@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Chat Site</title>
+</head>
+<body style="display: flex; gap: 20px;">
+
+  <!-- Main chat area -->
+  <div>
+    <h2 id="title"></h2>
+
+    <!-- Username will be prompted -->
+    <label>Status:</label><br>
+    <select id="status" onchange="updateStatus()">
+      <option value="Online">🟢 Online</option>
+      <option value="Away">🟡 Away</option>
+      <option value="Busy">🔴 Busy</option>
+      <option value="Do Not Disturb">⛔ Do Not Disturb</option>
+      <option value="Idle">💤 Idle</option>
+      <option value="Looking to Chat">💬 Looking to Chat</option>
+      <option value="Gaming">🎮 Gaming</option>
+      <option value="Listening to Music">🎵 Listening to Music</option>
+      <option value="Working">💼 Working</option>
+      <option value="Sleeping">😴 Sleeping</option>
+      <option value="Eating">🍽️ Eating</option>
+    </select>
+
+    <br><br>
+    <label>Choose a room:</label><br>
+    <select id="room">
+      <option value="Lobby">Lobby</option>
+      <option value="Gaming">Gaming</option>
+      <option value="Music">Music</option>
+      <option value="Adults">Adults</option>
+    </select>
+    <button onclick="joinRoom()">Join Room</button>
+
+    <ul id="messages"></ul>
+
+    <input id="input" autocomplete="off" placeholder="Type message..." />
+    <button onclick="send()">Send</button>
+  </div>
+
+  <!-- Member list -->
+  <div>
+    <h3>Who's in the room</h3>
+    <ul id="users"></ul>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    let username = "";
+    let currentRoom = "";
+    let currentStatus = "Online";
+    let previousStatus = currentStatus;
+    let idleTimer;
+
+    // Prompt for username on page load
+    while (!username) {
+      username = prompt("Choose a username:");
+    }
+    document.getElementById("title").innerText = "Logged in as: " + username;
+
+    // Reset idle timer function
+    function resetIdleTimer() {
+      clearTimeout(idleTimer);
+      if (currentStatus === "Idle") {
+        currentStatus = previousStatus;
+        if (currentRoom) {
+          socket.emit("status change", {
+            user: username,
+            room: currentRoom,
+            status: currentStatus
+          });
+        }
+      }
+      idleTimer = setTimeout(() => {
+        previousStatus = currentStatus;
+        currentStatus = "Idle";
+        if (currentRoom) {
+          socket.emit("status change", {
+            user: username,
+            room: currentRoom,
+            status: currentStatus
+          });
+        }
+      }, 120000); // 2 minutes
+    }
+
+    // Detect user activity
+    document.addEventListener("mousemove", resetIdleTimer);
+    document.addEventListener("keydown", resetIdleTimer);
+    document.addEventListener("click", resetIdleTimer);
+
+    // Update status from dropdown
+    function updateStatus() {
+      currentStatus = document.getElementById("status").value;
+      if (currentRoom) {
+        socket.emit("status change", {
+          user: username,
+          room: currentRoom,
+          status: currentStatus
+        });
+      }
+    }
+
+    // Join a room
+    function joinRoom() {
+      currentRoom = document.getElementById("room").value;
+
+      socket.emit("join room", {
+        user: username,
+        room: currentRoom,
+        status: currentStatus
+      });
+
+      document.getElementById("messages").innerHTML = "";
+      document.getElementById("users").innerHTML = "";
+
+      resetIdleTimer(); // start idle timer
+    }
+
+    // Send chat message
+    function send() {
+      if (!currentRoom) {
+        alert("Join a room first!");
+        return;
+      }
+      const input = document.getElementById("input");
+      socket.emit("chat message", {
+        user: username,
+        room: currentRoom,
+        text: input.value
+      });
+      input.value = "";
+    }
+
+    // Receive messages
+    socket.on("chat message", msg => {
+      const item = document.createElement("li");
+      item.textContent = msg.user + ": " + msg.text;
+      document.getElementById("messages").appendChild(item);
+    });
+
+    // Receive system messages
+    socket.on("system", msg => {
+      const item = document.createElement("li");
+      item.style.fontStyle = "italic";
+      item.textContent = msg;
+      document.getElementById("messages").appendChild(item);
+    });
+
+    // Update member list with statuses
+    socket.on("user list", users => {
+      const userList = document.getElementById("users");
+      userList.innerHTML = "";
+      users.forEach(user => {
+        const li = document.createElement("li");
+        li.textContent = `${user.name} (${user.status})`;
+        userList.appendChild(li);
+      });
+    });
+  </script>
+</body>
+</html>
