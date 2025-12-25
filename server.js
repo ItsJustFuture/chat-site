@@ -360,8 +360,9 @@ app.post("/login", (req, res) => {
     [username],
     async (err, row) => {
       if (err || !row) return res.status(401).send("Invalid username or password");
+      if (!row.password_hash) return res.status(500).send("Account is missing password hash (DB mismatch).");
 
-      const ok = await bcrypt.compare(password, row.password);
+      const ok = await bcrypt.compare(password, row.password_hash);
       if (!ok) return res.status(401).send("Invalid username or password");
 
       // ✅ AUTO CO-OWNER ENFORCEMENT (MUST BE HERE)
