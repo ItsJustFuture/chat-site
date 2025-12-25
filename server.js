@@ -72,6 +72,19 @@ db.serialize(() => {
       deleted INTEGER DEFAULT 0
     )
   `);
+  // warnings
+db.run(`
+  CREATE TABLE IF NOT EXISTS warns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    reason TEXT DEFAULT '',
+    by_user_id INTEGER NOT NULL,
+    by_username TEXT NOT NULL,
+    by_role TEXT NOT NULL
+  )
+`);
 
   // punishments: type=ban|mute, expires_at null => permanent
   db.run(`
@@ -180,7 +193,13 @@ function isActivePunishment(p) {
   if (p.expires_at == null) return true;
   return Number(p.expires_at) > Date.now();
 }
-
+function countWarns(userId, cb) {
+  db.get(
+    "SELECT COUNT(*) AS c FROM warns WHERE user_id = ?",
+    [userId],
+    (_e, row) => cb((row && row.c) ? Number(row.c) : 0)
+  );
+}
 function getActiveBanMute(userId, cb) {
   db.all(
     "SELECT * FROM punishments WHERE user_id = ? AND (expires_at IS NULL OR expires_at > ?) ORDER BY id DESC",
@@ -458,6 +477,187 @@ function allowMsg(socketId) {
 io.on("connection", (socket) => {
   socket.currentRoom = null;
   socketIdByUserId.set(socket.user.id, socket.id);
+socket.on("mod unmute", ({ username, reason = "" }) => {
+  const room = socket.currentRoom;
+  if (!room) return;
+
+  const actorRole = socket.request.session.user.role;
+  if (!requireMinRole(actorRole, "Moderator")) return;
+
+  username = sanitizeUsername(username);
+
+  db.get("SELECT id, role FROM users WHERE username = ?", [username], (_e, target) => {
+    if (!target) return;
+    if (!canModerate(actorRole, target.role)) return;
+
+    db.run(
+      "UPDATE punishments SET expires_at = ? WHERE user_id = ? AND type = 'mute' AND (expires_at IS NULL OR expires_at > ?)",
+      [Date.now() - 1, target.id, Date.now()],
+      function () {
+        io.to(room).emit("system", `${username} was unmuted.`);
+        logModAction({
+          actor: socket.user,
+          action: "UNMUTE",
+          targetUserId: target.id,
+          targetUsername: username,
+          room,
+          details: `reason=${String(reason || "").slice(0,120)} updated=${this.changes}`
+        });
+      }
+    );
+  });
+});
+  socket.on("mod unban", ({ username, reason = "" }) => {
+  const room = socket.currentRoom;
+  if (!room) return;
+
+  const actorRole = socket.request.session.user.role;
+  if (!requireMinRole(actorRole, "Admin")) return;
+
+  username = sanitizeUsername(username);
+
+  db.get("SELECT id, role FROM users WHERE username = ?", [username], (_e, target) => {
+    if (!target) return;
+    if (!canModerate(actorRole, target.role)) return;
+
+    db.run(
+      "UPDATE punishments SET expires_at = ? WHERE user_id = ? AND type = 'ban' AND (expires_at IS NULL OR expires_at > ?)",
+      [Date.now() - 1, target.id, Date.now()],
+      function () {
+        io.to(room).emit("system", `${username} was unbanned.`);
+        logModAction({
+          actor: socket.user,
+          action: "UNBAN",
+          targetUserId: target.id,
+          targetUsername: username,
+          room,
+          details: `reason=${String(reason || "").slice(0,120)} updated=${this.changes}`
+        });
+      }
+    );
+  });
+});
+socket.on("mod warn", ({ username, reason = "" }) => {
+  const room = socket.currentRoom;
+  if (!room) return;
+
+  const actorRole = socket.request.session.user.role;
+  if (!requireMinRole(actorRole, "Moderator")) return;
+
+  username = sanitizeUsername(username);
+  reason = String(reason || "").trim().slice(0, 200);
+  if (reason.length < 3) return;
+
+  db.get("SELECT id, role FROM users WHERE username = ?", [username], (_e, target) => {
+    if (!target) return;
+    if (!canModerate(actorRole, target.role)) return;
+
+    db.run(
+      "INSERT INTO warns (ts, user_id, username, reason, by_user_id, by_username, by_role) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [Date.now(), target.id, username, reason, socket.user.id, socket.user.username, socket.user.role],
+      () => {
+        countWarns(target.id, (count) => {
+          io.to(room).emit("system", `${username} was warned. (${count} total warns)`);
+
+          logModAction({
+            actor: socket.user,
+            action: "WARN",
+            targetUserId: target.id,
+            targetUsername: username,
+            room,
+            details: `count=${count} reason=${reason}`
+          });
+
+          // Auto escalation
+          if (count === 3) {
+            const mins = 30;
+            const expiresAt = Date.now() + mins * 60 * 1000;
+            db.run(
+              "INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id) VALUES (?, 'mute', ?, ?, ?)",
+              [target.id, expiresAt, "Auto-mute: 3 warnings", socket.user.id],
+              () => {
+                io.to(room).emit("system", `${username} was auto-muted for ${mins} minutes (3 warnings).`);
+                logModAction({
+                  actor: socket.user,
+                  action: "AUTO_MUTE",
+                  targetUserId: target.id,
+                  targetUsername: username,
+                  room,
+                  details: `minutes=${mins} threshold=3`
+                });
+              }
+            );
+          }
+
+          if (count === 5) {
+            const mins = 24 * 60;
+            const expiresAt = Date.now() + mins * 60 * 1000;
+            db.run(
+              "INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id) VALUES (?, 'ban', ?, ?, ?)",
+              [target.id, expiresAt, "Auto-ban: 5 warnings", socket.user.id],
+              () => {
+                io.to(room).emit("system", `${username} was auto-banned for 24 hours (5 warnings).`);
+
+                const sid = socketIdByUserId.get(target.id);
+                if (sid) io.sockets.sockets.get(sid)?.disconnect(true);
+
+                logModAction({
+                  actor: socket.user,
+                  action: "AUTO_BAN",
+                  targetUserId: target.id,
+                  targetUsername: username,
+                  room,
+                  details: `minutes=${mins} threshold=5`
+                });
+              }
+            );
+          }
+        });
+      }
+    );
+  });
+});
+socket.on("mod set role", ({ username, role, reason = "" }) => {
+  const room = socket.currentRoom;
+  if (!room) return;
+
+  const actorRole = socket.request.session.user.role;
+  if (!requireMinRole(actorRole, "Owner")) return;
+
+  username = sanitizeUsername(username);
+  role = normalizeRole(role);
+  reason = String(reason || "").slice(0,120);
+
+  // prevent demoting the configured owner username unless you REALLY want that
+  // if (username === OWNER_USERNAME && role !== "Owner") return;
+
+  db.get("SELECT id, role FROM users WHERE username = ?", [username], (_e, target) => {
+    if (!target) return;
+
+    // Owner can change anyone (including admins/mods), but keep a safety check:
+    if (username === socket.user.username && roleRank(role) < roleRank("Owner")) {
+      // Optional safety: allow it if you want, or block self-demote
+      // return;
+    }
+
+    db.run("UPDATE users SET role = ? WHERE id = ?", [role, target.id], () => {
+      io.to(room).emit("system", `${username} role set to ${role}.`);
+
+      logModAction({
+        actor: socket.user,
+        action: "SET_ROLE",
+        targetUserId: target.id,
+        targetUsername: username,
+        room,
+        details: `role=${role} reason=${reason}`
+      });
+
+      // If they're online, update the member list immediately by forcing their room presence to refresh
+      const sid = socketIdByUserId.get(target.id);
+      if (sid) io.sockets.sockets.get(sid)?.emit("system", `Your role is now ${role}. Rejoin the room to refresh UI.`);
+    });
+  });
+});
 
   socket.on("join room", ({ room, status }) => {
     room = String(room || "general").toLowerCase();
