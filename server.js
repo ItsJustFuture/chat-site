@@ -260,8 +260,17 @@ app.get("/profile/:username", (req, res) => {
 app.post("/profile", requireLogin, upload.single("avatar"), (req, res) => {
   const bio = String(req.body.bio || "").slice(0, 400);
   const mood = String(req.body.mood || "").slice(0, 60);
-  const ageRaw = req.body.age;
-  const age = ageRaw === "" || ageRaw == null ? null : Math.max(0, Math.min(120, Number(ageRaw)));
+ const MIN_AGE = 18;
+
+const ageRaw = req.body.age;
+let age = null;
+
+if (ageRaw !== "" && ageRaw != null) {
+  const n = Number(ageRaw);
+  if (!Number.isFinite(n)) return res.status(400).send("Invalid age.");
+  if (n < MIN_AGE) return res.status(400).send(`Minimum age is ${MIN_AGE}.`);
+  age = Math.min(120, Math.floor(n));
+}
   const gender = String(req.body.gender || "").slice(0, 24);
   const avatarPath = req.file ? `/avatars/${req.file.filename}` : null;
 
