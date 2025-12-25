@@ -588,10 +588,11 @@
         <div class="msgs" id="msgs"></div>
         <div class="typing" id="typing"></div>
 
-        <div class="inputBar">
-          <input id="msgInput" placeholder="Message #general" maxlength="800">
-          <button id="sendBtn">Send</button>
-        </div>
+   <div class="inputBar">
+  <input id="msgInput" placeholder="Message #general" maxlength="800">
+  <input id="fileInput" type="file" style="max-width:220px;">
+  <button id="sendBtn">Send</button>
+</div>
       </main>
 
       <aside class="members">
@@ -819,6 +820,7 @@
     const authMsg = document.getElementById("authMsg");
     const loginBtn = document.getElementById("loginBtn");
     const regBtn = document.getElementById("regBtn");
+    const fileInput = document.getElementById("fileInput");
 
     const chanList = document.getElementById("chanList");
     const nowRoom = document.getElementById("nowRoom");
@@ -1144,7 +1146,17 @@
         return { res: { ok:false, status: 0 }, text: "Network error (server not reachable)." };
       }
     }
+async function uploadChatFile(file){
+  const form = new FormData();
+  form.append("file", file);
 
+  const res = await fetch("/upload", { method:"POST", body: form });
+  if(!res.ok){
+    const t = await res.text().catch(()=> "Upload failed.");
+    throw new Error(t || "Upload failed.");
+  }
+  return await res.json(); // {url,type,mime}
+}
     // ---------- Auth ----------
     async function doLogin(){
       authMsg.textContent="Logging in...";
@@ -1237,14 +1249,36 @@
     });
     sendBtn.addEventListener("click", sendMessage);
 
-    function sendMessage(){
-      if(!socket) return;
-      const text=msgInput.value;
-      if(!text.trim()) return;
-      socket.emit("chat message", { text });
-      msgInput.value="";
-      socket.emit("stop typing");
+   async function sendMessage(){
+  if(!socket) return;
+
+  const text = msgInput.value || "";
+  const file = fileInput?.files?.[0];
+
+  if(!text.trim() && !file) return;
+
+  try{
+    let attachment = null;
+
+    if(file){
+      addSystem(`Uploading ${file.name}...`);
+      attachment = await uploadChatFile(file);
+      fileInput.value = "";
     }
+
+    socket.emit("chat message", {
+      text,
+      attachmentUrl: attachment?.url || "",
+      attachmentType: attachment?.type || "",
+      attachmentMime: attachment?.mime || ""
+    });
+
+    msgInput.value="";
+    socket.emit("stop typing");
+  }catch(e){
+    addSystem(`Upload failed: ${e.message}`);
+  }
+}
 
     statusSelect.addEventListener("change", ()=>{
       if(statusSelect.value!=="Idle") lastNonIdleStatus=statusSelect.value;
