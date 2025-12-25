@@ -1,5 +1,5 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -21,96 +21,22 @@
       --gray:#80848e;
       --line:#00000033;
       --soft:#00000022;
+      --shadow: 0 18px 60px rgba(0,0,0,.45);
     }
 
     *{ box-sizing:border-box; }
     body{
       margin:0;
-      font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       background:var(--bg);
       color:var(--text);
       height:100vh;
-    }msgInput.addEventListener("focus", () => {
-  setTimeout(() => msgInput.scrollIntoView({ block: "center", behavior: "smooth" }), 150);
-});
-/* --- Mobile drawers --- */
-.overlay{
-  position:fixed;
-  inset:0;
-  background: rgba(0,0,0,.55);
-  display:none;
-  z-index:50;
-}
-.overlay.show{ display:block; }
+      overflow:hidden;
+    }
 
-.iconBtn{
-  display:none;
-  width:36px; height:36px;
-  border-radius:10px;
-  border:1px solid rgba(255,255,255,.12);
-  background: rgba(255,255,255,.06);
-  cursor:pointer;
-  align-items:center;
-  justify-content:center;
-}
+    a{ color:inherit; }
+    button{ font-family:inherit; }
 
-@media (max-width: 980px){
-  /* show drawer buttons only on mobile */
-  .iconBtn{ display:flex; }
-
-  /* channels drawer (left) */
-  .channels{
-    position:fixed;
-    top:0; left:0;
-    height:100vh;
-    width:min(86vw, 320px);
-    transform:translateX(-105%);
-    transition:transform .18s ease;
-    z-index:60;
-    box-shadow: 12px 0 30px rgba(0,0,0,.55);
-  }
-  .channels.open{ transform:translateX(0); }
-
-  /* members drawer (right) */
-  .members{
-    position:fixed;
-    top:0; right:0;
-    height:100vh;
-    width:min(86vw, 320px);
-    transform:translateX(105%);
-    transition:transform .18s ease;
-    z-index:60;
-    box-shadow: -12px 0 30px rgba(0,0,0,.55);
-  }
-  .members.open{ transform:translateX(0); }
-
-  /* chat gets full width */
-  .main{ width:100%; }
-
-  /* bigger tap targets */
-  button, .chan, .mItem{ min-height:44px; }
-
-  /* prevent iOS zoom */
-  input, textarea, select{ font-size:16px; }
-
-  /* keep input above safe-area */
-  .inputBar{
-    position: sticky;
-    bottom: 0;
-    padding-bottom: calc(10px + env(safe-area-inset-bottom));
-  }
-}
-  /* slightly bigger tap targets */
-  button, .chan, .mItem{
-    min-height:44px;
-  }
-
-  /* message bubbles can use more width */
-  .bubble{ max-width: 92vw; }
-}
-
-/* Prevent iOS zoom on inputs (needs 16px font) */
-input, textarea, select { font-size:16px; }
     /* ---------- AUTH ---------- */
     #authWrap{
       height:100vh;
@@ -120,36 +46,40 @@ input, textarea, select { font-size:16px; }
       padding:20px;
     }
     .authCard{
-      width:380px;
+      width:min(420px, 94vw);
       background:var(--panel);
       border:1px solid var(--line);
-      border-radius:14px;
+      border-radius:16px;
       padding:18px;
+      box-shadow: var(--shadow);
     }
-    .authTitle{ font-size:18px; font-weight:900; margin:0 0 10px 0; }
+    .authTitle{ font-size:18px; font-weight:900; margin:0 0 12px; }
     .field{ display:flex; flex-direction:column; gap:6px; margin:10px 0; }
     .field label{ font-size:12px; color:var(--muted); }
     .field input, textarea, select{
-      padding:10px 12px;
-      border-radius:10px;
+      padding:11px 12px;
+      border-radius:12px;
       border:1px solid var(--line);
       background:var(--panel2);
       color:var(--text);
       outline:none;
     }
     textarea{ min-height:90px; resize:vertical; }
-    .row{ display:flex; gap:10px; flex-wrap:wrap; }
-    button{
+    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .btn{
       border:0;
-      border-radius:10px;
+      border-radius:12px;
       padding:10px 12px;
       cursor:pointer;
       color:white;
       background:var(--accent);
       font-weight:900;
+      line-height:1;
+      user-select:none;
     }
-    button.secondary{ background:#4e5058; }
-    button.danger{ background:var(--danger); }
+    .btn.secondary{ background:#4e5058; }
+    .btn.danger{ background:var(--danger); }
+    .btn:active{ transform: translateY(1px); }
     .msgline{
       margin-top:10px;
       font-size:12px;
@@ -171,6 +101,7 @@ input, textarea, select { font-size:16px; }
       display:flex;
       flex-direction:column;
       gap:10px;
+      min-width: 220px;
     }
     .brand{
       display:flex;
@@ -178,12 +109,16 @@ input, textarea, select { font-size:16px; }
       justify-content:space-between;
       padding:10px;
       background:var(--panel);
-      border-radius:12px;
+      border-radius:14px;
+      border:1px solid var(--line);
     }
     .brand strong{ font-size:14px; }
+    .brand .small{ font-size:12px; color:var(--muted); }
+
     .chanList{
       background:var(--panel);
-      border-radius:12px;
+      border-radius:14px;
+      border:1px solid var(--line);
       padding:8px;
       display:flex;
       flex-direction:column;
@@ -192,8 +127,8 @@ input, textarea, select { font-size:16px; }
       overflow:auto;
     }
     .chan{
-      padding:8px 10px;
-      border-radius:10px;
+      padding:9px 10px;
+      border-radius:12px;
       cursor:pointer;
       color:var(--muted);
       display:flex;
@@ -206,7 +141,8 @@ input, textarea, select { font-size:16px; }
 
     .bottomBar{
       background:var(--panel);
-      border-radius:12px;
+      border-radius:14px;
+      border:1px solid var(--line);
       padding:10px;
       display:flex;
       flex-direction:column;
@@ -229,6 +165,7 @@ input, textarea, select { font-size:16px; }
       background:#444;
       overflow:hidden;
       flex:0 0 auto;
+      border:1px solid rgba(0,0,0,.25);
     }
     .meAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
     .meMeta{
@@ -250,13 +187,16 @@ input, textarea, select { font-size:16px; }
       width:36px;
       height:36px;
       padding:0;
-      border-radius:10px;
+      border-radius:12px;
       background:#4e5058;
+      border:1px solid rgba(255,255,255,.08);
       display:flex;
       align-items:center;
       justify-content:center;
       font-size:16px;
       font-weight:900;
+      cursor:pointer;
+      user-select:none;
     }
     .iconBtn:hover{ filter:brightness(1.05); }
 
@@ -278,7 +218,7 @@ input, textarea, select { font-size:16px; }
       min-width:0;
     }
     .topbar{
-      height:52px;
+      height:54px;
       background:var(--panel2);
       border-bottom:1px solid var(--line);
       display:flex;
@@ -300,10 +240,11 @@ input, textarea, select { font-size:16px; }
       width:260px;
       max-width:40vw;
       padding:10px 12px;
-      border-radius:10px;
+      border-radius:12px;
       border:1px solid var(--line);
       background:var(--panel);
       color:var(--text);
+      outline:none;
     }
 
     .msgs{
@@ -321,6 +262,7 @@ input, textarea, select { font-size:16px; }
       padding:6px 10px;
       border-radius:999px;
       background:var(--soft);
+      border:1px solid var(--line);
     }
 
     .msg{
@@ -338,18 +280,20 @@ input, textarea, select { font-size:16px; }
       background:#444;
       overflow:hidden;
       flex:0 0 auto;
+      border:1px solid rgba(0,0,0,.25);
     }
     .msgAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
     .bubble{
       background:var(--bubble);
       padding:10px 12px;
-      border-radius:14px;
+      border-radius:16px;
       display:flex;
       flex-direction:column;
       gap:6px;
       min-width:140px;
       max-width:min(70vw, 720px);
       word-wrap:break-word;
+      border:1px solid rgba(0,0,0,.15);
     }
     .self .bubble{ background:var(--bubbleSelf); }
 
@@ -363,7 +307,7 @@ input, textarea, select { font-size:16px; }
     .badge{
       font-size:10px;
       font-weight:900;
-      padding:3px 6px;
+      padding:3px 7px;
       border-radius:999px;
       border:1px solid var(--line);
       background:var(--soft);
@@ -371,7 +315,7 @@ input, textarea, select { font-size:16px; }
     .ts{ font-size:11px; color:var(--muted); }
     .self .ts{ color:#e9e9ff; opacity:.85; }
 
-    .text{ font-size:14px; line-height:1.35; }
+    .text{ font-size:14px; line-height:1.35; white-space:pre-wrap; }
     .mention{
       background:var(--soft);
       border:1px solid var(--line);
@@ -379,20 +323,32 @@ input, textarea, select { font-size:16px; }
       border-radius:6px;
     }
 
+    .attachment{
+      margin-top:6px;
+      border-radius:14px;
+      overflow:hidden;
+      border:1px solid rgba(0,0,0,.2);
+      max-width: min(520px, 80vw);
+    }
+    .attachment img, .attachment video{ display:block; width:100%; height:auto; }
+    .attachment video{ background:#000; }
+
     .actions{
       display:flex;
       gap:8px;
       flex-wrap:wrap;
       align-items:center;
+      margin-top:2px;
     }
     .reactBtn{
-      border:0;
-      border-radius:10px;
+      border:1px solid var(--line);
+      border-radius:12px;
       padding:6px 8px;
       background:var(--soft);
       color:var(--text);
       cursor:pointer;
       font-weight:900;
+      user-select:none;
     }
     .reactBtn:hover{ background:#00000033; }
 
@@ -426,15 +382,72 @@ input, textarea, select { font-size:16px; }
       border-top:1px solid var(--line);
       display:flex;
       gap:10px;
+      align-items:center;
     }
-    .inputBar input{
+    .inputBar input[type="text"]{
       flex:1;
       padding:12px 12px;
-      border-radius:12px;
+      border-radius:14px;
       border:1px solid var(--line);
       background:var(--panel);
       color:var(--text);
       outline:none;
+    }
+    .filePick{
+      display:flex; align-items:center; gap:8px;
+      max-width: 240px;
+    }
+    .filePick input[type="file"]{
+      width: 200px;
+      color: var(--muted);
+    }
+
+    /* Upload preview */
+    .uploadPreview{
+      margin: 8px 12px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 14px;
+      background: rgba(255,255,255,.05);
+      display:none;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .uploadLeft{ display:flex; align-items:center; gap:12px; min-width:0; }
+    .previewThumb{
+      width:54px; height:54px;
+      border-radius:12px;
+      overflow:hidden;
+      border:1px solid rgba(0,0,0,.25);
+      background: rgba(0,0,0,.2);
+      display:flex; align-items:center; justify-content:center;
+      flex:0 0 auto;
+    }
+    .previewThumb img, .previewThumb video{
+      width:100%; height:100%;
+      object-fit:cover;
+      display:block;
+    }
+    .uploadMeta{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+    .uploadName{ font-weight:900; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:46vw; }
+    .uploadInfo{ opacity:.8; font-size:12px; }
+
+    .uploadRight{ display:flex; align-items:center; gap:10px; min-width:220px; }
+    .progressWrap{
+      flex:1;
+      height:10px;
+      border-radius:999px;
+      background: rgba(255,255,255,.08);
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,.08);
+    }
+    .progressBar{
+      height:100%;
+      width:0%;
+      border-radius:999px;
+      background: rgba(255,255,255,.45);
+      transition: width .08s linear;
     }
 
     /* Members */
@@ -454,18 +467,20 @@ input, textarea, select { font-size:16px; }
     }
     .mItem{
       padding:8px 8px;
-      border-radius:12px;
+      border-radius:14px;
       display:flex;
       align-items:center;
       gap:10px;
       cursor:pointer;
+      border:1px solid transparent;
     }
-    .mItem:hover{ background:var(--soft); }
+    .mItem:hover{ background:var(--soft); border-color: var(--line); }
     .mAvatar{
       width:30px; height:30px; border-radius:50%;
       background:#444;
       overflow:hidden;
       flex:0 0 auto;
+      border:1px solid rgba(0,0,0,.25);
     }
     .mAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
     .dot{ width:10px; height:10px; border-radius:50%; flex:0 0 auto; background:var(--gray); }
@@ -481,7 +496,7 @@ input, textarea, select { font-size:16px; }
       white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
     }
 
-    /* ---------- MODAL ---------- */
+    /* ---------- MODAL / PROFILE ---------- */
     #modal{
       position:fixed;
       inset:0;
@@ -490,13 +505,15 @@ input, textarea, select { font-size:16px; }
       align-items:center;
       justify-content:center;
       padding:18px;
+      z-index: 80;
     }
     .modalCard{
-      width:min(760px, 96vw);
+      width:min(860px, 98vw);
       background:var(--panel);
-      border-radius:16px;
+      border-radius:18px;
       border:1px solid var(--line);
       padding:14px;
+      box-shadow: var(--shadow);
     }
     .modalTop{
       display:flex;
@@ -511,17 +528,18 @@ input, textarea, select { font-size:16px; }
       display:flex;
       gap:8px;
       flex-wrap:wrap;
-      margin:8px 0 12px;
+      margin:10px 0 12px;
     }
     .tab{
       padding:8px 10px;
-      border-radius:10px;
+      border-radius:12px;
       background:var(--soft);
       border:1px solid var(--line);
       cursor:pointer;
       font-weight:900;
       font-size:12px;
       color:var(--text);
+      user-select:none;
     }
     .tab.active{
       background:#3a3c43;
@@ -530,29 +548,76 @@ input, textarea, select { font-size:16px; }
 
     .modalGrid{
       display:grid;
-      grid-template-columns: 160px 1fr;
+      grid-template-columns: 170px 1fr;
       gap:12px;
     }
     .pAvatar{
-      width:150px; height:150px;
+      width:160px; height:160px;
       border-radius:18px;
       background:var(--panel2);
       overflow:hidden;
+      border:1px solid rgba(0,0,0,.25);
     }
     .pAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
+
     .small{ font-size:12px; color:var(--muted); }
-    .sectionTitle{
-      font-weight:900;
-      margin:10px 0 6px;
-    }
+    .sectionTitle{ font-weight:900; margin:10px 0 6px; }
     .panelBox{
       background:var(--panel2);
       border:1px solid var(--line);
       border-radius:14px;
       padding:10px;
     }
-<div class="overlay" id="drawerOverlay"></div>
-    /* logs table */
+
+    .infoGrid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+    }
+    .infoItem{
+      background: rgba(255,255,255,.04);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:14px;
+      padding:10px;
+    }
+    .infoItem .k{ color:var(--muted); font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:.06em; }
+    .infoItem .v{ margin-top:4px; font-weight:900; }
+
+    .bioRender{
+      padding:10px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.04);
+      line-height:1.4;
+      white-space: normal;
+      word-break: break-word;
+    }
+    .bioRender blockquote{
+      margin:10px 0;
+      padding:10px;
+      border-left:4px solid rgba(255,255,255,.22);
+      background: rgba(0,0,0,.12);
+      border-radius:12px;
+    }
+    .bioRender pre{
+      overflow:auto;
+      padding:10px;
+      border-radius:12px;
+      background: rgba(0,0,0,.25);
+      border:1px solid rgba(255,255,255,.10);
+    }
+    .pill{
+      display:inline-block;
+      padding:3px 8px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:var(--soft);
+      font-weight:900;
+      font-size:11px;
+      margin-right:6px;
+    }
+
+    /* Logs table */
     .logTable{
       width:100%;
       border-collapse:collapse;
@@ -568,19 +633,64 @@ input, textarea, select { font-size:16px; }
     }
     .logTable th{ color:var(--muted); font-weight:900; }
     .logTable tr:last-child td{ border-bottom:0; }
-    .pill{
-      display:inline-block;
-      padding:3px 8px;
-      border-radius:999px;
-      border:1px solid var(--line);
-      background:var(--soft);
-      font-weight:900;
-      font-size:11px;
-      margin-right:6px;
+
+    /* ---------- Mobile drawers ---------- */
+    .overlay{
+      position:fixed;
+      inset:0;
+      background: rgba(0,0,0,.55);
+      display:none;
+      z-index: 70;
+    }
+    .overlay.show{ display:block; }
+
+    .mobOnly{ display:none; }
+
+    @media (max-width: 980px){
+      .mobOnly{ display:flex; }
+      .members{ display:none; } /* members becomes drawer */
+
+      .channels{
+        position:fixed;
+        top:0; left:0;
+        height:100vh;
+        width:min(86vw, 320px);
+        transform:translateX(-105%);
+        transition:transform .18s ease;
+        z-index:75;
+        box-shadow: 12px 0 30px rgba(0,0,0,.55);
+      }
+      .channels.open{ transform:translateX(0); }
+
+      .members.drawer{
+        display:block;
+        position:fixed;
+        top:0; right:0;
+        height:100vh;
+        width:min(86vw, 320px);
+        transform:translateX(105%);
+        transition:transform .18s ease;
+        z-index:75;
+        box-shadow: -12px 0 30px rgba(0,0,0,.55);
+      }
+      .members.drawer.open{ transform:translateX(0); }
+
+      input, textarea, select{ font-size:16px; } /* prevent iOS zoom */
+      .bubble{ max-width: 92vw; }
+      .inputBar{
+        position: sticky;
+        bottom: 0;
+        padding-bottom: calc(10px + env(safe-area-inset-bottom));
+      }
     }
 
-    @media (max-width: 980px){ .members{ display:none; } }
-    @media (max-width: 760px){ .channels{ width:220px; } .modalGrid{ grid-template-columns:1fr; } }
+    @media (max-width: 760px){
+      .modalGrid{ grid-template-columns: 1fr; }
+      .infoGrid{ grid-template-columns: 1fr; }
+      .searchWrap input{ width: 46vw; }
+      .filePick{ max-width: 160px; }
+      .filePick input[type="file"]{ width: 140px; }
+    }
   </style>
 </head>
 
@@ -601,8 +711,8 @@ input, textarea, select { font-size:16px; }
       </div>
 
       <div class="row">
-        <button id="loginBtn">Login</button>
-        <button id="regBtn" class="secondary">Register</button>
+        <button class="btn" id="loginBtn">Login</button>
+        <button class="btn secondary" id="regBtn">Register</button>
       </div>
 
       <div class="msgline" id="authMsg"></div>
@@ -612,15 +722,15 @@ input, textarea, select { font-size:16px; }
   <!-- APP -->
   <div id="app">
     <div class="layout">
-      <aside class="channels">
+      <aside class="channels" id="channelsPane">
         <div class="brand">
           <strong>Chat Site</strong>
-          <div class="small" id="nowRoom">#general</div>
+          <div class="small" id="nowRoom">#main</div>
         </div>
 
         <div class="chanList" id="chanList">
-          <div class="chan active" data-room="general"><span class="hash">#</span> general</div>
-          <div class="chan" data-room="gaming"><span class="hash">#</span> gaming</div>
+          <div class="chan active" data-room="main"><span class="hash">#</span> main</div>
+          <div class="chan" data-room="nsfw"><span class="hash">#</span> NSFW</div>
           <div class="chan" data-room="music"><span class="hash">#</span> music</div>
         </div>
 
@@ -634,7 +744,6 @@ input, textarea, select { font-size:16px; }
               </div>
             </div>
 
-            <!-- Space for status text + small profile icon button -->
             <div class="row" style="gap:8px; align-items:center;">
               <div class="meStatusText" id="meStatusText">Online</div>
               <button class="iconBtn" id="profileBtn" title="Profile">👤</button>
@@ -657,53 +766,76 @@ input, textarea, select { font-size:16px; }
       </aside>
 
       <main class="chat">
-       <div class="topbar">
-  <div class="row" style="align-items:center; gap:10px;">
-    <button class="iconBtn" id="openChannelsBtn" title="Channels" style="display:none;">☰</button>
-    <div class="roomTitle"><span>#</span><span id="roomTitle">general</span></div>
-  </div>
+        <div class="topbar">
+          <div class="row" style="align-items:center; gap:10px;">
+            <button class="iconBtn mobOnly" id="openChannelsBtn" title="Channels">☰</button>
+            <div class="roomTitle"><span>#</span><span id="roomTitle">main</span></div>
+          </div>
 
-  <div class="row" style="align-items:center; gap:10px;">
-    <div class="searchWrap">
-      <input id="searchInput" placeholder="Search messages...">
-    </div>
-    <button class="iconBtn" id="openMembersBtn" title="Members" style="display:none;">👥</button>
-  </div>
-</div>
+          <div class="row" style="align-items:center; gap:10px;">
+            <div class="searchWrap">
+              <input id="searchInput" placeholder="Search messages...">
+            </div>
+            <button class="iconBtn mobOnly" id="openMembersBtn" title="Members">👥</button>
+          </div>
+        </div>
+
         <div class="msgs" id="msgs"></div>
         <div class="typing" id="typing"></div>
-  <div class="inputBar">
-  <input id="msgInput" placeholder="Message #general" maxlength="800">
-  <input id="fileInput" type="file" style="max-width:220px;">
-  <button id="sendBtn">Send</button>
-</div>
+
+        <div id="uploadPreview" class="uploadPreview">
+          <div class="uploadLeft">
+            <div id="previewThumb" class="previewThumb"></div>
+            <div class="uploadMeta">
+              <div id="uploadName" class="uploadName"></div>
+              <div id="uploadInfo" class="uploadInfo"></div>
+            </div>
+          </div>
+          <div class="uploadRight">
+            <div class="progressWrap">
+              <div id="uploadProgress" class="progressBar"></div>
+            </div>
+            <button class="btn secondary" id="cancelUploadBtn">Cancel</button>
+          </div>
+        </div>
+
+        <div class="inputBar">
+          <input id="msgInput" type="text" placeholder="Message #main" maxlength="800">
+          <div class="filePick">
+            <input id="fileInput" type="file" accept="image/*,video/mp4,video/quicktime">
+          </div>
+          <button class="btn" id="sendBtn">Send</button>
+        </div>
       </main>
 
-      <aside class="members">
+      <aside class="members drawer" id="membersPane">
         <h3>Members</h3>
         <div id="memberList"></div>
       </aside>
     </div>
   </div>
 
-  <!-- MODAL -->
+  <!-- Mobile overlay -->
+  <div id="drawerOverlay" class="overlay"></div>
+
+  <!-- PROFILE / MODAL -->
   <div id="modal">
     <div class="modalCard">
       <div class="modalTop">
         <strong id="modalTitle">Profile</strong>
-        <button class="secondary" id="closeModalBtn">Close</button>
+        <button class="btn secondary" id="closeModalBtn">Close</button>
       </div>
 
       <div class="small" id="modalMeta"></div>
 
-      <!-- Tabs (Moderation shows only for Mod+) -->
       <div class="tabs" id="tabs">
-        <div class="tab active" id="tabProfile">Profile</div>
-        <div class="tab" id="tabModeration" style="display:none;">Moderation</div>
+        <div class="tab active" data-tab="info" id="tabInfo">Info</div>
+        <div class="tab" data-tab="about" id="tabAbout">About</div>
+        <div class="tab" data-tab="media" id="tabMedia">Media</div>
+        <div class="tab" data-tab="moderation" id="tabModeration" style="display:none;">Moderation</div>
       </div>
 
-      <!-- PROFILE VIEW -->
-      <div id="profileView">
+      <div id="viewInfo">
         <div class="modalGrid">
           <div>
             <div class="pAvatar" id="modalAvatar"></div>
@@ -711,21 +843,23 @@ input, textarea, select { font-size:16px; }
 
           <div>
             <div class="row" style="align-items:center;">
-              <div style="font-weight:900;" id="modalName"></div>
+              <div style="font-weight:900; font-size:16px;" id="modalName"></div>
               <div class="badge" id="modalRole"></div>
             </div>
-
             <div class="small" id="modalMood"></div>
-            <div class="small" id="modalAgeGender"></div>
 
-            <div class="field" style="margin-top:10px;">
-              <label>Bio</label>
-              <textarea id="modalBio" readonly></textarea>
+            <div class="sectionTitle">Details</div>
+            <div class="infoGrid">
+              <div class="infoItem"><div class="k">Age</div><div class="v" id="infoAge">—</div></div>
+              <div class="infoItem"><div class="k">Gender</div><div class="v" id="infoGender">—</div></div>
+              <div class="infoItem"><div class="k">Created</div><div class="v" id="infoCreated">—</div></div>
+              <div class="infoItem"><div class="k">Last seen</div><div class="v" id="infoLastSeen">—</div></div>
+              <div class="infoItem"><div class="k">Current room</div><div class="v" id="infoRoom">—</div></div>
+              <div class="infoItem"><div class="k">Status</div><div class="v" id="infoStatus">—</div></div>
             </div>
 
-            <!-- My profile edit -->
-            <div id="myProfileEdit" style="display:none;">
-              <div class="sectionTitle">Edit My Profile</div>
+            <div id="myProfileEdit" style="display:none; margin-top:12px;">
+              <div class="sectionTitle">Edit my profile</div>
               <div class="panelBox">
                 <div class="field">
                   <label>Avatar</label>
@@ -759,24 +893,22 @@ input, textarea, select { font-size:16px; }
                 </div>
 
                 <div class="field">
-                  <label>Bio</label>
-                  <textarea id="editBio" placeholder="Write something..."></textarea>
+                  <label>Bio (BBCode supported)</label>
+                  <textarea id="editBio" placeholder="[b]bold[/b] [i]italics[/i] [url=https://...]link[/url] [quote]...[/quote]"></textarea>
                 </div>
 
                 <div class="row">
-                  <button id="saveProfileBtn">Save</button>
-                  <button class="secondary" id="refreshProfileBtn">Refresh</button>
-                  <!-- Logout moved here -->
-                  <button class="danger" id="logoutBtn">Logout</button>
+                  <button class="btn" id="saveProfileBtn">Save</button>
+                  <button class="btn secondary" id="refreshProfileBtn">Refresh</button>
+                  <button class="btn danger" id="logoutBtn">Logout</button>
                 </div>
 
                 <div class="msgline" id="profileMsg"></div>
               </div>
             </div>
 
-            <!-- Quick mod tools when viewing someone -->
-            <div id="memberModTools" style="display:none;">
-              <div class="sectionTitle">Moderator Tools</div>
+            <div id="memberModTools" style="display:none; margin-top:12px;">
+              <div class="sectionTitle">Moderator tools</div>
               <div class="panelBox">
                 <div class="row" style="align-items:center;">
                   <input id="quickReason" placeholder="Reason (required)" style="flex:1; min-width:220px;">
@@ -784,9 +916,9 @@ input, textarea, select { font-size:16px; }
                   <input id="quickBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:160px;">
                 </div>
                 <div class="row" style="margin-top:8px;">
-                  <button class="secondary" id="quickKickBtn">Kick</button>
-                  <button class="secondary" id="quickMuteBtn">Mute</button>
-                  <button class="danger" id="quickBanBtn">Ban</button>
+                  <button class="btn secondary" id="quickKickBtn">Kick</button>
+                  <button class="btn secondary" id="quickMuteBtn">Mute</button>
+                  <button class="btn danger" id="quickBanBtn">Ban</button>
                 </div>
                 <div class="msgline" id="quickModMsg"></div>
               </div>
@@ -796,9 +928,28 @@ input, textarea, select { font-size:16px; }
         </div>
       </div>
 
-      <!-- MODERATION PANEL -->
-      <div id="moderationView" style="display:none;">
-        <div class="sectionTitle">Moderation Panel</div>
+      <div id="viewAbout" style="display:none;">
+        <div class="sectionTitle">Bio</div>
+        <div class="bioRender" id="bioRender">(no bio)</div>
+        <div class="small" style="margin-top:8px;">
+          BBCode: [b] [i] [u] [s] [quote] [code] [url=] [img]
+        </div>
+      </div>
+
+      <div id="viewMedia" style="display:none;">
+        <div class="sectionTitle">Media</div>
+        <div class="panelBox">
+          <div class="small">Quick actions</div>
+          <div class="row" style="margin-top:8px;">
+            <button class="btn secondary" id="copyProfileLinkBtn">Copy profile link</button>
+            <button class="btn secondary" id="copyUsernameBtn">Copy username</button>
+          </div>
+          <div class="msgline" id="mediaMsg"></div>
+        </div>
+      </div>
+
+      <div id="viewModeration" style="display:none;">
+        <div class="sectionTitle">Moderation panel</div>
 
         <div class="panelBox">
           <div class="row" style="align-items:center;">
@@ -806,37 +957,39 @@ input, textarea, select { font-size:16px; }
             <input id="modReason" placeholder="Reason (required)" style="flex:2; min-width:240px;">
           </div>
 
-<div class="row" style="align-items:center; margin-top:8px;">
-  <input id="modMuteMins" type="number" min="1" max="1440" placeholder="mute mins" style="width:140px;">
-  <input id="modBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:190px;">
+          <div class="row" style="align-items:center; margin-top:8px;">
+            <input id="modMuteMins" type="number" min="1" max="1440" placeholder="mute mins" style="width:140px;">
+            <input id="modBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:190px;">
 
-  <button class="secondary" id="modKickBtn">Kick</button>
-  <button class="secondary" id="modMuteBtn">Mute</button>
-  <button class="danger" id="modBanBtn">Ban</button>
+            <button class="btn secondary" id="modKickBtn">Kick</button>
+            <button class="btn secondary" id="modMuteBtn">Mute</button>
+            <button class="btn danger" id="modBanBtn">Ban</button>
 
-  <button class="secondary" id="modUnmuteBtn">Unmute</button>
-  <button class="secondary" id="modUnbanBtn">Unban</button>
-  <button class="secondary" id="modWarnBtn">Warn</button>
+            <button class="btn secondary" id="modUnmuteBtn">Unmute</button>
+            <button class="btn secondary" id="modUnbanBtn">Unban</button>
+            <button class="btn secondary" id="modWarnBtn">Warn</button>
 
-  <button class="secondary" id="modOpenProfileBtn">View Profile</button>
-</div>
+            <button class="btn secondary" id="modOpenProfileBtn">View profile</button>
+          </div>
+
           <div class="row" style="align-items:center; margin-top:10px;">
-  <select id="modSetRole" style="width:220px;">
-    <option value="">Set role (Owner only)</option>
-    <option>Owner</option>
-    <option>Co-owner</option>
-    <option>Admin</option>
-    <option>Moderator</option>
-    <option>VIP</option>
-    <option>User</option>
-    <option>Guest</option>
-  </select>
-  <button class="secondary" id="modSetRoleBtn">Apply Role</button>
-</div>
+            <select id="modSetRole" style="width:220px;">
+              <option value="">Set role (Owner only)</option>
+              <option>Owner</option>
+              <option>Co-owner</option>
+              <option>Admin</option>
+              <option>Moderator</option>
+              <option>VIP</option>
+              <option>User</option>
+              <option>Guest</option>
+            </select>
+            <button class="btn secondary" id="modSetRoleBtn">Apply role</button>
+          </div>
+
           <div class="msgline" id="modMsg"></div>
         </div>
 
-        <div class="sectionTitle">Moderation Logs</div>
+        <div class="sectionTitle">Moderation logs</div>
         <div class="panelBox">
           <div class="row" style="align-items:center;">
             <input id="logUser" placeholder="Filter by user (actor or target)" style="flex:1; min-width:220px;">
@@ -847,11 +1000,11 @@ input, textarea, select { font-size:16px; }
               <option value="BAN">BAN</option>
               <option value="DELETE_MESSAGE">DELETE_MESSAGE</option>
               <option value="UNMUTE">UNMUTE</option>
-<option value="UNBAN">UNBAN</option>
-<option value="WARN">WARN</option>
-<option value="AUTO_MUTE">AUTO_MUTE</option>
-<option value="AUTO_BAN">AUTO_BAN</option>
-<option value="SET_ROLE">SET_ROLE</option>
+              <option value="UNBAN">UNBAN</option>
+              <option value="WARN">WARN</option>
+              <option value="AUTO_MUTE">AUTO_MUTE</option>
+              <option value="AUTO_BAN">AUTO_BAN</option>
+              <option value="SET_ROLE">SET_ROLE</option>
             </select>
             <select id="logLimit" style="width:160px;">
               <option value="25">Last 25</option>
@@ -859,7 +1012,7 @@ input, textarea, select { font-size:16px; }
               <option value="100">Last 100</option>
               <option value="200">Last 200</option>
             </select>
-            <button class="secondary" id="refreshLogsBtn">Refresh</button>
+            <button class="btn secondary" id="refreshLogsBtn">Refresh</button>
           </div>
 
           <div class="msgline" id="logsMsg"></div>
@@ -890,11 +1043,15 @@ input, textarea, select { font-size:16px; }
     // ---------- State ----------
     let socket = null;
     let me = null;
-    let currentRoom = "general";
+    let currentRoom = "main";
     let lastUsers = [];
     const reactionsCache = Object.create(null);
-    const msgIndex = []; // for search filtering
+    const msgIndex = [];
     let modalTargetUsername = null;
+
+    // Upload state
+    let pendingFile = null;
+    let uploadXhr = null;
 
     // ---------- DOM ----------
     const authWrap = document.getElementById("authWrap");
@@ -904,39 +1061,7 @@ input, textarea, select { font-size:16px; }
     const authMsg = document.getElementById("authMsg");
     const loginBtn = document.getElementById("loginBtn");
     const regBtn = document.getElementById("regBtn");
-    const fileInput = document.getElementById("fileInput");
-const drawerOverlay = document.getElementById("drawerOverlay");
-const openChannelsBtn = document.getElementById("openChannelsBtn");
-const openMembersBtn = document.getElementById("openMembersBtn");
-const channelsPane = document.querySelector(".channels");
-const membersPane = document.querySelector(".members");
 
-function closeDrawers(){
-  channelsPane?.classList.remove("open");
-  membersPane?.classList.remove("open");
-  drawerOverlay?.classList.remove("show");
-}
-
-function openChannels(){
-  membersPane?.classList.remove("open");
-  channelsPane?.classList.add("open");
-  drawerOverlay?.classList.add("show");
-}
-
-function openMembers(){
-  channelsPane?.classList.remove("open");
-  membersPane?.classList.add("open");
-  drawerOverlay?.classList.add("show");
-}
-
-openChannelsBtn?.addEventListener("click", openChannels);
-openMembersBtn?.addEventListener("click", openMembers);
-drawerOverlay?.addEventListener("click", closeDrawers);
-
-// Escape closes drawers (desktop keyboards too)
-document.addEventListener("keydown", (e)=>{
-  if(e.key === "Escape") closeDrawers();
-});
     const chanList = document.getElementById("chanList");
     const nowRoom = document.getElementById("nowRoom");
     const roomTitle = document.getElementById("roomTitle");
@@ -948,6 +1073,7 @@ document.addEventListener("keydown", (e)=>{
     const msgInput = document.getElementById("msgInput");
     const sendBtn = document.getElementById("sendBtn");
     const searchInput = document.getElementById("searchInput");
+    const fileInput = document.getElementById("fileInput");
 
     const meAvatar = document.getElementById("meAvatar");
     const meName = document.getElementById("meName");
@@ -955,6 +1081,21 @@ document.addEventListener("keydown", (e)=>{
     const meStatusText = document.getElementById("meStatusText");
     const statusSelect = document.getElementById("statusSelect");
     const profileBtn = document.getElementById("profileBtn");
+
+    // drawers
+    const drawerOverlay = document.getElementById("drawerOverlay");
+    const openChannelsBtn = document.getElementById("openChannelsBtn");
+    const openMembersBtn = document.getElementById("openMembersBtn");
+    const channelsPane = document.getElementById("channelsPane");
+    const membersPane = document.getElementById("membersPane");
+
+    // upload preview
+    const uploadPreview = document.getElementById("uploadPreview");
+    const previewThumb = document.getElementById("previewThumb");
+    const uploadName = document.getElementById("uploadName");
+    const uploadInfo = document.getElementById("uploadInfo");
+    const uploadProgress = document.getElementById("uploadProgress");
+    const cancelUploadBtn = document.getElementById("cancelUploadBtn");
 
     // modal
     const modal = document.getElementById("modal");
@@ -965,15 +1106,30 @@ document.addEventListener("keydown", (e)=>{
     const modalName = document.getElementById("modalName");
     const modalRole = document.getElementById("modalRole");
     const modalMood = document.getElementById("modalMood");
-    const modalAgeGender = document.getElementById("modalAgeGender");
-    const modalBio = document.getElementById("modalBio");
 
-    const tabs = document.getElementById("tabs");
-    const tabProfile = document.getElementById("tabProfile");
+    // info
+    const infoAge = document.getElementById("infoAge");
+    const infoGender = document.getElementById("infoGender");
+    const infoCreated = document.getElementById("infoCreated");
+    const infoLastSeen = document.getElementById("infoLastSeen");
+    const infoRoom = document.getElementById("infoRoom");
+    const infoStatus = document.getElementById("infoStatus");
+
+    // views + tabs
+    const tabInfo = document.getElementById("tabInfo");
+    const tabAbout = document.getElementById("tabAbout");
+    const tabMedia = document.getElementById("tabMedia");
     const tabModeration = document.getElementById("tabModeration");
 
-    const profileView = document.getElementById("profileView");
-    const moderationView = document.getElementById("moderationView");
+    const viewInfo = document.getElementById("viewInfo");
+    const viewAbout = document.getElementById("viewAbout");
+    const viewMedia = document.getElementById("viewMedia");
+    const viewModeration = document.getElementById("viewModeration");
+
+    const bioRender = document.getElementById("bioRender");
+    const copyProfileLinkBtn = document.getElementById("copyProfileLinkBtn");
+    const copyUsernameBtn = document.getElementById("copyUsernameBtn");
+    const mediaMsg = document.getElementById("mediaMsg");
 
     // my profile edit
     const myProfileEdit = document.getElementById("myProfileEdit");
@@ -997,7 +1153,7 @@ document.addEventListener("keydown", (e)=>{
     const quickBanBtn = document.getElementById("quickBanBtn");
     const quickModMsg = document.getElementById("quickModMsg");
 
-    // moderation panel controls
+    // moderation controls
     const modUser = document.getElementById("modUser");
     const modReason = document.getElementById("modReason");
     const modMuteMins = document.getElementById("modMuteMins");
@@ -1005,13 +1161,13 @@ document.addEventListener("keydown", (e)=>{
     const modKickBtn = document.getElementById("modKickBtn");
     const modMuteBtn = document.getElementById("modMuteBtn");
     const modBanBtn = document.getElementById("modBanBtn");
-    const modOpenProfileBtn = document.getElementById("modOpenProfileBtn");
-    const modMsg = document.getElementById("modMsg");
     const modUnmuteBtn = document.getElementById("modUnmuteBtn");
     const modUnbanBtn = document.getElementById("modUnbanBtn");
     const modWarnBtn = document.getElementById("modWarnBtn");
+    const modOpenProfileBtn = document.getElementById("modOpenProfileBtn");
     const modSetRole = document.getElementById("modSetRole");
     const modSetRoleBtn = document.getElementById("modSetRoleBtn");
+    const modMsg = document.getElementById("modMsg");
 
     // logs
     const logUser = document.getElementById("logUser");
@@ -1028,8 +1184,26 @@ document.addEventListener("keydown", (e)=>{
       }[m]));
     }
 
-    function fmtTime(ts){
-      return new Date(ts).toLocaleString();
+    function fmtAbs(ts){
+      if(!ts) return "—";
+      const n = Number(ts);
+      if(!Number.isFinite(n)) return "—";
+      return new Date(n).toLocaleString();
+    }
+
+    function fmtCreated(ts){
+      if(!ts) return "—";
+      const d = new Date(ts);
+      if(Number.isNaN(d.getTime())) return String(ts);
+      return d.toLocaleString();
+    }
+
+    function bytesToNice(n){
+      n = Number(n||0);
+      const units = ["B","KB","MB","GB"];
+      let u = 0;
+      while(n >= 1024 && u < units.length-1){ n /= 1024; u++; }
+      return `${n.toFixed(u===0?0:1)} ${units[u]}`;
     }
 
     function statusDotColor(status){
@@ -1116,32 +1290,45 @@ document.addEventListener("keydown", (e)=>{
       return escapeHtml(text).replace(re, (m)=>`<span class="mention">${m}</span>`);
     }
 
+    // Safe-ish BBCode: escape HTML first, then allow a small whitelist
+    function renderBBCode(input){
+      let s = escapeHtml(input || "");
+      // newlines
+      s = s.replace(/\r?\n/g, "<br>");
+
+      // basic tags
+      s = s.replace(/\[b\](.*?)\[\/b\]/gi, "<b>$1</b>");
+      s = s.replace(/\[i\](.*?)\[\/i\]/gi, "<i>$1</i>");
+      s = s.replace(/\[u\](.*?)\[\/u\]/gi, "<u>$1</u>");
+      s = s.replace(/\[s\](.*?)\[\/s\]/gi, "<s>$1</s>");
+      s = s.replace(/\[quote\](.*?)\[\/quote\]/gis, "<blockquote>$1</blockquote>");
+      s = s.replace(/\[code\](.*?)\[\/code\]/gis, "<pre><code>$1</code></pre>");
+
+      // [color=...]
+      s = s.replace(/\[color=([#a-z0-9]+)\](.*?)\[\/color\]/gi, (m, c, body) => {
+        const ok = /^#[0-9a-f]{3,8}$/i.test(c) || /^[a-z]{3,20}$/i.test(c);
+        return ok ? `<span style="color:${c}">${body}</span>` : body;
+      });
+
+      // [url=https://...]text[/url]
+      s = s.replace(/\[url=([^\]]+)\](.*?)\[\/url\]/gi, (m, url, body) => {
+        url = String(url || "").trim();
+        if(!/^https?:\/\//i.test(url)) return body;
+        return `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer noopener">${body}</a>`;
+      });
+
+      // [img]https://...[/img] or [img]/uploads/...[/img]
+      s = s.replace(/\[img\](.*?)\[\/img\]/gi, (m, url) => {
+        url = String(url||"").trim();
+        const ok = /^https?:\/\//i.test(url) || /^\/(uploads|avatars)\//i.test(url);
+        if(!ok) return "";
+        return `<img src="${escapeHtml(url)}" alt="img" style="max-width:100%; border-radius:14px; border:1px solid rgba(0,0,0,.2);">`;
+      });
+
+      return s;
+    }
+
     function addMessage(m){
-      if(m.attachmentUrl){
-  if(m.attachmentType === "image"){
-    const img = document.createElement("img");
-    img.src = m.attachmentUrl;
-    img.style.maxWidth = "420px";
-    img.style.borderRadius = "12px";
-    img.style.border = "1px solid rgba(0,0,0,.25)";
-    bubble.appendChild(img);
-  } else if(m.attachmentType === "video"){
-    const v = document.createElement("video");
-    v.src = m.attachmentUrl;
-    v.controls = true;
-    v.style.maxWidth = "520px";
-    v.style.borderRadius = "12px";
-    v.style.border = "1px solid rgba(0,0,0,.25)";
-    bubble.appendChild(v);
-  } else {
-    const a = document.createElement("a");
-    a.href = m.attachmentUrl;
-    a.textContent = "Download file";
-    a.target = "_blank";
-    a.rel = "noreferrer";
-    bubble.appendChild(a);
-  }
-}
       const wrap=document.createElement("div");
       wrap.className="msg"+(m.user===me.username?" self":"");
       wrap.dataset.mid=m.messageId;
@@ -1164,6 +1351,32 @@ document.addEventListener("keydown", (e)=>{
       const text=document.createElement("div");
       text.className="text";
       text.innerHTML = applyMentions(m.text);
+
+      // attachment
+      if(m.attachmentUrl && m.attachmentType){
+        const att = document.createElement("div");
+        att.className = "attachment";
+        if(m.attachmentType === "image"){
+          const img = document.createElement("img");
+          img.src = m.attachmentUrl;
+          img.alt = "image";
+          att.appendChild(img);
+        }else if(m.attachmentType === "video"){
+          const v = document.createElement("video");
+          v.src = m.attachmentUrl;
+          v.controls = true;
+          v.playsInline = true;
+          att.appendChild(v);
+        }else{
+          const a = document.createElement("a");
+          a.href = m.attachmentUrl;
+          a.textContent = "Download file";
+          a.target = "_blank";
+          a.rel = "noreferrer";
+          att.appendChild(a);
+        }
+        bubble.appendChild(att);
+      }
 
       const actions=document.createElement("div");
       actions.className="actions";
@@ -1257,7 +1470,6 @@ document.addEventListener("keydown", (e)=>{
         row.appendChild(meta);
 
         row.onclick = () => openMemberProfile(u.name);
-
         memberList.appendChild(row);
       });
     }
@@ -1275,7 +1487,7 @@ document.addEventListener("keydown", (e)=>{
     }
     searchInput.addEventListener("input", applySearch);
 
-    // ---------- API helper ----------
+    // ---------- API ----------
     async function api(path, options){
       try{
         const res = await fetch(path, options);
@@ -1286,17 +1498,125 @@ document.addEventListener("keydown", (e)=>{
         return { res: { ok:false, status: 0 }, text: "Network error (server not reachable)." };
       }
     }
-async function uploadChatFile(file){
-  const form = new FormData();
-  form.append("file", file);
 
-  const res = await fetch("/upload", { method:"POST", body: form });
-  if(!res.ok){
-    const t = await res.text().catch(()=> "Upload failed.");
-    throw new Error(t || "Upload failed.");
-  }
-  return await res.json(); // {url,type,mime}
-}
+    // ---------- Drawers ----------
+    function closeDrawers(){
+      channelsPane?.classList.remove("open");
+      membersPane?.classList.remove("open");
+      drawerOverlay?.classList.remove("show");
+    }
+    function openChannels(){
+      membersPane?.classList.remove("open");
+      channelsPane?.classList.add("open");
+      drawerOverlay?.classList.add("show");
+    }
+    function openMembers(){
+      channelsPane?.classList.remove("open");
+      membersPane?.classList.add("open");
+      drawerOverlay?.classList.add("show");
+    }
+    openChannelsBtn?.addEventListener("click", openChannels);
+    openMembersBtn?.addEventListener("click", openMembers);
+    drawerOverlay?.addEventListener("click", closeDrawers);
+    document.addEventListener("keydown", (e)=>{ if(e.key === "Escape") closeDrawers(); });
+
+    // ---------- Upload preview + progress ----------
+    function showUploadPreview(file){
+      pendingFile = file;
+      uploadPreview.style.display = "flex";
+      uploadName.textContent = file.name;
+      uploadInfo.textContent = `${bytesToNice(file.size)} • ${file.type || "unknown type"}`;
+      uploadProgress.style.width = "0%";
+
+      previewThumb.innerHTML = "";
+      const url = URL.createObjectURL(file);
+
+      if ((file.type || "").startsWith("image/")) {
+        const img = document.createElement("img");
+        img.src = url;
+        img.onload = () => URL.revokeObjectURL(url);
+        previewThumb.appendChild(img);
+      } else if (file.type === "video/mp4" || file.type === "video/quicktime") {
+        const v = document.createElement("video");
+        v.src = url;
+        v.muted = true;
+        v.playsInline = true;
+        v.preload = "metadata";
+        v.onloadeddata = () => URL.revokeObjectURL(url);
+        previewThumb.appendChild(v);
+      } else {
+        previewThumb.textContent = "FILE";
+        URL.revokeObjectURL(url);
+      }
+    }
+
+    function clearUploadPreview(){
+      pendingFile = null;
+      uploadPreview.style.display = "none";
+      previewThumb.innerHTML = "";
+      uploadName.textContent = "";
+      uploadInfo.textContent = "";
+      uploadProgress.style.width = "0%";
+    }
+
+    fileInput.addEventListener("change", () => {
+      const f = fileInput.files?.[0];
+      if (!f) return clearUploadPreview();
+      if (f.size > 10 * 1024 * 1024) {
+        addSystem("Max upload size is 10MB.");
+        fileInput.value = "";
+        return clearUploadPreview();
+      }
+      showUploadPreview(f);
+    });
+
+    cancelUploadBtn.addEventListener("click", () => {
+      if (uploadXhr) {
+        uploadXhr.abort();
+        uploadXhr = null;
+        addSystem("Upload canceled.");
+      }
+      fileInput.value = "";
+      clearUploadPreview();
+    });
+
+    function uploadChatFileWithProgress(file){
+      return new Promise((resolve, reject) => {
+        const form = new FormData();
+        form.append("file", file);
+
+        const xhr = new XMLHttpRequest();
+        uploadXhr = xhr;
+
+        xhr.open("POST", "/upload");
+        xhr.responseType = "json";
+
+        xhr.upload.onprogress = (e) => {
+          if (!e.lengthComputable) return;
+          const pct = Math.max(0, Math.min(100, (e.loaded / e.total) * 100));
+          uploadProgress.style.width = `${pct.toFixed(0)}%`;
+        };
+
+        xhr.onload = () => {
+          uploadXhr = null;
+          if (xhr.status >= 200 && xhr.status < 300) return resolve(xhr.response);
+          reject(new Error((xhr.response && xhr.response.message) || xhr.responseText || "Upload failed."));
+        };
+
+        xhr.onerror = () => {
+          uploadXhr = null;
+          reject(new Error("Upload failed."));
+        };
+
+        xhr.onabort = () => {
+          uploadXhr = null;
+          reject(new Error("Upload canceled."));
+        };
+
+        xhr.send(form);
+      });
+    }
+
     // ---------- Auth ----------
     async function doLogin(){
       authMsg.textContent="Logging in...";
@@ -1365,14 +1685,14 @@ async function uploadChatFile(file){
       setActiveRoom(room);
       clearMsgs();
       socket?.emit("join room", { room, status: statusSelect.value || "Online" });
+      closeDrawers();
     }
 
     chanList.addEventListener("click", (e)=>{
       const el=e.target.closest(".chan");
       if(!el) return;
       const r=el.dataset.room;
-      if(r && r!==currentRoom) joinRoom(r);closeDrawers();
-
+      if(r && r!==currentRoom) joinRoom(r);
     });
 
     // ---------- Typing + send ----------
@@ -1390,36 +1710,38 @@ async function uploadChatFile(file){
     });
     sendBtn.addEventListener("click", sendMessage);
 
-   async function sendMessage(){
-  if(!socket) return;
+    async function sendMessage(){
+      if(!socket) return;
 
-  const text = msgInput.value || "";
-  const file = fileInput?.files?.[0];
+      const text = msgInput.value || "";
+      const file = pendingFile;
 
-  if(!text.trim() && !file) return;
+      if(!text.trim() && !file) return;
 
-  try{
-    let attachment = null;
+      try{
+        let attachment = null;
 
-    if(file){
-      addSystem(`Uploading ${file.name}...`);
-      attachment = await uploadChatFile(file);
-      fileInput.value = "";
+        if(file){
+          addSystem(`Uploading ${file.name}...`);
+          attachment = await uploadChatFileWithProgress(file);
+          fileInput.value = "";
+          clearUploadPreview();
+        }
+
+        socket.emit("chat message", {
+          text,
+          attachmentUrl: attachment?.url || "",
+          attachmentType: attachment?.type || "",
+          attachmentMime: attachment?.mime || "",
+          attachmentSize: attachment?.size || 0
+        });
+
+        msgInput.value="";
+        socket.emit("stop typing");
+      }catch(e){
+        addSystem(`Upload failed: ${e.message}`);
+      }
     }
-
-    socket.emit("chat message", {
-      text,
-      attachmentUrl: attachment?.url || "",
-      attachmentType: attachment?.type || "",
-      attachmentMime: attachment?.mime || ""
-    });
-
-    msgInput.value="";
-    socket.emit("stop typing");
-  }catch(e){
-    addSystem(`Upload failed: ${e.message}`);
-  }
-}
 
     statusSelect.addEventListener("change", ()=>{
       if(statusSelect.value!=="Idle") lastNonIdleStatus=statusSelect.value;
@@ -1429,29 +1751,31 @@ async function uploadChatFile(file){
     });
 
     // ---------- Modal helpers ----------
-    function openModal(){
-      modal.style.display="flex";
-    }
+    function openModal(){ modal.style.display="flex"; }
     function closeModal(){
       modal.style.display="none";
       modalTargetUsername=null;
       quickModMsg.textContent = "";
       modMsg.textContent = "";
       logsMsg.textContent = "";
+      mediaMsg.textContent = "";
     }
     closeModalBtn.addEventListener("click", closeModal);
     modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
 
-    function setTab(which){
-      const isProfile = which === "profile";
-      tabProfile.classList.toggle("active", isProfile);
-      tabModeration.classList.toggle("active", !isProfile);
-
-      profileView.style.display = isProfile ? "block" : "none";
-      moderationView.style.display = isProfile ? "none" : "block";
+    function setTab(tab){
+      for(const el of document.querySelectorAll(".tab")){
+        el.classList.toggle("active", el.dataset.tab === tab);
+      }
+      viewInfo.style.display = (tab==="info") ? "block" : "none";
+      viewAbout.style.display = (tab==="about") ? "block" : "none";
+      viewMedia.style.display = (tab==="media") ? "block" : "none";
+      viewModeration.style.display = (tab==="moderation") ? "block" : "none";
     }
 
-    tabProfile.addEventListener("click", ()=>setTab("profile"));
+    tabInfo.addEventListener("click", ()=>setTab("info"));
+    tabAbout.addEventListener("click", ()=>setTab("about"));
+    tabMedia.addEventListener("click", ()=>setTab("media"));
     tabModeration.addEventListener("click", async ()=>{
       setTab("moderation");
       await refreshLogs();
@@ -1473,20 +1797,32 @@ async function uploadChatFile(file){
       meAvatar.appendChild(avatarNode(p.avatar, p.username));
     }
 
+    function fillProfileUI(p){
+      modalAvatar.innerHTML=""; modalAvatar.appendChild(avatarNode(p.avatar, p.username));
+      modalName.textContent = p.username;
+      modalRole.textContent = `${roleIcon(p.role)} ${p.role}`;
+      modalRole.style.color = roleBadgeColor(p.role);
+      modalMood.textContent = p.mood ? `Mood: ${p.mood}` : "Mood: (none)";
+
+      infoAge.textContent = (p.age ?? "—");
+      infoGender.textContent = (p.gender ?? "—");
+      infoCreated.textContent = fmtCreated(p.created_at);
+      infoLastSeen.textContent = p.last_seen ? fmtAbs(p.last_seen) : "—";
+      infoRoom.textContent = p.current_room ? `#${p.current_room}` : (p.last_room ? `#${p.last_room}` : "—");
+      infoStatus.textContent = p.last_status || "—";
+
+      bioRender.innerHTML = p.bio ? renderBBCode(p.bio) : "(no bio)";
+    }
+
     async function openMyProfile(){
       const res = await fetch("/profile");
       if(!res.ok) return;
       const p = await res.json();
 
       modalTitle.textContent="My Profile";
-      modalMeta.textContent=`Created: ${new Date(p.created_at).toLocaleString()}`;
-      modalAvatar.innerHTML=""; modalAvatar.appendChild(avatarNode(p.avatar, p.username));
-      modalName.textContent=p.username;
-      modalRole.textContent=`${roleIcon(p.role)} ${p.role}`;
-      modalRole.style.color=roleBadgeColor(p.role);
-      modalMood.textContent=p.mood ? `Mood: ${p.mood}` : "Mood: (none)";
-      modalAgeGender.textContent = `Age: ${p.age ?? "—"} • Gender: ${p.gender ?? "—"}`;
-      modalBio.value = p.bio || "";
+      modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
+
+      fillProfileUI(p);
 
       myProfileEdit.style.display="block";
       memberModTools.style.display="none";
@@ -1498,9 +1834,8 @@ async function uploadChatFile(file){
       avatarFile.value = "";
       profileMsg.textContent="";
 
-      // show moderation tab if Moderator+
       tabModeration.style.display = (roleRank(me.role) >= roleRank("Moderator")) ? "block" : "none";
-      setTab("profile");
+      setTab("info");
       openModal();
     }
 
@@ -1525,7 +1860,7 @@ async function uploadChatFile(file){
       profileMsg.textContent="Saved!";
       await loadMyProfile();
 
-      // refresh member list info by rejoin
+      // refresh member info by rejoin
       socket?.emit("join room", { room: currentRoom, status: statusSelect.value || "Online" });
       await openMyProfile();
     });
@@ -1534,24 +1869,19 @@ async function uploadChatFile(file){
 
     async function openMemberProfile(username){
       modalTargetUsername = username;
-closeDrawers();
+      closeDrawers();
+
       const res = await fetch("/profile/" + encodeURIComponent(username));
       if(!res.ok) return;
       const p = await res.json();
 
       modalTitle.textContent="Member Profile";
-      modalMeta.textContent=`Created: ${new Date(p.created_at).toLocaleString()}`;
-      modalAvatar.innerHTML=""; modalAvatar.appendChild(avatarNode(p.avatar, p.username));
-      modalName.textContent=p.username;
-      modalRole.textContent=`${roleIcon(p.role)} ${p.role}`;
-      modalRole.style.color=roleBadgeColor(p.role);
-      modalMood.textContent=p.mood ? `Mood: ${p.mood}` : "Mood: (none)";
-      modalAgeGender.textContent = `Age: ${p.age ?? "—"} • Gender: ${p.gender ?? "—"}`;
-      modalBio.value = p.bio || "";
+      modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
+
+      fillProfileUI(p);
 
       myProfileEdit.style.display="none";
 
-      // show quick mod tools only if I outrank target and I am Moderator+
       const iCanMod = (roleRank(me.role) >= roleRank("Moderator")) && (roleRank(me.role) > roleRank(p.role));
       memberModTools.style.display = iCanMod ? "block" : "none";
       quickReason.value = "";
@@ -1560,29 +1890,46 @@ closeDrawers();
       quickModMsg.textContent = "";
 
       tabModeration.style.display = (roleRank(me.role) >= roleRank("Moderator")) ? "block" : "none";
-      setTab("profile");
+      setTab("info");
       openModal();
     }
 
+    // media actions
+    copyUsernameBtn.addEventListener("click", async ()=>{
+      const u = modalTargetUsername || me?.username || "";
+      try{
+        await navigator.clipboard.writeText(u);
+        mediaMsg.textContent = "Copied username.";
+      }catch{
+        mediaMsg.textContent = "Copy failed (browser blocked).";
+      }
+    });
+
+    copyProfileLinkBtn.addEventListener("click", async ()=>{
+      const u = modalTargetUsername || me?.username || "";
+      const link = `${location.origin}/#profile:${encodeURIComponent(u)}`;
+      try{
+        await navigator.clipboard.writeText(link);
+        mediaMsg.textContent = "Copied profile link.";
+      }catch{
+        mediaMsg.textContent = "Copy failed (browser blocked).";
+      }
+    });
+
     // ---------- Moderation actions ----------
     function requireReason(reason){
-      if(!reason || !reason.trim()){
-        return "Reason is required.";
-      }
-      if(reason.trim().length < 3){
-        return "Reason must be at least 3 characters.";
-      }
+      if(!reason || !reason.trim()) return "Reason is required.";
+      if(reason.trim().length < 3) return "Reason must be at least 3 characters.";
       return null;
     }
 
-    // quick mod tools (member profile)
+    // quick tools
     quickKickBtn.addEventListener("click", ()=>{
       const err = requireReason(quickReason.value);
       if(err){ quickModMsg.textContent = err; return; }
       socket?.emit("mod kick", { username: modalTargetUsername });
       quickModMsg.textContent = "Kick sent.";
     });
-
     quickMuteBtn.addEventListener("click", ()=>{
       const err = requireReason(quickReason.value);
       if(err){ quickModMsg.textContent = err; return; }
@@ -1590,7 +1937,6 @@ closeDrawers();
       socket?.emit("mod mute", { username: modalTargetUsername, minutes: mins, reason: quickReason.value.trim() });
       quickModMsg.textContent = "Mute sent.";
     });
-
     quickBanBtn.addEventListener("click", ()=>{
       const err = requireReason(quickReason.value);
       if(err){ quickModMsg.textContent = err; return; }
@@ -1599,7 +1945,7 @@ closeDrawers();
       quickModMsg.textContent = "Ban sent.";
     });
 
-    // main mod panel actions
+    // mod panel
     modKickBtn.addEventListener("click", ()=>{
       const err = requireReason(modReason.value);
       if(err){ modMsg.textContent = err; return; }
@@ -1607,7 +1953,6 @@ closeDrawers();
       socket?.emit("mod kick", { username: modUser.value.trim() });
       modMsg.textContent = "Kick sent.";
     });
-
     modMuteBtn.addEventListener("click", ()=>{
       const err = requireReason(modReason.value);
       if(err){ modMsg.textContent = err; return; }
@@ -1616,7 +1961,6 @@ closeDrawers();
       socket?.emit("mod mute", { username: modUser.value.trim(), minutes: mins, reason: modReason.value.trim() });
       modMsg.textContent = "Mute sent.";
     });
-
     modBanBtn.addEventListener("click", ()=>{
       const err = requireReason(modReason.value);
       if(err){ modMsg.textContent = err; return; }
@@ -1625,43 +1969,39 @@ closeDrawers();
       socket?.emit("mod ban", { username: modUser.value.trim(), minutes: mins, reason: modReason.value.trim() });
       modMsg.textContent = "Ban sent.";
     });
-
+    modUnmuteBtn.addEventListener("click", ()=>{
+      const err = requireReason(modReason.value);
+      if(err){ modMsg.textContent = err; return; }
+      if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+      socket?.emit("mod unmute", { username: modUser.value.trim(), reason: modReason.value.trim() });
+      modMsg.textContent = "Unmute sent.";
+    });
+    modUnbanBtn.addEventListener("click", ()=>{
+      const err = requireReason(modReason.value);
+      if(err){ modMsg.textContent = err; return; }
+      if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+      socket?.emit("mod unban", { username: modUser.value.trim(), reason: modReason.value.trim() });
+      modMsg.textContent = "Unban sent.";
+    });
+    modWarnBtn.addEventListener("click", ()=>{
+      const err = requireReason(modReason.value);
+      if(err){ modMsg.textContent = err; return; }
+      if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+      socket?.emit("mod warn", { username: modUser.value.trim(), reason: modReason.value.trim() });
+      modMsg.textContent = "Warn sent.";
+    });
     modOpenProfileBtn.addEventListener("click", async ()=>{
       if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
       await openMemberProfile(modUser.value.trim());
     });
-modUnmuteBtn.addEventListener("click", ()=>{
-  const err = requireReason(modReason.value);
-  if(err){ modMsg.textContent = err; return; }
-  if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
-  socket?.emit("mod unmute", { username: modUser.value.trim(), reason: modReason.value.trim() });
-  modMsg.textContent = "Unmute sent.";
-});
-
-modUnbanBtn.addEventListener("click", ()=>{
-  const err = requireReason(modReason.value);
-  if(err){ modMsg.textContent = err; return; }
-  if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
-  socket?.emit("mod unban", { username: modUser.value.trim(), reason: modReason.value.trim() });
-  modMsg.textContent = "Unban sent.";
-});
-
-modWarnBtn.addEventListener("click", ()=>{
-  const err = requireReason(modReason.value);
-  if(err){ modMsg.textContent = err; return; }
-  if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
-  socket?.emit("mod warn", { username: modUser.value.trim(), reason: modReason.value.trim() });
-  modMsg.textContent = "Warn sent.";
-});
-
-modSetRoleBtn.addEventListener("click", ()=>{
-  const err = requireReason(modReason.value);
-  if(err){ modMsg.textContent = err; return; }
-  if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
-  if(!modSetRole.value){ modMsg.textContent = "Choose a role first."; return; }
-  socket?.emit("mod set role", { username: modUser.value.trim(), role: modSetRole.value, reason: modReason.value.trim() });
-  modMsg.textContent = "Role change sent (Owner only).";
-});
+    modSetRoleBtn.addEventListener("click", ()=>{
+      const err = requireReason(modReason.value);
+      if(err){ modMsg.textContent = err; return; }
+      if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+      if(!modSetRole.value){ modMsg.textContent = "Choose a role first."; return; }
+      socket?.emit("mod set role", { username: modUser.value.trim(), role: modSetRole.value, reason: modReason.value.trim() });
+      modMsg.textContent = "Role change sent (Owner only).";
+    });
 
     // ---------- Logs ----------
     async function loadModLogs({ user = "", action = "", limit = 50 } = {}){
@@ -1682,7 +2022,7 @@ modSetRoleBtn.addEventListener("click", ()=>{
         const tr = document.createElement("tr");
 
         const tTime = document.createElement("td");
-        tTime.textContent = fmtTime(r.ts);
+        tTime.textContent = new Date(r.ts).toLocaleString();
 
         const tActor = document.createElement("td");
         tActor.innerHTML = `<span class="pill">${escapeHtml(r.actor_role)}</span> ${escapeHtml(r.actor_username)}`;
@@ -1750,7 +2090,6 @@ modSetRoleBtn.addEventListener("click", ()=>{
       });
 
       socket.on("system", addSystem);
-
       socket.on("user list", (users)=>renderMembers(users));
 
       socket.on("typing update", (names)=>{
@@ -1780,12 +2119,29 @@ modSetRoleBtn.addEventListener("click", ()=>{
         if(el) el.textContent = "[message deleted]";
       });
 
-      joinRoom("general");
+      joinRoom("main");
       meStatusText.textContent = statusSelect.value || "Online";
       resetIdle();
+
+      // make keyboard focus nicer on mobile
+      msgInput.addEventListener("focus", () => {
+        setTimeout(() => msgInput.scrollIntoView({ block: "center", behavior: "smooth" }), 150);
+      });
+
+      // handle hash profile links (#profile:Username)
+      if(location.hash.startsWith("#profile:")){
+        const u = decodeURIComponent(location.hash.slice("#profile:".length));
+        if(u) openMemberProfile(u);
+      }
+      window.addEventListener("hashchange", ()=>{
+        if(location.hash.startsWith("#profile:")){
+          const u = decodeURIComponent(location.hash.slice("#profile:".length));
+          if(u) openMemberProfile(u);
+        }
+      });
     }
 
-    // boot: auto-start if already logged in
+    // auto-start if already logged in
     (async function boot(){
       const res = await fetch("/me");
       me = await res.json();
@@ -1795,10 +2151,6 @@ modSetRoleBtn.addEventListener("click", ()=>{
         await startApp();
       }
     })();
-
-    // Auth buttons need to work even if not logged in
-    // (already wired above)
   </script>
-  <div id="drawerOverlay" class="overlay"></div>
 </body>
 </html>
