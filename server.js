@@ -127,10 +127,10 @@ db.run(`
   `);
 });
 // Add attachment columns if missing (safe on existing DB)
-db.run("ALTER TABLE messages ADD COLUMN attachment_url TEXT", () => {});
-db.run("ALTER TABLE messages ADD COLUMN attachment_type TEXT", () => {});
-db.run("ALTER TABLE messages ADD COLUMN attachment_mime TEXT", () => {});
-db.run("ALTER TABLE messages ADD COLUMN attachment_size INTEGER", () => {});
+db.run("ALTER TABLE messages ADD COLUMN attachment_url TEXT");
+db.run("ALTER TABLE messages ADD COLUMN attachment_type TEXT");
+db.run("ALTER TABLE messages ADD COLUMN attachment_mime TEXT");
+db.run("ALTER TABLE messages ADD COLUMN attachment_size INTEGER");
 // ---------- Middleware ----------
 app.use(helmet({ contentSecurityPolicy: false })); // IMPORTANT: allows inline <script> in index.html
 app.use(express.json());
