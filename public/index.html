@@ -884,8 +884,11 @@
       if(avatarFile.files[0]) form.append("avatar", avatarFile.files[0]);
 
       const res = await fetch("/profile", {method:"POST", body: form});
-      if(!res.ok){ profileMsg.textContent="Save failed."; return; }
-
+     if(!res.ok){
+  const t = await res.text().catch(()=> "Save failed.");
+  profileMsg.textContent = t || "Save failed.";
+  return;
+}
       profileMsg.textContent="Saved!";
       await loadMyProfile();
       // refresh member list info by rejoin
@@ -921,7 +924,17 @@
 
       openModal();
     }
+// ---------- Moderation ----------
+async function loadModLogs({ user = "", action = "", limit = 50 } = {}) {
+  const url = new URL("/mod/logs", location.origin);
+  url.searchParams.set("limit", String(limit));
+  if (user) url.searchParams.set("user", user);
+  if (action) url.searchParams.set("action", action);
 
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  return await res.json();
+}
     // mod buttons
     kickBtn.addEventListener("click", ()=>{
       if(!modalTargetUsername) return;
