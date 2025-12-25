@@ -795,7 +795,7 @@ socket.on("mod set role", ({ username, role, reason = "" }) => {
     }
   });
 
-  socket.on("chat message", ({ text }) => {
+ socket.on("chat message", ({ text, attachmentUrl, attachmentType, attachmentMime }) => {
     const room = socket.currentRoom;
     if (!room) return;
 
@@ -828,16 +828,19 @@ socket.on("mod set role", ({ username, role, reason = "" }) => {
         "INSERT INTO messages (id, room, user_id, username, role, text, ts, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
         [messageId, room, socket.user.id, u.username, u.role, cleanText, ts],
         () => {
-          io.to(room).emit("chat message", {
-            messageId,
-            room,
-            user: u.username,
-            role: u.role,
-            avatar: u.avatar || "",
-            mood: u.mood || "",
-            text: cleanText,
-            ts,
-          });
+       io.to(room).emit("chat message", {
+  messageId,
+  room,
+  user: u.username,
+  role: u.role,
+  avatar: u.avatar || "",
+  mood: u.mood || "",
+  text: cleanText,
+  ts,
+  attachmentUrl: attachmentUrl || "",
+  attachmentType: attachmentType || "",
+  attachmentMime: attachmentMime || ""
+});
         }
       );
     });
