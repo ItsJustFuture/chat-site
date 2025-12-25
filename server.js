@@ -385,18 +385,19 @@ app.get("/profile", requireLogin, (req, res) => {
 // Public profile
 app.get("/profile/:username", (req, res) => {
   const u = String(req.params.username || "").trim().slice(0, 24);
+
   db.get(
-    "SELECT id, username, role, bio, mood, age, gender, avatar, created_at FROM users WHERE username = ?",
+    "SELECT id, username, role, bio, mood, age, gender, avatar, created_at, last_seen, last_room, last_status FROM users WHERE username = ?",
     [u],
     (err, row) => {
       if (err || !row) return res.status(404).send("Not found");
-      res.json(row);
-      const live = onlineState.get(row.id);
-res.json({
-  ...row,
-  current_room: live?.room || null,
-  last_status: live?.status || row.last_status || null,
-});
+
+      const live = onlineState.get(row.id); // make sure onlineState exists
+      return res.json({
+        ...row,
+        current_room: live?.room || null,
+        last_status: live?.status || row.last_status || null,
+      });
     }
   );
 });
