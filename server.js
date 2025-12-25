@@ -40,6 +40,15 @@ const publicDir = path.join(__dirname, "public");
 const avatarDir = path.join(publicDir, "avatars");
 const uploadDir = path.join(publicDir, "uploads");
 fs.mkdirSync(uploadDir, { recursive: true });
+// Serve uploads with safer headers
+app.use("/uploads", express.static(uploadDir, {
+  setHeaders: (res) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+    // Optional: avoid browser caching while testing
+    // res.setHeader("Cache-Control", "no-store");
+  }
+}));
 fs.mkdirSync(publicDir, { recursive: true });
 fs.mkdirSync(avatarDir, { recursive: true });
 
@@ -117,7 +126,11 @@ db.run(`
     )
   `);
 });
-
+// Add attachment columns if missing (safe on existing DB)
+db.run("ALTER TABLE messages ADD COLUMN attachment_url TEXT", () => {});
+db.run("ALTER TABLE messages ADD COLUMN attachment_type TEXT", () => {});
+db.run("ALTER TABLE messages ADD COLUMN attachment_mime TEXT", () => {});
+db.run("ALTER TABLE messages ADD COLUMN attachment_size INTEGER", () => {});
 // ---------- Middleware ----------
 app.use(helmet({ contentSecurityPolicy: false })); // IMPORTANT: allows inline <script> in index.html
 app.use(express.json());
@@ -146,7 +159,13 @@ const authLimiter = rateLimit({
 });
 app.use("/login", authLimiter);
 app.use("/register", authLimiter);
-
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20, // 20 uploads/min per IP (tune later)
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use("/upload", uploadLimiter);
 // ---------- Helpers ----------
 function sanitizeUsername(u) {
   return String(u || "").trim().slice(0, 24);
@@ -256,12 +275,40 @@ const upload = multer({
 });
 const chatUploadStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const ext = (path.extname(file.originalname || "").toLowerCase() || "");
-    cb(null, `${randomUUID()}${ext}`);
+  filename: (req, file, cb) => {
+    // Ignore user-provided filename completely; we choose extension from MIME allowlist below.
+    const id = randomUUID();
+    const mime = String(file.mimetype || "").toLowerCase();
+
+    let ext = "";
+    if (mime === "image/png") ext = ".png";
+    else if (mime === "image/jpeg") ext = ".jpg";
+    else if (mime === "image/webp") ext = ".webp";
+    else if (mime === "image/gif") ext = ".gif";
+    else if (mime === "video/mp4") ext = ".mp4";
+    else if (mime === "video/quicktime") ext = ".mov"; // MOV
+
+    cb(null, `${id}${ext}`);
   }
 });
+const chatUpload = multer({
+  storage: chatUploadStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    const mime = String(file.mimetype || "").toLowerCase();
 
+    const isImage = ["image/png","image/jpeg","image/webp","image/gif"].includes(mime);
+    const isVideo = ["video/mp4","video/quicktime"].includes(mime);
+
+    const role = req.session?.user?.role || "User";
+    const vipPlus = roleRank(role) >= roleRank("VIP");
+
+    if (isImage) return cb(null, true);
+    if (vipPlus && isVideo) return cb(null, true);
+
+    cb(new Error("File type not allowed."), false);
+  }
+});
 const chatUpload = multer({
   storage: chatUploadStorage,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
@@ -352,6 +399,24 @@ app.post("/upload", requireLogin, (req, res) => {
 
     res.json({ url, type, mime });
   });
+  app.post("/upload", requireLogin, (req, res) => {
+  chatUpload.single("file")(req, res, (err) => {
+    if (err) return res.status(400).send(String(err.message || "Upload failed."));
+    if (!req.file) return res.status(400).send("No file uploaded.");
+
+    const mime = String(req.file.mimetype || "").toLowerCase();
+    let type = "file";
+    if (mime.startsWith("image/")) type = "image";
+    if (mime === "video/mp4" || mime === "video/quicktime") type = "video";
+
+    res.json({
+      url: `/uploads/${req.file.filename}`,
+      type,
+      mime,
+      size: req.file.size
+    });
+  });
+});
 });
 // ---------- Profile Routes ----------
 app.get("/profile", requireLogin, (req, res) => {
@@ -744,17 +809,22 @@ socket.on("mod set role", ({ username, role, reason = "" }) => {
 
             // Send history (last 50)
             db.all(
-              "SELECT id, room, username, role, text, ts, deleted FROM messages WHERE room = ? ORDER BY ts DESC LIMIT 50",
+            "SELECT id, room, username, role, text, ts, deleted, attachment_url, attachment_type, attachment_mime, attachment_size FROM messages ...
               [room],
               (_e2, rows) => {
                 const history = (rows || []).reverse().map(r => ({
-                  messageId: r.id,
-                  room: r.room,
-                  user: r.username,
-                  role: r.role,
-                  text: r.deleted ? "[message deleted]" : r.text,
-                  deleted: !!r.deleted,
-                  ts: r.ts,
+              const history = (rows || []).reverse().map(r => ({
+  messageId: r.id,
+  room: r.room,
+  user: r.username,
+  role: r.role,
+  text: r.deleted ? "[message deleted]" : r.text,
+  deleted: !!r.deleted,
+  ts: r.ts,
+  attachmentUrl: r.attachment_url || "",
+  attachmentType: r.attachment_type || "",
+  attachmentMime: r.attachment_mime || "",
+  attachmentSize: Number(r.attachment_size || 0) || 0,
                 }));
                 socket.emit("history", history);
               }
@@ -818,15 +888,21 @@ socket.on("mod set role", ({ username, role, reason = "" }) => {
       const u = map.get(socket.id);
       if (!u) return;
 
-      const cleanText = String(text || "").slice(0, 800);
-      if (!cleanText.trim()) return;
+     const cleanText = String(text || "").slice(0, 800);
+const hasAttachment = !!(attachmentUrl && attachmentType && attachmentMime);
 
+if (!cleanText.trim() && !hasAttachment) return;
       const messageId = randomUUID();
       const ts = Date.now();
 
       db.run(
         "INSERT INTO messages (id, room, user_id, username, role, text, ts, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
-        [messageId, room, socket.user.id, u.username, u.role, cleanText, ts],
+        [messageId, room, socket.user.id, u.username, u.role, cleanText, ts
+            (attachmentUrl || "").slice(0, 300),
+    (attachmentType || "").slice(0, 20),
+    (attachmentMime || "").slice(0, 60),
+    Number(attachmentSize || 0) || 0
+        ],
         () => {
        io.to(room).emit("chat message", {
   messageId,
@@ -840,6 +916,7 @@ socket.on("mod set role", ({ username, role, reason = "" }) => {
   attachmentUrl: attachmentUrl || "",
   attachmentType: attachmentType || "",
   attachmentMime: attachmentMime || ""
+  attachmentSize: Number(attachmentSize || 0) || 0
 });
         }
       );
