@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Discord-Style Chat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body {
+  margin: 0;
+  font-family: "Segoe UI", sans-serif;
+  background: #36393f;
+  color: #dcddde;
+  height: 100vh;
+}
+
+.container {
+  display: flex;
+  height: 100%;
+}
+
+/* Channels */
+.sidebar {
+  width: 220px;
+  background: #2f3136;
+}
+
+.channel {
+  padding: 8px 15px;
+  cursor: pointer;
+  color: #b9bbbe;
+}
+
+.channel:hover, .channel.active {
+  background: #40444b;
+  color: white;
+}
+
+/* Chat */
+.chat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  background: #2f3136;
+  padding: 10px;
+  border-bottom: 1px solid #202225;
+}
+
+.messages {
+  flex: 1;
+  padding: 15px;
+  overflow-y: auto;
+}
+
+.messages li {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.messages li.self {
+  justify-content: flex-end;
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  margin-right: 10px;
+}
+
+.bubble {
+  background: #40444b;
+  padding: 10px;
+  border-radius: 12px;
+}
+
+.bubble.self {
+  background: #7289da;
+}
+
+.timestamp {
+  font-size: 10px;
+  margin-left: 6px;
+  color: #72767d;
+}
+
+.reactions {
+  margin-left: 8px;
+  font-size: 14px;
+}
+
+.reaction-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #b9bbbe;
+}
+
+.reaction-btn:hover {
+  color: white;
+}
+
+/* Typing */
+#typing {
+  padding-left: 15px;
+  font-size: 12px;
+  color: #b9bbbe;
+}
+
+/* Input */
+.input {
+  display: flex;
+  padding: 10px;
+  background: #40444b;
+}
+
+.input input {
+  flex: 1;
+  padding: 10px;
+  background: #2f3136;
+  border: none;
+  border-radius: 6px;
+  color: white;
+}
+
+/* Users */
+.users {
+  width: 200px;
+  background: #2f3136;
+  padding: 10px;
+}
+
+.users li {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+</style>
+</head>
+
+<body>
+<div id="profile" style="display:none;">
+  <h3>My Profile</h3>
+
+  <img id="avatarPreview" width="80"><br>
+
+  <input type="file" id="avatar"><br>
+
+  <input id="mood" placeholder="Mood"><br>
+  <input id="age" type="number" placeholder="Age"><br>
+
+  <select id="gender">
+    <option value="">Gender</option>
+    <option>Male</option>
+    <option>Female</option>
+    <option>Non-binary</option>
+    <option>Other</option>
+  </select><br>
+
+  <textarea id="bio" placeholder="Bio"></textarea><br>
+
+  <button onclick="saveProfile()">Save</button>
+</div>
+
+<div class="container">
+<div id="login">
+  <h2>Login</h2>
+  <input id="user" placeholder="Username">
+  <input id="pass" type="password" placeholder="Password">
+  <button onclick="login()">Login</button>
+  <button onclick="register()">Register</button>
+</div>
+
+<div id="chat" style="display:none;">
+  <!-- your existing chat UI -->
+</div>
+
+  <div class="sidebar">
+    <div class="channel active" onclick="joinRoom('general')"># general</div>
+    <div class="channel" onclick="joinRoom('gaming')"># gaming</div>
+    <div class="channel" onclick="joinRoom('music')"># music</div>
+  </div>
+
+  <div class="chat">
+    <div class="header" id="header"># general</div>
+    <ul class="messages" id="messages"></ul>
+    <div id="typing"></div>
+    <div class="input">
+      <input id="input" placeholder="Message #general">
+    </div>
+  </div>
+
+  <ul class="users" id="users"></ul>
+
+</div>
+async function login() {
+  const username = user.value;
+  const password = pass.value;
+
+  const res = await fetch("/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password })
+  });
+
+  if (res.ok) startChat();
+  else alert("Login failed");
+}
+
+async function register() {
+  const username = user.value;
+  const password = pass.value;
+
+  const res = await fetch("/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password })
+  });
+
+  if (res.ok) alert("Registered! Now login.");
+  else alert("Registration failed");
+}
+
+async function startChat() {
+  document.getElementById("login").style.display = "none";
+  document.getElementById("chat").style.display = "block";
+  socket = io();
+}
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+let username = prompt("Choose a username:");
+let room = "general";
+let status = "Online";
+let msgId = 0;
+const colors = {};
+const reactions = {};
+let typing = false;
+let typingUsers = [];
+async function loadProfile() {
+  const res = await fetch("/profile");
+  if (!res.ok) return;
+
+  const p = await res.json();
+  bio.value = p.bio || "";
+  mood.value = p.mood || "";
+  age.value = p.age || "";
+  gender.value = p.gender || "";
+  if (p.avatar) avatarPreview.src = p.avatar;
+}
+
+async function saveProfile() {
+  const form = new FormData();
+  form.append("bio", bio.value);
+  form.append("mood", mood.value);
+  form.append("age", age.value);
+  form.append("gender", gender.value);
+  if (avatar.files[0]) form.append("avatar", avatar.files[0]);
+
+  await fetch("/profile", { method: "POST", body: form });
+  alert("Profile saved!");
+}
+
+function color(name) {
+  if (!colors[name]) {
+    const c = ["#e74c3c","#2ecc71","#3498db","#f1c40f","#9b59b6"];
+    colors[name] = c[Math.floor(Math.random()*c.length)];
+  }
+  return colors[name];
+}
+
+function joinRoom(r) {
+  room = r;
+  document.getElementById("header").textContent = "# " + r;
+  document.getElementById("messages").innerHTML = "";
+  socket.emit("join room", { user: username, room, status });
+}
+
+document.getElementById("input").addEventListener("input", () => {
+  if (!typing) {
+    typing = true;
+    socket.emit("typing", { user: username, room });
+  }
+  clearTimeout(window.t);
+  window.t = setTimeout(() => {
+    typing = false;
+    socket.emit("stop typing", { user: username, room });
+  }, 1000);
+});
+
+document.getElementById("input").addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.value.trim()) {
+    socket.emit("chat message", {
+      user: username,
+      room,
+      text: e.target.value
+    });
+    e.target.value = "";
+  }
+});
+
+socket.on("chat message", msg => {
+  const li = document.createElement("li");
+  li.dataset.id = msgId++;
+  if (msg.user === username) li.classList.add("self");
+
+  const av = document.createElement("div");
+  av.className = "avatar";
+  av.style.background = color(msg.user);
+
+  const bubble = document.createElement("div");
+  bubble.className = "bubble" + (msg.user === username ? " self" : "");
+  bubble.textContent = msg.user + ": " + msg.text;
+
+  const react = document.createElement("button");
+  react.className = "reaction-btn";
+  react.textContent = "😀";
+  react.onclick = () => {
+    socket.emit("reaction", { user: username, room, messageId: li.dataset.id, emoji: "😀" });
+  };
+
+  li.append(av, bubble, react);
+  document.getElementById("messages").appendChild(li);
+  li.scrollIntoView();
+});
+
+socket.on("reaction", ({ user, messageId, emoji }) => {
+  if (!reactions[messageId]) reactions[messageId] = {};
+  reactions[messageId][user] = emoji;
+
+  const li = [...document.querySelectorAll(".messages li")].find(m => m.dataset.id == messageId);
+  if (!li) return;
+
+  let span = li.querySelector(".reactions");
+  if (!span) {
+    span = document.createElement("span");
+    span.className = "reactions";
+    li.appendChild(span);
+  }
+
+  const counts = {};
+  Object.values(reactions[messageId]).forEach(e => counts[e] = (counts[e]||0)+1);
+  span.textContent = Object.entries(counts).map(([e,c]) => `${e} ${c}`).join(" ");
+});
+
+socket.on("typing", u => {
+  if (!typingUsers.includes(u)) typingUsers.push(u);
+  document.getElementById("typing").textContent = typingUsers.join(", ") + " typing...";
+});
+
+socket.on("stop typing", u => {
+  typingUsers = typingUsers.filter(x => x !== u);
+  document.getElementById("typing").textContent = typingUsers.length ? typingUsers.join(", ") + " typing..." : "";
+});
+
+socket.on("user list", users => {
+  const ul = document.getElementById("users");
+  ul.innerHTML = "";
+
+  users.forEach(u => {
+    const li = document.createElement("li");
+
+    const av = document.createElement("div");
+    av.className = "avatar";
+    av.style.width = "18px";
+    av.style.height = "18px";
+    av.style.background = color(u.name);
+
+    const dot = document.createElement("span");
+    dot.className = "status-dot";
+    dot.style.background =
+      u.status === "Online" ? "green" :
+      u.status === "Away" ? "yellow" :
+      u.status === "Busy" ? "red" :
+      u.status === "Idle" ? "gray" : "blue";
+
+    li.append(av, dot, document.createTextNode(`${u.name} (${u.role})`));
+    ul.appendChild(li);
+  });
+});
+
+joinRoom("general");
+</script>
+
+</body>
+</html>

@@ -1,75 +1,166 @@
 const express = require("express");
+const session = require("express-session");
+const bcrypt = require("bcrypt");
+const db = require("./database");
+const multer = require("multer");
+const path = require("path");
+const storage = multer.diskStorage({
+  destination: "./public/avatars",
+  filename: (req, file, cb) => {
+    cb(null, req.session.user.id + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ storage });
+
 const app = express();
 const http = require("http").createServer(app);
 const io = require("socket.io")(http);
+
 const PORT = process.env.PORT || 3000;
 
-http.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+app.use(session({
+  secret: "super-secret-key",
+  resave: false,
+  saveUninitialized: false
+}));
+
+app.use(express.static("public"));
+
+/* ---------------- AUTH ROUTES ---------------- */
+
+app.post("/register", async (req, res) => {
+  const { username, password } = req.body;
+  const hash = await bcrypt.hash(password, 10);
+
+  db.run(
+    "INSERT INTO users (username, password) VALUES (?, ?)",
+    [username, hash],
+    err => {
+      if (err) return res.status(400).send("Username already exists");
+      res.send("Registered");
+    }
+  );
 });
 
-app.use(express.static(__dirname));
+app.post("/login", (req, res) => {
+  const { username, password } = req.body;
 
-const rooms = {}; // { roomName: [ { name, status } ] }
+  db.get(
+    "SELECT * FROM users WHERE username = ?",
+    [username],
+    async (err, user) => {
+      if (!user) return res.status(401).send("Invalid login");
 
-io.on("connection", socket => {
-  let currentRoom = "";
-  let username = "";
+      const ok = await bcrypt.compare(password, user.password);
+      if (!ok) return res.status(401).send("Invalid login");
 
-  socket.on("join room", data => {
-    // Leave previous room
-    if (currentRoom && rooms[currentRoom]) {
-      socket.leave(currentRoom);
+      req.session.user = {
+        id: user.id,
+        username: user.username,
+        role: user.role
+      };
 
-      rooms[currentRoom] = rooms[currentRoom].filter(
-        user => user.name !== username
-      );
-
-      io.to(currentRoom).emit("user list", rooms[currentRoom]);
-      io.to(currentRoom).emit("system", username + " left the room");
+      res.send("Logged in");
     }
+  );
+});
 
-    username = data.user;
-    currentRoom = data.room;
+app.get("/me", (req, res) => {
+  res.json(req.session.user || null);
+});
 
-    socket.join(currentRoom);
+/* ---------------- SOCKET.IO ---------------- */
+app.get("/profile", (req, res) => {
+  if (!req.session.user) return res.sendStatus(401);
 
-    if (!rooms[currentRoom]) {
-      rooms[currentRoom] = [];
-    }
-
-    rooms[currentRoom].push({
-      name: username,
-      status: data.status || "Online"
+ db.get(
+  "SELECT username, role, avatar, mood FROM users WHERE id = ?",
+  [socket.user.id],
+  (err, user) => {
+    rooms[room].push({
+      id: socket.user.id,
+      name: user.username,
+      role: user.role,
+      avatar: user.avatar,
+      mood: user.mood,
+      status
     });
 
-    io.to(currentRoom).emit("user list", rooms[currentRoom]);
-    io.to(currentRoom).emit("system", username + " joined " + currentRoom);
+    io.to(room).emit("user list", rooms[room]);
+  }
+);
+  db.get(
+    "SELECT * FROM users WHERE id = ?",
+    [req.session.user.id],
+    (err, user) => res.json(user)
+  );
+});
+
+app.post("/profile", upload.single("avatar"), (req, res) => {
+  if (!req.session.user) return res.sendStatus(401);
+
+  const { bio, mood, age, gender } = req.body;
+  const avatar = req.file ? `/avatars/${req.file.filename}` : null;
+
+  db.run(
+    `
+    UPDATE users SET
+      bio = ?,
+      mood = ?,
+      age = ?,
+      gender = ?,
+      avatar = COALESCE(?, avatar)
+    WHERE id = ?
+    `,
+    [bio, mood, age, gender, avatar, req.session.user.id],
+    () => res.sendStatus(200)
+  );
+});
+
+const rooms = {};
+
+io.use((socket, next) => {
+  const req = socket.request;
+  if (!req.session.user) return next(new Error("Unauthorized"));
+  socket.user = req.session.user;
+  next();
+});
+
+io.on("connection", socket => {
+  socket.on("join room", ({ room, status }) => {
+    socket.join(room);
+    if (!rooms[room]) rooms[room] = [];
+
+    rooms[room].push({
+      id: socket.user.id,
+      name: socket.user.username,
+      role: socket.user.role,
+      status
+    });
+
+    io.to(room).emit("user list", rooms[room]);
   });
 
-  socket.on("chat message", data => {
-    io.to(data.room).emit("chat message", data);
-  });
-
-  socket.on("status change", data => {
-    if (!rooms[data.room]) return;
-
-    const user = rooms[data.room].find(u => u.name === data.user);
-    if (user) {
-      user.status = data.status;
-      io.to(data.room).emit("user list", rooms[data.room]);
-    }
+  socket.on("chat message", msg => {
+    io.to(msg.room).emit("chat message", {
+      user: socket.user.username,
+      role: socket.user.role,
+      text: msg.text
+    });
   });
 
   socket.on("disconnect", () => {
-    if (currentRoom && rooms[currentRoom]) {
-      rooms[currentRoom] = rooms[currentRoom].filter(u => u.name !== username);
-      io.to(currentRoom).emit("user list", rooms[currentRoom]);
-      io.to(currentRoom).emit("system", username + " disconnected");
+    for (const r in rooms) {
+      rooms[r] = rooms[r].filter(u => u.id !== socket.user.id);
+      io.to(r).emit("user list", rooms[r]);
     }
   });
 });
 
-http.listen(3000, () => {
-  console.log("Server running on http://localhost:3000");
+http.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });
