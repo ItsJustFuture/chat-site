@@ -721,15 +721,33 @@
             <input id="modReason" placeholder="Reason (required)" style="flex:2; min-width:240px;">
           </div>
 
-          <div class="row" style="align-items:center; margin-top:8px;">
-            <input id="modMuteMins" type="number" min="1" max="1440" placeholder="mute mins" style="width:140px;">
-            <input id="modBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:190px;">
-            <button class="secondary" id="modKickBtn">Kick</button>
-            <button class="secondary" id="modMuteBtn">Mute</button>
-            <button class="danger" id="modBanBtn">Ban</button>
-            <button class="secondary" id="modOpenProfileBtn">View Profile</button>
-          </div>
+<div class="row" style="align-items:center; margin-top:8px;">
+  <input id="modMuteMins" type="number" min="1" max="1440" placeholder="mute mins" style="width:140px;">
+  <input id="modBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:190px;">
 
+  <button class="secondary" id="modKickBtn">Kick</button>
+  <button class="secondary" id="modMuteBtn">Mute</button>
+  <button class="danger" id="modBanBtn">Ban</button>
+
+  <button class="secondary" id="modUnmuteBtn">Unmute</button>
+  <button class="secondary" id="modUnbanBtn">Unban</button>
+  <button class="secondary" id="modWarnBtn">Warn</button>
+
+  <button class="secondary" id="modOpenProfileBtn">View Profile</button>
+</div>
+          <div class="row" style="align-items:center; margin-top:10px;">
+  <select id="modSetRole" style="width:220px;">
+    <option value="">Set role (Owner only)</option>
+    <option>Owner</option>
+    <option>Co-owner</option>
+    <option>Admin</option>
+    <option>Moderator</option>
+    <option>VIP</option>
+    <option>User</option>
+    <option>Guest</option>
+  </select>
+  <button class="secondary" id="modSetRoleBtn">Apply Role</button>
+</div>
           <div class="msgline" id="modMsg"></div>
         </div>
 
@@ -743,6 +761,12 @@
               <option value="MUTE">MUTE</option>
               <option value="BAN">BAN</option>
               <option value="DELETE_MESSAGE">DELETE_MESSAGE</option>
+              <option value="UNMUTE">UNMUTE</option>
+<option value="UNBAN">UNBAN</option>
+<option value="WARN">WARN</option>
+<option value="AUTO_MUTE">AUTO_MUTE</option>
+<option value="AUTO_BAN">AUTO_BAN</option>
+<option value="SET_ROLE">SET_ROLE</option>
             </select>
             <select id="logLimit" style="width:160px;">
               <option value="25">Last 25</option>
@@ -866,6 +890,11 @@
     const modBanBtn = document.getElementById("modBanBtn");
     const modOpenProfileBtn = document.getElementById("modOpenProfileBtn");
     const modMsg = document.getElementById("modMsg");
+    const modUnmuteBtn = document.getElementById("modUnmuteBtn");
+    const modUnbanBtn = document.getElementById("modUnbanBtn");
+    const modWarnBtn = document.getElementById("modWarnBtn");
+    const modSetRole = document.getElementById("modSetRole");
+    const modSetRoleBtn = document.getElementById("modSetRoleBtn");
 
     // logs
     const logUser = document.getElementById("logUser");
@@ -1426,6 +1455,38 @@
       if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
       await openMemberProfile(modUser.value.trim());
     });
+modUnmuteBtn.addEventListener("click", ()=>{
+  const err = requireReason(modReason.value);
+  if(err){ modMsg.textContent = err; return; }
+  if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+  socket?.emit("mod unmute", { username: modUser.value.trim(), reason: modReason.value.trim() });
+  modMsg.textContent = "Unmute sent.";
+});
+
+modUnbanBtn.addEventListener("click", ()=>{
+  const err = requireReason(modReason.value);
+  if(err){ modMsg.textContent = err; return; }
+  if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+  socket?.emit("mod unban", { username: modUser.value.trim(), reason: modReason.value.trim() });
+  modMsg.textContent = "Unban sent.";
+});
+
+modWarnBtn.addEventListener("click", ()=>{
+  const err = requireReason(modReason.value);
+  if(err){ modMsg.textContent = err; return; }
+  if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+  socket?.emit("mod warn", { username: modUser.value.trim(), reason: modReason.value.trim() });
+  modMsg.textContent = "Warn sent.";
+});
+
+modSetRoleBtn.addEventListener("click", ()=>{
+  const err = requireReason(modReason.value);
+  if(err){ modMsg.textContent = err; return; }
+  if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+  if(!modSetRole.value){ modMsg.textContent = "Choose a role first."; return; }
+  socket?.emit("mod set role", { username: modUser.value.trim(), role: modSetRole.value, reason: modReason.value.trim() });
+  modMsg.textContent = "Role change sent (Owner only).";
+});
 
     // ---------- Logs ----------
     async function loadModLogs({ user = "", action = "", limit = 50 } = {}){
