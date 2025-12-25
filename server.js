@@ -1054,6 +1054,4 @@ socket.on("mod set role", ({ username, role, reason = "" }) => {
     leaveCurrentRoom(socket);
     msgRate.delete(socket.id);
   });
-});
-
 http.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
