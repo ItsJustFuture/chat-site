@@ -295,24 +295,6 @@ const chatUpload = multer({
   storage: chatUploadStorage,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
-    const mime = String(file.mimetype || "").toLowerCase();
-
-    const isImage = ["image/png","image/jpeg","image/webp","image/gif"].includes(mime);
-    const isVideo = ["video/mp4","video/quicktime"].includes(mime);
-
-    const role = req.session?.user?.role || "User";
-    const vipPlus = roleRank(role) >= roleRank("VIP");
-
-    if (isImage) return cb(null, true);
-    if (vipPlus && isVideo) return cb(null, true);
-
-    cb(new Error("File type not allowed."), false);
-  }
-});
-const chatUpload = multer({
-  storage: chatUploadStorage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-  fileFilter: (req, file, cb) => {
     // Everyone can upload images
     const isImage = ["image/png","image/jpeg","image/webp","image/gif"].includes(file.mimetype);
 
@@ -399,25 +381,7 @@ app.post("/upload", requireLogin, (req, res) => {
 
     res.json({ url, type, mime });
   });
-  app.post("/upload", requireLogin, (req, res) => {
-  chatUpload.single("file")(req, res, (err) => {
-    if (err) return res.status(400).send(String(err.message || "Upload failed."));
-    if (!req.file) return res.status(400).send("No file uploaded.");
-
-    const mime = String(req.file.mimetype || "").toLowerCase();
-    let type = "file";
-    if (mime.startsWith("image/")) type = "image";
-    if (mime === "video/mp4" || mime === "video/quicktime") type = "video";
-
-    res.json({
-      url: `/uploads/${req.file.filename}`,
-      type,
-      mime,
-      size: req.file.size
-    });
   });
-});
-});
 // ---------- Profile Routes ----------
 app.get("/profile", requireLogin, (req, res) => {
   db.get(
