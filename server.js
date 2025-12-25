@@ -38,6 +38,8 @@ app.set("trust proxy", 1);
 // ---------- Ensure folders ----------
 const publicDir = path.join(__dirname, "public");
 const avatarDir = path.join(publicDir, "avatars");
+const uploadDir = path.join(publicDir, "uploads");
+fs.mkdirSync(uploadDir, { recursive: true });
 fs.mkdirSync(publicDir, { recursive: true });
 fs.mkdirSync(avatarDir, { recursive: true });
 
@@ -252,7 +254,32 @@ const upload = multer({
     cb(ok ? null : new Error("Only image uploads allowed"), ok);
   },
 });
+const chatUploadStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadDir),
+  filename: (_req, file, cb) => {
+    const ext = (path.extname(file.originalname || "").toLowerCase() || "");
+    cb(null, `${randomUUID()}${ext}`);
+  }
+});
 
+const chatUpload = multer({
+  storage: chatUploadStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    // Everyone can upload images
+    const isImage = ["image/png","image/jpeg","image/webp","image/gif"].includes(file.mimetype);
+
+    // VIP+ can upload videos (mp4/mov)
+    const role = req.session?.user?.role || "User";
+    const vipPlus = roleRank(role) >= roleRank("VIP");
+    const isVideo = ["video/mp4","video/quicktime"].includes(file.mimetype); // quicktime = .mov
+
+    if (isImage) return cb(null, true);
+    if (vipPlus && isVideo) return cb(null, true);
+
+    cb(new Error("File type not allowed."), false);
+  }
+});
 // ---------- Auth Routes ----------
 app.post("/register", async (req, res) => {
   try {
@@ -308,7 +335,24 @@ app.post("/logout", (req, res) => {
 app.get("/me", (req, res) => {
   res.json(req.session.user || null);
 });
+app.post("/upload", requireLogin, (req, res) => {
+  chatUpload.single("file")(req, res, (err) => {
+    if (err) {
+      const msg = String(err.message || "Upload failed.");
+      return res.status(400).send(msg);
+    }
+    if (!req.file) return res.status(400).send("No file uploaded.");
 
+    const url = `/uploads/${req.file.filename}`;
+    const mime = req.file.mimetype;
+
+    let type = "file";
+    if (mime.startsWith("image/")) type = "image";
+    if (mime === "video/mp4" || mime === "video/quicktime") type = "video";
+
+    res.json({ url, type, mime });
+  });
+});
 // ---------- Profile Routes ----------
 app.get("/profile", requireLogin, (req, res) => {
   db.get(
