@@ -4,8 +4,13 @@ const bcrypt = require("bcrypt");
 const db = require("./database");
 const multer = require("multer");
 const path = require("path");
+const fs = require("fs");
+
+const avatarsDir = path.join(__dirname, "public", "avatars");
+if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
+
 const storage = multer.diskStorage({
-  destination: "./public/avatars",
+  destination: avatarsDir,
   filename: (req, file, cb) => {
     cb(null, req.session.user.id + path.extname(file.originalname));
   }
@@ -75,28 +80,15 @@ app.get("/me", (req, res) => {
 
 /* ---------------- SOCKET.IO ---------------- */
 app.get("/profile", (req, res) => {
-  if (!req.session.user) return res.sendStatus(401);
+  if (!req.session || !req.session.user) return res.sendStatus(401);
 
- db.get(
-  "SELECT username, role, avatar, mood FROM users WHERE id = ?",
-  [socket.user.id],
-  (err, user) => {
-    rooms[room].push({
-      id: socket.user.id,
-      name: user.username,
-      role: user.role,
-      avatar: user.avatar,
-      mood: user.mood,
-      status
-    });
-
-    io.to(room).emit("user list", rooms[room]);
-  }
-);
   db.get(
     "SELECT * FROM users WHERE id = ?",
     [req.session.user.id],
-    (err, user) => res.json(user)
+    (err, user) => {
+      if (err) return res.sendStatus(500);
+      res.json(user);
+    }
   );
 });
 
@@ -125,7 +117,7 @@ const rooms = {};
 
 io.use((socket, next) => {
   const req = socket.request;
-  if (!req.session.user) return next(new Error("Unauthorized"));
+  if (!req.session || !req.session.user) return next(new Error("Unauthorized"));
   socket.user = req.session.user;
   next();
 });
@@ -160,7 +152,6 @@ io.on("connection", socket => {
     }
   });
 });
-
 http.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
