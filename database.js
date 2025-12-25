@@ -7,7 +7,13 @@ db.serialize(() => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE,
       password TEXT,
-      role TEXT DEFAULT 'User'
+      role TEXT DEFAULT 'User',
+      bio TEXT DEFAULT '',
+      mood TEXT DEFAULT '',
+      age INTEGER,
+      gender TEXT,
+      avatar TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 });
