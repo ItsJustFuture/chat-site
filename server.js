@@ -773,22 +773,21 @@ socket.on("mod set role", ({ username, role, reason = "" }) => {
 
             // Send history (last 50)
             db.all(
-            "SELECT id, room, username, role, text, ts, deleted, attachment_url, attachment_type, attachment_mime, attachment_size FROM messages ...
+              "SELECT id, room, username, role, text, ts, deleted, attachment_url, attachment_type, attachment_mime, attachment_size FROM messages WHERE room = ? ORDER BY ts DESC LIMIT 50",
               [room],
               (_e2, rows) => {
                 const history = (rows || []).reverse().map(r => ({
-              const history = (rows || []).reverse().map(r => ({
-  messageId: r.id,
-  room: r.room,
-  user: r.username,
-  role: r.role,
-  text: r.deleted ? "[message deleted]" : r.text,
-  deleted: !!r.deleted,
-  ts: r.ts,
-  attachmentUrl: r.attachment_url || "",
-  attachmentType: r.attachment_type || "",
-  attachmentMime: r.attachment_mime || "",
-  attachmentSize: Number(r.attachment_size || 0) || 0,
+                  messageId: r.id,
+                  room: r.room,
+                  user: r.username,
+                  role: r.role,
+                  text: r.deleted ? "[message deleted]" : r.text,
+                  deleted: !!r.deleted,
+                  ts: r.ts,
+                  attachmentUrl: r.attachment_url || "",
+                  attachmentType: r.attachment_type || "",
+                  attachmentMime: r.attachment_mime || "",
+                  attachmentSize: Number(r.attachment_size || 0) || 0,
                 }));
                 socket.emit("history", history);
               }
@@ -860,28 +859,28 @@ if (!cleanText.trim() && !hasAttachment) return;
       const ts = Date.now();
 
       db.run(
-        "INSERT INTO messages (id, room, user_id, username, role, text, ts, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
-        [messageId, room, socket.user.id, u.username, u.role, cleanText, ts
+        "INSERT INTO messages (id, room, user_id, username, role, text, ts, deleted, attachment_url, attachment_type, attachment_mime, attachment_size) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
+        [messageId, room, socket.user.id, u.username, u.role, cleanText, ts,
             (attachmentUrl || "").slice(0, 300),
-    (attachmentType || "").slice(0, 20),
-    (attachmentMime || "").slice(0, 60),
-    Number(attachmentSize || 0) || 0
+            (attachmentType || "").slice(0, 20),
+            (attachmentMime || "").slice(0, 60),
+            Number(req.file?.size || 0) || 0
         ],
         () => {
-       io.to(room).emit("chat message", {
-  messageId,
-  room,
-  user: u.username,
-  role: u.role,
-  avatar: u.avatar || "",
-  mood: u.mood || "",
-  text: cleanText,
-  ts,
-  attachmentUrl: attachmentUrl || "",
-  attachmentType: attachmentType || "",
-  attachmentMime: attachmentMime || ""
-  attachmentSize: Number(attachmentSize || 0) || 0
-});
+          io.to(room).emit("chat message", {
+            messageId,
+            room,
+            user: u.username,
+            role: u.role,
+            avatar: u.avatar || "",
+            mood: u.mood || "",
+            text: cleanText,
+            ts,
+            attachmentUrl: attachmentUrl || "",
+            attachmentType: attachmentType || "",
+            attachmentMime: attachmentMime || "",
+            attachmentSize: Number(req.file?.size || 0) || 0
+          });
         }
       );
     });
