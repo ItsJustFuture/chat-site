@@ -350,34 +350,38 @@ app.post("/register", async (req, res) => {
 });
 
 app.post("/login", (req, res) => {
-  const username = String(req.body.username || "").trim().slice(0, 24);
-  const password = String(req.body.password || "");
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).send("Missing credentials");
+  }
 
-  db.get("SELECT * FROM users WHERE username = ?", [username], async (err, user) => {
-    if (err || !user) return res.status(401).send("Invalid login.");
+  db.get(
+    "SELECT * FROM users WHERE lower(username) = lower(?)",
+    [username],
+    async (err, row) => {
+      if (err || !row) return res.status(401).send("Invalid username or password");
 
-    getActiveBanMute(user.id, async ({ ban }) => {
-      if (ban && isActivePunishment(ban)) return res.status(403).send("You are banned.");
+      const ok = await bcrypt.compare(password, row.password);
+      if (!ok) return res.status(401).send("Invalid username or password");
 
-      const ok = await bcrypt.compare(password, user.password_hash);
-      if (!ok) return res.status(401).send("Invalid login.");
+      // ✅ AUTO CO-OWNER ENFORCEMENT (MUST BE HERE)
+      const uname = normalizeUsername(row.username);
+      if (AUTO_COOWNERS.has(uname) && row.role !== "Co-owner") {
+        db.run("UPDATE users SET role = 'Co-owner' WHERE id = ?", [row.id]);
+        row.role = "Co-owner";
+      }
 
-      ensureOwnerRoleIfNeeded(user, (fixedRole) => {
-        req.session.user = { id: user.id, username: user.username, role: fixedRole };
-        res.send("Logged in");
-        const uname = normalizeUsername(row.username);
-if (AUTO_COOWNERS.has(uname) && row.role !== "Co-owner") {
-  db.run(
-    "UPDATE users SET role = 'Co-owner' WHERE id = ?",
-    [row.id]
+      // set session
+      req.session.user = {
+        id: row.id,
+        username: row.username,
+        role: row.role
+      };
+
+      return res.json({ ok: true });
+    }
   );
-  row.role = "Co-owner";
-}
-      });
-    });
-  });
 });
-
 app.post("/logout", (req, res) => {
   req.session.destroy(() => res.send("Logged out"));
 });
