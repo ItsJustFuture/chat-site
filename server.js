@@ -828,63 +828,71 @@ socket.on("mod set role", ({ username, role, reason = "" }) => {
     }
   });
 
- socket.on("chat message", ({ text, attachmentUrl, attachmentType, attachmentMime }) => {
-    const room = socket.currentRoom;
-    if (!room) return;
+ socket.on("chat message", ({ text, attachmentUrl, attachmentType, attachmentMime, attachmentSize }) => {
+  const room = socket.currentRoom;
+  if (!room) return;
 
-    if (!allowMsg(socket.id)) {
-      socket.emit("system", "You are sending messages too fast.");
+  if (!allowMsg(socket.id)) {
+    socket.emit("system", "You are sending messages too fast.");
+    return;
+  }
+
+  getActiveBanMute(socket.user.id, ({ mute, ban }) => {
+    if (ban && isActivePunishment(ban)) {
+      socket.emit("system", "You are banned.");
+      return;
+    }
+    if (mute && isActivePunishment(mute)) {
+      socket.emit("system", "You are muted.");
       return;
     }
 
-    getActiveBanMute(socket.user.id, ({ mute, ban }) => {
-      if (ban && isActivePunishment(ban)) {
-        socket.emit("system", "You are banned.");
-        return;
+    const map = getRoomMap(room);
+    const u = map.get(socket.id);
+    if (!u) return;
+
+    const cleanText = String(text || "").slice(0, 800);
+
+    const hasAttachment = !!(attachmentUrl && attachmentType && attachmentMime);
+    if (!cleanText.trim() && !hasAttachment) return;
+
+    const safeAttachmentUrl = hasAttachment ? String(attachmentUrl).slice(0, 300) : "";
+    const safeAttachmentType = hasAttachment ? String(attachmentType).slice(0, 20) : "";
+    const safeAttachmentMime = hasAttachment ? String(attachmentMime).slice(0, 60) : "";
+    const safeAttachmentSize = hasAttachment ? (Number(attachmentSize) || 0) : 0;
+
+    const messageId = randomUUID();
+    const ts = Date.now();
+
+    db.run(
+      `INSERT INTO messages
+       (id, room, user_id, username, role, text, ts, deleted, attachment_url, attachment_type, attachment_mime, attachment_size)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+      [
+        messageId, room, socket.user.id, u.username, u.role, cleanText, ts,
+        safeAttachmentUrl, safeAttachmentType, safeAttachmentMime, safeAttachmentSize
+      ],
+      () => {
+        io.to(room).emit("chat message", {
+          messageId,
+          room,
+          user: u.username,
+          role: u.role,
+          avatar: u.avatar || "",
+          mood: u.mood || "",
+          text: cleanText,
+          ts,
+          attachmentUrl: safeAttachmentUrl,
+          attachmentType: safeAttachmentType,
+          attachmentMime: safeAttachmentMime,
+          attachmentSize: safeAttachmentSize
+        });
       }
-      if (mute && isActivePunishment(mute)) {
-        socket.emit("system", "You are muted.");
-        return;
-      }
-
-      const map = getRoomMap(room);
-      const u = map.get(socket.id);
-      if (!u) return;
-
-     const cleanText = String(text || "").slice(0, 800);
-const hasAttachment = !!(attachmentUrl && attachmentType && attachmentMime);
-
-if (!cleanText.trim() && !hasAttachment) return;
-      const messageId = randomUUID();
-      const ts = Date.now();
-
-      db.run(
-        "INSERT INTO messages (id, room, user_id, username, role, text, ts, deleted, attachment_url, attachment_type, attachment_mime, attachment_size) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
-        [messageId, room, socket.user.id, u.username, u.role, cleanText, ts,
-            (attachmentUrl || "").slice(0, 300),
-            (attachmentType || "").slice(0, 20),
-            (attachmentMime || "").slice(0, 60),
-            Number(req.file?.size || 0) || 0
-        ],
-        () => {
-          io.to(room).emit("chat message", {
-            messageId,
-            room,
-            user: u.username,
-            role: u.role,
-            avatar: u.avatar || "",
-            mood: u.mood || "",
-            text: cleanText,
-            ts,
-            attachmentUrl: attachmentUrl || "",
-            attachmentType: attachmentType || "",
-            attachmentMime: attachmentMime || "",
-            attachmentSize: Number(req.file?.size || 0) || 0
-          });
-        }
-      );
-    });
+    );
   });
+});
+
+          });
 
   // Reactions: 1 per user per message (overwrite)
   socket.on("reaction", ({ messageId, emoji }) => {
