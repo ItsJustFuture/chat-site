@@ -30,8 +30,67 @@
       background:var(--bg);
       color:var(--text);
       height:100vh;
-    }
+    }msgInput.addEventListener("focus", () => {
+  setTimeout(() => msgInput.scrollIntoView({ block: "center", behavior: "smooth" }), 150);
+});
+/* ---------- Mobile drawers ---------- */
+.overlay{
+  position:fixed;
+  inset:0;
+  background:#00000066;
+  display:none;
+  z-index:50;
+}
+.overlay.show{ display:block; }
 
+@media (max-width: 980px){
+  /* Make chat take full width */
+  .channels{
+    position:fixed;
+    top:0; left:0;
+    height:100vh;
+    transform:translateX(-105%);
+    transition:transform .2s ease;
+    z-index:60;
+    width:min(86vw, 320px);
+    box-shadow: 12px 0 30px #00000066;
+  }
+  .channels.open{ transform:translateX(0); }
+
+  .members{
+    position:fixed;
+    top:0; right:0;
+    height:100vh;
+    display:block;        /* override earlier hide */
+    transform:translateX(105%);
+    transition:transform .2s ease;
+    z-index:60;
+    width:min(86vw, 320px);
+    box-shadow: -12px 0 30px #00000066;
+  }
+  .members.open{ transform:translateX(0); }
+
+  /* show the drawer buttons in topbar */
+  #openChannelsBtn, #openMembersBtn{ display:flex !important; }
+
+  /* input bar stays visible above mobile browser UI */
+  .inputBar{
+    position:sticky;
+    bottom:0;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  /* slightly bigger tap targets */
+  button, .chan, .mItem{
+    min-height:44px;
+  }
+
+  /* message bubbles can use more width */
+  .bubble{ max-width: 92vw; }
+}
+
+/* Prevent iOS zoom on inputs (needs 16px font) */
+input, textarea, select { font-size:16px; }
     /* ---------- AUTH ---------- */
     #authWrap{
       height:100vh;
@@ -472,7 +531,7 @@
       border-radius:14px;
       padding:10px;
     }
-
+<div class="overlay" id="drawerOverlay"></div>
     /* logs table */
     .logTable{
       width:100%;
@@ -578,16 +637,21 @@
       </aside>
 
       <main class="chat">
-        <div class="topbar">
-          <div class="roomTitle"><span>#</span><span id="roomTitle">general</span></div>
-          <div class="searchWrap">
-            <input id="searchInput" placeholder="Search messages...">
-          </div>
-        </div>
+       <div class="topbar">
+  <div class="row" style="align-items:center; gap:10px;">
+    <button class="iconBtn" id="openChannelsBtn" title="Channels" style="display:none;">☰</button>
+    <div class="roomTitle"><span>#</span><span id="roomTitle">general</span></div>
+  </div>
 
+  <div class="row" style="align-items:center; gap:10px;">
+    <div class="searchWrap">
+      <input id="searchInput" placeholder="Search messages...">
+    </div>
+    <button class="iconBtn" id="openMembersBtn" title="Members" style="display:none;">👥</button>
+  </div>
+</div>
         <div class="msgs" id="msgs"></div>
         <div class="typing" id="typing"></div>
-
   <div class="inputBar">
   <input id="msgInput" placeholder="Message #general" maxlength="800">
   <input id="fileInput" type="file" style="max-width:220px;">
@@ -821,7 +885,29 @@
     const loginBtn = document.getElementById("loginBtn");
     const regBtn = document.getElementById("regBtn");
     const fileInput = document.getElementById("fileInput");
-
+const openChannelsBtn = document.getElementById("openChannelsBtn");
+const openMembersBtn = document.getElementById("openMembersBtn");
+const drawerOverlay = document.getElementById("drawerOverlay");
+const channelsPane = document.querySelector(".channels");
+const membersPane = document.querySelector(".members");
+function closeDrawers(){
+  channelsPane?.classList.remove("open");
+  membersPane?.classList.remove("open");
+  drawerOverlay?.classList.remove("show");
+}
+function openChannels(){
+  membersPane?.classList.remove("open");
+  channelsPane?.classList.add("open");
+  drawerOverlay?.classList.add("show");
+}
+function openMembers(){
+  channelsPane?.classList.remove("open");
+  membersPane?.classList.add("open");
+  drawerOverlay?.classList.add("show");
+}
+openChannelsBtn?.addEventListener("click", openChannels);
+openMembersBtn?.addEventListener("click", openMembers);
+drawerOverlay?.addEventListener("click", closeDrawers);
     const chanList = document.getElementById("chanList");
     const nowRoom = document.getElementById("nowRoom");
     const roomTitle = document.getElementById("roomTitle");
@@ -1256,7 +1342,8 @@ async function uploadChatFile(file){
       const el=e.target.closest(".chan");
       if(!el) return;
       const r=el.dataset.room;
-      if(r && r!==currentRoom) joinRoom(r);
+      if(r && r!==currentRoom) joinRoom(r);closeDrawers();
+
     });
 
     // ---------- Typing + send ----------
@@ -1418,7 +1505,7 @@ async function uploadChatFile(file){
 
     async function openMemberProfile(username){
       modalTargetUsername = username;
-
+closeDrawers();
       const res = await fetch("/profile/" + encodeURIComponent(username));
       if(!res.ok) return;
       const p = await res.json();
