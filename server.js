@@ -21,7 +21,7 @@ const multer = require("multer");
 const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
 const { randomUUID } = require("crypto");
-
+const onlineState = new Map(); // userId -> { room, status }
 const app = express();
 const http = require("http").createServer(app);
 const io = require("socket.io")(http);
@@ -202,6 +202,9 @@ db.serialize(() => {
   addColumnIfMissing("messages", "attachment_type", "attachment_type TEXT DEFAULT ''");
   addColumnIfMissing("messages", "attachment_mime", "attachment_mime TEXT DEFAULT ''");
   addColumnIfMissing("messages", "attachment_size", "attachment_size INTEGER DEFAULT 0");
+  addColumnIfMissing("users", "last_seen", "last_seen INTEGER");
+  addColumnIfMissing("users", "last_room", "last_room TEXT");
+  addColumnIfMissing("users", "last_status", "last_status TEXT");
 });
 
 // -------------------- Moderation logging --------------------
@@ -388,6 +391,12 @@ app.get("/profile/:username", (req, res) => {
     (err, row) => {
       if (err || !row) return res.status(404).send("Not found");
       res.json(row);
+      const live = onlineState.get(row.id);
+res.json({
+  ...row,
+  current_room: live?.room || null,
+  last_status: live?.status || row.last_status || null,
+});
     }
   );
 });
@@ -558,6 +567,12 @@ io.on("connection", (socket) => {
       if (ban && isActivePunishment(ban)) {
         socket.emit("system", "You are banned.");
         return;
+        onlineState.set(socket.user.id, { room, status });
+db.run(
+  "UPDATE users SET last_room = ?, last_status = ? WHERE id = ?",
+  [room, status, socket.user.id]
+);
+
       }
 
       leaveCurrentRoom(socket);
@@ -623,7 +638,9 @@ io.on("connection", (socket) => {
     const map = getRoomMap(room);
     const u = map.get(socket.id);
     if (!u) return;
-
+    const st = onlineState.get(socket.user.id);
+    if (st) st.status = String(status || "Online");
+    db.run("UPDATE users SET last_status = ? WHERE id = ?", [String(status || "Online"), socket.user.id]);
     u.status = String(status || "Online");
     map.set(socket.id, u);
     emitUserList(room);
@@ -1023,6 +1040,8 @@ io.on("connection", (socket) => {
     socketIdByUserId.delete(socket.user.id);
     leaveCurrentRoom(socket);
     msgRate.delete(socket.id);
+    onlineState.delete(socket.user.id);
+db.run("UPDATE users SET last_seen = ? WHERE id = ?", [Date.now(), socket.user.id]);
   });
 });
 
