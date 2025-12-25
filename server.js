@@ -553,7 +553,21 @@ io.on("connection", (socket) => {
 socket.on("mod unmute", ({ username, reason = "" }) => {
   const room = socket.currentRoom;
   if (!room) return;
+  // Reactions: 1 per user per message (overwrite)
+  socket.on("reaction", ({ messageId, emoji }) => {
+    const room = socket.currentRoom;
+    if (!room) return;
+    messageId = String(messageId || "");
+    emoji = String(emoji || "").slice(0, 8);
+    if (!messageId || !emoji) return;
 
+    const roomReacts = getRoomReactions(room);
+    if (!roomReacts.has(messageId)) roomReacts.set(messageId, {});
+    const map = roomReacts.get(messageId);
+    map[socket.user.username] = emoji;
+
+    io.to(room).emit("reaction update", { messageId, reactions: map });
+  });
   const actorRole = socket.request.session.user.role;
   if (!requireMinRole(actorRole, "Moderator")) return;
 
@@ -893,23 +907,6 @@ socket.on("mod set role", ({ username, role, reason = "" }) => {
 });
 
           });
-
-  // Reactions: 1 per user per message (overwrite)
-  socket.on("reaction", ({ messageId, emoji }) => {
-    const room = socket.currentRoom;
-    if (!room) return;
-    messageId = String(messageId || "");
-    emoji = String(emoji || "").slice(0, 8);
-    if (!messageId || !emoji) return;
-
-    const roomReacts = getRoomReactions(room);
-    if (!roomReacts.has(messageId)) roomReacts.set(messageId, {});
-    const map = roomReacts.get(messageId);
-    map[socket.user.username] = emoji;
-
-    io.to(room).emit("reaction update", { messageId, reactions: map });
-  });
-
   // ---------------- MODERATION ----------------
 
   // Delete message (Moderator+)
