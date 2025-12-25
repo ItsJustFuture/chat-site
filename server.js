@@ -17,6 +17,8 @@ const multer = require("multer");
 const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
 const { randomUUID } = require("crypto");
+const meStatusText = document.getElementById("meStatusText");
+meStatusText.textContent = statusSelect.value;
 
 const app = express();
 const http = require("http").createServer(app);
