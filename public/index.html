@@ -19,6 +19,21 @@
       --ok:#23a55a;
       --warn:#f0b132;
       --gray:#80848e;
+      .iconBtn{
+  width:36px;
+  height:36px;
+  padding:0;
+  border-radius:10px;
+  background:#4e5058;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:16px;
+  font-weight:900;
+}
+.iconBtn:hover{
+  filter:brightness(1.05);
+}
     }
     *{ box-sizing:border-box; }
     body{ margin:0; font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif; background:var(--bg); color:var(--text); height:100vh; }
@@ -194,10 +209,12 @@
                 <div class="meRole" id="meRole">...</div>
               </div>
             </div>
-            <div class="row" style="gap:8px;">
-              <button class="secondary" id="profileBtn">Profile</button>
-              <button class="danger" id="logoutBtn">Logout</button>
-            </div>
+            <div class="row" style="gap:8px; align-items:center;">
+  <div class="small" id="meStatusText" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px;">
+    ready
+  </div>
+  <button class="iconBtn" id="profileBtn" title="Profile">👤</button>
+</div>
           </div>
 
           <select id="statusSelect">
@@ -297,10 +314,11 @@
               <textarea id="editBio"></textarea>
             </div>
 
-            <div class="row">
-              <button id="saveProfileBtn">Save</button>
-              <button class="secondary" id="refreshProfileBtn">Refresh</button>
-            </div>
+           <div class="row">
+  <button id="saveProfileBtn">Save</button>
+  <button class="secondary" id="refreshProfileBtn">Refresh</button>
+  <button class="danger" id="logoutBtn">Logout</button>
+</div>
 
             <div class="msgline" id="profileMsg"></div>
           </div>
