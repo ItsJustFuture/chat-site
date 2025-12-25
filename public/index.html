@@ -33,53 +33,73 @@
     }msgInput.addEventListener("focus", () => {
   setTimeout(() => msgInput.scrollIntoView({ block: "center", behavior: "smooth" }), 150);
 });
-/* ---------- Mobile drawers ---------- */
+/* --- Mobile drawers --- */
 .overlay{
   position:fixed;
   inset:0;
-  background:#00000066;
+  background: rgba(0,0,0,.55);
   display:none;
   z-index:50;
 }
 .overlay.show{ display:block; }
 
+.iconBtn{
+  display:none;
+  width:36px; height:36px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  cursor:pointer;
+  align-items:center;
+  justify-content:center;
+}
+
 @media (max-width: 980px){
-  /* Make chat take full width */
+  /* show drawer buttons only on mobile */
+  .iconBtn{ display:flex; }
+
+  /* channels drawer (left) */
   .channels{
     position:fixed;
     top:0; left:0;
     height:100vh;
-    transform:translateX(-105%);
-    transition:transform .2s ease;
-    z-index:60;
     width:min(86vw, 320px);
-    box-shadow: 12px 0 30px #00000066;
+    transform:translateX(-105%);
+    transition:transform .18s ease;
+    z-index:60;
+    box-shadow: 12px 0 30px rgba(0,0,0,.55);
   }
   .channels.open{ transform:translateX(0); }
 
+  /* members drawer (right) */
   .members{
     position:fixed;
     top:0; right:0;
     height:100vh;
-    display:block;        /* override earlier hide */
-    transform:translateX(105%);
-    transition:transform .2s ease;
-    z-index:60;
     width:min(86vw, 320px);
-    box-shadow: -12px 0 30px #00000066;
+    transform:translateX(105%);
+    transition:transform .18s ease;
+    z-index:60;
+    box-shadow: -12px 0 30px rgba(0,0,0,.55);
   }
   .members.open{ transform:translateX(0); }
 
-  /* show the drawer buttons in topbar */
-  #openChannelsBtn, #openMembersBtn{ display:flex !important; }
+  /* chat gets full width */
+  .main{ width:100%; }
 
-  /* input bar stays visible above mobile browser UI */
+  /* bigger tap targets */
+  button, .chan, .mItem{ min-height:44px; }
+
+  /* prevent iOS zoom */
+  input, textarea, select{ font-size:16px; }
+
+  /* keep input above safe-area */
   .inputBar{
-    position:sticky;
-    bottom:0;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    position: sticky;
+    bottom: 0;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
-
+}
   /* slightly bigger tap targets */
   button, .chan, .mItem{
     min-height:44px;
@@ -885,29 +905,38 @@ input, textarea, select { font-size:16px; }
     const loginBtn = document.getElementById("loginBtn");
     const regBtn = document.getElementById("regBtn");
     const fileInput = document.getElementById("fileInput");
+const drawerOverlay = document.getElementById("drawerOverlay");
 const openChannelsBtn = document.getElementById("openChannelsBtn");
 const openMembersBtn = document.getElementById("openMembersBtn");
-const drawerOverlay = document.getElementById("drawerOverlay");
 const channelsPane = document.querySelector(".channels");
 const membersPane = document.querySelector(".members");
+
 function closeDrawers(){
   channelsPane?.classList.remove("open");
   membersPane?.classList.remove("open");
   drawerOverlay?.classList.remove("show");
 }
+
 function openChannels(){
   membersPane?.classList.remove("open");
   channelsPane?.classList.add("open");
   drawerOverlay?.classList.add("show");
 }
+
 function openMembers(){
   channelsPane?.classList.remove("open");
   membersPane?.classList.add("open");
   drawerOverlay?.classList.add("show");
 }
+
 openChannelsBtn?.addEventListener("click", openChannels);
 openMembersBtn?.addEventListener("click", openMembers);
 drawerOverlay?.addEventListener("click", closeDrawers);
+
+// Escape closes drawers (desktop keyboards too)
+document.addEventListener("keydown", (e)=>{
+  if(e.key === "Escape") closeDrawers();
+});
     const chanList = document.getElementById("chanList");
     const nowRoom = document.getElementById("nowRoom");
     const roomTitle = document.getElementById("roomTitle");
@@ -1770,5 +1799,6 @@ modSetRoleBtn.addEventListener("click", ()=>{
     // Auth buttons need to work even if not logged in
     // (already wired above)
   </script>
+  <div id="drawerOverlay" class="overlay"></div>
 </body>
 </html>
