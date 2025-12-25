@@ -1002,6 +1002,31 @@
     }
 
     function addMessage(m){
+      if(m.attachmentUrl){
+  if(m.attachmentType === "image"){
+    const img = document.createElement("img");
+    img.src = m.attachmentUrl;
+    img.style.maxWidth = "420px";
+    img.style.borderRadius = "12px";
+    img.style.border = "1px solid rgba(0,0,0,.25)";
+    bubble.appendChild(img);
+  } else if(m.attachmentType === "video"){
+    const v = document.createElement("video");
+    v.src = m.attachmentUrl;
+    v.controls = true;
+    v.style.maxWidth = "520px";
+    v.style.borderRadius = "12px";
+    v.style.border = "1px solid rgba(0,0,0,.25)";
+    bubble.appendChild(v);
+  } else {
+    const a = document.createElement("a");
+    a.href = m.attachmentUrl;
+    a.textContent = "Download file";
+    a.target = "_blank";
+    a.rel = "noreferrer";
+    bubble.appendChild(a);
+  }
+}
       const wrap=document.createElement("div");
       wrap.className="msg"+(m.user===me.username?" self":"");
       wrap.dataset.mid=m.messageId;
