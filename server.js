@@ -105,6 +105,14 @@ function requireLogin(req, res, next) {
   if (!req.session.user) return res.sendStatus(401);
   next();
 }
+function normalizeUsername(u){
+  return String(u || "").trim().toLowerCase();
+}
+
+const AUTO_COOWNERS = new Set([
+  "lola henderson",
+  "amelia"
+]);
 
 function ensureOwnerRoleIfNeeded(userRow, cb) {
   if (userRow.username === OWNER_USERNAME && userRow.role !== "Owner") {
@@ -357,6 +365,14 @@ app.post("/login", (req, res) => {
       ensureOwnerRoleIfNeeded(user, (fixedRole) => {
         req.session.user = { id: user.id, username: user.username, role: fixedRole };
         res.send("Logged in");
+        const uname = normalizeUsername(row.username);
+if (AUTO_COOWNERS.has(uname) && row.role !== "Co-owner") {
+  db.run(
+    "UPDATE users SET role = 'Co-owner' WHERE id = ?",
+    [row.id]
+  );
+  row.role = "Co-owner";
+}
       });
     });
   });
