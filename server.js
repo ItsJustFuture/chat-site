@@ -246,6 +246,55 @@ function canModerate(actorRole, targetRole) {
 const AUTO_OWNER = new Set(["iri"]);
 const AUTO_COOWNERS = new Set(["lola henderson", "amelia"]);
 
+function fetchUsersByNames(usernames, cb) {
+  const cleaned = Array.from(
+    new Set(
+      (usernames || [])
+        .map((u) => sanitizeUsername(u))
+        .filter(Boolean)
+        .map((u) => normKey(u))
+    )
+  );
+  if (!cleaned.length) return cb(null, []);
+
+  const placeholders = cleaned.map(() => "?").join(",");
+  db.all(
+    `SELECT id, username FROM users WHERE lower(username) IN (${placeholders})`,
+    cleaned,
+    (err, rows) => cb(err, rows || [])
+  );
+}
+
+function loadThreadForUser(threadId, userId, cb) {
+  db.get(
+    `SELECT id, title, is_group FROM dm_threads WHERE id = ?`,
+    [threadId],
+    (err, thread) => {
+      if (err || !thread) return cb(err || new Error("missing"));
+
+      db.get(
+        `SELECT 1 FROM dm_participants WHERE thread_id=? AND user_id=?`,
+        [threadId, userId],
+        (err2, member) => {
+          if (err2 || !member) return cb(err2 || new Error("forbidden"));
+
+          db.all(
+            `SELECT u.username FROM dm_participants dp JOIN users u ON u.id = dp.user_id WHERE dp.thread_id = ?`,
+            [threadId],
+            (err3, parts) => {
+              if (err3) return cb(err3);
+              cb(null, {
+                ...thread,
+                participants: (parts || []).map((p) => p.username),
+              });
+            }
+          );
+        }
+      );
+    }
+  );
+}
+
 function logModAction({ actor, action, targetUserId, targetUsername, room, details }) {
   db.run(
     `INSERT INTO mod_logs (ts, actor_user_id, actor_username, actor_role, action, target_user_id, target_username, room, details)
@@ -511,6 +560,116 @@ app.get("/mod/logs", requireLogin, (req, res) => {
   );
 });
 
+// ---- Direct messages API
+app.get("/dm/threads", requireLogin, (req, res) => {
+  const userId = req.session.user.id;
+
+  db.all(
+    `SELECT t.id, t.title, t.is_group, t.created_at,
+            (SELECT text FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1) AS last_text,
+            (SELECT ts FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1) AS last_ts
+     FROM dm_threads t
+     INNER JOIN dm_participants p ON p.thread_id = t.id
+     WHERE p.user_id = ?
+     ORDER BY COALESCE(last_ts, t.created_at) DESC`,
+    [userId],
+    (err, threads) => {
+      if (err) return res.status(500).send("Failed to load threads");
+      if (!threads?.length) return res.json([]);
+
+      const ids = threads.map((t) => t.id);
+      const placeholders = ids.map(() => "?").join(",");
+
+      db.all(
+        `SELECT dp.thread_id, u.username FROM dm_participants dp JOIN users u ON u.id = dp.user_id WHERE dp.thread_id IN (${placeholders})`,
+        ids,
+        (_e, parts) => {
+          const grouped = new Map();
+          for (const p of parts || []) {
+            if (!grouped.has(p.thread_id)) grouped.set(p.thread_id, []);
+            grouped.get(p.thread_id).push(p.username);
+          }
+
+          const result = threads.map((t) => ({
+            ...t,
+            participants: grouped.get(t.id) || [],
+          }));
+          res.json(result);
+        }
+      );
+    }
+  );
+});
+
+app.post("/dm/thread", requireLogin, (req, res) => {
+  let participants = req.body?.participants;
+  if (!Array.isArray(participants)) {
+    const raw = String(participants || req.body?.participant || req.body?.user || "");
+    participants = raw.split(",");
+  }
+  const title = String(req.body?.title || "").trim().slice(0, 80);
+
+  const cleaned = [];
+  const seen = new Set();
+  for (const name of participants || []) {
+    const s = sanitizeUsername(name);
+    const key = normKey(s);
+    if (!s || seen.has(key)) continue;
+    if (key === normKey(req.session.user.username)) continue;
+    seen.add(key);
+    cleaned.push(s);
+  }
+
+  if (!cleaned.length) return res.status(400).send("Add at least one other user");
+  if (cleaned.length > 9) return res.status(400).send("Too many participants");
+
+  fetchUsersByNames(cleaned, (err, users) => {
+    if (err) return res.status(500).send("Failed to create thread");
+    if (users.length !== cleaned.length) return res.status(404).send("User not found");
+
+    const now = Date.now();
+    const isGroup = users.length + 1 > 2 || !!title;
+
+    db.run(
+      `INSERT INTO dm_threads (title, is_group, created_by, created_at) VALUES (?, ?, ?, ?)`,
+      [title || null, isGroup ? 1 : 0, req.session.user.id, now],
+      function (insertErr) {
+        if (insertErr) return res.status(500).send("Failed to create thread");
+        const threadId = this.lastID;
+
+        const participantIds = users.map((u) => u.id);
+        participantIds.push(req.session.user.id);
+
+        for (const uid of participantIds) {
+          db.run(
+            `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
+            [threadId, uid, req.session.user.id, now]
+          );
+        }
+
+        const allNames = users.map((u) => u.username);
+        allNames.push(req.session.user.username);
+
+        for (const uid of participantIds) {
+          const sid = socketIdByUserId.get(uid);
+          if (sid) {
+            const sock = io.sockets.sockets.get(sid);
+            if (sock) sock.join(`dm:${threadId}`);
+            io.to(sid).emit("dm thread invited", {
+              threadId,
+              title,
+              isGroup,
+              participants: allNames,
+            });
+          }
+        }
+
+        res.json({ ok: true, threadId });
+      }
+    );
+  });
+});
+
 // ---- Real-time presence tracking
 const onlineState = new Map(); // userId -> { room, status }
 const socketIdByUserId = new Map(); // userId -> socket.id
@@ -611,6 +770,20 @@ io.on("connection", (socket) => {
   );
 
   socket.currentRoom = null;
+  socket.dmThreads = new Set();
+
+  db.all(
+    `SELECT thread_id FROM dm_participants WHERE user_id = ?`,
+    [socket.user.id],
+    (_e, rows) => {
+      for (const r of rows || []) {
+        const tid = Number(r.thread_id);
+        if (!Number.isFinite(tid)) continue;
+        socket.dmThreads.add(tid);
+        socket.join(`dm:${tid}`);
+      }
+    }
+  );
 
   socket.on("join room", ({ room, status }) => {
     room = String(room || "").trim().toLowerCase();
@@ -711,6 +884,75 @@ io.on("connection", (socket) => {
       set.delete(socket.user.username);
       broadcastTyping(room);
     }
+  });
+
+  socket.on("dm join", ({ threadId }) => {
+    const tid = Number(threadId);
+    if (!Number.isInteger(tid)) return;
+
+    loadThreadForUser(tid, socket.user.id, (err, thread) => {
+      if (err) return;
+      socket.dmThreads.add(tid);
+      socket.join(`dm:${tid}`);
+
+      db.all(
+        `SELECT id, thread_id, user_id, username, text, ts FROM dm_messages WHERE thread_id=? ORDER BY ts DESC LIMIT 50`,
+        [tid],
+        (_e, rows) => {
+          const msgs = (rows || []).reverse();
+          socket.emit("dm history", {
+            threadId: tid,
+            title: thread.title || "",
+            isGroup: !!thread.is_group,
+            participants: thread.participants || [],
+            messages: msgs,
+          });
+        }
+      );
+    });
+  });
+
+  socket.on("dm message", ({ threadId, text }) => {
+    const tid = Number(threadId);
+    const body = String(text || "").trim().slice(0, 800);
+    if (!Number.isInteger(tid) || !body) return;
+
+    loadThreadForUser(tid, socket.user.id, (err, thread) => {
+      if (err) return;
+      const ts = Date.now();
+
+      db.run(
+        `INSERT INTO dm_messages (thread_id, user_id, username, text, ts) VALUES (?, ?, ?, ?, ?)`,
+        [tid, socket.user.id, socket.user.username, body, ts],
+        function (insertErr) {
+          if (insertErr) return;
+          const payload = {
+            threadId: tid,
+            messageId: this.lastID,
+            userId: socket.user.id,
+            user: socket.user.username,
+            text: body,
+            ts,
+          };
+          io.to(`dm:${tid}`).emit("dm message", payload);
+          if (Array.isArray(thread.participants)) {
+            db.all(
+              `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
+              [tid],
+              (_e2, rows) => {
+                for (const r of rows || []) {
+                  const sid = socketIdByUserId.get(r.user_id);
+                  const s = sid ? io.sockets.sockets.get(sid) : null;
+                  if (s && !s.rooms.has(`dm:${tid}`)) {
+                    s.emit("dm message", payload);
+                  }
+                }
+              }
+            );
+          }
+        }
+      );
+    });
   });
 
   socket.on("status change", ({ status }) => {
