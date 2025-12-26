@@ -160,37 +160,6 @@ db.serialize(() => {
     )
   `);
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS dm_threads (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT,
-      is_group INTEGER NOT NULL DEFAULT 0,
-      created_by INTEGER NOT NULL,
-      created_at INTEGER NOT NULL
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS dm_participants (
-      thread_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      added_by INTEGER,
-      joined_at INTEGER NOT NULL,
-      UNIQUE(thread_id, user_id)
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS dm_messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      thread_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      username TEXT NOT NULL,
-      text TEXT,
-      ts INTEGER NOT NULL
-    )
-  `);
-
   // Ensure Iri is always Owner
   db.run("UPDATE users SET role='Owner' WHERE lower(username)='iri'");
 });
