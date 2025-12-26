@@ -139,7 +139,10 @@ db.serialize(() => {
       details TEXT
     )
   `);
-
+  // Ensure Iri is always Owner
+db.run(
+  "UPDATE users SET role='Owner' WHERE lower(username)='iri'"
+);
   // Add any missing columns safely if your DB is older:
   addColumnIfMissing("users", "last_seen", "last_seen INTEGER");
   addColumnIfMissing("users", "last_room", "last_room TEXT");
