@@ -89,6 +89,7 @@
             <div class="searchWrap">
               <input id="searchInput" placeholder="Search messages...">
             </div>
+            <button class="iconBtn" id="dmToggleBtn" type="button" title="Direct messages">💬</button>
             <button class="iconBtn mobOnly" id="openMembersBtn" type="button" title="Members">👥</button>
           </div>
         </div>
@@ -135,6 +136,51 @@
   <!-- Mobile overlay -->
   <div id="drawerOverlay" class="overlay"></div>
 
+  <!-- DM PANEL -->
+  <div id="dmPanel" class="dmPanel">
+    <div class="dmHeader">
+      <div>
+        <div class="title">Direct Messages</div>
+        <div class="small">DMs and small groups in a compact view.</div>
+      </div>
+      <div class="row" style="gap:6px;">
+        <button class="iconBtn secondary" id="dmRefreshBtn" type="button" title="Refresh">⟳</button>
+        <button class="iconBtn" id="dmCloseBtn" type="button" title="Close">✕</button>
+      </div>
+    </div>
+
+    <div class="dmCreate">
+      <input id="dmParticipants" placeholder="Add people (comma separated)">
+      <input id="dmTitle" placeholder="Group title (optional)">
+      <button class="btn" id="dmCreateBtn" type="button">Start chat</button>
+      <div class="msgline" id="dmMsg"></div>
+    </div>
+
+    <div class="dmContent">
+      <div class="dmThreads">
+        <div class="dmSection">
+          <div class="dmSectionTitle">Direct Messages</div>
+          <div class="dmSectionList" id="dmDirectList"></div>
+        </div>
+        <div class="dmSection">
+          <div class="dmSectionTitle">Group Messages</div>
+          <div class="dmSectionList" id="dmGroupList"></div>
+        </div>
+      </div>
+      <div class="dmConversation">
+        <div class="dmMeta">
+          <div class="title" id="dmMetaTitle">Pick a thread</div>
+          <div class="small" id="dmMetaPeople"></div>
+        </div>
+        <div class="dmMessages" id="dmMessages"></div>
+        <div class="dmInput">
+          <input id="dmText" placeholder="Message" maxlength="800">
+          <button class="btn" id="dmSendBtn" type="button">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- PROFILE / MODAL -->
   <div id="modal">
     <div class="modalCard">
@@ -174,6 +220,13 @@
               <div class="infoItem"><div class="k">Current room</div><div class="v" id="infoRoom">—</div></div>
               <div class="infoItem"><div class="k">Status</div><div class="v" id="infoStatus">—</div></div>
             </div>
+
+            <div class="row" style="gap:8px; margin-top:10px; flex-wrap:wrap;">
+              <button class="btn secondary" id="dmUserBtn" type="button">Message</button>
+              <button class="btn secondary" id="copyUsernameBtn" type="button">Copy username</button>
+              <button class="btn secondary" id="copyProfileLinkBtn" type="button">Copy profile link</button>
+            </div>
+            <div class="msgline" id="mediaMsg"></div>
 
             <div id="myProfileEdit" style="display:none; margin-top:12px;">
               <div class="sectionTitle">Edit my profile</div>
@@ -256,12 +309,7 @@
       <div id="viewMedia" style="display:none;">
         <div class="sectionTitle">Media</div>
         <div class="panelBox">
-          <div class="small">Quick actions</div>
-          <div class="row" style="margin-top:8px;">
-            <button class="btn secondary" id="copyProfileLinkBtn" type="button">Copy profile link</button>
-            <button class="btn secondary" id="copyUsernameBtn" type="button">Copy username</button>
-          </div>
-          <div class="msgline" id="mediaMsg"></div>
+          <div class="small">Nothing shared yet. Use DMs to swap files or links.</div>
         </div>
       </div>
 

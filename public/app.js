@@ -7,6 +7,9 @@ let currentRoom = "main";
 let lastUsers = [];
 const reactionsCache = Object.create(null);
 const msgIndex = [];
+let dmThreads = [];
+let activeDmId = null;
+const dmMessages = new Map();
 
 let modalTargetUsername = null;
 let pendingFile = null;
@@ -43,6 +46,24 @@ const meRole = document.getElementById("meRole");
 const meStatusText = document.getElementById("meStatusText");
 const statusSelect = document.getElementById("statusSelect");
 const profileBtn = document.getElementById("profileBtn");
+
+// dms
+const dmPanel = document.getElementById("dmPanel");
+const dmToggleBtn = document.getElementById("dmToggleBtn");
+const dmCloseBtn = document.getElementById("dmCloseBtn");
+const dmRefreshBtn = document.getElementById("dmRefreshBtn");
+const dmDirectList = document.getElementById("dmDirectList");
+const dmGroupList = document.getElementById("dmGroupList");
+const dmParticipantsInput = document.getElementById("dmParticipants");
+const dmTitleInput = document.getElementById("dmTitle");
+const dmCreateBtn = document.getElementById("dmCreateBtn");
+const dmMsg = document.getElementById("dmMsg");
+const dmMetaTitle = document.getElementById("dmMetaTitle");
+const dmMetaPeople = document.getElementById("dmMetaPeople");
+const dmMessagesEl = document.getElementById("dmMessages");
+const dmText = document.getElementById("dmText");
+const dmSendBtn = document.getElementById("dmSendBtn");
+const dmUserBtn = document.getElementById("dmUserBtn");
 
 // drawers
 const drawerOverlay = document.getElementById("drawerOverlay");
@@ -443,6 +464,153 @@ openChannelsBtn?.addEventListener("click", openChannels);
 openMembersBtn?.addEventListener("click", openMembers);
 drawerOverlay?.addEventListener("click", closeDrawers);
 document.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeDrawers(); });
+
+// dms
+function renderDmSection(target, items, emptyText){
+  target.innerHTML="";
+  if(!items.length){
+    target.innerHTML = `<div class="dmEmpty">${emptyText}</div>`;
+    return;
+  }
+  items.forEach(t=>{
+    const div=document.createElement("div");
+    div.className="dmItem" + (t.id===activeDmId?" active":"");
+    const others=(t.participants||[]).filter(p=>p!==me?.username);
+    const label=t.title || (others.join(", ") || (t.is_group?"Group chat":"Direct Message"));
+    const preview=t.last_text ? t.last_text.slice(0,80) : "No messages yet";
+    div.innerHTML = `
+      <div class="name">${escapeHtml(label)}</div>
+      <div class="small">${escapeHtml(preview)}</div>
+    `;
+    div.onclick=()=>openDmThread(t.id);
+    target.appendChild(div);
+  });
+}
+
+function renderDmThreads(){
+  const direct = dmThreads.filter(t=>!t.is_group);
+  const groups = dmThreads.filter(t=>!!t.is_group);
+  renderDmSection(dmDirectList, direct, "No direct messages yet.");
+  renderDmSection(dmGroupList, groups, "No group chats yet.");
+}
+
+async function loadDmThreads(){
+  const res=await fetch("/dm/threads");
+  if(!res.ok){ dmMsg.textContent="Could not load threads."; return; }
+  dmThreads = await res.json();
+  renderDmThreads();
+}
+
+function openDmPanel(prefill){
+  dmPanel.classList.add("open");
+  dmMsg.textContent="";
+  if(prefill){ dmParticipantsInput.value=prefill; }
+  if(!dmThreads.length) loadDmThreads();
+}
+function closeDmPanel(){
+  dmPanel.classList.remove("open");
+}
+
+function renderDmMessages(threadId){
+  dmMessagesEl.innerHTML="";
+  const msgsArr = dmMessages.get(threadId) || [];
+  if(!msgsArr.length){
+    const empty=document.createElement("div");
+    empty.className="dmEmpty";
+    empty.textContent="No messages yet.";
+    dmMessagesEl.appendChild(empty);
+    return;
+  }
+
+  msgsArr.forEach(m=>{
+    const wrap=document.createElement("div");
+    wrap.className="dmBubble" + (m.user===me.username?" self":"");
+
+    const meta=document.createElement("div");
+    meta.className="dmMetaRow";
+    meta.innerHTML = `<span>${escapeHtml(m.user)}</span><span>${new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span>`;
+    wrap.appendChild(meta);
+
+    const text=document.createElement("div");
+    text.innerHTML = applyMentions(m.text || "");
+    wrap.appendChild(text);
+
+    dmMessagesEl.appendChild(wrap);
+  });
+  dmMessagesEl.scrollTop = dmMessagesEl.scrollHeight;
+}
+
+function setDmMeta(thread){
+  if(!thread){
+    dmMetaTitle.textContent="Pick a thread";
+    dmMetaPeople.textContent="";
+    return;
+  }
+  const others=(thread.participants||[]).filter(p=>p!==me?.username);
+  dmMetaTitle.textContent = thread.title || (others.join(", ") || "Direct Message");
+  dmMetaPeople.textContent = (thread.participants||[]).join(", ");
+}
+
+function openDmThread(threadId){
+  activeDmId = threadId;
+  renderDmThreads();
+  const meta = dmThreads.find(t=>t.id===threadId);
+  setDmMeta(meta);
+  dmMessagesEl.innerHTML = "<div class='dmEmpty'>Loading...</div>";
+  socket?.emit("dm join", { threadId });
+}
+
+function upsertThreadMeta(tid, updater){
+  const idx = dmThreads.findIndex(t=>t.id===tid);
+  if(idx === -1){
+    dmThreads.unshift({ id: tid, participants: [], ...updater });
+  } else {
+    const updated = { ...dmThreads[idx], ...updater };
+    dmThreads[idx] = updated;
+  }
+  renderDmThreads();
+}
+
+async function createDmThread(){
+  dmMsg.textContent="Creating...";
+  const names = dmParticipantsInput.value.trim();
+  const title = dmTitleInput.value.trim();
+  if(!names){ dmMsg.textContent="Add at least one username."; return; }
+  const res=await fetch("/dm/thread", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({ participants: names.split(","), title })
+  });
+  const text = await res.text();
+  if(!res.ok){ dmMsg.textContent = text || "Could not create."; return; }
+  dmMsg.textContent="Thread created.";
+  dmParticipantsInput.value="";
+  dmTitleInput.value="";
+  await loadDmThreads();
+  const { threadId } = JSON.parse(text || "{}") || {};
+  if(threadId) openDmThread(threadId);
+}
+
+function sendDmMessage(){
+  if(!activeDmId) return;
+  const txt=dmText.value.trim();
+  if(!txt) return;
+  socket?.emit("dm message", { threadId: activeDmId, text: txt });
+  dmText.value="";
+}
+
+dmToggleBtn?.addEventListener("click", ()=>openDmPanel());
+dmCloseBtn?.addEventListener("click", closeDmPanel);
+dmRefreshBtn?.addEventListener("click", loadDmThreads);
+dmCreateBtn?.addEventListener("click", createDmThread);
+dmSendBtn?.addEventListener("click", sendDmMessage);
+dmText?.addEventListener("keydown", (e)=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); sendDmMessage(); } });
+dmUserBtn?.addEventListener("click", ()=>{
+  if(modalTargetUsername){
+    closeModal();
+    openDmPanel(modalTargetUsername);
+  }
+});
 
 // upload button icon -> open file picker
 pickFileBtn?.addEventListener("click", () => fileInput.click());
@@ -974,6 +1142,32 @@ async function startApp(){
     const el=document.querySelector(`[data-mid="${messageId}"] .text`);
     if(el) el.textContent="[message deleted]";
   });
+  socket.on("dm history", (payload)=>{
+    const { threadId, messages=[], participants=[], title="" } = payload || {};
+    const existing = dmThreads.find(t=>t.id===threadId);
+    const lastText = messages.length ? messages[messages.length-1].text || "" : (existing?.last_text || "");
+    if(existing){
+      Object.assign(existing, { participants, title, last_text: lastText, last_ts: messages.length ? messages[messages.length-1].ts : existing.last_ts });
+    } else {
+      dmThreads.unshift({ id: threadId, participants, title, last_text: lastText, last_ts: messages.length ? messages[messages.length-1].ts : Date.now() });
+    }
+    dmMessages.set(threadId, messages);
+    renderDmThreads();
+    if(activeDmId === threadId){
+      setDmMeta(dmThreads.find(t=>t.id===threadId));
+      renderDmMessages(threadId);
+    }
+  });
+  socket.on("dm message", (m)=>{
+    const arr = dmMessages.get(m.threadId) || [];
+    arr.push(m);
+    dmMessages.set(m.threadId, arr);
+    upsertThreadMeta(m.threadId, { last_text: m.text || "", last_ts: m.ts });
+    if(activeDmId === m.threadId){
+      renderDmMessages(m.threadId);
+    }
+  });
+  socket.on("dm thread invited", ()=>{ loadDmThreads(); });
 
   joinRoom("main");
   meStatusText.textContent = statusSelect.value || "Online";
