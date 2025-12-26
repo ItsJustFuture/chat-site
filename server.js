@@ -990,49 +990,51 @@ io.on("connection", (socket) => {
       socket.user.id,
     ]);
 
-    // Send history
-    db.all(
-      `SELECT id, room, username, role, avatar, text, ts, deleted, attachment_url, attachment_type, attachment_mime, attachment_size
-       FROM messages WHERE room=? ORDER BY ts ASC LIMIT 200`,
-      [room],
-      (_e, rows) => {
-        const history = (rows || []).map((r) => ({
-          messageId: r.id,
-          room: r.room,
-          user: r.username,
-          role: r.role,
-          avatar: r.avatar || "",
-          text: r.deleted ? "[message deleted]" : (r.text || ""),
-          ts: r.ts,
-          attachmentUrl: r.attachment_url || "",
-          attachmentType: r.attachment_type || "",
-          attachmentMime: r.attachment_mime || "",
-          attachmentSize: r.attachment_size || 0,
-        }));
-        socket.emit("history", history);
+   // Send history (exclude deleted messages entirely)
+db.all(
+  `SELECT id, room, username, role, avatar, text, ts, attachment_url, attachment_type, attachment_mime, attachment_size
+   FROM messages
+   WHERE room=? AND deleted=0
+   ORDER BY ts ASC
+   LIMIT 200`,
+  [room],
+  (_e, rows) => {
+    const history = (rows || []).map((r) => ({
+      messageId: r.id,
+      room: r.room,
+      user: r.username,
+      role: r.role,
+      avatar: r.avatar || "",
+      text: (r.text || ""),
+      ts: r.ts,
+      attachmentUrl: r.attachment_url || "",
+      attachmentType: r.attachment_type || "",
+      attachmentMime: r.attachment_mime || "",
+      attachmentSize: r.attachment_size || 0,
+    }));
+    socket.emit("history", history);
 
-        // reactions for recent messages
-        const ids = history.map((m) => m.messageId).slice(-80);
-        if (ids.length) {
-          const placeholders = ids.map(() => "?").join(",");
-          db.all(
-            `SELECT message_id, username, emoji FROM reactions WHERE message_id IN (${placeholders})`,
-            ids,
-            (_e2, reacts) => {
-              const byMsg = {};
-              for (const r of reacts || []) {
-                byMsg[r.message_id] = byMsg[r.message_id] || {};
-                byMsg[r.message_id][r.username] = r.emoji;
-              }
-              for (const mid of Object.keys(byMsg)) {
-                socket.emit("reaction update", { messageId: mid, reactions: byMsg[mid] });
-              }
-            }
-          );
+    // reactions for recent messages
+    const ids = history.map((m) => m.messageId).slice(-80);
+    if (ids.length) {
+      const placeholders = ids.map(() => "?").join(",");
+      db.all(
+        `SELECT message_id, username, emoji FROM reactions WHERE message_id IN (${placeholders})`,
+        ids,
+        (_e2, reacts) => {
+          const byMsg = {};
+          for (const r of reacts || []) {
+            byMsg[r.message_id] = byMsg[r.message_id] || {};
+            byMsg[r.message_id][r.username] = r.emoji;
+          }
+          for (const mid of Object.keys(byMsg)) {
+            socket.emit("reaction update", { messageId: mid, reactions: byMsg[mid] });
+          }
         }
-      }
-    );
-
+      );
+    }
+  }
+);
     socket.emit("system", `Joined #${room}`);
     emitUserList(room);
   });
