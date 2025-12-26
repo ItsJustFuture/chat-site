@@ -159,6 +159,54 @@ db.serialize(() => {
       details TEXT
     )
   `);
+    // ---- DM tables (make sure these exist at startup)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dm_threads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT,
+      is_group INTEGER NOT NULL DEFAULT 0,
+      created_by INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dm_participants (
+      thread_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      added_by INTEGER,
+      joined_at INTEGER NOT NULL,
+      UNIQUE(thread_id, user_id)
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dm_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      thread_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      username TEXT NOT NULL,
+      text TEXT,
+      ts INTEGER NOT NULL
+    )
+  `);
+
+  ensureColumns("dm_threads", [
+    ["title", "title TEXT"],
+    ["is_group", "is_group INTEGER NOT NULL DEFAULT 0"],
+    ["created_by", "created_by INTEGER NOT NULL DEFAULT 0"],
+    ["created_at", "created_at INTEGER NOT NULL DEFAULT 0"],
+  ]);
+
+  ensureColumns("dm_participants", [
+    ["added_by", "added_by INTEGER"],
+    ["joined_at", "joined_at INTEGER NOT NULL DEFAULT 0"],
+  ]);
+
+  // Helpful indexes
+  db.run(`CREATE INDEX IF NOT EXISTS idx_dm_participants_user ON dm_participants(user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_dm_participants_thread ON dm_participants(thread_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_dm_messages_thread_ts ON dm_messages(thread_id, ts)`);
 
   // Ensure Iri is always Owner
   db.run("UPDATE users SET role='Owner' WHERE lower(username)='iri'");
@@ -299,7 +347,17 @@ function clamp(n, a, b) {
   if (!Number.isFinite(n)) return a;
   return Math.max(a, Math.min(b, n));
 }
-
+function ensureColumns(table, cols) {
+  db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
+    if (err) return;
+    const existing = new Set((rows || []).map(r => r.name));
+    for (const [colName, ddl] of cols) {
+      if (!existing.has(colName)) {
+        db.run(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+      }
+    }
+  });
+}
 const ROLES = ["Guest", "User", "VIP", "Moderator", "Admin", "Co-owner", "Owner"];
 function roleRank(role) {
   const idx = ROLES.indexOf(role);
@@ -679,7 +737,9 @@ app.post("/dm/thread", requireLogin, (req, res) => {
     const raw = String(participants || req.body?.participant || req.body?.user || "");
     participants = raw.split(",");
   }
-  const title = String(req.body?.title || "").trim().slice(0, 80);
+
+  const kindRaw = String(req.body?.kind || "").trim().toLowerCase(); // "direct" | "group" | ""
+  let title = String(req.body?.title || "").trim().slice(0, 80);
 
   const cleaned = [];
   const seen = new Set();
@@ -695,50 +755,90 @@ app.post("/dm/thread", requireLogin, (req, res) => {
   if (!cleaned.length) return res.status(400).send("Add at least one other user");
   if (cleaned.length > 9) return res.status(400).send("Too many participants");
 
+  // Enforce mode rules
+  if (kindRaw === "direct") {
+    title = ""; // no titles for direct DMs
+    if (cleaned.length !== 1) return res.status(400).send("Direct messages must have exactly 1 participant");
+  }
+  if (kindRaw === "group") {
+    if (cleaned.length < 2 && !title) return res.status(400).send("Group chats need 2+ participants (or a title)");
+  }
+
   fetchUsersByNames(cleaned, (err, users) => {
     if (err) return res.status(500).send("Failed to create thread");
     if (users.length !== cleaned.length) return res.status(404).send("User not found");
 
     const now = Date.now();
-    const isGroup = users.length + 1 > 2 || !!title;
+    const isGroup = kindRaw === "group"
+      ? true
+      : (kindRaw === "direct" ? false : (users.length + 1 > 2 || !!title));
 
-    db.run(
-      `INSERT INTO dm_threads (title, is_group, created_by, created_at) VALUES (?, ?, ?, ?)`,
-      [title || null, isGroup ? 1 : 0, req.session.user.id, now],
-      function (insertErr) {
-        if (insertErr) return res.status(500).send("Failed to create thread");
-        const threadId = this.lastID;
-
-        const participantIds = users.map((u) => u.id);
-        participantIds.push(req.session.user.id);
-
-        for (const uid of participantIds) {
-          db.run(
-            `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
-            [threadId, uid, req.session.user.id, now]
-          );
+    // If it's a direct DM, reuse existing 1:1 thread (prevents duplicates)
+    const myId = req.session.user.id;
+    if (!isGroup && users.length === 1) {
+      const otherId = users[0].id;
+      db.get(
+        `
+        SELECT t.id AS id
+        FROM dm_threads t
+        WHERE t.is_group = 0
+          AND (SELECT COUNT(*) FROM dm_participants dp WHERE dp.thread_id = t.id) = 2
+          AND EXISTS (SELECT 1 FROM dm_participants dp WHERE dp.thread_id = t.id AND dp.user_id = ?)
+          AND EXISTS (SELECT 1 FROM dm_participants dp WHERE dp.thread_id = t.id AND dp.user_id = ?)
+        LIMIT 1
+        `,
+        [myId, otherId],
+        (reuseErr, row) => {
+          if (reuseErr) return res.status(500).send("Failed to create thread");
+          if (row?.id) return res.json({ ok: true, threadId: row.id, reused: true });
+          return createNewThread();
         }
+      );
+      return;
+    }
 
-        const allNames = users.map((u) => u.username);
-        allNames.push(req.session.user.username);
+    return createNewThread();
 
-        for (const uid of participantIds) {
-          const sid = socketIdByUserId.get(uid);
-          if (sid) {
-            const sock = io.sockets.sockets.get(sid);
-            if (sock) sock.join(`dm:${threadId}`);
-            io.to(sid).emit("dm thread invited", {
-              threadId,
-              title,
-              isGroup,
-              participants: allNames,
-            });
+    function createNewThread() {
+      db.run(
+        `INSERT INTO dm_threads (title, is_group, created_by, created_at) VALUES (?, ?, ?, ?)`,
+        [title || null, isGroup ? 1 : 0, myId, now],
+        function (insertErr) {
+          if (insertErr) return res.status(500).send("Failed to create thread");
+          const threadId = this.lastID;
+
+          const participantIds = users.map((u) => u.id);
+          participantIds.push(myId);
+
+          for (const uid of participantIds) {
+            db.run(
+              `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
+              [threadId, uid, myId, now]
+            );
           }
-        }
 
-        res.json({ ok: true, threadId });
-      }
-    );
+          const allNames = users.map((u) => u.username);
+          allNames.push(req.session.user.username);
+
+          // join sockets + notify invited users
+          for (const uid of participantIds) {
+            const sid = socketIdByUserId.get(uid);
+            if (sid) {
+              const sock = io.sockets.sockets.get(sid);
+              if (sock) sock.join(`dm:${threadId}`);
+              io.to(sid).emit("dm thread invited", {
+                threadId,
+                title,
+                isGroup,
+                participants: allNames,
+              });
+            }
+          }
+
+          res.json({ ok: true, threadId });
+        }
+      );
+    }
   });
 });
 
