@@ -1,5 +1,5 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -19,133 +19,678 @@
       --ok:#23a55a;
       --warn:#f0b132;
       --gray:#80848e;
+      --line:#00000033;
+      --soft:#00000022;
+      --shadow: 0 18px 60px rgba(0,0,0,.45);
     }
-    *{ box-sizing:border-box; }
-    body{ margin:0; font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif; background:var(--bg); color:var(--text); height:100vh; }
 
-    /* auth */
-    #authWrap{ height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
-    .authCard{ width:380px; background:var(--panel); border:1px solid #00000033; border-radius:14px; padding:18px; }
-    .authTitle{ font-size:18px; font-weight:800; margin:0 0 10px 0; }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background:var(--bg);
+      color:var(--text);
+      height:100vh;
+      overflow:hidden;
+    }
+
+    a{ color:inherit; }
+    button{ font-family:inherit; }
+
+    /* ---------- AUTH ---------- */
+    #authWrap{
+      height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+    }
+    .authCard{
+      width:min(420px, 94vw);
+      background:var(--panel);
+      border:1px solid var(--line);
+      border-radius:16px;
+      padding:18px;
+      box-shadow: var(--shadow);
+    }
+    .authTitle{ font-size:18px; font-weight:900; margin:0 0 12px; }
     .field{ display:flex; flex-direction:column; gap:6px; margin:10px 0; }
     .field label{ font-size:12px; color:var(--muted); }
     .field input, textarea, select{
-      padding:10px 12px; border-radius:10px; border:1px solid #00000033;
-      background:var(--panel2); color:var(--text); outline:none;
+      padding:11px 12px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:var(--panel2);
+      color:var(--text);
+      outline:none;
     }
     textarea{ min-height:90px; resize:vertical; }
-    .row{ display:flex; gap:10px; }
-    button{ border:0; border-radius:10px; padding:10px 12px; cursor:pointer; color:white; background:var(--accent); font-weight:800; }
-    button.secondary{ background:#4e5058; }
-    button.danger{ background:var(--danger); }
-    .msgline{ margin-top:10px; font-size:12px; color:var(--muted); min-height:16px; }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .btn{
+      border:0;
+      border-radius:12px;
+      padding:10px 12px;
+      cursor:pointer;
+      color:white;
+      background:var(--accent);
+      font-weight:900;
+      line-height:1;
+      user-select:none;
+    }
+    .btn.secondary{ background:#4e5058; }
+    .btn.danger{ background:var(--danger); }
+    .btn:active{ transform: translateY(1px); }
+    .msgline{
+      margin-top:10px;
+      font-size:12px;
+      color:var(--muted);
+      min-height:16px;
+      white-space:pre-wrap;
+    }
 
-    /* app layout */
+    /* ---------- APP LAYOUT ---------- */
     #app{ height:100vh; display:none; }
     .layout{ height:100%; display:flex; }
 
-    /* channels */
-    .channels{ width:260px; background:var(--panel2); border-right:1px solid #00000033; padding:10px; display:flex; flex-direction:column; gap:10px; }
-    .brand{ display:flex; justify-content:space-between; align-items:center; padding:10px; background:var(--panel); border-radius:12px; }
+    /* Channels */
+    .channels{
+      width:270px;
+      background:var(--panel2);
+      border-right:1px solid var(--line);
+      padding:10px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      min-width: 220px;
+    }
+    .brand{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:10px;
+      background:var(--panel);
+      border-radius:14px;
+      border:1px solid var(--line);
+    }
     .brand strong{ font-size:14px; }
-    .chanList{ background:var(--panel); border-radius:12px; padding:8px; display:flex; flex-direction:column; gap:4px; flex:1; overflow:auto; }
-    .chan{ padding:8px 10px; border-radius:10px; cursor:pointer; color:var(--muted); display:flex; align-items:center; gap:8px; }
+    .brand .small{ font-size:12px; color:var(--muted); }
+
+    .chanList{
+      background:var(--panel);
+      border-radius:14px;
+      border:1px solid var(--line);
+      padding:8px;
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      flex:1;
+      overflow:auto;
+    }
+    .chan{
+      padding:9px 10px;
+      border-radius:12px;
+      cursor:pointer;
+      color:var(--muted);
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
     .chan:hover{ background:#3a3c4333; color:var(--text); }
     .chan.active{ background:#3a3c43; color:var(--text); }
     .hash{ color:#9aa0a6; }
 
-    .bottomBar{ background:var(--panel); border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:10px; }
-    .meRow{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
-    .meLeft{ display:flex; align-items:center; gap:10px; min-width:0; }
-    .meAvatar{ width:34px; height:34px; border-radius:50%; background:#444; overflow:hidden; }
-    .meAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
-    .meMeta{ min-width:0; display:flex; flex-direction:column; gap:2px; }
-    .meName{ font-size:13px; font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .meRole{ font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    select{ width:100%; }
-
-    /* chat */
-    .chat{ flex:1; display:flex; flex-direction:column; min-width:0; }
-    .topbar{
-      height:52px; background:var(--panel2); border-bottom:1px solid #00000033;
-      display:flex; align-items:center; justify-content:space-between; padding:0 14px; gap:10px;
+    .bottomBar{
+      background:var(--panel);
+      border-radius:14px;
+      border:1px solid var(--line);
+      padding:10px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
     }
-    .roomTitle{ font-weight:900; display:flex; gap:8px; align-items:center; }
+    .meRow{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .meLeft{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+    }
+    .meAvatar{
+      width:34px; height:34px; border-radius:50%;
+      background:#444;
+      overflow:hidden;
+      flex:0 0 auto;
+      border:1px solid rgba(0,0,0,.25);
+    }
+    .meAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
+    .meMeta{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+    }
+    .meName{
+      font-size:13px; font-weight:900;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .meRole{
+      font-size:11px; color:var(--muted);
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+
+    .iconBtn{
+      width:36px;
+      height:36px;
+      padding:0;
+      border-radius:12px;
+      background:#4e5058;
+      border:1px solid rgba(255,255,255,.08);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:16px;
+      font-weight:900;
+      cursor:pointer;
+      user-select:none;
+    }
+    .iconBtn:hover{ filter:brightness(1.05); }
+
+    .meStatusText{
+      font-size:12px;
+      color:var(--muted);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      max-width:140px;
+      padding:0 2px;
+    }
+
+    /* Chat */
+    .chat{
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      min-width:0;
+    }
+    .topbar{
+      height:54px;
+      background:var(--panel2);
+      border-bottom:1px solid var(--line);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:0 14px;
+      gap:10px;
+    }
+    .roomTitle{
+      font-weight:900;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
     .roomTitle span{ color:var(--muted); }
 
     .searchWrap{ display:flex; gap:8px; align-items:center; }
     .searchWrap input{
-      width:260px; max-width:40vw;
-      padding:10px 12px; border-radius:10px; border:1px solid #00000033;
-      background:var(--panel); color:var(--text);
+      width:260px;
+      max-width:40vw;
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:var(--panel);
+      color:var(--text);
+      outline:none;
     }
 
-    .msgs{ flex:1; overflow:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
-    .sys{ align-self:center; color:var(--muted); font-size:12px; padding:6px 10px; border-radius:999px; background:#00000022; }
+    .msgs{
+      flex:1;
+      overflow:auto;
+      padding:14px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+    .sys{
+      align-self:center;
+      color:var(--muted);
+      font-size:12px;
+      padding:6px 10px;
+      border-radius:999px;
+      background:var(--soft);
+      border:1px solid var(--line);
+    }
 
-    .msg{ display:flex; gap:10px; align-items:flex-start; max-width:900px; }
-    .msg.self{ align-self:flex-end; flex-direction:row-reverse; }
-    .msgAvatar{ width:38px; height:38px; border-radius:50%; background:#444; overflow:hidden; flex:0 0 auto; }
+    .msg{
+      display:flex;
+      gap:10px;
+      align-items:flex-start;
+      max-width:900px;
+    }
+    .msg.self{
+      align-self:flex-end;
+      flex-direction:row-reverse;
+    }
+    .msgAvatar{
+      width:38px; height:38px; border-radius:50%;
+      background:#444;
+      overflow:hidden;
+      flex:0 0 auto;
+      border:1px solid rgba(0,0,0,.25);
+    }
     .msgAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
     .bubble{
-      background:var(--bubble); padding:10px 12px; border-radius:14px; display:flex; flex-direction:column; gap:6px;
-      min-width:140px; max-width:min(70vw, 720px);
+      background:var(--bubble);
+      padding:10px 12px;
+      border-radius:16px;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      min-width:140px;
+      max-width:min(70vw, 720px);
       word-wrap:break-word;
+      border:1px solid rgba(0,0,0,.15);
     }
     .self .bubble{ background:var(--bubbleSelf); }
-    .metaLine{ display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+
+    .metaLine{
+      display:flex;
+      gap:8px;
+      align-items:baseline;
+      flex-wrap:wrap;
+    }
     .uName{ font-weight:900; font-size:13px; }
     .badge{
-      font-size:10px; font-weight:900; padding:3px 6px; border-radius:999px;
-      border:1px solid #00000033; background:#00000022;
+      font-size:10px;
+      font-weight:900;
+      padding:3px 7px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:var(--soft);
     }
     .ts{ font-size:11px; color:var(--muted); }
     .self .ts{ color:#e9e9ff; opacity:.85; }
-    .text{ font-size:14px; line-height:1.35; }
-    .mention{ background:#00000022; border:1px solid #00000033; padding:0 4px; border-radius:6px; }
 
-    .actions{ display:flex; gap:8px; flex-wrap:wrap; }
-    .reactBtn{ border:0; border-radius:10px; padding:6px 8px; background:#00000022; color:var(--text); cursor:pointer; font-weight:900; }
-    .reactBtn:hover{ background:#00000033; }
-
-    .reactions{ display:flex; gap:6px; flex-wrap:wrap; margin-top:2px; }
-    .reactPill{ background:#00000022; border:1px solid #00000033; border-radius:999px; padding:4px 8px; font-size:12px; font-weight:900; }
-
-    .typing{ height:22px; padding:0 14px; color:var(--muted); font-size:12px; display:flex; align-items:center; }
-
-    .inputBar{ padding:12px; background:var(--panel2); border-top:1px solid #00000033; display:flex; gap:10px; }
-    .inputBar input{
-      flex:1; padding:12px 12px; border-radius:12px; border:1px solid #00000033;
-      background:var(--panel); color:var(--text); outline:none;
+    .text{ font-size:14px; line-height:1.35; white-space:pre-wrap; }
+    .mention{
+      background:var(--soft);
+      border:1px solid var(--line);
+      padding:0 4px;
+      border-radius:6px;
     }
 
-    /* members */
-    .members{ width:290px; background:var(--panel2); border-left:1px solid #00000033; padding:10px; overflow:auto; }
-    .members h3{ margin:6px 6px 10px; font-size:12px; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; }
-    .mItem{ padding:8px 8px; border-radius:12px; display:flex; align-items:center; gap:10px; cursor:pointer; }
-    .mItem:hover{ background:#00000022; }
-    .mAvatar{ width:30px; height:30px; border-radius:50%; background:#444; overflow:hidden; flex:0 0 auto; }
+    .attachment{
+      margin-top:6px;
+      border-radius:14px;
+      overflow:hidden;
+      border:1px solid rgba(0,0,0,.2);
+      max-width: min(520px, 80vw);
+    }
+    .attachment img, .attachment video{ display:block; width:100%; height:auto; }
+    .attachment video{ background:#000; }
+
+    .actions{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      align-items:center;
+      margin-top:2px;
+    }
+    .reactBtn{
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:6px 8px;
+      background:var(--soft);
+      color:var(--text);
+      cursor:pointer;
+      font-weight:900;
+      user-select:none;
+    }
+    .reactBtn:hover{ background:#00000033; }
+
+    .reactions{
+      display:flex;
+      gap:6px;
+      flex-wrap:wrap;
+      margin-top:2px;
+    }
+    .reactPill{
+      background:var(--soft);
+      border:1px solid var(--line);
+      border-radius:999px;
+      padding:4px 8px;
+      font-size:12px;
+      font-weight:900;
+    }
+
+    .typing{
+      height:22px;
+      padding:0 14px;
+      color:var(--muted);
+      font-size:12px;
+      display:flex;
+      align-items:center;
+    }
+
+    .inputBar{
+      padding:12px;
+      background:var(--panel2);
+      border-top:1px solid var(--line);
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
+    .inputBar input[type="text"]{
+      flex:1;
+      padding:12px 12px;
+      border-radius:14px;
+      border:1px solid var(--line);
+      background:var(--panel);
+      color:var(--text);
+      outline:none;
+    }
+    .filePick{
+      display:flex; align-items:center; gap:8px;
+      max-width: 240px;
+    }
+    .filePick input[type="file"]{
+      width: 200px;
+      color: var(--muted);
+    }
+
+    /* Upload preview */
+    .uploadPreview{
+      margin: 8px 12px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 14px;
+      background: rgba(255,255,255,.05);
+      display:none;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .uploadLeft{ display:flex; align-items:center; gap:12px; min-width:0; }
+    .previewThumb{
+      width:54px; height:54px;
+      border-radius:12px;
+      overflow:hidden;
+      border:1px solid rgba(0,0,0,.25);
+      background: rgba(0,0,0,.2);
+      display:flex; align-items:center; justify-content:center;
+      flex:0 0 auto;
+    }
+    .previewThumb img, .previewThumb video{
+      width:100%; height:100%;
+      object-fit:cover;
+      display:block;
+    }
+    .uploadMeta{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+    .uploadName{ font-weight:900; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:46vw; }
+    .uploadInfo{ opacity:.8; font-size:12px; }
+
+    .uploadRight{ display:flex; align-items:center; gap:10px; min-width:220px; }
+    .progressWrap{
+      flex:1;
+      height:10px;
+      border-radius:999px;
+      background: rgba(255,255,255,.08);
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,.08);
+    }
+    .progressBar{
+      height:100%;
+      width:0%;
+      border-radius:999px;
+      background: rgba(255,255,255,.45);
+      transition: width .08s linear;
+    }
+
+    /* Members */
+    .members{
+      width:300px;
+      background:var(--panel2);
+      border-left:1px solid var(--line);
+      padding:10px;
+      overflow:auto;
+    }
+    .members h3{
+      margin:6px 6px 10px;
+      font-size:12px;
+      color:var(--muted);
+      letter-spacing:.06em;
+      text-transform:uppercase;
+    }
+    .mItem{
+      padding:8px 8px;
+      border-radius:14px;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      cursor:pointer;
+      border:1px solid transparent;
+    }
+    .mItem:hover{ background:var(--soft); border-color: var(--line); }
+    .mAvatar{
+      width:30px; height:30px; border-radius:50%;
+      background:#444;
+      overflow:hidden;
+      flex:0 0 auto;
+      border:1px solid rgba(0,0,0,.25);
+    }
     .mAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
     .dot{ width:10px; height:10px; border-radius:50%; flex:0 0 auto; background:var(--gray); }
     .mMeta{ display:flex; flex-direction:column; gap:2px; min-width:0; }
-    .mName{ font-weight:900; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .mSub{ font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .mName{
+      font-weight:900;
+      font-size:13px;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .mSub{
+      font-size:11px;
+      color:var(--muted);
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
 
-    /* profile modal */
-    #modal{ position:fixed; inset:0; background:#00000088; display:none; align-items:center; justify-content:center; padding:18px; }
-    .modalCard{ width:min(620px, 96vw); background:var(--panel); border-radius:16px; border:1px solid #00000033; padding:14px; }
-    .modalTop{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+    /* ---------- MODAL / PROFILE ---------- */
+    #modal{
+      position:fixed;
+      inset:0;
+      background:#00000088;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+      z-index: 80;
+    }
+    .modalCard{
+      width:min(860px, 98vw);
+      background:var(--panel);
+      border-radius:18px;
+      border:1px solid var(--line);
+      padding:14px;
+      box-shadow: var(--shadow);
+    }
+    .modalTop{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      margin-bottom:10px;
+    }
     .modalTop strong{ font-size:14px; }
-    .modalGrid{ display:grid; grid-template-columns: 140px 1fr; gap:12px; }
-    .pAvatar{ width:130px; height:130px; border-radius:18px; background:var(--panel2); overflow:hidden; }
-    .pAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
-    .small{ font-size:12px; color:var(--muted); }
-    .modPanel{ margin-top:12px; padding-top:12px; border-top:1px solid #00000033; display:none; }
-    .modRow{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-    .modRow input{ width:120px; }
 
-    @media (max-width: 980px){ .members{ display:none; } }
-    @media (max-width: 760px){ .channels{ width:220px; } .modalGrid{ grid-template-columns:1fr; } }
+    .tabs{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin:10px 0 12px;
+    }
+    .tab{
+      padding:8px 10px;
+      border-radius:12px;
+      background:var(--soft);
+      border:1px solid var(--line);
+      cursor:pointer;
+      font-weight:900;
+      font-size:12px;
+      color:var(--text);
+      user-select:none;
+    }
+    .tab.active{
+      background:#3a3c43;
+      border-color:#00000055;
+    }
+
+    .modalGrid{
+      display:grid;
+      grid-template-columns: 170px 1fr;
+      gap:12px;
+    }
+    .pAvatar{
+      width:160px; height:160px;
+      border-radius:18px;
+      background:var(--panel2);
+      overflow:hidden;
+      border:1px solid rgba(0,0,0,.25);
+    }
+    .pAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
+
+    .small{ font-size:12px; color:var(--muted); }
+    .sectionTitle{ font-weight:900; margin:10px 0 6px; }
+    .panelBox{
+      background:var(--panel2);
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:10px;
+    }
+
+    .infoGrid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+    }
+    .infoItem{
+      background: rgba(255,255,255,.04);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:14px;
+      padding:10px;
+    }
+    .infoItem .k{ color:var(--muted); font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:.06em; }
+    .infoItem .v{ margin-top:4px; font-weight:900; }
+
+    .bioRender{
+      padding:10px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.04);
+      line-height:1.4;
+      white-space: normal;
+      word-break: break-word;
+    }
+    .bioRender blockquote{
+      margin:10px 0;
+      padding:10px;
+      border-left:4px solid rgba(255,255,255,.22);
+      background: rgba(0,0,0,.12);
+      border-radius:12px;
+    }
+    .bioRender pre{
+      overflow:auto;
+      padding:10px;
+      border-radius:12px;
+      background: rgba(0,0,0,.25);
+      border:1px solid rgba(255,255,255,.10);
+    }
+    .pill{
+      display:inline-block;
+      padding:3px 8px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:var(--soft);
+      font-weight:900;
+      font-size:11px;
+      margin-right:6px;
+    }
+
+    /* Logs table */
+    .logTable{
+      width:100%;
+      border-collapse:collapse;
+      font-size:12px;
+      overflow:hidden;
+      border-radius:12px;
+    }
+    .logTable th, .logTable td{
+      border-bottom:1px solid var(--line);
+      padding:8px 8px;
+      text-align:left;
+      vertical-align:top;
+    }
+    .logTable th{ color:var(--muted); font-weight:900; }
+    .logTable tr:last-child td{ border-bottom:0; }
+
+    /* ---------- Mobile drawers ---------- */
+    .overlay{
+      position:fixed;
+      inset:0;
+      background: rgba(0,0,0,.55);
+      display:none;
+      z-index: 70;
+    }
+    .overlay.show{ display:block; }
+
+    .mobOnly{ display:none; }
+
+    @media (max-width: 980px){
+      .mobOnly{ display:flex; }
+      .members{ display:none; } /* members becomes drawer */
+
+      .channels{
+        position:fixed;
+        top:0; left:0;
+        height:100vh;
+        width:min(86vw, 320px);
+        transform:translateX(-105%);
+        transition:transform .18s ease;
+        z-index:75;
+        box-shadow: 12px 0 30px rgba(0,0,0,.55);
+      }
+      .channels.open{ transform:translateX(0); }
+
+      .members.drawer{
+        display:block;
+        position:fixed;
+        top:0; right:0;
+        height:100vh;
+        width:min(86vw, 320px);
+        transform:translateX(105%);
+        transition:transform .18s ease;
+        z-index:75;
+        box-shadow: -12px 0 30px rgba(0,0,0,.55);
+      }
+      .members.drawer.open{ transform:translateX(0); }
+
+      input, textarea, select{ font-size:16px; } /* prevent iOS zoom */
+      .bubble{ max-width: 92vw; }
+      .inputBar{
+        position: sticky;
+        bottom: 0;
+        padding-bottom: calc(10px + env(safe-area-inset-bottom));
+      }
+    }
+
+    @media (max-width: 760px){
+      .modalGrid{ grid-template-columns: 1fr; }
+      .infoGrid{ grid-template-columns: 1fr; }
+      .searchWrap input{ width: 46vw; }
+      .filePick{ max-width: 160px; }
+      .filePick input[type="file"]{ width: 140px; }
+    }
   </style>
 </head>
 
@@ -154,18 +699,22 @@
   <div id="authWrap">
     <div class="authCard">
       <div class="authTitle">Login / Register</div>
+
       <div class="field">
         <label>Username</label>
         <input id="authUser" autocomplete="username" placeholder="username">
       </div>
+
       <div class="field">
         <label>Password</label>
         <input id="authPass" type="password" autocomplete="current-password" placeholder="password">
       </div>
+
       <div class="row">
-        <button id="loginBtn">Login</button>
-        <button id="regBtn" class="secondary">Register</button>
+        <button class="btn" id="loginBtn">Login</button>
+        <button class="btn secondary" id="regBtn">Register</button>
       </div>
+
       <div class="msgline" id="authMsg"></div>
     </div>
   </div>
@@ -173,15 +722,15 @@
   <!-- APP -->
   <div id="app">
     <div class="layout">
-      <aside class="channels">
+      <aside class="channels" id="channelsPane">
         <div class="brand">
           <strong>Chat Site</strong>
-          <div class="small" id="nowRoom">#general</div>
+          <div class="small" id="nowRoom">#main</div>
         </div>
 
         <div class="chanList" id="chanList">
-          <div class="chan active" data-room="general"><span class="hash">#</span> general</div>
-          <div class="chan" data-room="gaming"><span class="hash">#</span> gaming</div>
+          <div class="chan active" data-room="main"><span class="hash">#</span> main</div>
+          <div class="chan" data-room="nsfw"><span class="hash">#</span> NSFW</div>
           <div class="chan" data-room="music"><span class="hash">#</span> music</div>
         </div>
 
@@ -194,9 +743,10 @@
                 <div class="meRole" id="meRole">...</div>
               </div>
             </div>
-            <div class="row" style="gap:8px;">
-              <button class="secondary" id="profileBtn">Profile</button>
-              <button class="danger" id="logoutBtn">Logout</button>
+
+            <div class="row" style="gap:8px; align-items:center;">
+              <div class="meStatusText" id="meStatusText">Online</div>
+              <button class="iconBtn" id="profileBtn" title="Profile">👤</button>
             </div>
           </div>
 
@@ -217,111 +767,274 @@
 
       <main class="chat">
         <div class="topbar">
-          <div class="roomTitle"><span>#</span><span id="roomTitle">general</span></div>
-          <div class="searchWrap">
-            <input id="searchInput" placeholder="Search messages...">
+          <div class="row" style="align-items:center; gap:10px;">
+            <button class="iconBtn mobOnly" id="openChannelsBtn" title="Channels">☰</button>
+            <div class="roomTitle"><span>#</span><span id="roomTitle">main</span></div>
+          </div>
+
+          <div class="row" style="align-items:center; gap:10px;">
+            <div class="searchWrap">
+              <input id="searchInput" placeholder="Search messages...">
+            </div>
+            <button class="iconBtn mobOnly" id="openMembersBtn" title="Members">👥</button>
           </div>
         </div>
 
         <div class="msgs" id="msgs"></div>
         <div class="typing" id="typing"></div>
 
+        <div id="uploadPreview" class="uploadPreview">
+          <div class="uploadLeft">
+            <div id="previewThumb" class="previewThumb"></div>
+            <div class="uploadMeta">
+              <div id="uploadName" class="uploadName"></div>
+              <div id="uploadInfo" class="uploadInfo"></div>
+            </div>
+          </div>
+          <div class="uploadRight">
+            <div class="progressWrap">
+              <div id="uploadProgress" class="progressBar"></div>
+            </div>
+            <button class="btn secondary" id="cancelUploadBtn">Cancel</button>
+          </div>
+        </div>
+
         <div class="inputBar">
-          <input id="msgInput" placeholder="Message #general" maxlength="800">
-          <button id="sendBtn">Send</button>
+          <input id="msgInput" type="text" placeholder="Message #main" maxlength="800">
+          <div class="filePick">
+            <input id="fileInput" type="file" accept="image/*,video/mp4,video/quicktime">
+          </div>
+          <button class="btn" id="sendBtn">Send</button>
         </div>
       </main>
 
-      <aside class="members">
+      <aside class="members drawer" id="membersPane">
         <h3>Members</h3>
         <div id="memberList"></div>
       </aside>
     </div>
   </div>
 
-  <!-- MODAL (My profile + Member profile + Mod tools) -->
+  <!-- Mobile overlay -->
+  <div id="drawerOverlay" class="overlay"></div>
+
+  <!-- PROFILE / MODAL -->
   <div id="modal">
     <div class="modalCard">
       <div class="modalTop">
         <strong id="modalTitle">Profile</strong>
-        <button class="secondary" id="closeModalBtn">Close</button>
+        <button class="btn secondary" id="closeModalBtn">Close</button>
       </div>
 
       <div class="small" id="modalMeta"></div>
 
-      <div class="modalGrid">
-        <div>
-          <div class="pAvatar" id="modalAvatar"></div>
-        </div>
+      <div class="tabs" id="tabs">
+        <div class="tab active" data-tab="info" id="tabInfo">Info</div>
+        <div class="tab" data-tab="about" id="tabAbout">About</div>
+        <div class="tab" data-tab="media" id="tabMedia">Media</div>
+        <div class="tab" data-tab="moderation" id="tabModeration" style="display:none;">Moderation</div>
+      </div>
 
-        <div>
-          <div class="row" style="align-items:center; flex-wrap:wrap;">
-            <div style="font-weight:900;" id="modalName"></div>
-            <div class="badge" id="modalRole"></div>
+      <div id="viewInfo">
+        <div class="modalGrid">
+          <div>
+            <div class="pAvatar" id="modalAvatar"></div>
           </div>
 
-          <div class="small" id="modalMood"></div>
-          <div class="small" id="modalAgeGender"></div>
+          <div>
+            <div class="row" style="align-items:center;">
+              <div style="font-weight:900; font-size:16px;" id="modalName"></div>
+              <div class="badge" id="modalRole"></div>
+            </div>
+            <div class="small" id="modalMood"></div>
 
-          <div class="field" style="margin-top:10px;">
-            <label>Bio</label>
-            <textarea id="modalBio" readonly></textarea>
-          </div>
-
-          <!-- My profile edit -->
-          <div id="myProfileEdit" style="display:none;">
-            <div class="field">
-              <label>Avatar</label>
-              <input id="avatarFile" type="file" accept="image/*">
-              <div class="small">Max 2MB.</div>
+            <div class="sectionTitle">Details</div>
+            <div class="infoGrid">
+              <div class="infoItem"><div class="k">Age</div><div class="v" id="infoAge">—</div></div>
+              <div class="infoItem"><div class="k">Gender</div><div class="v" id="infoGender">—</div></div>
+              <div class="infoItem"><div class="k">Created</div><div class="v" id="infoCreated">—</div></div>
+              <div class="infoItem"><div class="k">Last seen</div><div class="v" id="infoLastSeen">—</div></div>
+              <div class="infoItem"><div class="k">Current room</div><div class="v" id="infoRoom">—</div></div>
+              <div class="infoItem"><div class="k">Status</div><div class="v" id="infoStatus">—</div></div>
             </div>
 
-            <div class="field">
-              <label>Mood</label>
-              <input id="editMood">
-            </div>
+            <div id="myProfileEdit" style="display:none; margin-top:12px;">
+              <div class="sectionTitle">Edit my profile</div>
+              <div class="panelBox">
+                <div class="field">
+                  <label>Avatar</label>
+                  <input id="avatarFile" type="file" accept="image/*">
+                  <div class="small">Max 2MB. PNG/JPG/WEBP/GIF.</div>
+                </div>
 
-            <div class="row">
-              <div class="field" style="flex:1;">
-                <label>Age</label>
-                <input id="editAge" type="number" min="0" max="120">
+                <div class="field">
+                  <label>Mood</label>
+                  <input id="editMood" placeholder="e.g. chilling">
+                </div>
+
+                <div class="row">
+                  <div class="field" style="flex:1;">
+                    <label>Age (18+)</label>
+                    <input id="editAge" type="number" min="18" max="120" placeholder="18+">
+                  </div>
+                  <div class="field" style="flex:1;">
+                    <label>Gender</label>
+                    <select id="editGender">
+                      <option value="">Prefer not to say</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Non-binary">Non-binary</option>
+                      <option value="Transgender">Transgender</option>
+                      <option value="Genderfluid">Genderfluid</option>
+                      <option value="Agender">Agender</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <label>Bio (BBCode supported)</label>
+                  <textarea id="editBio" placeholder="[b]bold[/b] [i]italics[/i] [url=https://...]link[/url] [quote]...[/quote]"></textarea>
+                </div>
+
+                <div class="row">
+                  <button class="btn" id="saveProfileBtn">Save</button>
+                  <button class="btn secondary" id="refreshProfileBtn">Refresh</button>
+                  <button class="btn danger" id="logoutBtn">Logout</button>
+                </div>
+
+                <div class="msgline" id="profileMsg"></div>
               </div>
-              <div class="field" style="flex:1;">
-                <label>Gender</label>
-                <input id="editGender">
+            </div>
+
+            <div id="memberModTools" style="display:none; margin-top:12px;">
+              <div class="sectionTitle">Moderator tools</div>
+              <div class="panelBox">
+                <div class="row" style="align-items:center;">
+                  <input id="quickReason" placeholder="Reason (required)" style="flex:1; min-width:220px;">
+                  <input id="quickMuteMins" type="number" min="1" max="1440" placeholder="mute mins" style="width:120px;">
+                  <input id="quickBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:160px;">
+                </div>
+                <div class="row" style="margin-top:8px;">
+                  <button class="btn secondary" id="quickKickBtn">Kick</button>
+                  <button class="btn secondary" id="quickMuteBtn">Mute</button>
+                  <button class="btn danger" id="quickBanBtn">Ban</button>
+                </div>
+                <div class="msgline" id="quickModMsg"></div>
               </div>
             </div>
 
-            <div class="field">
-              <label>Bio</label>
-              <textarea id="editBio"></textarea>
-            </div>
-
-            <div class="row">
-              <button id="saveProfileBtn">Save</button>
-              <button class="secondary" id="refreshProfileBtn">Refresh</button>
-            </div>
-
-            <div class="msgline" id="profileMsg"></div>
           </div>
-
-          <!-- Mod tools -->
-          <div class="modPanel" id="modPanel">
-            <div style="font-weight:900; margin-bottom:8px;">Moderator Tools</div>
-            <div class="modRow">
-              <button id="kickBtn" class="secondary">Kick</button>
-              <input id="muteMins" type="number" min="1" max="1440" placeholder="mute mins">
-              <button id="muteBtn" class="secondary">Mute</button>
-              <input id="banMins" type="number" min="0" max="100000" placeholder="ban mins (0=perm)">
-              <button id="banBtn" class="danger">Ban</button>
-            </div>
-            <div class="small" style="margin-top:6px;">
-              (Ban blocks login and kicks them if online.)
-            </div>
-          </div>
-
         </div>
       </div>
+
+      <div id="viewAbout" style="display:none;">
+        <div class="sectionTitle">Bio</div>
+        <div class="bioRender" id="bioRender">(no bio)</div>
+        <div class="small" style="margin-top:8px;">
+          BBCode: [b] [i] [u] [s] [quote] [code] [url=] [img]
+        </div>
+      </div>
+
+      <div id="viewMedia" style="display:none;">
+        <div class="sectionTitle">Media</div>
+        <div class="panelBox">
+          <div class="small">Quick actions</div>
+          <div class="row" style="margin-top:8px;">
+            <button class="btn secondary" id="copyProfileLinkBtn">Copy profile link</button>
+            <button class="btn secondary" id="copyUsernameBtn">Copy username</button>
+          </div>
+          <div class="msgline" id="mediaMsg"></div>
+        </div>
+      </div>
+
+      <div id="viewModeration" style="display:none;">
+        <div class="sectionTitle">Moderation panel</div>
+
+        <div class="panelBox">
+          <div class="row" style="align-items:center;">
+            <input id="modUser" placeholder="Target username" style="flex:1; min-width:220px;">
+            <input id="modReason" placeholder="Reason (required)" style="flex:2; min-width:240px;">
+          </div>
+
+          <div class="row" style="align-items:center; margin-top:8px;">
+            <input id="modMuteMins" type="number" min="1" max="1440" placeholder="mute mins" style="width:140px;">
+            <input id="modBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:190px;">
+
+            <button class="btn secondary" id="modKickBtn">Kick</button>
+            <button class="btn secondary" id="modMuteBtn">Mute</button>
+            <button class="btn danger" id="modBanBtn">Ban</button>
+
+            <button class="btn secondary" id="modUnmuteBtn">Unmute</button>
+            <button class="btn secondary" id="modUnbanBtn">Unban</button>
+            <button class="btn secondary" id="modWarnBtn">Warn</button>
+
+            <button class="btn secondary" id="modOpenProfileBtn">View profile</button>
+          </div>
+
+          <div class="row" style="align-items:center; margin-top:10px;">
+            <select id="modSetRole" style="width:220px;">
+              <option value="">Set role (Owner only)</option>
+              <option>Owner</option>
+              <option>Co-owner</option>
+              <option>Admin</option>
+              <option>Moderator</option>
+              <option>VIP</option>
+              <option>User</option>
+              <option>Guest</option>
+            </select>
+            <button class="btn secondary" id="modSetRoleBtn">Apply role</button>
+          </div>
+
+          <div class="msgline" id="modMsg"></div>
+        </div>
+
+        <div class="sectionTitle">Moderation logs</div>
+        <div class="panelBox">
+          <div class="row" style="align-items:center;">
+            <input id="logUser" placeholder="Filter by user (actor or target)" style="flex:1; min-width:220px;">
+            <select id="logAction" style="width:220px;">
+              <option value="">All actions</option>
+              <option value="KICK">KICK</option>
+              <option value="MUTE">MUTE</option>
+              <option value="BAN">BAN</option>
+              <option value="DELETE_MESSAGE">DELETE_MESSAGE</option>
+              <option value="UNMUTE">UNMUTE</option>
+              <option value="UNBAN">UNBAN</option>
+              <option value="WARN">WARN</option>
+              <option value="AUTO_MUTE">AUTO_MUTE</option>
+              <option value="AUTO_BAN">AUTO_BAN</option>
+              <option value="SET_ROLE">SET_ROLE</option>
+            </select>
+            <select id="logLimit" style="width:160px;">
+              <option value="25">Last 25</option>
+              <option value="50" selected>Last 50</option>
+              <option value="100">Last 100</option>
+              <option value="200">Last 200</option>
+            </select>
+            <button class="btn secondary" id="refreshLogsBtn">Refresh</button>
+          </div>
+
+          <div class="msgline" id="logsMsg"></div>
+
+          <div style="overflow:auto; margin-top:8px;">
+            <table class="logTable" id="logsTable">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Actor</th>
+                  <th>Action</th>
+                  <th>Target</th>
+                  <th>Room</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody id="logsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -330,10 +1043,15 @@
     // ---------- State ----------
     let socket = null;
     let me = null;
-    let currentRoom = "general";
-    let lastUsers = []; // member list cache
+    let currentRoom = "main";
+    let lastUsers = [];
     const reactionsCache = Object.create(null);
-    const msgIndex = []; // for search (store {id, el, textLower})
+    const msgIndex = [];
+    let modalTargetUsername = null;
+
+    // Upload state
+    let pendingFile = null;
+    let uploadXhr = null;
 
     // ---------- DOM ----------
     const authWrap = document.getElementById("authWrap");
@@ -347,6 +1065,7 @@
     const chanList = document.getElementById("chanList");
     const nowRoom = document.getElementById("nowRoom");
     const roomTitle = document.getElementById("roomTitle");
+
     const msgs = document.getElementById("msgs");
     const typingEl = document.getElementById("typing");
     const memberList = document.getElementById("memberList");
@@ -354,13 +1073,29 @@
     const msgInput = document.getElementById("msgInput");
     const sendBtn = document.getElementById("sendBtn");
     const searchInput = document.getElementById("searchInput");
+    const fileInput = document.getElementById("fileInput");
 
     const meAvatar = document.getElementById("meAvatar");
     const meName = document.getElementById("meName");
     const meRole = document.getElementById("meRole");
+    const meStatusText = document.getElementById("meStatusText");
     const statusSelect = document.getElementById("statusSelect");
-    const logoutBtn = document.getElementById("logoutBtn");
     const profileBtn = document.getElementById("profileBtn");
+
+    // drawers
+    const drawerOverlay = document.getElementById("drawerOverlay");
+    const openChannelsBtn = document.getElementById("openChannelsBtn");
+    const openMembersBtn = document.getElementById("openMembersBtn");
+    const channelsPane = document.getElementById("channelsPane");
+    const membersPane = document.getElementById("membersPane");
+
+    // upload preview
+    const uploadPreview = document.getElementById("uploadPreview");
+    const previewThumb = document.getElementById("previewThumb");
+    const uploadName = document.getElementById("uploadName");
+    const uploadInfo = document.getElementById("uploadInfo");
+    const uploadProgress = document.getElementById("uploadProgress");
+    const cancelUploadBtn = document.getElementById("cancelUploadBtn");
 
     // modal
     const modal = document.getElementById("modal");
@@ -371,9 +1106,32 @@
     const modalName = document.getElementById("modalName");
     const modalRole = document.getElementById("modalRole");
     const modalMood = document.getElementById("modalMood");
-    const modalAgeGender = document.getElementById("modalAgeGender");
-    const modalBio = document.getElementById("modalBio");
 
+    // info
+    const infoAge = document.getElementById("infoAge");
+    const infoGender = document.getElementById("infoGender");
+    const infoCreated = document.getElementById("infoCreated");
+    const infoLastSeen = document.getElementById("infoLastSeen");
+    const infoRoom = document.getElementById("infoRoom");
+    const infoStatus = document.getElementById("infoStatus");
+
+    // views + tabs
+    const tabInfo = document.getElementById("tabInfo");
+    const tabAbout = document.getElementById("tabAbout");
+    const tabMedia = document.getElementById("tabMedia");
+    const tabModeration = document.getElementById("tabModeration");
+
+    const viewInfo = document.getElementById("viewInfo");
+    const viewAbout = document.getElementById("viewAbout");
+    const viewMedia = document.getElementById("viewMedia");
+    const viewModeration = document.getElementById("viewModeration");
+
+    const bioRender = document.getElementById("bioRender");
+    const copyProfileLinkBtn = document.getElementById("copyProfileLinkBtn");
+    const copyUsernameBtn = document.getElementById("copyUsernameBtn");
+    const mediaMsg = document.getElementById("mediaMsg");
+
+    // my profile edit
     const myProfileEdit = document.getElementById("myProfileEdit");
     const avatarFile = document.getElementById("avatarFile");
     const editMood = document.getElementById("editMood");
@@ -383,15 +1141,41 @@
     const saveProfileBtn = document.getElementById("saveProfileBtn");
     const refreshProfileBtn = document.getElementById("refreshProfileBtn");
     const profileMsg = document.getElementById("profileMsg");
+    const logoutBtn = document.getElementById("logoutBtn");
 
-    const modPanel = document.getElementById("modPanel");
-    const kickBtn = document.getElementById("kickBtn");
-    const muteMins = document.getElementById("muteMins");
-    const muteBtn = document.getElementById("muteBtn");
-    const banMins = document.getElementById("banMins");
-    const banBtn = document.getElementById("banBtn");
+    // member quick mod tools
+    const memberModTools = document.getElementById("memberModTools");
+    const quickReason = document.getElementById("quickReason");
+    const quickMuteMins = document.getElementById("quickMuteMins");
+    const quickBanMins = document.getElementById("quickBanMins");
+    const quickKickBtn = document.getElementById("quickKickBtn");
+    const quickMuteBtn = document.getElementById("quickMuteBtn");
+    const quickBanBtn = document.getElementById("quickBanBtn");
+    const quickModMsg = document.getElementById("quickModMsg");
 
-    let modalTargetUsername = null;
+    // moderation controls
+    const modUser = document.getElementById("modUser");
+    const modReason = document.getElementById("modReason");
+    const modMuteMins = document.getElementById("modMuteMins");
+    const modBanMins = document.getElementById("modBanMins");
+    const modKickBtn = document.getElementById("modKickBtn");
+    const modMuteBtn = document.getElementById("modMuteBtn");
+    const modBanBtn = document.getElementById("modBanBtn");
+    const modUnmuteBtn = document.getElementById("modUnmuteBtn");
+    const modUnbanBtn = document.getElementById("modUnbanBtn");
+    const modWarnBtn = document.getElementById("modWarnBtn");
+    const modOpenProfileBtn = document.getElementById("modOpenProfileBtn");
+    const modSetRole = document.getElementById("modSetRole");
+    const modSetRoleBtn = document.getElementById("modSetRoleBtn");
+    const modMsg = document.getElementById("modMsg");
+
+    // logs
+    const logUser = document.getElementById("logUser");
+    const logAction = document.getElementById("logAction");
+    const logLimit = document.getElementById("logLimit");
+    const refreshLogsBtn = document.getElementById("refreshLogsBtn");
+    const logsMsg = document.getElementById("logsMsg");
+    const logsBody = document.getElementById("logsBody");
 
     // ---------- Helpers ----------
     function escapeHtml(s){
@@ -400,8 +1184,26 @@
       }[m]));
     }
 
-    function fmtTime(ts){
-      return new Date(ts).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+    function fmtAbs(ts){
+      if(!ts) return "—";
+      const n = Number(ts);
+      if(!Number.isFinite(n)) return "—";
+      return new Date(n).toLocaleString();
+    }
+
+    function fmtCreated(ts){
+      if(!ts) return "—";
+      const d = new Date(ts);
+      if(Number.isNaN(d.getTime())) return String(ts);
+      return d.toLocaleString();
+    }
+
+    function bytesToNice(n){
+      n = Number(n||0);
+      const units = ["B","KB","MB","GB"];
+      let u = 0;
+      while(n >= 1024 && u < units.length-1){ n /= 1024; u++; }
+      return `${n.toFixed(u===0?0:1)} ${units[u]}`;
     }
 
     function statusDotColor(status){
@@ -411,7 +1213,7 @@
         case "Busy": return "var(--danger)";
         case "Do Not Disturb": return "var(--danger)";
         case "Idle": return "var(--gray)";
-        case "Chatting": return "var(--ok)";
+        case "Invisible": return "var(--gray)";
         default: return "var(--accent)";
       }
     }
@@ -441,16 +1243,15 @@
     }
 
     function roleRank(role){
-      switch(role){
-        case "Owner": return 6;
-        case "Co-owner": return 5;
-        case "Admin": return 4;
-        case "Moderator": return 3;
-        case "VIP": return 2;
-        case "User": return 1;
-        case "Guest": return 0;
-        default: return 1;
-      }
+      return ({
+        "Owner": 6,
+        "Co-owner": 5,
+        "Admin": 4,
+        "Moderator": 3,
+        "VIP": 2,
+        "User": 1,
+        "Guest": 0
+      }[role] ?? 1);
     }
 
     function avatarNode(url, fallbackText){
@@ -483,11 +1284,48 @@
     }
 
     function applyMentions(text){
-      // highlight @me.username occurrences
       const u = me?.username ? me.username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : null;
       if(!u) return escapeHtml(text);
       const re = new RegExp(`@${u}\\b`, "gi");
       return escapeHtml(text).replace(re, (m)=>`<span class="mention">${m}</span>`);
+    }
+
+    // Safe-ish BBCode: escape HTML first, then allow a small whitelist
+    function renderBBCode(input){
+      let s = escapeHtml(input || "");
+      // newlines
+      s = s.replace(/\r?\n/g, "<br>");
+
+      // basic tags
+      s = s.replace(/\[b\](.*?)\[\/b\]/gi, "<b>$1</b>");
+      s = s.replace(/\[i\](.*?)\[\/i\]/gi, "<i>$1</i>");
+      s = s.replace(/\[u\](.*?)\[\/u\]/gi, "<u>$1</u>");
+      s = s.replace(/\[s\](.*?)\[\/s\]/gi, "<s>$1</s>");
+      s = s.replace(/\[quote\](.*?)\[\/quote\]/gis, "<blockquote>$1</blockquote>");
+      s = s.replace(/\[code\](.*?)\[\/code\]/gis, "<pre><code>$1</code></pre>");
+
+      // [color=...]
+      s = s.replace(/\[color=([#a-z0-9]+)\](.*?)\[\/color\]/gi, (m, c, body) => {
+        const ok = /^#[0-9a-f]{3,8}$/i.test(c) || /^[a-z]{3,20}$/i.test(c);
+        return ok ? `<span style="color:${c}">${body}</span>` : body;
+      });
+
+      // [url=https://...]text[/url]
+      s = s.replace(/\[url=([^\]]+)\](.*?)\[\/url\]/gi, (m, url, body) => {
+        url = String(url || "").trim();
+        if(!/^https?:\/\//i.test(url)) return body;
+        return `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer noopener">${body}</a>`;
+      });
+
+      // [img]https://...[/img] or [img]/uploads/...[/img]
+      s = s.replace(/\[img\](.*?)\[\/img\]/gi, (m, url) => {
+        url = String(url||"").trim();
+        const ok = /^https?:\/\//i.test(url) || /^\/(uploads|avatars)\//i.test(url);
+        if(!ok) return "";
+        return `<img src="${escapeHtml(url)}" alt="img" style="max-width:100%; border-radius:14px; border:1px solid rgba(0,0,0,.2);">`;
+      });
+
+      return s;
     }
 
     function addMessage(m){
@@ -507,12 +1345,38 @@
       meta.innerHTML = `
         <span class="uName">${escapeHtml(roleIcon(m.role))} ${escapeHtml(m.user)}</span>
         <span class="badge" style="color:${roleBadgeColor(m.role)}">${escapeHtml(m.role)}</span>
-        <span class="ts">${fmtTime(m.ts)}</span>
+        <span class="ts">${new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span>
       `;
 
       const text=document.createElement("div");
       text.className="text";
       text.innerHTML = applyMentions(m.text);
+
+      // attachment
+      if(m.attachmentUrl && m.attachmentType){
+        const att = document.createElement("div");
+        att.className = "attachment";
+        if(m.attachmentType === "image"){
+          const img = document.createElement("img");
+          img.src = m.attachmentUrl;
+          img.alt = "image";
+          att.appendChild(img);
+        }else if(m.attachmentType === "video"){
+          const v = document.createElement("video");
+          v.src = m.attachmentUrl;
+          v.controls = true;
+          v.playsInline = true;
+          att.appendChild(v);
+        }else{
+          const a = document.createElement("a");
+          a.href = m.attachmentUrl;
+          a.textContent = "Download file";
+          a.target = "_blank";
+          a.rel = "noreferrer";
+          att.appendChild(a);
+        }
+        bubble.appendChild(att);
+      }
 
       const actions=document.createElement("div");
       actions.className="actions";
@@ -526,7 +1390,6 @@
         actions.appendChild(b);
       }
 
-      // delete button for mods/admin/owner (and only visible if role >= Moderator)
       if(roleRank(me.role) >= roleRank("Moderator")){
         const del=document.createElement("button");
         del.className="reactBtn";
@@ -607,7 +1470,6 @@
         row.appendChild(meta);
 
         row.onclick = () => openMemberProfile(u.name);
-
         memberList.appendChild(row);
       });
     }
@@ -625,34 +1487,137 @@
     }
     searchInput.addEventListener("input", applySearch);
 
-    // ---------- Auto-idle ----------
-    let idleTimer=null;
-    let lastNonIdleStatus="Online";
-    function resetIdle(){
-      if(statusSelect.value==="Idle"){
-        statusSelect.value=lastNonIdleStatus;
-        socket?.emit("status change",{status:statusSelect.value});
+    // ---------- API ----------
+    async function api(path, options){
+      try{
+        const res = await fetch(path, options);
+        const text = await res.text().catch(()=> "");
+        return { res, text };
+      }catch(e){
+        console.error(e);
+        return { res: { ok:false, status: 0 }, text: "Network error (server not reachable)." };
       }
-      clearTimeout(idleTimer);
-      idleTimer=setTimeout(()=>{
-        if(statusSelect.value!=="Idle"){
-          lastNonIdleStatus=statusSelect.value;
-          statusSelect.value="Idle";
-          socket?.emit("status change",{status:"Idle"});
-        }
-      },120000);
     }
-    ["mousemove","keydown","click","touchstart"].forEach(evt=>{
-      document.addEventListener(evt, resetIdle, {passive:true});
+
+    // ---------- Drawers ----------
+    function closeDrawers(){
+      channelsPane?.classList.remove("open");
+      membersPane?.classList.remove("open");
+      drawerOverlay?.classList.remove("show");
+    }
+    function openChannels(){
+      membersPane?.classList.remove("open");
+      channelsPane?.classList.add("open");
+      drawerOverlay?.classList.add("show");
+    }
+    function openMembers(){
+      channelsPane?.classList.remove("open");
+      membersPane?.classList.add("open");
+      drawerOverlay?.classList.add("show");
+    }
+    openChannelsBtn?.addEventListener("click", openChannels);
+    openMembersBtn?.addEventListener("click", openMembers);
+    drawerOverlay?.addEventListener("click", closeDrawers);
+    document.addEventListener("keydown", (e)=>{ if(e.key === "Escape") closeDrawers(); });
+
+    // ---------- Upload preview + progress ----------
+    function showUploadPreview(file){
+      pendingFile = file;
+      uploadPreview.style.display = "flex";
+      uploadName.textContent = file.name;
+      uploadInfo.textContent = `${bytesToNice(file.size)} • ${file.type || "unknown type"}`;
+      uploadProgress.style.width = "0%";
+
+      previewThumb.innerHTML = "";
+      const url = URL.createObjectURL(file);
+
+      if ((file.type || "").startsWith("image/")) {
+        const img = document.createElement("img");
+        img.src = url;
+        img.onload = () => URL.revokeObjectURL(url);
+        previewThumb.appendChild(img);
+      } else if (file.type === "video/mp4" || file.type === "video/quicktime") {
+        const v = document.createElement("video");
+        v.src = url;
+        v.muted = true;
+        v.playsInline = true;
+        v.preload = "metadata";
+        v.onloadeddata = () => URL.revokeObjectURL(url);
+        previewThumb.appendChild(v);
+      } else {
+        previewThumb.textContent = "FILE";
+        URL.revokeObjectURL(url);
+      }
+    }
+
+    function clearUploadPreview(){
+      pendingFile = null;
+      uploadPreview.style.display = "none";
+      previewThumb.innerHTML = "";
+      uploadName.textContent = "";
+      uploadInfo.textContent = "";
+      uploadProgress.style.width = "0%";
+    }
+
+    fileInput.addEventListener("change", () => {
+      const f = fileInput.files?.[0];
+      if (!f) return clearUploadPreview();
+      if (f.size > 10 * 1024 * 1024) {
+        addSystem("Max upload size is 10MB.");
+        fileInput.value = "";
+        return clearUploadPreview();
+      }
+      showUploadPreview(f);
     });
 
-    // ---------- Auth ----------
-    async function api(path, options){
-      const res = await fetch(path, options);
-      const text = await res.text().catch(()=> "");
-      return { res, text };
+    cancelUploadBtn.addEventListener("click", () => {
+      if (uploadXhr) {
+        uploadXhr.abort();
+        uploadXhr = null;
+        addSystem("Upload canceled.");
+      }
+      fileInput.value = "";
+      clearUploadPreview();
+    });
+
+    function uploadChatFileWithProgress(file){
+      return new Promise((resolve, reject) => {
+        const form = new FormData();
+        form.append("file", file);
+
+        const xhr = new XMLHttpRequest();
+        uploadXhr = xhr;
+
+        xhr.open("POST", "/upload");
+        xhr.responseType = "json";
+
+        xhr.upload.onprogress = (e) => {
+          if (!e.lengthComputable) return;
+          const pct = Math.max(0, Math.min(100, (e.loaded / e.total) * 100));
+          uploadProgress.style.width = `${pct.toFixed(0)}%`;
+        };
+
+        xhr.onload = () => {
+          uploadXhr = null;
+          if (xhr.status >= 200 && xhr.status < 300) return resolve(xhr.response);
+          reject(new Error((xhr.response && xhr.response.message) || xhr.responseText || "Upload failed."));
+        };
+
+        xhr.onerror = () => {
+          uploadXhr = null;
+          reject(new Error("Upload failed."));
+        };
+
+        xhr.onabort = () => {
+          uploadXhr = null;
+          reject(new Error("Upload canceled."));
+        };
+
+        xhr.send(form);
+      });
     }
 
+    // ---------- Auth ----------
     async function doLogin(){
       authMsg.textContent="Logging in...";
       const {res,text}=await api("/login",{
@@ -677,6 +1642,436 @@
     regBtn.addEventListener("click", doRegister);
     authPass.addEventListener("keydown", (e)=>{ if(e.key==="Enter") doLogin(); });
 
+    async function doLogout(){
+      await fetch("/logout", {method:"POST"});
+      location.reload();
+    }
+    logoutBtn.addEventListener("click", doLogout);
+
+    // ---------- Auto-idle ----------
+    let idleTimer=null;
+    let lastNonIdleStatus="Online";
+    function resetIdle(){
+      if(statusSelect.value==="Idle"){
+        statusSelect.value=lastNonIdleStatus;
+        socket?.emit("status change",{status:statusSelect.value});
+      }
+      clearTimeout(idleTimer);
+      idleTimer=setTimeout(()=>{
+        if(statusSelect.value!=="Idle"){
+          lastNonIdleStatus=statusSelect.value;
+          statusSelect.value="Idle";
+          socket?.emit("status change",{status:"Idle"});
+          meStatusText.textContent = "Idle";
+        }
+      },120000);
+    }
+    ["mousemove","keydown","click","touchstart"].forEach(evt=>{
+      document.addEventListener(evt, resetIdle, {passive:true});
+    });
+
+    // ---------- Rooms ----------
+    function setActiveRoom(room){
+      currentRoom=room;
+      nowRoom.textContent=`#${room}`;
+      roomTitle.textContent=room;
+      msgInput.placeholder=`Message #${room}`;
+      document.querySelectorAll(".chan").forEach(el=>{
+        el.classList.toggle("active", el.dataset.room===room);
+      });
+    }
+
+    function joinRoom(room){
+      setActiveRoom(room);
+      clearMsgs();
+      socket?.emit("join room", { room, status: statusSelect.value || "Online" });
+      closeDrawers();
+    }
+
+    chanList.addEventListener("click", (e)=>{
+      const el=e.target.closest(".chan");
+      if(!el) return;
+      const r=el.dataset.room;
+      if(r && r!==currentRoom) joinRoom(r);
+    });
+
+    // ---------- Typing + send ----------
+    let typingDebounce=null;
+    function emitTyping(){
+      if(!socket) return;
+      socket.emit("typing");
+      clearTimeout(typingDebounce);
+      typingDebounce=setTimeout(()=>socket.emit("stop typing"), 900);
+    }
+
+    msgInput.addEventListener("input", emitTyping);
+    msgInput.addEventListener("keydown",(e)=>{
+      if(e.key==="Enter"){ e.preventDefault(); sendMessage(); }
+    });
+    sendBtn.addEventListener("click", sendMessage);
+
+    async function sendMessage(){
+      if(!socket) return;
+
+      const text = msgInput.value || "";
+      const file = pendingFile;
+
+      if(!text.trim() && !file) return;
+
+      try{
+        let attachment = null;
+
+        if(file){
+          addSystem(`Uploading ${file.name}...`);
+          attachment = await uploadChatFileWithProgress(file);
+          fileInput.value = "";
+          clearUploadPreview();
+        }
+
+        socket.emit("chat message", {
+          text,
+          attachmentUrl: attachment?.url || "",
+          attachmentType: attachment?.type || "",
+          attachmentMime: attachment?.mime || "",
+          attachmentSize: attachment?.size || 0
+        });
+
+        msgInput.value="";
+        socket.emit("stop typing");
+      }catch(e){
+        addSystem(`Upload failed: ${e.message}`);
+      }
+    }
+
+    statusSelect.addEventListener("change", ()=>{
+      if(statusSelect.value!=="Idle") lastNonIdleStatus=statusSelect.value;
+      socket?.emit("status change", {status: statusSelect.value});
+      meStatusText.textContent = statusSelect.value;
+      resetIdle();
+    });
+
+    // ---------- Modal helpers ----------
+    function openModal(){ modal.style.display="flex"; }
+    function closeModal(){
+      modal.style.display="none";
+      modalTargetUsername=null;
+      quickModMsg.textContent = "";
+      modMsg.textContent = "";
+      logsMsg.textContent = "";
+      mediaMsg.textContent = "";
+    }
+    closeModalBtn.addEventListener("click", closeModal);
+    modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
+
+    function setTab(tab){
+      for(const el of document.querySelectorAll(".tab")){
+        el.classList.toggle("active", el.dataset.tab === tab);
+      }
+      viewInfo.style.display = (tab==="info") ? "block" : "none";
+      viewAbout.style.display = (tab==="about") ? "block" : "none";
+      viewMedia.style.display = (tab==="media") ? "block" : "none";
+      viewModeration.style.display = (tab==="moderation") ? "block" : "none";
+    }
+
+    tabInfo.addEventListener("click", ()=>setTab("info"));
+    tabAbout.addEventListener("click", ()=>setTab("about"));
+    tabMedia.addEventListener("click", ()=>setTab("media"));
+    tabModeration.addEventListener("click", async ()=>{
+      setTab("moderation");
+      await refreshLogs();
+    });
+
+    // ---------- Profiles ----------
+    async function loadMyProfile(){
+      const res = await fetch("/profile");
+      if(!res.ok) return;
+      const p = await res.json();
+
+      me.username = p.username;
+      me.role = p.role;
+
+      meName.textContent = p.username;
+      meRole.textContent = `${roleIcon(p.role)} ${p.role}`;
+
+      meAvatar.innerHTML="";
+      meAvatar.appendChild(avatarNode(p.avatar, p.username));
+    }
+
+    function fillProfileUI(p){
+      modalAvatar.innerHTML=""; modalAvatar.appendChild(avatarNode(p.avatar, p.username));
+      modalName.textContent = p.username;
+      modalRole.textContent = `${roleIcon(p.role)} ${p.role}`;
+      modalRole.style.color = roleBadgeColor(p.role);
+      modalMood.textContent = p.mood ? `Mood: ${p.mood}` : "Mood: (none)";
+
+      infoAge.textContent = (p.age ?? "—");
+      infoGender.textContent = (p.gender ?? "—");
+      infoCreated.textContent = fmtCreated(p.created_at);
+      infoLastSeen.textContent = p.last_seen ? fmtAbs(p.last_seen) : "—";
+      infoRoom.textContent = p.current_room ? `#${p.current_room}` : (p.last_room ? `#${p.last_room}` : "—");
+      infoStatus.textContent = p.last_status || "—";
+
+      bioRender.innerHTML = p.bio ? renderBBCode(p.bio) : "(no bio)";
+    }
+
+    async function openMyProfile(){
+      const res = await fetch("/profile");
+      if(!res.ok) return;
+      const p = await res.json();
+
+      modalTitle.textContent="My Profile";
+      modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
+
+      fillProfileUI(p);
+
+      myProfileEdit.style.display="block";
+      memberModTools.style.display="none";
+
+      editMood.value = p.mood || "";
+      editAge.value = p.age ?? "";
+      editGender.value = p.gender || "";
+      editBio.value = p.bio || "";
+      avatarFile.value = "";
+      profileMsg.textContent="";
+
+      tabModeration.style.display = (roleRank(me.role) >= roleRank("Moderator")) ? "block" : "none";
+      setTab("info");
+      openModal();
+    }
+
+    profileBtn.addEventListener("click", openMyProfile);
+
+    saveProfileBtn.addEventListener("click", async ()=>{
+      profileMsg.textContent="Saving...";
+      const form=new FormData();
+      form.append("mood", editMood.value);
+      form.append("age", editAge.value);
+      form.append("gender", editGender.value);
+      form.append("bio", editBio.value);
+      if(avatarFile.files[0]) form.append("avatar", avatarFile.files[0]);
+
+      const res = await fetch("/profile", {method:"POST", body: form});
+      if(!res.ok){
+        const t = await res.text().catch(()=> "Save failed.");
+        profileMsg.textContent = t || "Save failed.";
+        return;
+      }
+
+      profileMsg.textContent="Saved!";
+      await loadMyProfile();
+
+      // refresh member info by rejoin
+      socket?.emit("join room", { room: currentRoom, status: statusSelect.value || "Online" });
+      await openMyProfile();
+    });
+
+    refreshProfileBtn.addEventListener("click", openMyProfile);
+
+    async function openMemberProfile(username){
+      modalTargetUsername = username;
+      closeDrawers();
+
+      const res = await fetch("/profile/" + encodeURIComponent(username));
+      if(!res.ok) return;
+      const p = await res.json();
+
+      modalTitle.textContent="Member Profile";
+      modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
+
+      fillProfileUI(p);
+
+      myProfileEdit.style.display="none";
+
+      const iCanMod = (roleRank(me.role) >= roleRank("Moderator")) && (roleRank(me.role) > roleRank(p.role));
+      memberModTools.style.display = iCanMod ? "block" : "none";
+      quickReason.value = "";
+      quickMuteMins.value = "";
+      quickBanMins.value = "";
+      quickModMsg.textContent = "";
+
+      tabModeration.style.display = (roleRank(me.role) >= roleRank("Moderator")) ? "block" : "none";
+      setTab("info");
+      openModal();
+    }
+
+    // media actions
+    copyUsernameBtn.addEventListener("click", async ()=>{
+      const u = modalTargetUsername || me?.username || "";
+      try{
+        await navigator.clipboard.writeText(u);
+        mediaMsg.textContent = "Copied username.";
+      }catch{
+        mediaMsg.textContent = "Copy failed (browser blocked).";
+      }
+    });
+
+    copyProfileLinkBtn.addEventListener("click", async ()=>{
+      const u = modalTargetUsername || me?.username || "";
+      const link = `${location.origin}/#profile:${encodeURIComponent(u)}`;
+      try{
+        await navigator.clipboard.writeText(link);
+        mediaMsg.textContent = "Copied profile link.";
+      }catch{
+        mediaMsg.textContent = "Copy failed (browser blocked).";
+      }
+    });
+
+    // ---------- Moderation actions ----------
+    function requireReason(reason){
+      if(!reason || !reason.trim()) return "Reason is required.";
+      if(reason.trim().length < 3) return "Reason must be at least 3 characters.";
+      return null;
+    }
+
+    // quick tools
+    quickKickBtn.addEventListener("click", ()=>{
+      const err = requireReason(quickReason.value);
+      if(err){ quickModMsg.textContent = err; return; }
+      socket?.emit("mod kick", { username: modalTargetUsername });
+      quickModMsg.textContent = "Kick sent.";
+    });
+    quickMuteBtn.addEventListener("click", ()=>{
+      const err = requireReason(quickReason.value);
+      if(err){ quickModMsg.textContent = err; return; }
+      const mins = Number(quickMuteMins.value || 10);
+      socket?.emit("mod mute", { username: modalTargetUsername, minutes: mins, reason: quickReason.value.trim() });
+      quickModMsg.textContent = "Mute sent.";
+    });
+    quickBanBtn.addEventListener("click", ()=>{
+      const err = requireReason(quickReason.value);
+      if(err){ quickModMsg.textContent = err; return; }
+      const mins = Number(quickBanMins.value || 0);
+      socket?.emit("mod ban", { username: modalTargetUsername, minutes: mins, reason: quickReason.value.trim() });
+      quickModMsg.textContent = "Ban sent.";
+    });
+
+    // mod panel
+    modKickBtn.addEventListener("click", ()=>{
+      const err = requireReason(modReason.value);
+      if(err){ modMsg.textContent = err; return; }
+      if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+      socket?.emit("mod kick", { username: modUser.value.trim() });
+      modMsg.textContent = "Kick sent.";
+    });
+    modMuteBtn.addEventListener("click", ()=>{
+      const err = requireReason(modReason.value);
+      if(err){ modMsg.textContent = err; return; }
+      if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+      const mins = Number(modMuteMins.value || 10);
+      socket?.emit("mod mute", { username: modUser.value.trim(), minutes: mins, reason: modReason.value.trim() });
+      modMsg.textContent = "Mute sent.";
+    });
+    modBanBtn.addEventListener("click", ()=>{
+      const err = requireReason(modReason.value);
+      if(err){ modMsg.textContent = err; return; }
+      if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+      const mins = Number(modBanMins.value || 0);
+      socket?.emit("mod ban", { username: modUser.value.trim(), minutes: mins, reason: modReason.value.trim() });
+      modMsg.textContent = "Ban sent.";
+    });
+    modUnmuteBtn.addEventListener("click", ()=>{
+      const err = requireReason(modReason.value);
+      if(err){ modMsg.textContent = err; return; }
+      if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+      socket?.emit("mod unmute", { username: modUser.value.trim(), reason: modReason.value.trim() });
+      modMsg.textContent = "Unmute sent.";
+    });
+    modUnbanBtn.addEventListener("click", ()=>{
+      const err = requireReason(modReason.value);
+      if(err){ modMsg.textContent = err; return; }
+      if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+      socket?.emit("mod unban", { username: modUser.value.trim(), reason: modReason.value.trim() });
+      modMsg.textContent = "Unban sent.";
+    });
+    modWarnBtn.addEventListener("click", ()=>{
+      const err = requireReason(modReason.value);
+      if(err){ modMsg.textContent = err; return; }
+      if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+      socket?.emit("mod warn", { username: modUser.value.trim(), reason: modReason.value.trim() });
+      modMsg.textContent = "Warn sent.";
+    });
+    modOpenProfileBtn.addEventListener("click", async ()=>{
+      if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+      await openMemberProfile(modUser.value.trim());
+    });
+    modSetRoleBtn.addEventListener("click", ()=>{
+      const err = requireReason(modReason.value);
+      if(err){ modMsg.textContent = err; return; }
+      if(!modUser.value.trim()){ modMsg.textContent = "Enter a target username."; return; }
+      if(!modSetRole.value){ modMsg.textContent = "Choose a role first."; return; }
+      socket?.emit("mod set role", { username: modUser.value.trim(), role: modSetRole.value, reason: modReason.value.trim() });
+      modMsg.textContent = "Role change sent (Owner only).";
+    });
+
+    // ---------- Logs ----------
+    async function loadModLogs({ user = "", action = "", limit = 50 } = {}){
+      const url = new URL("/mod/logs", location.origin);
+      url.searchParams.set("limit", String(limit));
+      if(user) url.searchParams.set("user", user);
+      if(action) url.searchParams.set("action", action);
+
+      const res = await fetch(url);
+      if(!res.ok) return { ok:false, status:res.status, rows:[] };
+      const rows = await res.json();
+      return { ok:true, status:200, rows: rows || [] };
+    }
+
+    function renderLogs(rows){
+      logsBody.innerHTML = "";
+      for(const r of rows){
+        const tr = document.createElement("tr");
+
+        const tTime = document.createElement("td");
+        tTime.textContent = new Date(r.ts).toLocaleString();
+
+        const tActor = document.createElement("td");
+        tActor.innerHTML = `<span class="pill">${escapeHtml(r.actor_role)}</span> ${escapeHtml(r.actor_username)}`;
+
+        const tAction = document.createElement("td");
+        tAction.innerHTML = `<span class="pill">${escapeHtml(r.action)}</span>`;
+
+        const tTarget = document.createElement("td");
+        tTarget.textContent = r.target_username || "—";
+
+        const tRoom = document.createElement("td");
+        tRoom.textContent = r.room || "—";
+
+        const tDetails = document.createElement("td");
+        tDetails.textContent = r.details || "";
+
+        tr.appendChild(tTime);
+        tr.appendChild(tActor);
+        tr.appendChild(tAction);
+        tr.appendChild(tTarget);
+        tr.appendChild(tRoom);
+        tr.appendChild(tDetails);
+
+        logsBody.appendChild(tr);
+      }
+    }
+
+    async function refreshLogs(){
+      logsMsg.textContent = "Loading logs...";
+      const limit = Number(logLimit.value || 50);
+      const user = logUser.value.trim();
+      const action = logAction.value;
+
+      const result = await loadModLogs({ user, action, limit });
+      if(!result.ok){
+        logsMsg.textContent = result.status === 403
+          ? "You do not have permission to view logs."
+          : "Failed to load logs.";
+        renderLogs([]);
+        return;
+      }
+
+      logsMsg.textContent = `Showing ${result.rows.length} log(s).`;
+      renderLogs(result.rows);
+    }
+
+    refreshLogsBtn.addEventListener("click", refreshLogs);
+
+    // ---------- Start app ----------
     async function startApp(){
       const meRes = await fetch("/me");
       me = await meRes.json();
@@ -695,12 +2090,13 @@
       });
 
       socket.on("system", addSystem);
-
       socket.on("user list", (users)=>renderMembers(users));
 
       socket.on("typing update", (names)=>{
         const others=(names||[]).filter(n=>n!==me.username);
-        typingEl.textContent = others.length ? (others.length===1? `${others[0]} is typing...` : `${others.join(", ")} are typing...`) : "";
+        typingEl.textContent = others.length
+          ? (others.length===1 ? `${others[0]} is typing...` : `${others.join(", ")} are typing...`)
+          : "";
       });
 
       socket.on("history", (history)=>{
@@ -723,200 +2119,29 @@
         if(el) el.textContent = "[message deleted]";
       });
 
-      joinRoom("general");
+      joinRoom("main");
+      meStatusText.textContent = statusSelect.value || "Online";
       resetIdle();
-    }
 
-    async function doLogout(){
-      await fetch("/logout", {method:"POST"});
-      location.reload();
-    }
-    logoutBtn.addEventListener("click", doLogout);
+      // make keyboard focus nicer on mobile
+      msgInput.addEventListener("focus", () => {
+        setTimeout(() => msgInput.scrollIntoView({ block: "center", behavior: "smooth" }), 150);
+      });
 
-    // ---------- Rooms ----------
-    function setActiveRoom(room){
-      currentRoom=room;
-      nowRoom.textContent=`#${room}`;
-      roomTitle.textContent=room;
-      msgInput.placeholder=`Message #${room}`;
-      document.querySelectorAll(".chan").forEach(el=>{
-        el.classList.toggle("active", el.dataset.room===room);
+      // handle hash profile links (#profile:Username)
+      if(location.hash.startsWith("#profile:")){
+        const u = decodeURIComponent(location.hash.slice("#profile:".length));
+        if(u) openMemberProfile(u);
+      }
+      window.addEventListener("hashchange", ()=>{
+        if(location.hash.startsWith("#profile:")){
+          const u = decodeURIComponent(location.hash.slice("#profile:".length));
+          if(u) openMemberProfile(u);
+        }
       });
     }
 
-    function joinRoom(room){
-      setActiveRoom(room);
-      clearMsgs();
-      socket?.emit("join room", { room, status: statusSelect.value || "Online" });
-    }
-
-    chanList.addEventListener("click", (e)=>{
-      const el=e.target.closest(".chan");
-      if(!el) return;
-      const r=el.dataset.room;
-      if(r && r!==currentRoom) joinRoom(r);
-    });
-
-    // ---------- Sending + typing ----------
-    let typingDebounce=null;
-    function emitTyping(){
-      if(!socket) return;
-      socket.emit("typing");
-      clearTimeout(typingDebounce);
-      typingDebounce=setTimeout(()=>socket.emit("stop typing"), 900);
-    }
-
-    msgInput.addEventListener("input", emitTyping);
-    msgInput.addEventListener("keydown",(e)=>{
-      if(e.key==="Enter"){ e.preventDefault(); sendMessage(); }
-    });
-    sendBtn.addEventListener("click", sendMessage);
-
-    function sendMessage(){
-      if(!socket) return;
-      const text=msgInput.value;
-      if(!text.trim()) return;
-      socket.emit("chat message", { text });
-      msgInput.value="";
-      socket.emit("stop typing");
-    }
-
-    statusSelect.addEventListener("change", ()=>{
-      if(statusSelect.value!=="Idle") lastNonIdleStatus=statusSelect.value;
-      socket?.emit("status change", {status: statusSelect.value});
-      resetIdle();
-    });
-
-    // ---------- Modal profiles ----------
-    function openModal(){
-      modal.style.display="flex";
-    }
-    function closeModal(){
-      modal.style.display="none";
-      myProfileEdit.style.display="none";
-      modPanel.style.display="none";
-      profileMsg.textContent="";
-      modalTargetUsername=null;
-    }
-    closeModalBtn.addEventListener("click", closeModal);
-    modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
-
-    profileBtn.addEventListener("click", async ()=>{
-      await openMyProfile();
-    });
-
-    async function loadMyProfile(){
-      const res = await fetch("/profile");
-      if(!res.ok) return;
-      const p = await res.json();
-
-      // me strip
-      me.username = p.username;
-      me.role = p.role;
-      meName.textContent = p.username;
-      meRole.textContent = `${roleIcon(p.role)} ${p.role}`;
-      meAvatar.innerHTML="";
-      meAvatar.appendChild(avatarNode(p.avatar, p.username));
-    }
-
-    async function openMyProfile(){
-      const res = await fetch("/profile");
-      if(!res.ok) return;
-      const p = await res.json();
-
-      modalTitle.textContent="My Profile";
-      modalMeta.textContent=`Created: ${new Date(p.created_at).toLocaleString()}`;
-      modalAvatar.innerHTML=""; modalAvatar.appendChild(avatarNode(p.avatar, p.username));
-      modalName.textContent=p.username;
-      modalRole.textContent=`${roleIcon(p.role)} ${p.role}`;
-      modalRole.style.color=roleBadgeColor(p.role);
-      modalMood.textContent=p.mood ? `Mood: ${p.mood}` : "Mood: (none)";
-      modalAgeGender.textContent = `Age: ${p.age ?? "—"} • Gender: ${p.gender ?? "—"}`;
-      modalBio.value = p.bio || "";
-
-      myProfileEdit.style.display="block";
-      modPanel.style.display="none";
-
-      editMood.value = p.mood || "";
-      editAge.value = p.age ?? "";
-      editGender.value = p.gender || "";
-      editBio.value = p.bio || "";
-      avatarFile.value = "";
-      profileMsg.textContent="";
-
-      openModal();
-    }
-
-    saveProfileBtn.addEventListener("click", async ()=>{
-      profileMsg.textContent="Saving...";
-      const form=new FormData();
-      form.append("mood", editMood.value);
-      form.append("age", editAge.value);
-      form.append("gender", editGender.value);
-      form.append("bio", editBio.value);
-      if(avatarFile.files[0]) form.append("avatar", avatarFile.files[0]);
-
-      const res = await fetch("/profile", {method:"POST", body: form});
-      if(!res.ok){ profileMsg.textContent="Save failed."; return; }
-
-      profileMsg.textContent="Saved!";
-      await loadMyProfile();
-      // refresh member list info by rejoin
-      socket?.emit("join room", { room: currentRoom, status: statusSelect.value || "Online" });
-      // refresh modal view
-      await openMyProfile();
-    });
-
-    refreshProfileBtn.addEventListener("click", openMyProfile);
-
-    async function openMemberProfile(username){
-      modalTargetUsername = username;
-      const res = await fetch("/profile/" + encodeURIComponent(username));
-      if(!res.ok) return;
-
-      const p = await res.json();
-
-      modalTitle.textContent="Member Profile";
-      modalMeta.textContent=`Created: ${new Date(p.created_at).toLocaleString()}`;
-      modalAvatar.innerHTML=""; modalAvatar.appendChild(avatarNode(p.avatar, p.username));
-      modalName.textContent=p.username;
-      modalRole.textContent=`${roleIcon(p.role)} ${p.role}`;
-      modalRole.style.color=roleBadgeColor(p.role);
-      modalMood.textContent=p.mood ? `Mood: ${p.mood}` : "Mood: (none)";
-      modalAgeGender.textContent = `Age: ${p.age ?? "—"} • Gender: ${p.gender ?? "—"}`;
-      modalBio.value = p.bio || "";
-
-      myProfileEdit.style.display="none";
-
-      // show mod tools only if I have permission
-      const iCanMod = roleRank(me.role) >= roleRank("Moderator") && roleRank(me.role) > roleRank(p.role);
-      modPanel.style.display = iCanMod ? "block" : "none";
-
-      openModal();
-    }
-
-    // mod buttons
-    kickBtn.addEventListener("click", ()=>{
-      if(!modalTargetUsername) return;
-      socket?.emit("mod kick", { username: modalTargetUsername });
-      closeModal();
-    });
-
-    muteBtn.addEventListener("click", ()=>{
-      if(!modalTargetUsername) return;
-      const mins = Number(muteMins.value || 10);
-      socket?.emit("mod mute", { username: modalTargetUsername, minutes: mins, reason: "" });
-      closeModal();
-    });
-
-    banBtn.addEventListener("click", ()=>{
-      if(!modalTargetUsername) return;
-      const mins = Number(banMins.value || 0);
-      socket?.emit("mod ban", { username: modalTargetUsername, minutes: mins, reason: "" });
-      closeModal();
-    });
-
-    // ---------- Boot ----------
+    // auto-start if already logged in
     (async function boot(){
       const res = await fetch("/me");
       me = await res.json();
@@ -929,5 +2154,3 @@
   </script>
 </body>
 </html>
-<!DOCTYPE html>
-<html lang="en">

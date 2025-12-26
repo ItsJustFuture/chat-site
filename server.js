@@ -1,38 +1,49 @@
-// server.js — Full build with:
-// Rooms, member list, statuses, auto-idle (client), typing, reactions (1/user/message),
-// login/register + sessions, persistent roles + profiles + avatars,
-// profile popup endpoint, message history (SQLite), search/mentions (client),
-// moderation: mute/kick/ban/delete (role-based),
-// hardening: dotenv, helmet, rate limits, message rate limit
-
-require("dotenv").config();
+// server.js
+"use strict";
 
 const path = require("path");
 const fs = require("fs");
 const express = require("express");
 const session = require("express-session");
+const SQLiteStore = require("connect-sqlite3")(session);
 const bcrypt = require("bcrypt");
-const sqlite3 = require("sqlite3").verbose();
 const multer = require("multer");
-const rateLimit = require("express-rate-limit");
-const helmet = require("helmet");
-const { randomUUID } = require("crypto");
+const http = require("http");
+const { Server } = require("socket.io");
+const sqlite3 = require("sqlite3").verbose();
 
+const PORT = Number(process.env.PORT || 3000);
+const DB_FILE = process.env.DB_FILE || path.join(__dirname, "chat.db");
+const PUBLIC_DIR = path.join(__dirname, "public");
+const UPLOADS_DIR = path.join(__dirname, "uploads");
+const AVATARS_DIR = path.join(__dirname, "avatars");
+
+// ---- Ensure folders exist
+for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+// ---- App + Server
 const app = express();
-const http = require("http").createServer(app);
-const io = require("socket.io")(http);
+const server = http.createServer(app);
+const io = new Server(server, {
+  // Render uses HTTPS -> allow websocket upgrade
+  cors: { origin: true, credentials: true },
+});
+// IMPORTANT for Render/any reverse proxy so secure cookies work
+app.set("trust proxy", 1);
+// ---- DB
+const db = new sqlite3.Database(DB_FILE);
 
-const PORT = process.env.PORT || 3000;
-const OWNER_USERNAME = process.env.OWNER_USERNAME || "Iri";
-
-// ---------- Folders ----------
-const publicDir = path.join(__dirname, "public");
-const avatarDir = path.join(publicDir, "avatars");
-fs.mkdirSync(publicDir, { recursive: true });
-fs.mkdirSync(avatarDir, { recursive: true });
-
-// ---------- DB ----------
-const db = new sqlite3.Database(path.join(__dirname, "chat.db"));
+// ---- Basic migrations
+function addColumnIfMissing(table, column, definition) {
+  db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
+    if (err) return;
+    const exists = rows.some((r) => r.name === column);
+    if (exists) return;
+    db.run(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+  });
+}
 
 db.serialize(() => {
   db.run(`
@@ -40,493 +51,729 @@ db.serialize(() => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
-      role TEXT DEFAULT 'User',
-      bio TEXT DEFAULT '',
-      mood TEXT DEFAULT '',
+      role TEXT NOT NULL DEFAULT 'User',
+      created_at INTEGER NOT NULL,
+      avatar TEXT,
+      bio TEXT,
+      mood TEXT,
       age INTEGER,
       gender TEXT,
-      avatar TEXT DEFAULT '',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      last_seen INTEGER,
+      last_room TEXT,
+      last_status TEXT
     )
   `);
+  // ---- DB migrations (keep old DBs compatible)
+function addColumnIfMissing(table, col, ddl) {
+  db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
+    if (err) return;
+    const exists = rows.some(r => r.name === col);
+    if (!exists) db.run(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  });
+}
 
+// ensure all expected columns exist even if DB was created by older code
+db.serialize(() => {
+  addColumnIfMissing("users", "password_hash", "password_hash TEXT"); // older DBs may not have it
+  addColumnIfMissing("users", "role", "role TEXT NOT NULL DEFAULT 'User'");
+  addColumnIfMissing("users", "created_at", "created_at INTEGER");
+  addColumnIfMissing("users", "avatar", "avatar TEXT");
+  addColumnIfMissing("users", "bio", "bio TEXT");
+  addColumnIfMissing("users", "mood", "mood TEXT");
+  addColumnIfMissing("users", "age", "age INTEGER");
+  addColumnIfMissing("users", "gender", "gender TEXT");
+  addColumnIfMissing("users", "last_seen", "last_seen INTEGER");
+  addColumnIfMissing("users", "last_room", "last_room TEXT");
+  addColumnIfMissing("users", "last_status", "last_status TEXT");
+});
   db.run(`
     CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       room TEXT NOT NULL,
       user_id INTEGER NOT NULL,
       username TEXT NOT NULL,
       role TEXT NOT NULL,
-      text TEXT NOT NULL,
+      avatar TEXT,
+      text TEXT,
       ts INTEGER NOT NULL,
-      deleted INTEGER DEFAULT 0
+      deleted INTEGER NOT NULL DEFAULT 0,
+      attachment_url TEXT,
+      attachment_type TEXT,
+      attachment_mime TEXT,
+      attachment_size INTEGER
     )
   `);
 
-  // punishments: type=ban|mute, expires_at null => permanent
+  db.run(`
+    CREATE TABLE IF NOT EXISTS reactions (
+      message_id INTEGER NOT NULL,
+      username TEXT NOT NULL,
+      emoji TEXT NOT NULL,
+      PRIMARY KEY (message_id, username)
+    )
+  `);
+
   db.run(`
     CREATE TABLE IF NOT EXISTS punishments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      expires_at INTEGER,
-      reason TEXT DEFAULT '',
+      type TEXT NOT NULL,                 -- 'mute' | 'ban'
+      expires_at INTEGER,                 -- null => permanent
+      reason TEXT,
       by_user_id INTEGER,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at INTEGER NOT NULL
     )
   `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS mod_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      actor_user_id INTEGER,
+      actor_username TEXT,
+      actor_role TEXT,
+      action TEXT NOT NULL,
+      target_user_id INTEGER,
+      target_username TEXT,
+      room TEXT,
+      details TEXT
+    )
+  `);
+  // Ensure Iri is always Owner
+db.run(
+  "UPDATE users SET role='Owner' WHERE lower(username)='iri'"
+);
+  // Add any missing columns safely if your DB is older:
+  addColumnIfMissing("users", "last_seen", "last_seen INTEGER");
+  addColumnIfMissing("users", "last_room", "last_room TEXT");
+  addColumnIfMissing("users", "last_status", "last_status TEXT");
 });
 
-// ---------- Middleware ----------
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// ---- Security + parsing
+app.disable("x-powered-by");
+app.use(express.json({ limit: "1mb" }));
 
-const sessionMiddleware = session({
-  secret: process.env.SESSION_SECRET || "change-me",
-  resave: false,
-  saveUninitialized: false,
-  cookie: { httpOnly: true, sameSite: "lax", secure: false },
-});
-app.use(sessionMiddleware);
-
-app.use(express.static(publicDir));
-
-// ---------- Rate limits ----------
-const authLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 1000,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use("/login", authLimiter);
-app.use("/register", authLimiter);
-
-// ---------- Helpers ----------
-function sanitizeUsername(u) {
-  return String(u || "").trim().slice(0, 24);
-}
-function normalizeRole(role) {
-  const allowed = ["Owner", "Co-owner", "Admin", "Moderator", "VIP", "User", "Guest"];
-  return allowed.includes(role) ? role : "User";
-}
-function roleRank(role) {
-  // higher = more power
-  switch (role) {
-    case "Owner": return 6;
-    case "Co-owner": return 5;
-    case "Admin": return 4;
-    case "Moderator": return 3;
-    case "VIP": return 2;
-    case "User": return 1;
-    case "Guest": return 0;
-    default: return 1;
-  }
-}
-function ensureOwnerRoleIfNeeded(userRow, cb) {
-  if (userRow.username === OWNER_USERNAME && userRow.role !== "Owner") {
-    db.run("UPDATE users SET role = 'Owner' WHERE id = ?", [userRow.id], () => cb("Owner"));
-    return;
-  }
-  cb(userRow.role);
-}
-function requireLogin(req, res, next) {
-  if (!req.session.user) return res.sendStatus(401);
+// IMPORTANT: CSP that blocks inline JS (good), but allows our external /public/app.js & /public/styles.css
+app.use((req, res, next) => {
+  res.setHeader(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "script-src 'self'",
+      "script-src-elem 'self'",
+      // we use an external stylesheet, so no unsafe-inline required
+      "style-src 'self'",
+      // allow avatars/uploads + blob previews on client
+      "img-src 'self' data: blob:",
+      "media-src 'self' blob:",
+      // socket.io
+      "connect-src 'self' ws: wss:",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "frame-ancestors 'none'",
+    ].join("; ")
+  );
   next();
+});
+
+// ---- Sessions (works locally + Render)
+app.use(
+  session({
+    store: new SQLiteStore({ db: "sessions.sqlite", dir: __dirname }),
+    secret: process.env.SESSION_SECRET || "dev_secret_change_me",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      // secure cookies in production (Render). With trust proxy set, this will work.
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 1000 * 60 * 60 * 24 * 7,
+    },
+  })
+);
+// ---- Static
+app.use("/uploads", express.static(UPLOADS_DIR));
+app.use("/avatars", express.static(AVATARS_DIR));
+app.use(express.static(PUBLIC_DIR));
+
+// ---- Helpers
+function normalizeUsername(u) {
+  return String(u || "").trim();
 }
-function isActivePunishment(p) {
-  if (!p) return false;
-  if (p.expires_at == null) return true;
-  return Number(p.expires_at) > Date.now();
+function normKey(u) {
+  return normalizeUsername(u).toLowerCase();
 }
-function getActivePunishments(userId, cb) {
-  db.all(
-    "SELECT * FROM punishments WHERE user_id = ? AND (expires_at IS NULL OR expires_at > ?) ORDER BY id DESC",
-    [userId, Date.now()],
-    (err, rows) => cb(err, rows || [])
+function sanitizeUsername(u) {
+  u = normalizeUsername(u);
+  // allow spaces, letters, digits, some punctuation; trim length
+  u = u.replace(/[^\p{L}\p{N} _.'-]/gu, "").trim();
+  return u.slice(0, 24);
+}
+function clamp(n, a, b) {
+  n = Number(n);
+  if (!Number.isFinite(n)) return a;
+  return Math.max(a, Math.min(b, n));
+}
+
+const ROLES = ["Guest", "User", "VIP", "Moderator", "Admin", "Co-owner", "Owner"];
+function roleRank(role) {
+  const idx = ROLES.indexOf(role);
+  return idx === -1 ? 1 : idx;
+}
+function requireMinRole(role, minRole) {
+  return roleRank(role) >= roleRank(minRole);
+}
+function canModerate(actorRole, targetRole) {
+  // can only moderate lower roles
+  return roleRank(actorRole) > roleRank(targetRole);
+}
+const AUTO_OWNER = new Set(["iri"]);
+const AUTO_COOWNERS = new Set(["lola henderson", "amelia"]);
+
+function logModAction({ actor, action, targetUserId, targetUsername, room, details }) {
+  db.run(
+    `INSERT INTO mod_logs (ts, actor_user_id, actor_username, actor_role, action, target_user_id, target_username, room, details)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      Date.now(),
+      actor?.id || null,
+      actor?.username || null,
+      actor?.role || null,
+      action,
+      targetUserId || null,
+      targetUsername || null,
+      room || null,
+      details || null,
+    ]
   );
 }
-function getActiveBanMute(userId, cb) {
-  getActivePunishments(userId, (_err, rows) => {
-    const ban = rows.find(r => r.type === "ban");
-    const mute = rows.find(r => r.type === "mute");
-    cb({ ban, mute });
-  });
+
+function requireLogin(req, res, next) {
+  if (!req.session?.user?.id) return res.status(401).send("Not logged in");
+  next();
 }
 
-// ---------- Multer avatar upload ----------
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, avatarDir),
-  filename: (req, file, cb) => {
-    const userId = req.session?.user?.id;
-    const ext = (path.extname(file.originalname || "").toLowerCase() || ".png");
-    cb(null, `${userId}${ext}`);
-  },
-});
-const upload = multer({
-  storage,
-  limits: { fileSize: 2 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const ok = ["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.mimetype);
-    cb(ok ? null : new Error("Only images allowed"), ok);
-  },
-});
-
-// ---------- Auth ----------
+// ---- Auth routes
 app.post("/register", async (req, res) => {
   try {
-    const username = sanitizeUsername(req.body.username);
-    const password = String(req.body.password || "");
+    const username = sanitizeUsername(req.body?.username);
+    const password = String(req.body?.password || "");
 
-    if (username.length < 3) return res.status(400).send("Username must be at least 3 characters.");
-    if (password.length < 6) return res.status(400).send("Password must be at least 6 characters.");
+    if (!username || username.length < 2) return res.status(400).send("Invalid username");
+    if (!password || password.length < 6) return res.status(400).send("Password must be 6+ chars");
 
-    const password_hash = await bcrypt.hash(password, 12);
+    const password_hash = await bcrypt.hash(password, 10);
+    const role = AUTO_COOWNERS.has(normKey(username)) ? "Co-owner" : "User";
 
     db.run(
-      "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-      [username, password_hash, "User"],
-      (err) => {
+      `INSERT INTO users (username, password_hash, role, created_at, last_seen, last_status)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [username, password_hash, role, Date.now(), Date.now(), "Online"],
+      function (err) {
         if (err) {
-          if (String(err.message || "").includes("UNIQUE")) return res.status(400).send("Username already exists.");
-          return res.status(500).send("Register failed.");
+          if (String(err.message || "").includes("UNIQUE")) return res.status(409).send("Username already taken");
+          return res.status(500).send("Register failed");
         }
-        res.send("Registered");
+        return res.json({ ok: true });
       }
     );
   } catch {
-    res.status(500).send("Register failed.");
+    return res.status(500).send("Register failed");
   }
 });
 
 app.post("/login", (req, res) => {
-  const username = sanitizeUsername(req.body.username);
-  const password = String(req.body.password || "");
+  const username = sanitizeUsername(req.body?.username);
+  const password = String(req.body?.password || "");
+  if (!username || !password) return res.status(400).send("Missing credentials");
 
-  db.get("SELECT * FROM users WHERE username = ?", [username], async (err, user) => {
-    if (err || !user) return res.status(401).send("Invalid login.");
+  db.get(
+    "SELECT * FROM users WHERE lower(username) = lower(?)",
+    [username],
+    async (err, row) => {
+      if (err || !row) return res.status(401).send("Invalid username or password");
+    if (!row.password_hash || typeof row.password_hash !== "string") {
+  return res.status(401).send("Account needs a password reset (old database record).");
+}
+      const ok = await bcrypt.compare(password, row.password_hash);
+      if (!ok) return res.status(401).send("Invalid username or password");
 
-    // ban check
-    getActiveBanMute(user.id, async ({ ban }) => {
-      if (ban) return res.status(403).send("You are banned.");
+      // Auto co-owner enforcement (case-insensitive)
+      if (AUTO_COOWNERS.has(normKey(row.username)) && row.role !== "Co-owner") {
+        db.run("UPDATE users SET role = 'Co-owner' WHERE id = ?", [row.id]);
+        row.role = "Co-owner";
+      }
 
-      const ok = await bcrypt.compare(password, user.password_hash);
-      if (!ok) return res.status(401).send("Invalid login.");
+     req.session.user = { id: row.id, username: row.username, role: row.role };
 
-      ensureOwnerRoleIfNeeded(user, (fixedRole) => {
-        req.session.user = { id: user.id, username: user.username, role: normalizeRole(fixedRole) };
-        res.send("Logged in");
-      });
-    });
-  });
+db.run("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]);
+
+// Ensure session is actually persisted before replying
+req.session.save((saveErr) => {
+  if (saveErr) return res.status(500).send("Session save failed");
+  return res.json({ ok: true });
+});
+    }
+  );
 });
 
 app.post("/logout", (req, res) => {
-  req.session.destroy(() => res.send("Logged out"));
+  req.session.destroy(() => res.json({ ok: true }));
 });
 
 app.get("/me", (req, res) => {
-  res.json(req.session.user || null);
+  if (!req.session?.user?.id) return res.json(null);
+  return res.json(req.session.user);
 });
 
-// ---------- Profiles ----------
+// ---- Profile routes
 app.get("/profile", requireLogin, (req, res) => {
   db.get(
-    "SELECT id, username, role, bio, mood, age, gender, avatar, created_at FROM users WHERE id = ?",
+    `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status
+     FROM users WHERE id = ?`,
     [req.session.user.id],
     (err, row) => {
       if (err || !row) return res.status(404).send("Not found");
-      res.json(row);
+      const live = onlineState.get(row.id);
+      return res.json({
+        ...row,
+        current_room: live?.room || null,
+        last_status: live?.status || row.last_status || null,
+      });
     }
   );
 });
 
-// Public profile for popup (by username)
-app.get("/profile/:username", (req, res) => {
+app.get("/profile/:username", requireLogin, (req, res) => {
   const u = sanitizeUsername(req.params.username);
+  if (!u) return res.status(400).send("Bad username");
+
   db.get(
-    "SELECT id, username, role, bio, mood, age, gender, avatar, created_at FROM users WHERE username = ?",
+    `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status
+     FROM users WHERE lower(username) = lower(?)`,
     [u],
     (err, row) => {
       if (err || !row) return res.status(404).send("Not found");
-      // You can hide age/gender later with privacy settings
-      res.json(row);
+      const live = onlineState.get(row.id);
+      return res.json({
+        ...row,
+        current_room: live?.room || null,
+        last_status: live?.status || row.last_status || null,
+      });
     }
   );
 });
 
-app.post("/profile", requireLogin, upload.single("avatar"), (req, res) => {
-  const bio = String(req.body.bio || "").slice(0, 400);
-  const mood = String(req.body.mood || "").slice(0, 60);
-  const ageRaw = req.body.age;
-  const age = ageRaw === "" || ageRaw == null ? null : Math.max(0, Math.min(120, Number(ageRaw)));
-  const gender = String(req.body.gender || "").slice(0, 24);
-  const avatarPath = req.file ? `/avatars/${req.file.filename}` : null;
+// Avatar upload for profile edits (2MB)
+const avatarUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, AVATARS_DIR),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || "").slice(0, 10) || ".png";
+      cb(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`);
+    },
+  }),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok = /^image\/(png|jpeg|jpg|webp|gif)$/i.test(file.mimetype || "");
+    cb(ok ? null : new Error("Invalid avatar type"), ok);
+  },
+});
 
-  db.run(
-    `
-      UPDATE users
-      SET bio = ?,
-          mood = ?,
-          age = ?,
-          gender = ?,
-          avatar = COALESCE(?, avatar)
-      WHERE id = ?
-    `,
-    [bio, mood, Number.isFinite(age) ? age : null, gender || null, avatarPath, req.session.user.id],
-    (err) => {
-      if (err) return res.status(500).send("Profile update failed.");
-      res.send("Profile updated");
+app.post("/profile", requireLogin, avatarUpload.single("avatar"), (req, res) => {
+  const mood = String(req.body?.mood || "").slice(0, 40);
+  const bio = String(req.body?.bio || "").slice(0, 2000);
+  const age = req.body?.age === "" || req.body?.age == null ? null : clamp(req.body.age, 18, 120);
+  const gender = String(req.body?.gender || "").slice(0, 40);
+
+  const avatar = req.file ? `/avatars/${req.file.filename}` : null;
+
+  db.get("SELECT avatar FROM users WHERE id = ?", [req.session.user.id], (e, old) => {
+    const newAvatar = avatar || old?.avatar || null;
+
+    db.run(
+      `UPDATE users SET mood=?, bio=?, age=?, gender=?, avatar=? WHERE id=?`,
+      [mood, bio, age, gender, newAvatar, req.session.user.id],
+      (err2) => {
+        if (err2) return res.status(500).send("Save failed");
+        return res.json({ ok: true });
+      }
+    );
+  });
+});
+
+// ---- Uploads (10MB max). VIP can upload mp4/mov, everyone can upload images.
+const chatUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || "").slice(0, 12) || "";
+      cb(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+app.post("/upload", requireLogin, chatUpload.single("file"), (req, res) => {
+  if (!req.file) return res.status(400).send("No file");
+
+  const mime = String(req.file.mimetype || "");
+  const role = req.session.user.role;
+
+  const isImage = /^image\//i.test(mime);
+  const isVideo = /^(video\/mp4|video\/quicktime)$/i.test(mime);
+
+  if (!isImage && !isVideo) return res.status(400).json({ message: "File type not allowed" });
+
+  if (isVideo && !requireMinRole(role, "VIP")) {
+    return res.status(403).json({ message: "VIP required for video uploads" });
+  }
+
+  const url = `/uploads/${req.file.filename}`;
+  return res.json({
+    url,
+    mime,
+    size: req.file.size,
+    type: isImage ? "image" : "video",
+  });
+});
+
+// ---- Mod logs API (Moderator+)
+app.get("/mod/logs", requireLogin, (req, res) => {
+  const role = req.session.user.role;
+  if (!requireMinRole(role, "Moderator")) return res.status(403).send("Forbidden");
+
+  const limit = clamp(req.query.limit || 50, 1, 200);
+  const user = String(req.query.user || "").trim().slice(0, 40);
+  const action = String(req.query.action || "").trim().slice(0, 40);
+
+  const wh = [];
+  const args = [];
+
+  if (user) {
+    wh.push("(lower(actor_username) = lower(?) OR lower(target_username) = lower(?))");
+    args.push(user, user);
+  }
+  if (action) {
+    wh.push("action = ?");
+    args.push(action);
+  }
+
+  const whereSql = wh.length ? `WHERE ${wh.join(" AND ")}` : "";
+  db.all(
+    `SELECT ts, actor_username, actor_role, action, target_username, room, details
+     FROM mod_logs ${whereSql}
+     ORDER BY ts DESC LIMIT ?`,
+    [...args, limit],
+    (err, rows) => {
+      if (err) return res.status(500).send("Failed");
+      return res.json(rows || []);
     }
   );
 });
 
-// ---------- Socket session bridge ----------
-io.use((socket, next) => sessionMiddleware(socket.request, {}, next));
-io.use((socket, next) => {
-  const sess = socket.request.session;
-  if (!sess?.user) return next(new Error("Unauthorized"));
-  socket.user = sess.user; // {id, username, role}
-  next();
-});
-
-// ---------- Realtime state ----------
-const roomsState = new Map(); // room -> Map(socket.id -> userObj)
-const typingState = new Map(); // room -> Set(username)
-const reactionsState = new Map(); // room -> Map(messageId -> { username: emoji })
+// ---- Real-time presence tracking
+const onlineState = new Map(); // userId -> { room, status }
 const socketIdByUserId = new Map(); // userId -> socket.id
+const typingByRoom = new Map(); // room -> Set(username)
+const msgRate = new Map(); // socket.id -> { lastTs, count }
 
-function getRoomMap(room) {
-  if (!roomsState.has(room)) roomsState.set(room, new Map());
-  return roomsState.get(room);
+// ---- Helpers for punishments
+function isPunished(userId, type, cb) {
+  const now = Date.now();
+  db.get(
+    `SELECT * FROM punishments
+     WHERE user_id = ? AND type = ?
+     AND (expires_at IS NULL OR expires_at > ?)
+     ORDER BY created_at DESC LIMIT 1`,
+    [userId, type, now],
+    (_e, row) => cb(!!row, row || null)
+  );
 }
-function getTypingSet(room) {
-  if (!typingState.has(room)) typingState.set(room, new Set());
-  return typingState.get(room);
-}
-function getRoomReactions(room) {
-  if (!reactionsState.has(room)) reactionsState.set(room, new Map());
-  return reactionsState.get(room);
+
+// ---- Socket auth middleware (session)
+io.use((socket, next) => {
+  // express-session is cookie-based; socket.io shares cookies.
+  // We just trust that the client loaded the page after login.
+  // If not logged in, disconnect.
+  const req = socket.request;
+  const res = req.res || {};
+  session({
+    store: new SQLiteStore({ db: "sessions.sqlite", dir: __dirname }),
+    secret: process.env.SESSION_SECRET || "dev_secret_change_me",
+    resave: false,
+    saveUninitialized: false,
+    cookie: { httpOnly: true, sameSite: "lax", secure: !!process.env.RENDER },
+  })(req, res, () => {
+    if (!req.session?.user?.id) return next(new Error("Not authenticated"));
+    next();
+  });
+});
+
+function broadcastTyping(room) {
+  const set = typingByRoom.get(room);
+  const names = set ? Array.from(set) : [];
+  io.to(room).emit("typing update", names);
 }
 
 function emitUserList(room) {
-  const map = getRoomMap(room);
-  const list = Array.from(map.values()).map(u => ({
-    id: u.userId,
-    name: u.username,
-    role: u.role,
-    status: u.status,
-    avatar: u.avatar,
-    mood: u.mood,
-  }));
-  io.to(room).emit("user list", list);
-}
-
-function leaveCurrentRoom(socket) {
-  const prev = socket.currentRoom;
-  if (!prev) return;
-
-  socket.leave(prev);
-
-  const map = getRoomMap(prev);
-  map.delete(socket.id);
-
-  const tset = getTypingSet(prev);
-  if (tset.delete(socket.user.username)) {
-    socket.to(prev).emit("typing update", Array.from(tset));
+  // Build list from sockets in room
+  const users = [];
+  const sids = io.sockets.adapter.rooms.get(room);
+  if (sids) {
+    for (const sid of sids) {
+      const s = io.sockets.sockets.get(sid);
+      if (!s?.user) continue;
+      users.push({
+        name: s.user.username,
+        role: s.user.role,
+        status: s.user.status || "Online",
+        mood: s.user.mood || "",
+        avatar: s.user.avatar || "",
+      });
+    }
   }
 
-  emitUserList(prev);
-  socket.currentRoom = null;
-}
-
-// message rate limit per socket
-const msgRate = new Map(); // socket.id -> {tokens,last}
-function allowMsg(socketId) {
-  const now = Date.now();
-  const cap = 6;          // burst
-  const refillPerMs = 6 / 4000; // ~6 msgs per 4s
-  const prev = msgRate.get(socketId) || { tokens: cap, last: now };
-  const elapsed = now - prev.last;
-  const tokens = Math.min(cap, prev.tokens + elapsed * refillPerMs);
-  const ok = tokens >= 1;
-  msgRate.set(socketId, { tokens: ok ? tokens - 1 : tokens, last: now });
-  return ok;
-}
-
-// ---------- Moderation checks ----------
-function canModerate(actorRole, targetRole) {
-  return roleRank(actorRole) > roleRank(targetRole);
-}
-function requireMinRole(actorRole, minRole) {
-  return roleRank(actorRole) >= roleRank(minRole);
-}
-
-// ---------- Socket events ----------
-io.on("connection", (socket) => {
-  socket.currentRoom = null;
-  socketIdByUserId.set(socket.user.id, socket.id);
-
-  socket.on("join room", ({ room, status }) => {
-    room = String(room || "general").toLowerCase();
-    status = String(status || "Online");
-
-    // ban check (ban blocks socket participation)
-    getActiveBanMute(socket.user.id, ({ ban }) => {
-      if (ban) {
-        socket.emit("system", "You are banned.");
-        return;
-      }
-
-      leaveCurrentRoom(socket);
-      socket.join(room);
-      socket.currentRoom = room;
-
-      // load fresh profile bits
-      db.get(
-        "SELECT username, role, avatar, mood FROM users WHERE id = ?",
-        [socket.user.id],
-        (err, row) => {
-          if (err || !row) return;
-
-          ensureOwnerRoleIfNeeded(row, (fixedRole) => {
-            fixedRole = normalizeRole(fixedRole);
-            socket.request.session.user.role = fixedRole;
-
-            const map = getRoomMap(room);
-            map.set(socket.id, {
-              socketId: socket.id,
-              userId: socket.user.id,
-              username: row.username,
-              role: fixedRole,
-              status,
-              avatar: row.avatar || "",
-              mood: row.mood || "",
-            });
-
-            socket.to(room).emit("system", `${row.username} joined #${room}`);
-            emitUserList(room);
-
-            // send last 50 messages
-            db.all(
-              "SELECT id, room, username, role, text, ts, deleted FROM messages WHERE room = ? ORDER BY ts DESC LIMIT 50",
-              [room],
-              (_e2, rows) => {
-                const history = (rows || []).reverse().map(r => ({
-                  messageId: r.id,
-                  room: r.room,
-                  user: r.username,
-                  role: r.role,
-                  text: r.deleted ? "[message deleted]" : r.text,
-                  deleted: !!r.deleted,
-                  ts: r.ts,
-                }));
-                socket.emit("history", history);
-              }
-            );
-          });
-        }
-      );
-    });
+  // Sort by role then name
+  users.sort((a, b) => {
+    const ra = roleRank(a.role);
+    const rb = roleRank(b.role);
+    if (ra !== rb) return rb - ra;
+    return a.name.localeCompare(b.name);
   });
 
-  socket.on("status change", ({ status }) => {
-    const room = socket.currentRoom;
-    if (!room) return;
+  io.to(room).emit("user list", users);
+}
 
-    const map = getRoomMap(room);
-    const u = map.get(socket.id);
-    if (!u) return;
+// ---- Socket handlers
+io.on("connection", (socket) => {
+  const sessUser = socket.request.session.user;
+  socket.user = {
+    id: sessUser.id,
+    username: sessUser.username,
+    role: sessUser.role,
+    status: "Online",
+    mood: "",
+    avatar: "",
+  };
 
-    u.status = String(status || "Online");
-    map.set(socket.id, u);
+  socketIdByUserId.set(socket.user.id, socket.id);
+
+  // Load profile bits for presence
+  db.get(
+    "SELECT avatar, mood FROM users WHERE id = ?",
+    [socket.user.id],
+    (_e, row) => {
+      if (row) {
+        socket.user.avatar = row.avatar || "";
+        socket.user.mood = row.mood || "";
+      }
+    }
+  );
+
+  socket.currentRoom = null;
+
+  socket.on("join room", ({ room, status }) => {
+    room = String(room || "").trim().toLowerCase();
+    if (!room) room = "main";
+    if (!["main", "nsfw", "music"].includes(room)) room = "main";
+
+    // leave old room
+    if (socket.currentRoom) {
+      socket.leave(socket.currentRoom);
+      const old = socket.currentRoom;
+      socket.currentRoom = null;
+
+      const set = typingByRoom.get(old);
+      if (set) {
+        set.delete(socket.user.username);
+        broadcastTyping(old);
+      }
+
+      emitUserList(old);
+    }
+
+    socket.currentRoom = room;
+    socket.join(room);
+
+    socket.user.status = String(status || socket.user.status || "Online").slice(0, 32);
+
+    onlineState.set(socket.user.id, { room, status: socket.user.status });
+
+    db.run("UPDATE users SET last_room=?, last_status=? WHERE id=?", [
+      room,
+      socket.user.status,
+      socket.user.id,
+    ]);
+
+    // Send history
+    db.all(
+      `SELECT id, room, username, role, avatar, text, ts, deleted, attachment_url, attachment_type, attachment_mime, attachment_size
+       FROM messages WHERE room=? ORDER BY ts ASC LIMIT 200`,
+      [room],
+      (_e, rows) => {
+        const history = (rows || []).map((r) => ({
+          messageId: r.id,
+          room: r.room,
+          user: r.username,
+          role: r.role,
+          avatar: r.avatar || "",
+          text: r.deleted ? "[message deleted]" : (r.text || ""),
+          ts: r.ts,
+          attachmentUrl: r.attachment_url || "",
+          attachmentType: r.attachment_type || "",
+          attachmentMime: r.attachment_mime || "",
+          attachmentSize: r.attachment_size || 0,
+        }));
+        socket.emit("history", history);
+
+        // reactions for recent messages
+        const ids = history.map((m) => m.messageId).slice(-80);
+        if (ids.length) {
+          const placeholders = ids.map(() => "?").join(",");
+          db.all(
+            `SELECT message_id, username, emoji FROM reactions WHERE message_id IN (${placeholders})`,
+            ids,
+            (_e2, reacts) => {
+              const byMsg = {};
+              for (const r of reacts || []) {
+                byMsg[r.message_id] = byMsg[r.message_id] || {};
+                byMsg[r.message_id][r.username] = r.emoji;
+              }
+              for (const mid of Object.keys(byMsg)) {
+                socket.emit("reaction update", { messageId: mid, reactions: byMsg[mid] });
+              }
+            }
+          );
+        }
+      }
+    );
+
+    socket.emit("system", `Joined #${room}`);
     emitUserList(room);
   });
 
   socket.on("typing", () => {
     const room = socket.currentRoom;
     if (!room) return;
-    const tset = getTypingSet(room);
-    tset.add(socket.user.username);
-    socket.to(room).emit("typing update", Array.from(tset));
+
+    let set = typingByRoom.get(room);
+    if (!set) typingByRoom.set(room, (set = new Set()));
+    set.add(socket.user.username);
+    broadcastTyping(room);
   });
 
   socket.on("stop typing", () => {
     const room = socket.currentRoom;
     if (!room) return;
-    const tset = getTypingSet(room);
-    if (tset.delete(socket.user.username)) {
-      socket.to(room).emit("typing update", Array.from(tset));
+
+    const set = typingByRoom.get(room);
+    if (set) {
+      set.delete(socket.user.username);
+      broadcastTyping(room);
     }
   });
 
-  socket.on("chat message", ({ text }) => {
+  socket.on("status change", ({ status }) => {
+    status = String(status || "Online").slice(0, 32);
+    socket.user.status = status;
+
+    const st = onlineState.get(socket.user.id);
+    if (st) st.status = status;
+
+    db.run("UPDATE users SET last_status=? WHERE id=?", [status, socket.user.id]);
+
+    if (socket.currentRoom) emitUserList(socket.currentRoom);
+  });
+
+  socket.on("chat message", (payload) => {
     const room = socket.currentRoom;
     if (!room) return;
 
-    if (!allowMsg(socket.id)) {
-      socket.emit("system", "You are sending messages too fast.");
-      return;
+    // basic spam rate limiting
+    const now = Date.now();
+    const r = msgRate.get(socket.id) || { lastTs: now, count: 0 };
+    if (now - r.lastTs > 4000) {
+      r.lastTs = now;
+      r.count = 0;
     }
+    r.count++;
+    msgRate.set(socket.id, r);
+    if (r.count > 10) return;
 
-    getActiveBanMute(socket.user.id, ({ mute, ban }) => {
-      if (ban) {
-        socket.emit("system", "You are banned.");
-        return;
-      }
-      if (mute && isActivePunishment(mute)) {
-        socket.emit("system", "You are muted.");
-        return;
-      }
+    isPunished(socket.user.id, "ban", (banned) => {
+      if (banned) return;
+      isPunished(socket.user.id, "mute", (muted) => {
+        if (muted) return;
 
-      const map = getRoomMap(room);
-      const u = map.get(socket.id);
-      if (!u) return;
+        const text = String(payload?.text || "").slice(0, 800);
+        const attachmentUrl = String(payload?.attachmentUrl || "").slice(0, 400);
+        const attachmentType = String(payload?.attachmentType || "").slice(0, 20);
+        const attachmentMime = String(payload?.attachmentMime || "").slice(0, 60);
+        const attachmentSize = Number(payload?.attachmentSize || 0) || 0;
 
-      const cleanText = String(text || "").slice(0, 800);
-      if (!cleanText.trim()) return;
-
-      const messageId = randomUUID();
-      const ts = Date.now();
-
-      db.run(
-        "INSERT INTO messages (id, room, user_id, username, role, text, ts, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
-        [messageId, room, socket.user.id, u.username, u.role, cleanText, ts],
-        () => {
-          io.to(room).emit("chat message", {
-            messageId,
+        db.run(
+          `INSERT INTO messages (room, user_id, username, role, avatar, text, ts, attachment_url, attachment_type, attachment_mime, attachment_size)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
             room,
-            user: u.username,
-            role: u.role,
-            avatar: u.avatar || "",
-            mood: u.mood || "",
-            text: cleanText,
-            ts,
-          });
-        }
-      );
+            socket.user.id,
+            socket.user.username,
+            socket.user.role,
+            socket.user.avatar || "",
+            text,
+            Date.now(),
+            attachmentUrl || null,
+            attachmentType || null,
+            attachmentMime || null,
+            attachmentSize || null,
+          ],
+          function () {
+            const msg = {
+              messageId: this.lastID,
+              room,
+              user: socket.user.username,
+              role: socket.user.role,
+              avatar: socket.user.avatar || "",
+              text,
+              ts: Date.now(),
+              attachmentUrl: attachmentUrl || "",
+              attachmentType: attachmentType || "",
+              attachmentMime: attachmentMime || "",
+              attachmentSize: attachmentSize || 0,
+            };
+            io.to(room).emit("chat message", msg);
+          }
+        );
+      });
     });
   });
 
-  // reactions: 1 per user per message
+  // Reactions: 1 reaction per user per message (enforced by PRIMARY KEY)
   socket.on("reaction", ({ messageId, emoji }) => {
     const room = socket.currentRoom;
     if (!room) return;
-    messageId = String(messageId || "");
-    emoji = String(emoji || "").slice(0, 8);
-    if (!messageId || !emoji) return;
+    const mid = String(messageId || "").trim();
+    const em = String(emoji || "").slice(0, 8);
+    if (!mid || !em) return;
 
-    const roomReacts = getRoomReactions(room);
-    if (!roomReacts.has(messageId)) roomReacts.set(messageId, {});
-    const map = roomReacts.get(messageId);
-
-    map[socket.user.username] = emoji;
-
-    io.to(room).emit("reaction update", { messageId, reactions: map });
+    db.run(
+      `INSERT INTO reactions (message_id, username, emoji)
+       VALUES (?, ?, ?)
+       ON CONFLICT(message_id, username) DO UPDATE SET emoji=excluded.emoji`,
+      [mid, socket.user.username, em],
+      () => {
+        db.all("SELECT username, emoji FROM reactions WHERE message_id=?", [mid], (_e, rows) => {
+          const reactions = {};
+          for (const r of rows || []) reactions[r.username] = r.emoji;
+          io.to(room).emit("reaction update", { messageId: mid, reactions });
+        });
+      }
+    );
   });
 
-  // ---------- Moderation ----------
-  // Delete message: Moderator+ can delete any; Users can delete their own if you want (disabled here).
+  // ---- Moderation: delete message
   socket.on("mod delete message", ({ messageId }) => {
     const room = socket.currentRoom;
     if (!room) return;
@@ -534,73 +781,33 @@ io.on("connection", (socket) => {
     const actorRole = socket.request.session.user.role;
     if (!requireMinRole(actorRole, "Moderator")) return;
 
-    db.get("SELECT * FROM messages WHERE id = ? AND room = ?", [messageId, room], (_e, msg) => {
-      if (!msg) return;
-      // Optional: enforce you can’t delete higher roles’ messages unless your role outranks
-      if (!canModerate(actorRole, msg.role) && msg.user_id !== socket.user.id) return;
+    const mid = String(messageId || "").trim();
+    if (!mid) return;
 
-      db.run("UPDATE messages SET deleted = 1 WHERE id = ?", [messageId], () => {
-        io.to(room).emit("message deleted", { messageId });
-      });
-    });
+    db.get(
+      "SELECT * FROM messages WHERE id=? AND room=?",
+      [mid, room],
+      (_e, msg) => {
+        if (!msg) return;
+        // cannot delete higher/equal role messages unless it's your own
+        if (!canModerate(actorRole, msg.role) && msg.user_id !== socket.user.id) return;
+
+        db.run("UPDATE messages SET deleted=1 WHERE id=?", [mid], () => {
+          io.to(room).emit("message deleted", { messageId: mid });
+          logModAction({
+            actor: socket.user,
+            action: "DELETE_MESSAGE",
+            targetUserId: msg.user_id,
+            targetUsername: msg.username,
+            room,
+            details: `messageId=${mid}`,
+          });
+        });
+      }
+    );
   });
 
-  // Mute user: Moderator+
-  socket.on("mod mute", ({ username, minutes, reason }) => {
-    const room = socket.currentRoom;
-    if (!room) return;
-    const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Moderator")) return;
-
-    const mins = Math.max(1, Math.min(1440, Number(minutes || 10)));
-    const expiresAt = Date.now() + mins * 60 * 1000;
-
-    db.get("SELECT id, role FROM users WHERE username = ?", [String(username || "")], (_e, target) => {
-      if (!target) return;
-      if (!canModerate(actorRole, target.role)) return;
-
-      db.run(
-        "INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id) VALUES (?, 'mute', ?, ?, ?)",
-        [target.id, expiresAt, String(reason || "").slice(0, 120), socket.user.id],
-        () => {
-          io.to(room).emit("system", `${username} was muted for ${mins} minutes.`);
-        }
-      );
-    });
-  });
-
-  // Ban user: Admin+
-  socket.on("mod ban", ({ username, minutes, reason }) => {
-    const room = socket.currentRoom;
-    if (!room) return;
-    const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Admin")) return;
-
-    const mins = Number(minutes);
-    const expiresAt = Number.isFinite(mins) && mins > 0 ? (Date.now() + mins * 60 * 1000) : null;
-
-    db.get("SELECT id, role FROM users WHERE username = ?", [String(username || "")], (_e, target) => {
-      if (!target) return;
-      if (!canModerate(actorRole, target.role)) return;
-
-      db.run(
-        "INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id) VALUES (?, 'ban', ?, ?, ?)",
-        [target.id, expiresAt, String(reason || "").slice(0, 120), socket.user.id],
-        () => {
-          io.to(room).emit("system", `${username} was banned${expiresAt ? ` for ${mins} minutes` : ""}.`);
-
-          // kick if online
-          const sid = socketIdByUserId.get(target.id);
-          if (sid) {
-            const s = io.sockets.sockets.get(sid);
-            if (s) s.disconnect(true);
-          }
-        }
-      );
-    });
-  });
-
-  // Kick user: Moderator+ (disconnect only, no DB record)
+  // ---- Kick / Mute / Ban + Unmute/Unban/Warn + Set role
   socket.on("mod kick", ({ username }) => {
     const room = socket.currentRoom;
     if (!room) return;
@@ -608,24 +815,230 @@ io.on("connection", (socket) => {
     const actorRole = socket.request.session.user.role;
     if (!requireMinRole(actorRole, "Moderator")) return;
 
-    db.get("SELECT id, role FROM users WHERE username = ?", [String(username || "")], (_e, target) => {
+    username = sanitizeUsername(username);
+    db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
       if (!target) return;
       if (!canModerate(actorRole, target.role)) return;
 
       const sid = socketIdByUserId.get(target.id);
-      if (sid) {
-        const s = io.sockets.sockets.get(sid);
-        if (s) s.disconnect(true);
-      }
+      if (sid) io.sockets.sockets.get(sid)?.disconnect(true);
+
       io.to(room).emit("system", `${username} was kicked.`);
+      logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: username, room });
+    });
+  });
+
+  socket.on("mod mute", ({ username, minutes = 10, reason = "" }) => {
+    const room = socket.currentRoom;
+    if (!room) return;
+
+    const actorRole = socket.request.session.user.role;
+    if (!requireMinRole(actorRole, "Moderator")) return;
+
+    username = sanitizeUsername(username);
+    const mins = clamp(minutes, 1, 1440);
+    const expiresAt = Date.now() + mins * 60 * 1000;
+
+    db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+      if (!target) return;
+      if (!canModerate(actorRole, target.role)) return;
+
+      db.run(
+        `INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id, created_at)
+         VALUES (?, 'mute', ?, ?, ?, ?)`,
+        [target.id, expiresAt, String(reason || "").slice(0, 180), socket.user.id, Date.now()],
+        () => {
+          io.to(room).emit("system", `${username} was muted for ${mins} minutes.`);
+          logModAction({
+            actor: socket.user,
+            action: "MUTE",
+            targetUserId: target.id,
+            targetUsername: username,
+            room,
+            details: `minutes=${mins} reason=${String(reason || "").slice(0, 180)}`,
+          });
+        }
+      );
+    });
+  });
+
+  socket.on("mod ban", ({ username, minutes = 0, reason = "" }) => {
+    const room = socket.currentRoom;
+    if (!room) return;
+
+    const actorRole = socket.request.session.user.role;
+    if (!requireMinRole(actorRole, "Admin")) return;
+
+    username = sanitizeUsername(username);
+    const mins = Number(minutes);
+    const expiresAt = Number.isFinite(mins) && mins > 0 ? Date.now() + mins * 60 * 1000 : null;
+
+    db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+      if (!target) return;
+      if (!canModerate(actorRole, target.role)) return;
+
+      db.run(
+        `INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id, created_at)
+         VALUES (?, 'ban', ?, ?, ?, ?)`,
+        [target.id, expiresAt, String(reason || "").slice(0, 180), socket.user.id, Date.now()],
+        () => {
+          io.to(room).emit(
+            "system",
+            `${username} was banned${expiresAt ? ` for ${mins} minutes` : " permanently"}.`
+          );
+          const sid = socketIdByUserId.get(target.id);
+          if (sid) io.sockets.sockets.get(sid)?.disconnect(true);
+
+          logModAction({
+            actor: socket.user,
+            action: "BAN",
+            targetUserId: target.id,
+            targetUsername: username,
+            room,
+            details: expiresAt ? `minutes=${mins}` : `permanent reason=${String(reason || "").slice(0, 180)}`,
+          });
+        }
+      );
+    });
+  });
+
+  socket.on("mod unmute", ({ username, reason = "" }) => {
+    const room = socket.currentRoom;
+    if (!room) return;
+    const actorRole = socket.request.session.user.role;
+    if (!requireMinRole(actorRole, "Moderator")) return;
+
+    username = sanitizeUsername(username);
+    db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+      if (!target) return;
+      if (!canModerate(actorRole, target.role)) return;
+
+      db.run("DELETE FROM punishments WHERE user_id=? AND type='mute'", [target.id], () => {
+        io.to(room).emit("system", `${username} was unmuted.`);
+        logModAction({
+          actor: socket.user,
+          action: "UNMUTE",
+          targetUserId: target.id,
+          targetUsername: username,
+          room,
+          details: String(reason || "").slice(0, 180),
+        });
+      });
+    });
+  });
+
+  socket.on("mod unban", ({ username, reason = "" }) => {
+    const room = socket.currentRoom;
+    if (!room) return;
+    const actorRole = socket.request.session.user.role;
+    if (!requireMinRole(actorRole, "Admin")) return;
+
+    username = sanitizeUsername(username);
+    db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+      if (!target) return;
+      if (!canModerate(actorRole, target.role)) return;
+
+      db.run("DELETE FROM punishments WHERE user_id=? AND type='ban'", [target.id], () => {
+        io.to(room).emit("system", `${username} was unbanned.`);
+        logModAction({
+          actor: socket.user,
+          action: "UNBAN",
+          targetUserId: target.id,
+          targetUsername: username,
+          room,
+          details: String(reason || "").slice(0, 180),
+        });
+      });
+    });
+  });
+
+  socket.on("mod warn", ({ username, reason = "" }) => {
+    const room = socket.currentRoom;
+    if (!room) return;
+    const actorRole = socket.request.session.user.role;
+    if (!requireMinRole(actorRole, "Moderator")) return;
+
+    username = sanitizeUsername(username);
+    db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+      if (!target) return;
+      if (!canModerate(actorRole, target.role)) return;
+
+      io.to(room).emit("system", `${username} was warned: ${String(reason || "").slice(0, 120)}`);
+      logModAction({
+        actor: socket.user,
+        action: "WARN",
+        targetUserId: target.id,
+        targetUsername: username,
+        room,
+        details: String(reason || "").slice(0, 180),
+      });
+    });
+  });
+
+  socket.on("mod set role", ({ username, role, reason = "" }) => {
+    const room = socket.currentRoom;
+    if (!room) return;
+
+    const actorRole = socket.request.session.user.role;
+    if (actorRole !== "Owner") return;
+
+    username = sanitizeUsername(username);
+    role = String(role || "").trim();
+    if (!ROLES.includes(role)) return;
+
+    db.get("SELECT id, role as oldRole FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+      if (!target) return;
+
+      // don't allow lowering Owner unless it's yourself (simple safety)
+      if (target.oldRole === "Owner" && target.id !== socket.user.id) return;
+
+      db.run("UPDATE users SET role=? WHERE id=?", [role, target.id], () => {
+        logModAction({
+          actor: socket.user,
+          action: "SET_ROLE",
+          targetUserId: target.id,
+          targetUsername: username,
+          room,
+          details: `role=${role} reason=${String(reason || "").slice(0, 180)}`,
+        });
+
+        // if user is online, update session-ish info
+        const sid = socketIdByUserId.get(target.id);
+        if (sid) {
+          const s = io.sockets.sockets.get(sid);
+          if (s?.request?.session?.user) {
+            s.request.session.user.role = role;
+            s.user.role = role;
+          }
+        }
+
+        io.to(room).emit("system", `${username} role set to ${role}.`);
+        emitUserList(room);
+      });
     });
   });
 
   socket.on("disconnect", () => {
+    const room = socket.currentRoom;
+
     socketIdByUserId.delete(socket.user.id);
-    leaveCurrentRoom(socket);
+    onlineState.delete(socket.user.id);
     msgRate.delete(socket.id);
+
+    db.run("UPDATE users SET last_seen=? WHERE id=?", [Date.now(), socket.user.id]);
+
+    if (room) {
+      const set = typingByRoom.get(room);
+      if (set) {
+        set.delete(socket.user.username);
+        broadcastTyping(room);
+      }
+      emitUserList(room);
+    }
   });
 });
 
-http.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+// ---- Start
+server.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
