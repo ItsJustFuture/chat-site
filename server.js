@@ -62,6 +62,17 @@ app.use("/uploads", express.static(uploadDir, {
   setHeaders: (res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+    res.setHeader(
+  "Content-Security-Policy",
+  "default-src 'self'; " +
+  "script-src 'self' 'unsafe-inline'; " +
+  "script-src-elem 'self' 'unsafe-inline'; " +
+  "style-src 'self' 'unsafe-inline'; " +
+  "img-src 'self' data: blob:; " +
+  "connect-src 'self' ws: wss:; " +
+  "media-src 'self' blob:; " +
+  "object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
+);
   }
 }));
 
