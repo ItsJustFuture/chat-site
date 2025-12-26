@@ -938,7 +938,6 @@ function setActiveRoom(room){
     el.classList.toggle("active", el.dataset.room === room);
   });
 }
-}
 function joinRoom(room){
   room = sanitizeRoomClient(room) || "main";
   setActiveRoom(room);
