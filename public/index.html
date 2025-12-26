@@ -90,6 +90,7 @@
               <input id="searchInput" placeholder="Search messages...">
             </div>
             <button class="iconBtn" id="dmToggleBtn" type="button" title="Direct messages">💬</button>
+            <button class="iconBtn" id="groupDmToggleBtn" type="button" title="Group chats">👪</button>
             <button class="iconBtn mobOnly" id="openMembersBtn" type="button" title="Members">👥</button>
           </div>
         </div>
@@ -150,11 +151,12 @@
     </div>
 
     <div class="dmCreate">
-      <input id="dmParticipants" placeholder="Add people (comma separated)">
-      <input id="dmTitle" placeholder="Group title (optional)">
-      <button class="btn" id="dmCreateBtn" type="button">Start chat</button>
-      <div class="msgline" id="dmMsg"></div>
-    </div>
+  <div class="small" id="dmModeLabel">Mode: Direct Message</div>
+  <input id="dmParticipants" placeholder="Add people (comma separated)">
+  <input id="dmTitle" placeholder="Group title (optional)">
+  <button class="btn" id="dmCreateBtn" type="button">Start chat</button>
+  <div class="msgline" id="dmMsg"></div>
+</div>
 
     <div class="dmContent">
       <div class="dmThreads" id="dmThreadList"></div>
