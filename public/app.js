@@ -52,8 +52,7 @@ const dmPanel = document.getElementById("dmPanel");
 const dmToggleBtn = document.getElementById("dmToggleBtn");
 const dmCloseBtn = document.getElementById("dmCloseBtn");
 const dmRefreshBtn = document.getElementById("dmRefreshBtn");
-const dmDirectList = document.getElementById("dmDirectList");
-const dmGroupList = document.getElementById("dmGroupList");
+const dmThreadList = document.getElementById("dmThreadList");
 const dmParticipantsInput = document.getElementById("dmParticipants");
 const dmTitleInput = document.getElementById("dmTitle");
 const dmCreateBtn = document.getElementById("dmCreateBtn");
@@ -466,32 +465,25 @@ drawerOverlay?.addEventListener("click", closeDrawers);
 document.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeDrawers(); });
 
 // dms
-function renderDmSection(target, items, emptyText){
-  target.innerHTML="";
-  if(!items.length){
-    target.innerHTML = `<div class="dmEmpty">${emptyText}</div>`;
+function renderDmThreads(){
+  dmThreadList.innerHTML="";
+  if(!dmThreads.length){
+    dmThreadList.innerHTML = '<div class="dmEmpty">No conversations yet.</div>';
     return;
   }
-  items.forEach(t=>{
+  dmThreads.forEach(t=>{
     const div=document.createElement("div");
     div.className="dmItem" + (t.id===activeDmId?" active":"");
     const others=(t.participants||[]).filter(p=>p!==me?.username);
-    const label=t.title || (others.join(", ") || (t.is_group?"Group chat":"Direct Message"));
+    const label=t.title || (others.join(", ") || "Direct Message");
     const preview=t.last_text ? t.last_text.slice(0,80) : "No messages yet";
     div.innerHTML = `
       <div class="name">${escapeHtml(label)}</div>
       <div class="small">${escapeHtml(preview)}</div>
     `;
     div.onclick=()=>openDmThread(t.id);
-    target.appendChild(div);
+    dmThreadList.appendChild(div);
   });
-}
-
-function renderDmThreads(){
-  const direct = dmThreads.filter(t=>!t.is_group);
-  const groups = dmThreads.filter(t=>!!t.is_group);
-  renderDmSection(dmDirectList, direct, "No direct messages yet.");
-  renderDmSection(dmGroupList, groups, "No group chats yet.");
 }
 
 async function loadDmThreads(){
