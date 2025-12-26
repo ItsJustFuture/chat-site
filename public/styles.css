@@ -195,6 +195,20 @@ textarea{ min-height:90px; resize:vertical; }
 .self .ts{ color:#e9e9ff; opacity:.85; }
 .text{ font-size:14px; line-height:1.35; white-space:pre-wrap; }
 .mention{ background:var(--soft); border:1px solid var(--line); padding:0 4px; border-radius:6px; }
+/* message layout: bubble + reactions + side action rail */
+.msgBody{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  min-width:0;
+}
+
+.msgActions{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  padding-top:2px;
+}
 
 .attachment{
   margin-top:6px; border-radius:14px; overflow:hidden;
