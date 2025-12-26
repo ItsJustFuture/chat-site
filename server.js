@@ -164,6 +164,75 @@ db.serialize(() => {
   db.run("UPDATE users SET role='Owner' WHERE lower(username)='iri'");
 });
 
+function ensureDmSchema(cb) {
+  db.serialize(() => {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS dm_threads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        is_group INTEGER NOT NULL DEFAULT 0,
+        created_by INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS dm_participants (
+        thread_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        added_by INTEGER,
+        joined_at INTEGER NOT NULL,
+        UNIQUE(thread_id, user_id)
+      )
+    `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS dm_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        thread_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        username TEXT NOT NULL,
+        text TEXT,
+        ts INTEGER NOT NULL
+      )
+    `);
+
+    let pending = 2;
+    let done = false;
+    const finish = (err) => {
+      if (done) return;
+      if (err) {
+        done = true;
+        return cb(err);
+      }
+      if (--pending === 0) {
+        done = true;
+        cb();
+      }
+    };
+
+    ensureTableColumns(
+      "dm_threads",
+      [
+        ["title", "title TEXT"],
+        ["is_group", "is_group INTEGER NOT NULL DEFAULT 0"],
+        ["created_by", "created_by INTEGER NOT NULL DEFAULT 0"],
+        ["created_at", "created_at INTEGER NOT NULL DEFAULT 0"],
+      ],
+      finish
+    );
+
+    ensureTableColumns(
+      "dm_participants",
+      [
+        ["added_by", "added_by INTEGER"],
+        ["joined_at", "joined_at INTEGER NOT NULL DEFAULT 0"],
+      ],
+      finish
+    );
+  });
+}
+
 // ---- Security + parsing
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
@@ -386,8 +455,11 @@ app.post("/login", (req, res) => {
       const ok = await bcrypt.compare(password, passwordHash);
       if (!ok) return res.status(401).send("Invalid username or password");
 
-      // Auto co-owner enforcement (case-insensitive)
-      if (AUTO_COOWNERS.has(normKey(row.username)) && row.role !== "Co-owner") {
+      const norm = normKey(row.username);
+      if (AUTO_OWNER.has(norm) && row.role !== "Owner") {
+        db.run("UPDATE users SET role = 'Owner' WHERE id = ?", [row.id]);
+        row.role = "Owner";
+      } else if (AUTO_COOWNERS.has(norm) && row.role !== "Co-owner") {
         db.run("UPDATE users SET role = 'Co-owner' WHERE id = ?", [row.id]);
         row.role = "Co-owner";
       }

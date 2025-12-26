@@ -124,6 +124,45 @@ db.serialize(() => {
       details TEXT
     )
   `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dm_threads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT,
+      is_group INTEGER NOT NULL DEFAULT 0,
+      created_by INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
+  addColumnIfMissing("dm_threads", "title", "title TEXT");
+  addColumnIfMissing("dm_threads", "is_group", "is_group INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing("dm_threads", "created_by", "created_by INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing("dm_threads", "created_at", "created_at INTEGER NOT NULL DEFAULT 0");
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dm_participants (
+      thread_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      added_by INTEGER,
+      joined_at INTEGER NOT NULL,
+      UNIQUE(thread_id, user_id)
+    )
+  `);
+
+  addColumnIfMissing("dm_participants", "added_by", "added_by INTEGER");
+  addColumnIfMissing("dm_participants", "joined_at", "joined_at INTEGER NOT NULL DEFAULT 0");
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dm_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      thread_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      username TEXT NOT NULL,
+      text TEXT,
+      ts INTEGER NOT NULL
+    )
+  `);
 });
 
 module.exports = db;
