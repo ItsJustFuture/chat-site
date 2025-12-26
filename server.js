@@ -87,7 +87,19 @@ db.serialize(() => {
       last_status TEXT
     )
   `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS rooms (
+      name TEXT PRIMARY KEY,
+      created_by INTEGER,
+      created_at INTEGER NOT NULL
+    )
+  `);
 
+  // seed default rooms
+  const seedRooms = ["main", "nsfw", "music"];
+  for (const r of seedRooms) {
+    db.run(`INSERT OR IGNORE INTO rooms (name, created_by, created_at) VALUES (?, NULL, ?)`, [r, Date.now()]);
+  }
   // ensure all expected columns exist even if DB was created by older code
   const userColumns = [
     ["password_hash", "password_hash TEXT"],
@@ -391,7 +403,13 @@ function fetchUsersByNames(usernames, cb) {
     (err, rows) => cb(err, rows || [])
   );
 }
-
+function sanitizeRoomName(r) {
+  r = String(r || "").trim();
+  r = r.replace(/^#+/, "");      // drop leading '#'
+  r = r.toLowerCase();
+  r = r.replace(/[^a-z0-9_-]/g, "");
+  return r.slice(0, 24);
+}
 function loadThreadForUser(threadId, userId, cb) {
   db.get(
     `SELECT id, title, is_group FROM dm_threads WHERE id = ?`,
@@ -543,7 +561,43 @@ app.get("/me", (req, res) => {
   if (!req.session?.user?.id) return res.json(null);
   return res.json(req.session.user);
 });
+// ---- Rooms API
+app.get("/rooms", requireLogin, (_req, res) => {
+  db.all(`SELECT name FROM rooms ORDER BY name ASC`, [], (err, rows) => {
+    if (err) return res.status(500).send("Failed");
+    return res.json((rows || []).map(r => r.name));
+  });
+});
 
+// Co-owner+ can create rooms
+app.post("/rooms", requireLogin, (req, res) => {
+  const actor = req.session.user;
+  if (!requireMinRole(actor.role, "Co-owner")) return res.status(403).send("Forbidden");
+
+  const name = sanitizeRoomName(req.body?.name || req.body?.room || "");
+  if (!name) return res.status(400).send("Invalid room name");
+
+  db.get(`SELECT name FROM rooms WHERE name=?`, [name], (err, row) => {
+    if (err) return res.status(500).send("Failed");
+    if (row) return res.status(409).send("Room already exists");
+
+    db.run(
+      `INSERT INTO rooms (name, created_by, created_at) VALUES (?, ?, ?)`,
+      [name, actor.id, Date.now()],
+      (insErr) => {
+        if (insErr) return res.status(500).send("Failed to create room");
+
+        logModAction({ actor, action: "room.create", room: name, details: null });
+
+        db.all(`SELECT name FROM rooms ORDER BY name ASC`, [], (_e2, rows2) => {
+          io.emit("rooms update", (rows2 || []).map(r => r.name));
+        });
+
+        return res.json({ ok: true, name });
+      }
+    );
+  });
+});
 // ---- Profile routes
 app.get("/profile", requireLogin, (req, res) => {
   db.get(
@@ -957,87 +1011,89 @@ io.on("connection", (socket) => {
     }
   );
 
-  socket.on("join room", ({ room, status }) => {
-    room = String(room || "").trim().toLowerCase();
-    if (!room) room = "main";
-    if (!["main", "nsfw", "music"].includes(room)) room = "main";
+socket.on("join room", ({ room, status }) => {
+  const desired = sanitizeRoomName(room) || "main";
 
-    // leave old room
-    if (socket.currentRoom) {
-      socket.leave(socket.currentRoom);
-      const old = socket.currentRoom;
-      socket.currentRoom = null;
-
-      const set = typingByRoom.get(old);
-      if (set) {
-        set.delete(socket.user.username);
-        broadcastTyping(old);
-      }
-
-      emitUserList(old);
-    }
-
-    socket.currentRoom = room;
-    socket.join(room);
-
-    socket.user.status = String(status || socket.user.status || "Online").slice(0, 32);
-
-    onlineState.set(socket.user.id, { room, status: socket.user.status });
-
-    db.run("UPDATE users SET last_room=?, last_status=? WHERE id=?", [
-      room,
-      socket.user.status,
-      socket.user.id,
-    ]);
-
-   // Send history (exclude deleted messages entirely)
-db.all(
-  `SELECT id, room, username, role, avatar, text, ts, attachment_url, attachment_type, attachment_mime, attachment_size
-   FROM messages
-   WHERE room=? AND deleted=0
-   ORDER BY ts ASC
-   LIMIT 200`,
-  [room],
-  (_e, rows) => {
-    const history = (rows || []).map((r) => ({
-      messageId: r.id,
-      room: r.room,
-      user: r.username,
-      role: r.role,
-      avatar: r.avatar || "",
-      text: (r.text || ""),
-      ts: r.ts,
-      attachmentUrl: r.attachment_url || "",
-      attachmentType: r.attachment_type || "",
-      attachmentMime: r.attachment_mime || "",
-      attachmentSize: r.attachment_size || 0,
-    }));
-    socket.emit("history", history);
-
-    // reactions for recent messages
-    const ids = history.map((m) => m.messageId).slice(-80);
-    if (ids.length) {
-      const placeholders = ids.map(() => "?").join(",");
-      db.all(
-        `SELECT message_id, username, emoji FROM reactions WHERE message_id IN (${placeholders})`,
-        ids,
-        (_e2, reacts) => {
-          const byMsg = {};
-          for (const r of reacts || []) {
-            byMsg[r.message_id] = byMsg[r.message_id] || {};
-            byMsg[r.message_id][r.username] = r.emoji;
-          }
-          for (const mid of Object.keys(byMsg)) {
-            socket.emit("reaction update", { messageId: mid, reactions: byMsg[mid] });
-          }
-        }
-      );
-    }
-  }
-);
-    socket.emit("system", `Joined #${room}`);
-    emitUserList(room);
+  db.get(`SELECT name FROM rooms WHERE name=?`, [desired], (_err, row) => {
+    const finalRoom = row ? desired : "main";
+    doJoin(finalRoom, status);
   });
+});
+
+function doJoin(room, status) {
+  // leave old room
+  if (socket.currentRoom) {
+    socket.leave(socket.currentRoom);
+    const old = socket.currentRoom;
+    socket.currentRoom = null;
+
+    const set = typingByRoom.get(old);
+    if (set) {
+      set.delete(socket.user.username);
+      broadcastTyping(old);
+    }
+
+    emitUserList(old);
+  }
+
+  socket.currentRoom = room;
+  socket.join(room);
+
+  socket.user.status = String(status || socket.user.status || "Online").slice(0, 32);
+
+  onlineState.set(socket.user.id, { room, status: socket.user.status });
+
+  db.run("UPDATE users SET last_room=?, last_status=? WHERE id=?", [
+    room,
+    socket.user.status,
+    socket.user.id,
+  ]);
+
+  // Send history (exclude deleted messages entirely)
+  db.all(
+    `SELECT id, room, username, role, avatar, text, ts, attachment_url, attachment_type, attachment_mime, attachment_size
+     FROM messages WHERE room=? AND deleted=0 ORDER BY ts ASC LIMIT 200`,
+    [room],
+    (_e, rows) => {
+      const history = (rows || []).map((r) => ({
+        messageId: r.id,
+        room: r.room,
+        user: r.username,
+        role: r.role,
+        avatar: r.avatar || "",
+        text: (r.text || ""),
+        ts: r.ts,
+        attachmentUrl: r.attachment_url || "",
+        attachmentType: r.attachment_type || "",
+        attachmentMime: r.attachment_mime || "",
+        attachmentSize: r.attachment_size || 0,
+      }));
+      socket.emit("history", history);
+
+      const ids = history.map((m) => m.messageId).slice(-80);
+      if (ids.length) {
+        const placeholders = ids.map(() => "?").join(",");
+        db.all(
+          `SELECT message_id, username, emoji FROM reactions WHERE message_id IN (${placeholders})`,
+          ids,
+          (_e2, reacts) => {
+            const byMsg = {};
+            for (const r of reacts || []) {
+              byMsg[r.message_id] = byMsg[r.message_id] || {};
+              byMsg[r.message_id][r.username] = r.emoji;
+            }
+            for (const mid of Object.keys(byMsg)) {
+              socket.emit("reaction update", { messageId: mid, reactions: byMsg[mid] });
+            }
+          }
+        );
+      }
+    }
+  );
+
+  socket.emit("system", `Joined ${room}`);
+  emitUserList(room);
+}
 
   socket.on("typing", () => {
     const room = socket.currentRoom;
