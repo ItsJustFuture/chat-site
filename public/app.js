@@ -298,6 +298,10 @@ function addMessage(m){
   av.className="msgAvatar";
   av.appendChild(avatarNode(m.avatar, m.user));
 
+  // Message body (bubble + reactions BELOW bubble)
+  const body=document.createElement("div");
+  body.className="msgBody";
+
   const bubble=document.createElement("div");
   bubble.className="bubble";
 
@@ -341,16 +345,28 @@ function addMessage(m){
     bubble.appendChild(att);
   }
 
+  // reactions display (NOT inside bubble anymore)
+  const reacts=document.createElement("div");
+  reacts.className="reactions";
+  reacts.id="reacts-"+m.messageId;
+
+  body.appendChild(bubble);
+  body.appendChild(reacts);
+
+  // Side rail actions (NOT inside bubble anymore)
   const actions=document.createElement("div");
-  actions.className="actions";
-  const emojis=["😀","😂","🔥","❤️","👍"];
+  actions.className="msgActions";
+
+  const emojis=["😀","😂","🔥","❤️","👍","👀","🫦","👎"];
   for(const e of emojis){
     const b=document.createElement("button");
     b.className="reactBtn";
     b.textContent=e;
+    b.title="React";
     b.onclick=()=>socket?.emit("reaction",{messageId:m.messageId, emoji:e});
     actions.appendChild(b);
   }
+
   if(roleRank(me.role) >= roleRank("Moderator")){
     const del=document.createElement("button");
     del.className="reactBtn";
@@ -359,15 +375,10 @@ function addMessage(m){
     del.onclick=()=>socket?.emit("mod delete message",{messageId:m.messageId});
     actions.appendChild(del);
   }
-  bubble.appendChild(actions);
-
-  const reacts=document.createElement("div");
-  reacts.className="reactions";
-  reacts.id="reacts-"+m.messageId;
-  bubble.appendChild(reacts);
 
   wrap.appendChild(av);
-  wrap.appendChild(bubble);
+  wrap.appendChild(body);
+  wrap.appendChild(actions);
 
   msgs.appendChild(wrap);
   msgs.scrollTop=msgs.scrollHeight;
@@ -1247,10 +1258,14 @@ async function startApp(){
   socket.on("reaction update", ({messageId,reactions})=>{
     renderReactions(messageId,reactions);
   });
-  socket.on("message deleted", ({messageId})=>{
-    const el=document.querySelector(`[data-mid="${messageId}"] .text`);
-    if(el) el.textContent="[message deleted]";
-  });
+socket.on("message deleted", ({messageId})=>{
+  const row = document.querySelector(`[data-mid="${messageId}"]`);
+  if(row) row.remove();
+
+  // also remove from search index
+  const idx = msgIndex.findIndex(x => String(x.id) === String(messageId));
+  if(idx !== -1) msgIndex.splice(idx, 1);
+});
   socket.on("dm history", (payload)=>{
     const { threadId, messages=[], participants=[], title="" } = payload || {};
     const existing = dmThreads.find(t=>t.id===threadId);
