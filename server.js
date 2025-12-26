@@ -62,7 +62,29 @@ db.serialize(() => {
       last_status TEXT
     )
   `);
+  // ---- DB migrations (keep old DBs compatible)
+function addColumnIfMissing(table, col, ddl) {
+  db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
+    if (err) return;
+    const exists = rows.some(r => r.name === col);
+    if (!exists) db.run(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  });
+}
 
+// ensure all expected columns exist even if DB was created by older code
+db.serialize(() => {
+  addColumnIfMissing("users", "password_hash", "password_hash TEXT"); // older DBs may not have it
+  addColumnIfMissing("users", "role", "role TEXT NOT NULL DEFAULT 'User'");
+  addColumnIfMissing("users", "created_at", "created_at INTEGER");
+  addColumnIfMissing("users", "avatar", "avatar TEXT");
+  addColumnIfMissing("users", "bio", "bio TEXT");
+  addColumnIfMissing("users", "mood", "mood TEXT");
+  addColumnIfMissing("users", "age", "age INTEGER");
+  addColumnIfMissing("users", "gender", "gender TEXT");
+  addColumnIfMissing("users", "last_seen", "last_seen INTEGER");
+  addColumnIfMissing("users", "last_room", "last_room TEXT");
+  addColumnIfMissing("users", "last_status", "last_status TEXT");
+});
   db.run(`
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -267,8 +289,9 @@ app.post("/login", (req, res) => {
     [username],
     async (err, row) => {
       if (err || !row) return res.status(401).send("Invalid username or password");
-      if (!row.password_hash) return res.status(500).send("Account missing password hash");
-
+    if (!row.password_hash || typeof row.password_hash !== "string") {
+  return res.status(401).send("Account needs a password reset (old database record).");
+}
       const ok = await bcrypt.compare(password, row.password_hash);
       if (!ok) return res.status(401).send("Invalid username or password");
 
