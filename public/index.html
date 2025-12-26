@@ -33,7 +33,143 @@
       height:100vh;
       overflow:hidden;
     }
+/* =========================================================
+   MOBILE REFINEMENT PACK (paste at very bottom of <style>)
+   ========================================================= */
 
+/* Better tap + less accidental selections */
+button, .chan, .mItem { -webkit-tap-highlight-color: transparent; }
+.msgs { scroll-behavior: smooth; }
+
+/* Compact topbar + inputs on mobile */
+@media (max-width: 980px){
+  /* Keep topbar visible while scrolling */
+  .topbar{
+    position: sticky;
+    top: 0;
+    z-index: 40;
+  }
+
+  /* Reduce padding to fit more content */
+  .topbar{ padding: 0 10px; gap: 8px; }
+  .roomTitle{ font-size: 14px; }
+  .searchWrap input{
+    width: 40vw;
+    padding: 9px 10px;
+    border-radius: 12px;
+  }
+
+  /* Messages: tighter spacing */
+  .msgs{ padding: 10px; gap: 8px; }
+  .msg{ gap: 8px; }
+  .msgAvatar{ width: 34px; height: 34px; }
+  .bubble{
+    padding: 9px 10px;
+    border-radius: 14px;
+    max-width: 94vw;
+  }
+  .metaLine{ gap: 6px; }
+  .uName{ font-size: 12px; }
+  .badge{ font-size: 9px; padding: 2px 6px; }
+  .text{ font-size: 14px; }
+
+  /* Actions row: smaller buttons, wrap nicer */
+  .actions{ gap: 6px; }
+  .reactBtn{
+    padding: 6px 7px;
+    border-radius: 12px;
+    font-size: 13px;
+  }
+
+  /* Typing indicator: smaller */
+  .typing{ padding: 0 10px; height: 18px; font-size: 11px; }
+
+  /* Input bar: fixed-like bottom, compact */
+  .inputBar{
+    padding: 10px;
+    gap: 8px;
+  }
+  .inputBar input[type="text"]{
+    padding: 11px 10px;
+    border-radius: 14px;
+  }
+  .btn{ padding: 10px 12px; border-radius: 14px; }
+
+  /* File picker: hide long native control on small screens */
+  .filePick input[type="file"]{
+    width: 42px;
+    overflow: hidden;
+  }
+  .filePick input[type="file"]::file-selector-button{
+    padding: 9px 10px;
+    border-radius: 12px;
+    border: 0;
+    background: #4e5058;
+    color: white;
+    cursor: pointer;
+    font-weight: 900;
+  }
+
+  /* Upload preview: slimmer + stack on narrow phones */
+  .uploadPreview{
+    margin: 6px 10px;
+    padding: 8px 10px;
+    gap: 10px;
+  }
+  .uploadRight{ min-width: 160px; }
+}
+
+/* Extra small phones */
+@media (max-width: 520px){
+  /* Hide search input to save space (still searchable by keyboard ctrl+f etc.) */
+  .searchWrap input{ display: none; }
+
+  /* Make the two top icons slightly smaller */
+  .iconBtn{
+    width: 34px;
+    height: 34px;
+    border-radius: 12px;
+  }
+
+  /* Bubble content uses full width more comfortably */
+  .bubble{ max-width: 96vw; }
+
+  /* Condense meta line */
+  .ts{ display: none; } /* timestamps still exist on desktop, hidden here */
+  .badge{ opacity: .95; }
+
+  /* Upload preview stacks */
+  .uploadPreview{
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .uploadRight{
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+/* Safe-area improvements (iPhone notch/home bar) */
+@supports (padding: max(0px)) {
+  .topbar{
+    padding-top: max(0px, env(safe-area-inset-top));
+  }
+  .inputBar{
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Improve drawer usability on mobile */
+@media (max-width: 980px){
+  .channels .brand, .channels .bottomBar{
+    position: sticky;
+    background: inherit;
+    z-index: 2;
+  }
+  .channels .brand{ top: 0; padding-top: 10px; }
+  .channels .bottomBar{ bottom: 0; }
+  .chanList{ padding-bottom: 10px; }
+}
     a{ color:inherit; }
     button{ font-family:inherit; }
 
