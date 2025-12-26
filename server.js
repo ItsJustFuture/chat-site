@@ -30,7 +30,8 @@ const io = new Server(server, {
   // Render uses HTTPS -> allow websocket upgrade
   cors: { origin: true, credentials: true },
 });
-
+// IMPORTANT for Render/any reverse proxy so secure cookies work
+app.set("trust proxy", 1);
 // ---- DB
 const db = new sqlite3.Database(DB_FILE);
 
@@ -182,12 +183,12 @@ app.use(
     cookie: {
       httpOnly: true,
       sameSite: "lax",
-      secure: !!process.env.RENDER, // Render is HTTPS
-      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+      // secure cookies in production (Render). With trust proxy set, this will work.
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 1000 * 60 * 60 * 24 * 7,
     },
   })
 );
-
 // ---- Static
 app.use("/uploads", express.static(UPLOADS_DIR));
 app.use("/avatars", express.static(AVATARS_DIR));
@@ -301,10 +302,15 @@ app.post("/login", (req, res) => {
         row.role = "Co-owner";
       }
 
-      req.session.user = { id: row.id, username: row.username, role: row.role };
-      db.run("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]);
+     req.session.user = { id: row.id, username: row.username, role: row.role };
 
-      return res.json({ ok: true });
+db.run("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]);
+
+// Ensure session is actually persisted before replying
+req.session.save((saveErr) => {
+  if (saveErr) return res.status(500).send("Session save failed");
+  return res.json({ ok: true });
+});
     }
   );
 });
