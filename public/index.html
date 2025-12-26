@@ -33,10 +33,79 @@
       height:100vh;
       overflow:hidden;
     }
+    /* --- Profile tabs: mobile-friendly, scrollable, sticky --- */
+.tabs{
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+.tabs::-webkit-scrollbar{ display:none; }
+
+.tab{
+  flex: 0 0 auto;         /* prevents shrinking */
+  min-width: max-content; /* keeps each tab tappable */
+}
+
+@media (max-width: 760px){
+  /* Keep tabs visible while editing profile */
+  .tabs{
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--panel);
+    padding-top: 6px;
+    margin-top: 6px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  /* Make modal fit phone better */
+  .modalCard{
+    width: 100vw;
+    height: 92vh;
+    max-height: 92vh;
+    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Make content scroll inside modal, not the page */
+  #viewInfo, #viewAbout, #viewMedia, #viewModeration{
+    overflow: auto;
+    padding-right: 2px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Reduce profile edit spacing to fit */
+  .panelBox{ padding: 10px; }
+  .field input, textarea, select{ border-radius: 12px; }
+}
 /* =========================================================
    MOBILE REFINEMENT PACK (paste at very bottom of <style>)
    ========================================================= */
+/* --- Photo icon upload button --- */
+.filePick{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
 
+/* hide native input but keep it clickable via JS */
+#fileInput{
+  position:absolute;
+  left:-9999px;
+  width:1px; height:1px;
+  opacity:0;
+}
+
+/* make camera icon match */
+#pickFileBtn{
+  background:#4e5058;
+  border:1px solid rgba(255,255,255,.10);
+}
 /* Better tap + less accidental selections */
 button, .chan, .mItem { -webkit-tap-highlight-color: transparent; }
 .msgs { scroll-behavior: smooth; }
@@ -172,6 +241,17 @@ button, .chan, .mItem { -webkit-tap-highlight-color: transparent; }
 }
     a{ color:inherit; }
     button{ font-family:inherit; }
+    @media (max-width: 520px){
+  /* bigger buttons in profile edit on tiny screens */
+  #myProfileEdit .btn{
+    width: 100%;
+    justify-content: center;
+  }
+  #myProfileEdit .row{
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
 
     /* ---------- AUTH ---------- */
     #authWrap{
@@ -938,8 +1018,9 @@ button, .chan, .mItem { -webkit-tap-highlight-color: transparent; }
         <div class="inputBar">
           <input id="msgInput" type="text" placeholder="Message #main" maxlength="800">
           <div class="filePick">
-            <input id="fileInput" type="file" accept="image/*,video/mp4,video/quicktime">
-          </div>
+  <input id="fileInput" type="file" accept="image/*,video/mp4,video/quicktime">
+  <button class="iconBtn" id="pickFileBtn" type="button" title="Upload">📷</button>
+</div>
           <button class="btn" id="sendBtn">Send</button>
         </div>
       </main>
@@ -1197,7 +1278,8 @@ button, .chan, .mItem { -webkit-tap-highlight-color: transparent; }
     const authMsg = document.getElementById("authMsg");
     const loginBtn = document.getElementById("loginBtn");
     const regBtn = document.getElementById("regBtn");
-
+const pickFileBtn = document.getElementById("pickFileBtn");
+pickFileBtn?.addEventListener("click", () => fileInput.click());
     const chanList = document.getElementById("chanList");
     const nowRoom = document.getElementById("nowRoom");
     const roomTitle = document.getElementById("roomTitle");
@@ -1333,6 +1415,9 @@ button, .chan, .mItem { -webkit-tap-highlight-color: transparent; }
       if(Number.isNaN(d.getTime())) return String(ts);
       return d.toLocaleString();
     }
+    function focusActiveTab(){
+  const active = document.querySelector(".tab.active");
+  active?.scrollIntoView({ behavior:"smooth", inline:"center", block:"nearest" });
 
     function bytesToNice(n){
       n = Number(n||0);
@@ -1928,6 +2013,7 @@ function refocusMsg(){
     tabModeration.addEventListener("click", async ()=>{
       setTab("moderation");
       await refreshLogs();
+      focusActiveTab();
     });
 
     // ---------- Profiles ----------
