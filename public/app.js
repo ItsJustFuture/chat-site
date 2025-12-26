@@ -1395,49 +1395,68 @@ if(addRoomBtn){
     addMessage(m);
     applySearch();
   });
-  socket.on("reaction update", ({messageId,reactions})=>{
-    renderReactions(messageId,reactions);
+    socket.on("reaction update", ({ messageId, reactions }) => {
+    renderReactions(messageId, reactions);
   });
-socket.on("message deleted", ({messageId})=>{
-  const row = document.querySelector(`[data-mid="${messageId}"]`);
-  if(row) row.remove();
 
-  const idx = msgIndex.findIndex(x => String(x.id) === String(messageId));
-  if(idx !== -1) msgIndex.splice(idx, 1);
+  socket.on("message deleted", ({ messageId }) => {
+    const row = document.querySelector(`[data-mid="${messageId}"]`);
+    if (row) row.remove();
 
-  closeReactionMenu();
-});
+    const idx = msgIndex.findIndex((x) => String(x.id) === String(messageId));
+    if (idx !== -1) msgIndex.splice(idx, 1);
 
-  // also remove from search index
-  const idx = msgIndex.findIndex(x => String(x.id) === String(messageId));
-  if(idx !== -1) msgIndex.splice(idx, 1);
-});
-  socket.on("dm history", (payload)=>{
-    const { threadId, messages=[], participants=[], title="" } = payload || {};
-    const existing = dmThreads.find(t=>t.id===threadId);
-    const lastText = messages.length ? messages[messages.length-1].text || "" : (existing?.last_text || "");
-    if(existing){
-      Object.assign(existing, { participants, title, last_text: lastText, last_ts: messages.length ? messages[messages.length-1].ts : existing.last_ts });
+    closeReactionMenu();
+  });
+
+  socket.on("dm history", (payload) => {
+    const { threadId, messages = [], participants = [], title = "" } = payload || {};
+    const existing = dmThreads.find((t) => t.id === threadId);
+    const lastText = messages.length
+      ? messages[messages.length - 1].text || ""
+      : (existing?.last_text || "");
+
+    if (existing) {
+      Object.assign(existing, {
+        participants,
+        title,
+        last_text: lastText,
+        last_ts: messages.length ? messages[messages.length - 1].ts : existing.last_ts,
+      });
     } else {
-      dmThreads.unshift({ id: threadId, participants, title, last_text: lastText, last_ts: messages.length ? messages[messages.length-1].ts : Date.now() });
+      dmThreads.unshift({
+        id: threadId,
+        participants,
+        title,
+        last_text: lastText,
+        last_ts: messages.length ? messages[messages.length - 1].ts : Date.now(),
+      });
     }
+
     dmMessages.set(threadId, messages);
     renderDmThreads();
-    if(activeDmId === threadId){
-      setDmMeta(dmThreads.find(t=>t.id===threadId));
+
+    if (activeDmId === threadId) {
+      setDmMeta(dmThreads.find((t) => t.id === threadId));
       renderDmMessages(threadId);
     }
   });
-  socket.on("dm message", (m)=>{
+
+  socket.on("dm message", (m) => {
     const arr = dmMessages.get(m.threadId) || [];
     arr.push(m);
     dmMessages.set(m.threadId, arr);
+
     upsertThreadMeta(m.threadId, { last_text: m.text || "", last_ts: m.ts });
-    if(activeDmId === m.threadId){
+
+    if (activeDmId === m.threadId) {
       renderDmMessages(m.threadId);
     }
   });
-  socket.on("dm thread invited", ()=>{ loadDmThreads(); });
+
+  socket.on("dm thread invited", () => {
+    loadDmThreads();
+  });
 
   joinRoom("main"); // main will exist from seeded rooms
   meStatusText.textContent = statusSelect.value || "Online";
