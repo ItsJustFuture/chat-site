@@ -418,7 +418,17 @@ textarea{ min-height:90px; resize:vertical; }
 .dmMetaRow{ display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--muted); }
 .dmInput{ padding:10px 12px; border-top:1px solid var(--line); display:flex; gap:8px; }
 .dmInput input{ flex:1; }
-
+.dmSectionTitle{
+  padding:10px 12px;
+  font-size:11px;
+  font-weight:900;
+  color: var(--muted);
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  border-bottom:1px solid var(--line);
+  background: rgba(255,255,255,.03);
+}
+.dmCreate.direct #dmTitle{ display:none; }
 .dmEmpty{ color:var(--muted); font-size:12px; text-align:center; padding:12px; }
 .mobOnly{ display:none; }
 
