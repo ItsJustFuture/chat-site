@@ -50,6 +50,8 @@ const profileBtn = document.getElementById("profileBtn");
 // dms
 const dmPanel = document.getElementById("dmPanel");
 const dmToggleBtn = document.getElementById("dmToggleBtn");
+const groupDmToggleBtn = document.getElementById("groupDmToggleBtn");
+const dmModeLabel = document.getElementById("dmModeLabel");
 const dmCloseBtn = document.getElementById("dmCloseBtn");
 const dmRefreshBtn = document.getElementById("dmRefreshBtn");
 const dmThreadList = document.getElementById("dmThreadList");
@@ -464,165 +466,258 @@ openMembersBtn?.addEventListener("click", openMembers);
 drawerOverlay?.addEventListener("click", closeDrawers);
 document.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeDrawers(); });
 
-// dms
-function renderDmSection(target, items, emptyText){
-  target.innerHTML="";
-  if(!items.length){
-    target.innerHTML = `<div class="dmEmpty">${emptyText}</div>`;
-    return;
+// dms (rebuilt)
+let dmCreateMode = "direct"; // "direct" | "group"
+
+function setDmCreateMode(mode){
+  dmCreateMode = (mode === "group") ? "group" : "direct";
+
+  // style + label
+  dmPanel?.querySelector(".dmCreate")?.classList.toggle("direct", dmCreateMode === "direct");
+  dmPanel?.querySelector(".dmCreate")?.classList.toggle("group", dmCreateMode === "group");
+
+  if (dmModeLabel) dmModeLabel.textContent = `Mode: ${dmCreateMode === "group" ? "Group Chat" : "Direct Message"}`;
+
+  // button text hint
+  if (dmCreateBtn) dmCreateBtn.textContent = dmCreateMode === "group" ? "Start group chat" : "Start DM";
+
+  // placeholder hints
+  if (dmParticipantsInput) {
+    dmParticipantsInput.placeholder = dmCreateMode === "group"
+      ? "Add people (comma separated)"
+      : "Add one person (username)";
   }
-  items.forEach(t=>{
-    const div=document.createElement("div");
-    div.className="dmItem" + (t.id===activeDmId?" active":"");
-    const others=(t.participants||[]).filter(p=>p!==me?.username);
-    const label=t.title || (others.join(", ") || (t.is_group?"Group chat":"Direct Message"));
-function renderDmThreads(){
-  dmThreadList.innerHTML="";
-  if(!dmThreads.length){
-    dmThreadList.innerHTML = '<div class="dmEmpty">No conversations yet.</div>';
-    return;
-  }
-  dmThreads.forEach(t=>{
-    const div=document.createElement("div");
-    div.className="dmItem" + (t.id===activeDmId?" active":"");
-    const others=(t.participants||[]).filter(p=>p!==me?.username);
-    const label=t.title || (others.join(", ") || "Direct Message");
-    const preview=t.last_text ? t.last_text.slice(0,80) : "No messages yet";
-    div.innerHTML = `
-      <div class="name">${escapeHtml(label)}</div>
-      <div class="small">${escapeHtml(preview)}</div>
-    `;
-    div.onclick=()=>openDmThread(t.id);
-    target.appendChild(div);
-  });
+
+  // if switching to direct, clear title
+  if (dmCreateMode === "direct" && dmTitleInput) dmTitleInput.value = "";
+}
+
+function threadLabel(t){
+  const parts = (t.participants || []);
+  const others = parts.filter(p => p !== me?.username);
+  if (t.title) return t.title;
+  if (t.is_group) return others.join(", ") || "Group chat";
+  return others[0] || "Direct Message";
+}
+
+function renderThreadItem(t){
+  const div = document.createElement("div");
+  div.className = "dmItem" + (t.id === activeDmId ? " active" : "");
+  const label = threadLabel(t);
+  const preview = t.last_text ? String(t.last_text).slice(0, 80) : "No messages yet";
+  div.innerHTML = `
+    <div class="name">${escapeHtml(label)}</div>
+    <div class="small">${escapeHtml(preview)}</div>
+  `;
+  div.onclick = () => openDmThread(t.id);
+  return div;
 }
 
 function renderDmThreads(){
-  const direct = dmThreads.filter(t=>!t.is_group);
-  const groups = dmThreads.filter(t=>!!t.is_group);
-  renderDmSection(dmDirectList, direct, "No direct messages yet.");
-  renderDmSection(dmGroupList, groups, "No group chats yet.");
-}
+  dmThreadList.innerHTML = "";
 
-    dmThreadList.appendChild(div);
-  });
+  if (!dmThreads.length) {
+    dmThreadList.innerHTML = `<div class="dmEmpty">No conversations yet.</div>`;
+    return;
+  }
+
+  const direct = dmThreads.filter(t => !t.is_group);
+  const groups = dmThreads.filter(t => !!t.is_group);
+
+  const addSection = (title, items, emptyText) => {
+    const head = document.createElement("div");
+    head.className = "dmSectionTitle";
+    head.textContent = title;
+    dmThreadList.appendChild(head);
+
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "dmEmpty";
+      empty.textContent = emptyText;
+      dmThreadList.appendChild(empty);
+      return;
+    }
+
+    for (const t of items) dmThreadList.appendChild(renderThreadItem(t));
+  };
+
+  addSection("Direct messages", direct, "No direct messages yet.");
+  addSection("Group chats", groups, "No group chats yet.");
 }
 
 async function loadDmThreads(){
-  const res=await fetch("/dm/threads");
-  if(!res.ok){ dmMsg.textContent="Could not load threads."; return; }
-  dmThreads = await res.json();
-  renderDmThreads();
+  try {
+    const res = await fetch("/dm/threads");
+    if (!res.ok) {
+      dmMsg.textContent = "Could not load threads.";
+      return;
+    }
+    dmThreads = await res.json();
+    renderDmThreads();
+  } catch {
+    dmMsg.textContent = "Could not load threads.";
+  }
 }
 
-function openDmPanel(prefill){
+function openDmPanel({ mode = "direct", prefill = "" } = {}){
   dmPanel.classList.add("open");
-  dmMsg.textContent="";
-  if(prefill){ dmParticipantsInput.value=prefill; }
-  if(!dmThreads.length) loadDmThreads();
+  dmMsg.textContent = "";
+
+  setDmCreateMode(mode);
+
+  if (prefill && dmParticipantsInput) dmParticipantsInput.value = prefill;
+
+  // load threads if we haven't yet
+  if (!dmThreads.length) loadDmThreads();
 }
+
 function closeDmPanel(){
   dmPanel.classList.remove("open");
 }
 
 function renderDmMessages(threadId){
-  dmMessagesEl.innerHTML="";
+  dmMessagesEl.innerHTML = "";
   const msgsArr = dmMessages.get(threadId) || [];
-  if(!msgsArr.length){
-    const empty=document.createElement("div");
-    empty.className="dmEmpty";
-    empty.textContent="No messages yet.";
+
+  if (!msgsArr.length) {
+    const empty = document.createElement("div");
+    empty.className = "dmEmpty";
+    empty.textContent = "No messages yet.";
     dmMessagesEl.appendChild(empty);
     return;
   }
 
-  msgsArr.forEach(m=>{
-    const wrap=document.createElement("div");
-    wrap.className="dmBubble" + (m.user===me.username?" self":"");
+  for (const m of msgsArr) {
+    const wrap = document.createElement("div");
+    wrap.className = "dmBubble" + (m.user === me.username ? " self" : "");
 
-    const meta=document.createElement("div");
-    meta.className="dmMetaRow";
+    const meta = document.createElement("div");
+    meta.className = "dmMetaRow";
     meta.innerHTML = `<span>${escapeHtml(m.user)}</span><span>${new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span>`;
     wrap.appendChild(meta);
 
-    const text=document.createElement("div");
+    const text = document.createElement("div");
     text.innerHTML = applyMentions(m.text || "");
     wrap.appendChild(text);
 
     dmMessagesEl.appendChild(wrap);
-  });
+  }
+
   dmMessagesEl.scrollTop = dmMessagesEl.scrollHeight;
 }
 
 function setDmMeta(thread){
-  if(!thread){
-    dmMetaTitle.textContent="Pick a thread";
-    dmMetaPeople.textContent="";
+  if (!thread) {
+    dmMetaTitle.textContent = "Pick a thread";
+    dmMetaPeople.textContent = "";
     return;
   }
-  const others=(thread.participants||[]).filter(p=>p!==me?.username);
-  dmMetaTitle.textContent = thread.title || (others.join(", ") || "Direct Message");
-  dmMetaPeople.textContent = (thread.participants||[]).join(", ");
+  dmMetaTitle.textContent = threadLabel(thread);
+  dmMetaPeople.textContent = (thread.participants || []).join(", ");
 }
 
 function openDmThread(threadId){
   activeDmId = threadId;
   renderDmThreads();
-  const meta = dmThreads.find(t=>t.id===threadId);
+
+  const meta = dmThreads.find(t => t.id === threadId);
   setDmMeta(meta);
+
   dmMessagesEl.innerHTML = "<div class='dmEmpty'>Loading...</div>";
   socket?.emit("dm join", { threadId });
 }
 
 function upsertThreadMeta(tid, updater){
-  const idx = dmThreads.findIndex(t=>t.id===tid);
-  if(idx === -1){
-    dmThreads.unshift({ id: tid, participants: [], ...updater });
-  } else {
-    const updated = { ...dmThreads[idx], ...updater };
-    dmThreads[idx] = updated;
-  }
+  const idx = dmThreads.findIndex(t => t.id === tid);
+  if (idx === -1) dmThreads.unshift({ id: tid, participants: [], ...updater });
+  else dmThreads[idx] = { ...dmThreads[idx], ...updater };
   renderDmThreads();
 }
 
 async function createDmThread(){
-  dmMsg.textContent="Creating...";
-  const names = dmParticipantsInput.value.trim();
+  dmMsg.textContent = "Creating...";
+
+  const namesRaw = dmParticipantsInput.value.trim();
   const title = dmTitleInput.value.trim();
-  if(!names){ dmMsg.textContent="Add at least one username."; return; }
-  const res=await fetch("/dm/thread", {
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({ participants: names.split(","), title })
-  });
-  const text = await res.text();
-  if(!res.ok){ dmMsg.textContent = text || "Could not create."; return; }
-  dmMsg.textContent="Thread created.";
-  dmParticipantsInput.value="";
-  dmTitleInput.value="";
-  await loadDmThreads();
-  const { threadId } = JSON.parse(text || "{}") || {};
-  if(threadId) openDmThread(threadId);
+
+  if (!namesRaw) {
+    dmMsg.textContent = dmCreateMode === "group"
+      ? "Add at least two usernames (comma separated)."
+      : "Add one username.";
+    return;
+  }
+
+  const names = namesRaw.split(",").map(s => s.trim()).filter(Boolean);
+
+  // client-side enforcement
+  if (dmCreateMode === "direct" && names.length !== 1) {
+    dmMsg.textContent = "Direct messages must have exactly 1 participant.";
+    return;
+  }
+  if (dmCreateMode === "group" && names.length < 2 && !title) {
+    dmMsg.textContent = "Group chats need 2+ participants (or a title).";
+    return;
+  }
+
+  try {
+    const res = await fetch("/dm/thread", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        participants: names,
+        title,
+        kind: dmCreateMode
+      })
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      dmMsg.textContent = text || "Could not create.";
+      return;
+    }
+
+    const data = await res.json();
+    dmMsg.textContent = data.reused ? "Opened existing DM." : "Thread created.";
+
+    // reset fields
+    dmParticipantsInput.value = "";
+    dmTitleInput.value = "";
+
+    await loadDmThreads();
+    if (data.threadId) openDmThread(data.threadId);
+  } catch {
+    dmMsg.textContent = "Could not create.";
+  }
 }
 
 function sendDmMessage(){
-  if(!activeDmId) return;
-  const txt=dmText.value.trim();
-  if(!txt) return;
+  if (!activeDmId) return;
+  const txt = dmText.value.trim();
+  if (!txt) return;
   socket?.emit("dm message", { threadId: activeDmId, text: txt });
-  dmText.value="";
+  dmText.value = "";
 }
 
-dmToggleBtn?.addEventListener("click", ()=>openDmPanel());
+dmToggleBtn?.addEventListener("click", () => openDmPanel({ mode: "direct" }));
+groupDmToggleBtn?.addEventListener("click", () => openDmPanel({ mode: "group" }));
+
 dmCloseBtn?.addEventListener("click", closeDmPanel);
 dmRefreshBtn?.addEventListener("click", loadDmThreads);
 dmCreateBtn?.addEventListener("click", createDmThread);
 dmSendBtn?.addEventListener("click", sendDmMessage);
-dmText?.addEventListener("keydown", (e)=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); sendDmMessage(); } });
-dmUserBtn?.addEventListener("click", ()=>{
-  if(modalTargetUsername){
+
+dmText?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendDmMessage();
+  }
+});
+
+// "Message" button on profile -> always direct DM
+dmUserBtn?.addEventListener("click", () => {
+  if (modalTargetUsername) {
     closeModal();
-    openDmPanel(modalTargetUsername);
+    openDmPanel({ mode: "direct", prefill: modalTargetUsername });
   }
 });
 
