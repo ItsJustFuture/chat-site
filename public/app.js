@@ -658,7 +658,7 @@ statusSelect.addEventListener("change", ()=>{
 // ---- auth helpers
 async function api(path, options){
   try{
-    const res=await fetch(path, options);
+  const res = await fetch(path, { credentials: "include", ...options });
     const text=await res.text().catch(()=> "");
     return {res, text};
   }catch{
