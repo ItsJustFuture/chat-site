@@ -40,8 +40,32 @@ function addColumnIfMissing(table, column, definition) {
   db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
     if (err) return;
     const exists = rows.some((r) => r.name === column);
-    if (exists) return;
-    db.run(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+    if (!exists) db.run(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+  });
+}
+
+function migrateLegacyPasswords() {
+  db.all("PRAGMA table_info(users)", [], (err, rows) => {
+    if (err) return;
+    const hasPasswordHash = rows.some((r) => r.name === "password_hash");
+    const hasLegacyPassword = rows.some((r) => r.name === "password");
+    if (!hasPasswordHash) return;
+    if (!hasLegacyPassword) return;
+
+    db.all(
+      `SELECT id, password, password_hash FROM users
+       WHERE (password_hash IS NULL OR password_hash = '') AND password IS NOT NULL`,
+      [],
+      async (_e, legacyRows) => {
+        if (!legacyRows?.length) return;
+        for (const row of legacyRows) {
+          const legacy = String(row.password || "");
+          if (!legacy) continue;
+          const hash = legacy.startsWith("$2") ? legacy : await bcrypt.hash(legacy, 10);
+          db.run("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [hash, row.id]);
+        }
+      }
+    );
   });
 }
 
@@ -50,7 +74,7 @@ db.serialize(() => {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
+      password_hash TEXT,
       role TEXT NOT NULL DEFAULT 'User',
       created_at INTEGER NOT NULL,
       avatar TEXT,
@@ -63,29 +87,25 @@ db.serialize(() => {
       last_status TEXT
     )
   `);
-  // ---- DB migrations (keep old DBs compatible)
-function addColumnIfMissing(table, col, ddl) {
-  db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
-    if (err) return;
-    const exists = rows.some(r => r.name === col);
-    if (!exists) db.run(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
-  });
-}
 
-// ensure all expected columns exist even if DB was created by older code
-db.serialize(() => {
-  addColumnIfMissing("users", "password_hash", "password_hash TEXT"); // older DBs may not have it
-  addColumnIfMissing("users", "role", "role TEXT NOT NULL DEFAULT 'User'");
-  addColumnIfMissing("users", "created_at", "created_at INTEGER");
-  addColumnIfMissing("users", "avatar", "avatar TEXT");
-  addColumnIfMissing("users", "bio", "bio TEXT");
-  addColumnIfMissing("users", "mood", "mood TEXT");
-  addColumnIfMissing("users", "age", "age INTEGER");
-  addColumnIfMissing("users", "gender", "gender TEXT");
-  addColumnIfMissing("users", "last_seen", "last_seen INTEGER");
-  addColumnIfMissing("users", "last_room", "last_room TEXT");
-  addColumnIfMissing("users", "last_status", "last_status TEXT");
-});
+  // ensure all expected columns exist even if DB was created by older code
+  const userColumns = [
+    ["password_hash", "password_hash TEXT"],
+    ["role", "role TEXT NOT NULL DEFAULT 'User'"],
+    ["created_at", "created_at INTEGER"],
+    ["avatar", "avatar TEXT"],
+    ["bio", "bio TEXT"],
+    ["mood", "mood TEXT"],
+    ["age", "age INTEGER"],
+    ["gender", "gender TEXT"],
+    ["last_seen", "last_seen INTEGER"],
+    ["last_room", "last_room TEXT"],
+    ["last_status", "last_status TEXT"],
+  ];
+  for (const [col, ddl] of userColumns) addColumnIfMissing("users", col, ddl);
+
+  migrateLegacyPasswords();
+
   db.run(`
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -139,14 +159,9 @@ db.serialize(() => {
       details TEXT
     )
   `);
+
   // Ensure Iri is always Owner
-db.run(
-  "UPDATE users SET role='Owner' WHERE lower(username)='iri'"
-);
-  // Add any missing columns safely if your DB is older:
-  addColumnIfMissing("users", "last_seen", "last_seen INTEGER");
-  addColumnIfMissing("users", "last_room", "last_room TEXT");
-  addColumnIfMissing("users", "last_status", "last_status TEXT");
+  db.run("UPDATE users SET role='Owner' WHERE lower(username)='iri'");
 });
 
 // ---- Security + parsing
@@ -263,19 +278,28 @@ app.post("/register", async (req, res) => {
     if (!username || username.length < 2) return res.status(400).send("Invalid username");
     if (!password || password.length < 6) return res.status(400).send("Password must be 6+ chars");
 
-    const password_hash = await bcrypt.hash(password, 10);
-    const role = AUTO_COOWNERS.has(normKey(username)) ? "Co-owner" : "User";
+    db.get(
+      "SELECT id FROM users WHERE lower(username) = lower(?)",
+      [username],
+      async (checkErr, existing) => {
+        if (checkErr) return res.status(500).send("Register failed");
+        if (existing) return res.status(409).send("Username already taken");
 
-    db.run(
-      `INSERT INTO users (username, password_hash, role, created_at, last_seen, last_status)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [username, password_hash, role, Date.now(), Date.now(), "Online"],
-      function (err) {
-        if (err) {
-          if (String(err.message || "").includes("UNIQUE")) return res.status(409).send("Username already taken");
-          return res.status(500).send("Register failed");
-        }
-        return res.json({ ok: true });
+        const password_hash = await bcrypt.hash(password, 10);
+        const role = AUTO_COOWNERS.has(normKey(username)) ? "Co-owner" : "User";
+
+        db.run(
+          `INSERT INTO users (username, password_hash, role, created_at, last_seen, last_status)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [username, password_hash, role, Date.now(), Date.now(), "Online"],
+          function (err) {
+            if (err) {
+              if (String(err.message || "").includes("UNIQUE")) return res.status(409).send("Username already taken");
+              return res.status(500).send("Register failed");
+            }
+            return res.json({ ok: true });
+          }
+        );
       }
     );
   } catch {
@@ -293,10 +317,24 @@ app.post("/login", (req, res) => {
     [username],
     async (err, row) => {
       if (err || !row) return res.status(401).send("Invalid username or password");
-    if (!row.password_hash || typeof row.password_hash !== "string") {
-  return res.status(401).send("Account needs a password reset (old database record).");
-}
-      const ok = await bcrypt.compare(password, row.password_hash);
+      let passwordHash = typeof row.password_hash === "string" ? row.password_hash : "";
+
+      if (!passwordHash) {
+        const legacyPassword = typeof row.password === "string" ? row.password : "";
+        if (!legacyPassword) return res.status(401).send("Invalid username or password");
+
+        const legacyMatches = legacyPassword.startsWith("$2")
+          ? await bcrypt.compare(password, legacyPassword)
+          : legacyPassword === password;
+        if (!legacyMatches) return res.status(401).send("Invalid username or password");
+
+        passwordHash = legacyPassword.startsWith("$2")
+          ? legacyPassword
+          : await bcrypt.hash(password, 10);
+        db.run("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [passwordHash, row.id]);
+      }
+
+      const ok = await bcrypt.compare(password, passwordHash);
       if (!ok) return res.status(401).send("Invalid username or password");
 
       // Auto co-owner enforcement (case-insensitive)
@@ -305,15 +343,15 @@ app.post("/login", (req, res) => {
         row.role = "Co-owner";
       }
 
-     req.session.user = { id: row.id, username: row.username, role: row.role };
+      req.session.user = { id: row.id, username: row.username, role: row.role };
 
-db.run("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]);
+      db.run("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]);
 
-// Ensure session is actually persisted before replying
-req.session.save((saveErr) => {
-  if (saveErr) return res.status(500).send("Session save failed");
-  return res.json({ ok: true });
-});
+      // Ensure session is actually persisted before replying
+      req.session.save((saveErr) => {
+        if (saveErr) return res.status(500).send("Session save failed");
+        return res.json({ ok: true });
+      });
     }
   );
 });
