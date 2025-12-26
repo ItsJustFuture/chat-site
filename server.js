@@ -228,7 +228,7 @@ function canModerate(actorRole, targetRole) {
   // can only moderate lower roles
   return roleRank(actorRole) > roleRank(targetRole);
 }
-
+const AUTO_OWNER = new Set(["iri"]);
 const AUTO_COOWNERS = new Set(["lola henderson", "amelia"]);
 
 function logModAction({ actor, action, targetUserId, targetUsername, room, details }) {
