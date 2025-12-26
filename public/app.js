@@ -18,6 +18,7 @@ let uploadXhr = null;
 // ---- DOM
 const authWrap = document.getElementById("authWrap");
 const app = document.getElementById("app");
+const addRoomBtn = document.getElementById("addRoomBtn");
 
 const authUser = document.getElementById("authUser");
 const authPass = document.getElementById("authPass");
@@ -288,33 +289,100 @@ function renderBBCode(input){
   });
   return s;
 }
+const EMOJI_CHOICES = ["😀","😁","😂","🙂","😉","😍","😘","💀","🤔","😤","😢","😡","🔥","🖕","♥️","💯","👍","👎","🎉","👀"];
+
+let reactionMenuEl = null;
+let reactionMenuFor = null;
+let reactionMenuRow = null;
+
+function ensureReactionMenu(){
+  if(reactionMenuEl) return;
+  reactionMenuEl = document.createElement("div");
+  reactionMenuEl.className = "reactionMenu";
+  reactionMenuEl.innerHTML = `<div class="reactionGrid"></div>`;
+  document.body.appendChild(reactionMenuEl);
+
+  // click outside closes
+  document.addEventListener("mousedown", (e)=>{
+    if(reactionMenuEl?.classList.contains("open") && !reactionMenuEl.contains(e.target)){
+      closeReactionMenu();
+    }
+  });
+  document.addEventListener("keydown", (e)=>{
+    if(e.key === "Escape") closeReactionMenu();
+  });
+  window.addEventListener("scroll", ()=>closeReactionMenu(), {passive:true});
+}
+
+function openReactionMenu(messageId, anchorEl, rowEl){
+  ensureReactionMenu();
+  reactionMenuFor = messageId;
+  reactionMenuRow = rowEl;
+
+  const grid = reactionMenuEl.querySelector(".reactionGrid");
+  grid.innerHTML = "";
+
+  for(const em of EMOJI_CHOICES){
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = em;
+    b.onclick = ()=>{
+      socket?.emit("reaction", { messageId, emoji: em });
+      closeReactionMenu();
+    };
+    grid.appendChild(b);
+  }
+
+  // position near anchor
+  const rect = anchorEl.getBoundingClientRect();
+  reactionMenuEl.classList.add("open");
+
+  // place above if possible, else below
+  const menuRect = reactionMenuEl.getBoundingClientRect();
+  let x = Math.min(window.innerWidth - menuRect.width - 12, Math.max(12, rect.left));
+  let y = rect.top - menuRect.height - 10;
+  if(y < 12) y = rect.bottom + 10;
+
+  reactionMenuEl.style.left = `${x}px`;
+  reactionMenuEl.style.top = `${y}px`;
+
+  // on mobile, force show actions while menu is open
+  if(rowEl) rowEl.classList.add("showActions");
+}
+
+function closeReactionMenu(){
+  if(!reactionMenuEl) return;
+  reactionMenuEl.classList.remove("open");
+  if(reactionMenuRow) reactionMenuRow.classList.remove("showActions");
+  reactionMenuFor = null;
+  reactionMenuRow = null;
+}
 
 function addMessage(m){
-  const wrap=document.createElement("div");
-  wrap.className="msg"+(m.user===me.username?" self":"");
-  wrap.dataset.mid=m.messageId;
+  const row = document.createElement("div");
+  row.className = "msg" + (m.user === me.username ? " self" : "");
+  row.dataset.mid = m.messageId;
 
-  const av=document.createElement("div");
-  av.className="msgAvatar";
+  const av = document.createElement("div");
+  av.className = "msgAvatar";
   av.appendChild(avatarNode(m.avatar, m.user));
 
-  // Message body (bubble + reactions BELOW bubble)
-  const body=document.createElement("div");
-  body.className="msgBody";
+  const main = document.createElement("div");
+  main.className = "msgMain";
 
-  const bubble=document.createElement("div");
-  bubble.className="bubble";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
 
-  const meta=document.createElement("div");
-  meta.className="metaLine";
+  const meta = document.createElement("div");
+  meta.className = "metaLine";
   meta.innerHTML = `
     <span class="uName">${escapeHtml(roleIcon(m.role))} ${escapeHtml(m.user)}</span>
     <span class="badge" style="color:${roleBadgeColor(m.role)}">${escapeHtml(m.role)}</span>
     <span class="ts">${new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span>
   `;
 
-  const text=document.createElement("div");
-  text.className="text";
+  const text = document.createElement("div");
+  text.className = "text";
   text.innerHTML = applyMentions(m.text);
 
   bubble.appendChild(meta);
@@ -345,45 +413,61 @@ function addMessage(m){
     bubble.appendChild(att);
   }
 
-  // reactions display (NOT inside bubble anymore)
-  const reacts=document.createElement("div");
-  reacts.className="reactions";
-  reacts.id="reacts-"+m.messageId;
+  // reactions display (below bubble, not inside it)
+  const reacts = document.createElement("div");
+  reacts.className = "reactions";
+  reacts.id = "reacts-" + m.messageId;
 
-  body.appendChild(bubble);
-  body.appendChild(reacts);
+  main.appendChild(bubble);
+  main.appendChild(reacts);
 
-  // Side rail actions (NOT inside bubble anymore)
-  const actions=document.createElement("div");
-  actions.className="msgActions";
+  // actions rail: ONE reaction button (+ delete for mods)
+  const actions = document.createElement("div");
+  actions.className = "msgActions";
 
-  const emojis=["😀","😂","🔥","❤️","👍","👀","🫦","👎"];
-  for(const e of emojis){
-    const b=document.createElement("button");
-    b.className="reactBtn";
-    b.textContent=e;
-    b.title="React";
-    b.onclick=()=>socket?.emit("reaction",{messageId:m.messageId, emoji:e});
-    actions.appendChild(b);
-  }
+  const reactToggle = document.createElement("button");
+  reactToggle.className = "reactBtn";
+  reactToggle.type = "button";
+  reactToggle.textContent = "❤️‍🔥";
+  reactToggle.title = "React";
+  reactToggle.onclick = (e)=>{
+    e.stopPropagation();
+    if(reactionMenuFor === m.messageId) closeReactionMenu();
+    else openReactionMenu(m.messageId, reactToggle, row);
+  };
+  actions.appendChild(reactToggle);
 
   if(roleRank(me.role) >= roleRank("Moderator")){
-    const del=document.createElement("button");
-    del.className="reactBtn";
-    del.textContent="🗑️";
-    del.title="Delete message";
-    del.onclick=()=>socket?.emit("mod delete message",{messageId:m.messageId});
+    const del = document.createElement("button");
+    del.className = "reactBtn";
+    del.type = "button";
+    del.textContent = "🗑️";
+    del.title = "Delete message";
+    del.onclick = (e)=>{
+      e.stopPropagation();
+      socket?.emit("mod delete message", { messageId: m.messageId });
+    };
     actions.appendChild(del);
   }
 
-  wrap.appendChild(av);
-  wrap.appendChild(body);
-  wrap.appendChild(actions);
+  // mobile: long press bubble opens reaction menu
+  let pressTimer = null;
+  bubble.addEventListener("touchstart", ()=>{
+    pressTimer = setTimeout(()=>{
+      openReactionMenu(m.messageId, bubble, row);
+    }, 450);
+  }, {passive:true});
+  bubble.addEventListener("touchend", ()=>{ clearTimeout(pressTimer); });
+  bubble.addEventListener("touchcancel", ()=>{ clearTimeout(pressTimer); });
 
-  msgs.appendChild(wrap);
-  msgs.scrollTop=msgs.scrollHeight;
+  row.appendChild(av);
+  row.appendChild(main);
+  row.appendChild(actions);
 
-  msgIndex.push({ id: m.messageId, el: wrap, textLower: (m.user+" "+m.text).toLowerCase() });
+  msgs.appendChild(row);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  msgIndex.push({ id: m.messageId, el: row, textLower: (m.user+" "+m.text).toLowerCase() });
 }
 
 function renderReactions(messageId, reactionsMap){
@@ -846,15 +930,17 @@ modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
 
 // rooms
 function setActiveRoom(room){
-  currentRoom=room;
-  nowRoom.textContent=`#${room}`;
-  roomTitle.textContent=room;
-  msgInput.placeholder=`Message #${room}`;
+  currentRoom = room;
+  nowRoom.textContent = room;
+  roomTitle.textContent = room;
+  msgInput.placeholder = `Message ${room}`;
   document.querySelectorAll(".chan").forEach(el=>{
-    el.classList.toggle("active", el.dataset.room===room);
+    el.classList.toggle("active", el.dataset.room === room);
   });
 }
+}
 function joinRoom(room){
+  room = sanitizeRoomClient(room) || "main";
   setActiveRoom(room);
   clearMsgs();
   socket?.emit("join room", { room, status: statusSelect.value || "Online" });
@@ -866,6 +952,52 @@ chanList.addEventListener("click", (e)=>{
   const r=el.dataset.room;
   if(r && r!==currentRoom) joinRoom(r);
 });
+function sanitizeRoomClient(r){
+  r = String(r || "").trim().replace(/^#+/, "").toLowerCase();
+  r = r.replace(/[^a-z0-9_-]/g, "").slice(0,24);
+  return r;
+}
+
+function renderRoomsList(rooms){
+  chanList.innerHTML = "";
+  for(const r of rooms || []){
+    const div = document.createElement("div");
+    div.className = "chan" + (r === currentRoom ? " active" : "");
+    div.dataset.room = r;
+    div.textContent = r; // no '#'
+    chanList.appendChild(div);
+  }
+}
+
+async function loadRooms(){
+  const {res, text} = await api("/rooms", { method:"GET" });
+  if(!res.ok) return;
+  try{
+    const rooms = JSON.parse(text);
+    renderRoomsList(rooms);
+  }catch{}
+}
+
+async function createRoomFlow(){
+  const raw = prompt("New room name (letters/numbers/_/-):");
+  if(!raw) return;
+  const name = sanitizeRoomClient(raw);
+  if(!name){ addSystem("Invalid room name."); return; }
+
+  const {res, text} = await api("/rooms", {
+    method:"POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ name })
+  });
+  if(!res.ok){
+    addSystem(text || "Failed to create room.");
+    return;
+  }
+
+  // rooms will also update via socket event, but we can refresh immediately:
+  await loadRooms();
+  joinRoom(name);
+}
 
 // typing/send
 let typingDebounce=null;
@@ -1237,6 +1369,14 @@ async function startApp(){
   await loadMyProfile();
 
   socket = io();
+socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
+await loadRooms();
+
+// show Create Room button only for Co-owner+
+if(addRoomBtn){
+  addRoomBtn.style.display = (roleRank(me.role) >= roleRank("Co-owner")) ? "inline-flex" : "none";
+  addRoomBtn.addEventListener("click", createRoomFlow);
+}
 
   socket.on("system", addSystem);
   socket.on("user list", (users)=>renderMembers(users));
@@ -1261,6 +1401,12 @@ async function startApp(){
 socket.on("message deleted", ({messageId})=>{
   const row = document.querySelector(`[data-mid="${messageId}"]`);
   if(row) row.remove();
+
+  const idx = msgIndex.findIndex(x => String(x.id) === String(messageId));
+  if(idx !== -1) msgIndex.splice(idx, 1);
+
+  closeReactionMenu();
+});
 
   // also remove from search index
   const idx = msgIndex.findIndex(x => String(x.id) === String(messageId));
@@ -1293,7 +1439,7 @@ socket.on("message deleted", ({messageId})=>{
   });
   socket.on("dm thread invited", ()=>{ loadDmThreads(); });
 
-  joinRoom("main");
+  joinRoom("main"); // main will exist from seeded rooms
   meStatusText.textContent = statusSelect.value || "Online";
   resetIdle();
 
