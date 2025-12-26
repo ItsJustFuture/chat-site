@@ -44,29 +44,6 @@ function addColumnIfMissing(table, column, definition) {
   });
 }
 
-function ensureTableColumns(table, defs, cb) {
-  db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
-    if (err) return cb(err);
-    const have = new Set((rows || []).map((r) => r.name));
-    const missing = defs.filter(([col]) => !have.has(col));
-    if (!missing.length) return cb();
-
-    let pending = missing.length;
-    let failed = false;
-    missing.forEach(([col, ddl]) => {
-      db.run(`ALTER TABLE ${table} ADD COLUMN ${ddl}`, (alterErr) => {
-        if (failed) return;
-        // If another process added the column first, keep going.
-        if (alterErr && !String(alterErr.message || "").includes("duplicate column")) {
-          failed = true;
-          return cb(alterErr);
-        }
-        if (--pending === 0 && !failed) cb();
-      });
-    });
-  });
-}
-
 function migrateLegacyPasswords() {
   db.all("PRAGMA table_info(users)", [], (err, rows) => {
     if (err) return;
@@ -183,51 +160,8 @@ db.serialize(() => {
     )
   `);
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS dm_threads (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT,
-      is_group INTEGER NOT NULL DEFAULT 0,
-      created_by INTEGER NOT NULL,
-      created_at INTEGER NOT NULL
-    )
-  `);
-
-  addColumnIfMissing("dm_threads", "title", "title TEXT");
-  addColumnIfMissing("dm_threads", "is_group", "is_group INTEGER NOT NULL DEFAULT 0");
-  addColumnIfMissing("dm_threads", "created_by", "created_by INTEGER NOT NULL DEFAULT 0");
-  addColumnIfMissing("dm_threads", "created_at", "created_at INTEGER NOT NULL DEFAULT 0");
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS dm_participants (
-      thread_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      added_by INTEGER,
-      joined_at INTEGER NOT NULL,
-      UNIQUE(thread_id, user_id)
-    )
-  `);
-
-  addColumnIfMissing("dm_participants", "added_by", "added_by INTEGER");
-  addColumnIfMissing("dm_participants", "joined_at", "joined_at INTEGER NOT NULL DEFAULT 0");
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS dm_messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      thread_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      username TEXT NOT NULL,
-      text TEXT,
-      ts INTEGER NOT NULL
-    )
-  `);
-
   // Ensure Iri is always Owner
   db.run("UPDATE users SET role='Owner' WHERE lower(username)='iri'");
-});
-
-ensureDmSchema((err) => {
-  if (err) console.error("dm schema ensure failed", err);
 });
 
 function ensureDmSchema(cb) {
@@ -470,12 +404,7 @@ app.post("/register", async (req, res) => {
         if (existing) return res.status(409).send("Username already taken");
 
         const password_hash = await bcrypt.hash(password, 10);
-        const key = normKey(username);
-        const role = AUTO_OWNER.has(key)
-          ? "Owner"
-          : AUTO_COOWNERS.has(key)
-            ? "Co-owner"
-            : "User";
+        const role = AUTO_COOWNERS.has(normKey(username)) ? "Co-owner" : "User";
 
         db.run(
           `INSERT INTO users (username, password_hash, role, created_at, last_seen, last_status)
@@ -766,73 +695,50 @@ app.post("/dm/thread", requireLogin, (req, res) => {
   if (!cleaned.length) return res.status(400).send("Add at least one other user");
   if (cleaned.length > 9) return res.status(400).send("Too many participants");
 
-  ensureDmSchema((schemaErr) => {
-    if (schemaErr) {
-      console.error("dm schema fix failed", schemaErr);
-      return res.status(500).send("Failed to create thread");
-    }
+  fetchUsersByNames(cleaned, (err, users) => {
+    if (err) return res.status(500).send("Failed to create thread");
+    if (users.length !== cleaned.length) return res.status(404).send("User not found");
 
-    fetchUsersByNames(cleaned, (err, users) => {
-      if (err) return res.status(500).send("Failed to create thread");
-      if (users.length !== cleaned.length) return res.status(404).send("User not found");
+    const now = Date.now();
+    const isGroup = users.length + 1 > 2 || !!title;
 
-      const now = Date.now();
-      const isGroup = users.length + 1 > 2 || !!title;
+    db.run(
+      `INSERT INTO dm_threads (title, is_group, created_by, created_at) VALUES (?, ?, ?, ?)`,
+      [title || null, isGroup ? 1 : 0, req.session.user.id, now],
+      function (insertErr) {
+        if (insertErr) return res.status(500).send("Failed to create thread");
+        const threadId = this.lastID;
 
-      const attemptCreate = (retried) => {
-        db.run(
-          `INSERT INTO dm_threads (title, is_group, created_by, created_at) VALUES (?, ?, ?, ?)`,
-          [title || null, isGroup ? 1 : 0, req.session.user.id, now],
-          function (insertErr) {
-            if (insertErr) {
-              console.error("dm thread insert failed", insertErr);
-              if (!retried) {
-                return ensureDmSchema((repairErr) => {
-                  if (repairErr) {
-                    console.error("dm schema repair after insert failure", repairErr);
-                    return res.status(500).send("Failed to create thread");
-                  }
-                  attemptCreate(true);
-                });
-              }
-              return res.status(500).send("Failed to create thread");
-            }
-            const threadId = this.lastID;
+        const participantIds = users.map((u) => u.id);
+        participantIds.push(req.session.user.id);
 
-            const participantIds = users.map((u) => u.id);
-            participantIds.push(req.session.user.id);
+        for (const uid of participantIds) {
+          db.run(
+            `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
+            [threadId, uid, req.session.user.id, now]
+          );
+        }
 
-            for (const uid of participantIds) {
-              db.run(
-                `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
-                [threadId, uid, req.session.user.id, now]
-              );
-            }
+        const allNames = users.map((u) => u.username);
+        allNames.push(req.session.user.username);
 
-            const allNames = users.map((u) => u.username);
-            allNames.push(req.session.user.username);
-
-            for (const uid of participantIds) {
-              const sid = socketIdByUserId.get(uid);
-              if (sid) {
-                const sock = io.sockets.sockets.get(sid);
-                if (sock) sock.join(`dm:${threadId}`);
-                io.to(sid).emit("dm thread invited", {
-                  threadId,
-                  title,
-                  isGroup,
-                  participants: allNames,
-                });
-              }
-            }
-
-            res.json({ ok: true, threadId });
+        for (const uid of participantIds) {
+          const sid = socketIdByUserId.get(uid);
+          if (sid) {
+            const sock = io.sockets.sockets.get(sid);
+            if (sock) sock.join(`dm:${threadId}`);
+            io.to(sid).emit("dm thread invited", {
+              threadId,
+              title,
+              isGroup,
+              participants: allNames,
+            });
           }
-        );
-      };
+        }
 
-      attemptCreate(false);
-    });
+        res.json({ ok: true, threadId });
+      }
+    );
   });
 });
 

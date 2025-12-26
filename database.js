@@ -71,9 +71,6 @@ db.serialize(() => {
 
   migrateLegacyPasswords();
 
-  db.run("UPDATE users SET role='Owner' WHERE lower(username)='iri'");
-  db.run("UPDATE users SET role='Co-owner' WHERE lower(username) IN ('lola henderson', 'amelia')");
-
   db.run(`
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
