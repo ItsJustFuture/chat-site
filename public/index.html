@@ -36,16 +36,19 @@
   <div id="app">
     <div class="layout">
       <aside class="channels" id="channelsPane">
-        <div class="brand">
-          <strong>Chat Site</strong>
-          <div class="small" id="nowRoom">#main</div>
-        </div>
+       <div class="brand">
+  <strong>Chat Site</strong>
+  <div class="small" id="nowRoom">main</div>
+</div>
 
-        <div class="chanList" id="chanList">
-          <div class="chan active" data-room="main"><span class="hash">#</span> main</div>
-          <div class="chan" data-room="nsfw"><span class="hash">#</span> NSFW</div>
-          <div class="chan" data-room="music"><span class="hash">#</span> music</div>
-        </div>
+<div class="chanHeader">
+  <div class="small">Rooms</div>
+  <button class="iconBtn smallIcon" id="addRoomBtn" type="button" title="Create room">＋</button>
+</div>
+
+<div class="chanList" id="chanList">
+  <!-- will be rendered by app.js from /rooms -->
+</div>
 
         <div class="bottomBar">
           <div class="meRow">
@@ -82,7 +85,7 @@
         <div class="topbar">
           <div class="row" style="align-items:center; gap:10px;">
             <button class="iconBtn mobOnly" id="openChannelsBtn" type="button" title="Channels">☰</button>
-            <div class="roomTitle"><span>#</span><span id="roomTitle">main</span></div>
+           <div class="roomTitle"><span id="roomTitle">main</span></div>
           </div>
 
           <div class="row" style="align-items:center; gap:10px;">
@@ -115,7 +118,7 @@
         </div>
 
         <div class="inputBar">
-          <input id="msgInput" type="text" placeholder="Message #main" maxlength="800">
+         <input id="msgInput" type="text" placeholder="Message main" maxlength="800">
 
           <!-- hidden native input -->
           <input id="fileInput" type="file" accept="image/*,video/mp4,video/quicktime">
