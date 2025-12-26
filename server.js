@@ -40,8 +40,32 @@ function addColumnIfMissing(table, column, definition) {
   db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
     if (err) return;
     const exists = rows.some((r) => r.name === column);
-    if (exists) return;
-    db.run(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+    if (!exists) db.run(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+  });
+}
+
+function migrateLegacyPasswords() {
+  db.all("PRAGMA table_info(users)", [], (err, rows) => {
+    if (err) return;
+    const hasPasswordHash = rows.some((r) => r.name === "password_hash");
+    const hasLegacyPassword = rows.some((r) => r.name === "password");
+    if (!hasPasswordHash) return;
+    if (!hasLegacyPassword) return;
+
+    db.all(
+      `SELECT id, password, password_hash FROM users
+       WHERE (password_hash IS NULL OR password_hash = '') AND password IS NOT NULL`,
+      [],
+      async (_e, legacyRows) => {
+        if (!legacyRows?.length) return;
+        for (const row of legacyRows) {
+          const legacy = String(row.password || "");
+          if (!legacy) continue;
+          const hash = legacy.startsWith("$2") ? legacy : await bcrypt.hash(legacy, 10);
+          db.run("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [hash, row.id]);
+        }
+      }
+    );
   });
 }
 
@@ -50,7 +74,7 @@ db.serialize(() => {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
+      password_hash TEXT,
       role TEXT NOT NULL DEFAULT 'User',
       created_at INTEGER NOT NULL,
       avatar TEXT,
@@ -63,29 +87,25 @@ db.serialize(() => {
       last_status TEXT
     )
   `);
-  // ---- DB migrations (keep old DBs compatible)
-function addColumnIfMissing(table, col, ddl) {
-  db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
-    if (err) return;
-    const exists = rows.some(r => r.name === col);
-    if (!exists) db.run(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
-  });
-}
 
-// ensure all expected columns exist even if DB was created by older code
-db.serialize(() => {
-  addColumnIfMissing("users", "password_hash", "password_hash TEXT"); // older DBs may not have it
-  addColumnIfMissing("users", "role", "role TEXT NOT NULL DEFAULT 'User'");
-  addColumnIfMissing("users", "created_at", "created_at INTEGER");
-  addColumnIfMissing("users", "avatar", "avatar TEXT");
-  addColumnIfMissing("users", "bio", "bio TEXT");
-  addColumnIfMissing("users", "mood", "mood TEXT");
-  addColumnIfMissing("users", "age", "age INTEGER");
-  addColumnIfMissing("users", "gender", "gender TEXT");
-  addColumnIfMissing("users", "last_seen", "last_seen INTEGER");
-  addColumnIfMissing("users", "last_room", "last_room TEXT");
-  addColumnIfMissing("users", "last_status", "last_status TEXT");
-});
+  // ensure all expected columns exist even if DB was created by older code
+  const userColumns = [
+    ["password_hash", "password_hash TEXT"],
+    ["role", "role TEXT NOT NULL DEFAULT 'User'"],
+    ["created_at", "created_at INTEGER"],
+    ["avatar", "avatar TEXT"],
+    ["bio", "bio TEXT"],
+    ["mood", "mood TEXT"],
+    ["age", "age INTEGER"],
+    ["gender", "gender TEXT"],
+    ["last_seen", "last_seen INTEGER"],
+    ["last_room", "last_room TEXT"],
+    ["last_status", "last_status TEXT"],
+  ];
+  for (const [col, ddl] of userColumns) addColumnIfMissing("users", col, ddl);
+
+  migrateLegacyPasswords();
+
   db.run(`
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -139,14 +159,48 @@ db.serialize(() => {
       details TEXT
     )
   `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dm_threads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT,
+      is_group INTEGER NOT NULL DEFAULT 0,
+      created_by INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
+  addColumnIfMissing("dm_threads", "title", "title TEXT");
+  addColumnIfMissing("dm_threads", "is_group", "is_group INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing("dm_threads", "created_by", "created_by INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing("dm_threads", "created_at", "created_at INTEGER NOT NULL DEFAULT 0");
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dm_participants (
+      thread_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      added_by INTEGER,
+      joined_at INTEGER NOT NULL,
+      UNIQUE(thread_id, user_id)
+    )
+  `);
+
+  addColumnIfMissing("dm_participants", "added_by", "added_by INTEGER");
+  addColumnIfMissing("dm_participants", "joined_at", "joined_at INTEGER NOT NULL DEFAULT 0");
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dm_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      thread_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      username TEXT NOT NULL,
+      text TEXT,
+      ts INTEGER NOT NULL
+    )
+  `);
+
   // Ensure Iri is always Owner
-db.run(
-  "UPDATE users SET role='Owner' WHERE lower(username)='iri'"
-);
-  // Add any missing columns safely if your DB is older:
-  addColumnIfMissing("users", "last_seen", "last_seen INTEGER");
-  addColumnIfMissing("users", "last_room", "last_room TEXT");
-  addColumnIfMissing("users", "last_status", "last_status TEXT");
+  db.run("UPDATE users SET role='Owner' WHERE lower(username)='iri'");
 });
 
 // ---- Security + parsing
@@ -231,6 +285,55 @@ function canModerate(actorRole, targetRole) {
 const AUTO_OWNER = new Set(["iri"]);
 const AUTO_COOWNERS = new Set(["lola henderson", "amelia"]);
 
+function fetchUsersByNames(usernames, cb) {
+  const cleaned = Array.from(
+    new Set(
+      (usernames || [])
+        .map((u) => sanitizeUsername(u))
+        .filter(Boolean)
+        .map((u) => normKey(u))
+    )
+  );
+  if (!cleaned.length) return cb(null, []);
+
+  const placeholders = cleaned.map(() => "?").join(",");
+  db.all(
+    `SELECT id, username FROM users WHERE lower(username) IN (${placeholders})`,
+    cleaned,
+    (err, rows) => cb(err, rows || [])
+  );
+}
+
+function loadThreadForUser(threadId, userId, cb) {
+  db.get(
+    `SELECT id, title, is_group FROM dm_threads WHERE id = ?`,
+    [threadId],
+    (err, thread) => {
+      if (err || !thread) return cb(err || new Error("missing"));
+
+      db.get(
+        `SELECT 1 FROM dm_participants WHERE thread_id=? AND user_id=?`,
+        [threadId, userId],
+        (err2, member) => {
+          if (err2 || !member) return cb(err2 || new Error("forbidden"));
+
+          db.all(
+            `SELECT u.username FROM dm_participants dp JOIN users u ON u.id = dp.user_id WHERE dp.thread_id = ?`,
+            [threadId],
+            (err3, parts) => {
+              if (err3) return cb(err3);
+              cb(null, {
+                ...thread,
+                participants: (parts || []).map((p) => p.username),
+              });
+            }
+          );
+        }
+      );
+    }
+  );
+}
+
 function logModAction({ actor, action, targetUserId, targetUsername, room, details }) {
   db.run(
     `INSERT INTO mod_logs (ts, actor_user_id, actor_username, actor_role, action, target_user_id, target_username, room, details)
@@ -263,19 +366,28 @@ app.post("/register", async (req, res) => {
     if (!username || username.length < 2) return res.status(400).send("Invalid username");
     if (!password || password.length < 6) return res.status(400).send("Password must be 6+ chars");
 
-    const password_hash = await bcrypt.hash(password, 10);
-    const role = AUTO_COOWNERS.has(normKey(username)) ? "Co-owner" : "User";
+    db.get(
+      "SELECT id FROM users WHERE lower(username) = lower(?)",
+      [username],
+      async (checkErr, existing) => {
+        if (checkErr) return res.status(500).send("Register failed");
+        if (existing) return res.status(409).send("Username already taken");
 
-    db.run(
-      `INSERT INTO users (username, password_hash, role, created_at, last_seen, last_status)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [username, password_hash, role, Date.now(), Date.now(), "Online"],
-      function (err) {
-        if (err) {
-          if (String(err.message || "").includes("UNIQUE")) return res.status(409).send("Username already taken");
-          return res.status(500).send("Register failed");
-        }
-        return res.json({ ok: true });
+        const password_hash = await bcrypt.hash(password, 10);
+        const role = AUTO_COOWNERS.has(normKey(username)) ? "Co-owner" : "User";
+
+        db.run(
+          `INSERT INTO users (username, password_hash, role, created_at, last_seen, last_status)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [username, password_hash, role, Date.now(), Date.now(), "Online"],
+          function (err) {
+            if (err) {
+              if (String(err.message || "").includes("UNIQUE")) return res.status(409).send("Username already taken");
+              return res.status(500).send("Register failed");
+            }
+            return res.json({ ok: true });
+          }
+        );
       }
     );
   } catch {
@@ -293,10 +405,24 @@ app.post("/login", (req, res) => {
     [username],
     async (err, row) => {
       if (err || !row) return res.status(401).send("Invalid username or password");
-    if (!row.password_hash || typeof row.password_hash !== "string") {
-  return res.status(401).send("Account needs a password reset (old database record).");
-}
-      const ok = await bcrypt.compare(password, row.password_hash);
+      let passwordHash = typeof row.password_hash === "string" ? row.password_hash : "";
+
+      if (!passwordHash) {
+        const legacyPassword = typeof row.password === "string" ? row.password : "";
+        if (!legacyPassword) return res.status(401).send("Invalid username or password");
+
+        const legacyMatches = legacyPassword.startsWith("$2")
+          ? await bcrypt.compare(password, legacyPassword)
+          : legacyPassword === password;
+        if (!legacyMatches) return res.status(401).send("Invalid username or password");
+
+        passwordHash = legacyPassword.startsWith("$2")
+          ? legacyPassword
+          : await bcrypt.hash(password, 10);
+        db.run("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [passwordHash, row.id]);
+      }
+
+      const ok = await bcrypt.compare(password, passwordHash);
       if (!ok) return res.status(401).send("Invalid username or password");
 
       // Auto co-owner enforcement (case-insensitive)
@@ -305,15 +431,15 @@ app.post("/login", (req, res) => {
         row.role = "Co-owner";
       }
 
-     req.session.user = { id: row.id, username: row.username, role: row.role };
+      req.session.user = { id: row.id, username: row.username, role: row.role };
 
-db.run("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]);
+      db.run("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]);
 
-// Ensure session is actually persisted before replying
-req.session.save((saveErr) => {
-  if (saveErr) return res.status(500).send("Session save failed");
-  return res.json({ ok: true });
-});
+      // Ensure session is actually persisted before replying
+      req.session.save((saveErr) => {
+        if (saveErr) return res.status(500).send("Session save failed");
+        return res.json({ ok: true });
+      });
     }
   );
 });
@@ -473,6 +599,119 @@ app.get("/mod/logs", requireLogin, (req, res) => {
   );
 });
 
+// ---- Direct messages API
+app.get("/dm/threads", requireLogin, (req, res) => {
+  const userId = req.session.user.id;
+
+  db.all(
+    `SELECT t.id, t.title, t.is_group, t.created_at,
+            (SELECT text FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1) AS last_text,
+            (SELECT ts FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1) AS last_ts
+     FROM dm_threads t
+     INNER JOIN dm_participants p ON p.thread_id = t.id
+     WHERE p.user_id = ?
+     ORDER BY COALESCE(last_ts, t.created_at) DESC`,
+    [userId],
+    (err, threads) => {
+      if (err) return res.status(500).send("Failed to load threads");
+      if (!threads?.length) return res.json([]);
+
+      const ids = threads.map((t) => t.id);
+      const placeholders = ids.map(() => "?").join(",");
+
+      db.all(
+        `SELECT dp.thread_id, u.username FROM dm_participants dp JOIN users u ON u.id = dp.user_id WHERE dp.thread_id IN (${placeholders})`,
+        ids,
+        (_e, parts) => {
+          const grouped = new Map();
+          for (const p of parts || []) {
+            if (!grouped.has(p.thread_id)) grouped.set(p.thread_id, []);
+            grouped.get(p.thread_id).push(p.username);
+          }
+
+          const result = threads.map((t) => ({
+            ...t,
+            participants: grouped.get(t.id) || [],
+          }));
+          res.json(result);
+        }
+      );
+    }
+  );
+});
+
+app.post("/dm/thread", requireLogin, (req, res) => {
+  let participants = req.body?.participants;
+  if (!Array.isArray(participants)) {
+    const raw = String(participants || req.body?.participant || req.body?.user || "");
+    participants = raw.split(",");
+  }
+  const title = String(req.body?.title || "").trim().slice(0, 80);
+
+  const cleaned = [];
+  const seen = new Set();
+  for (const name of participants || []) {
+    const s = sanitizeUsername(name);
+    const key = normKey(s);
+    if (!s || seen.has(key)) continue;
+    if (key === normKey(req.session.user.username)) continue;
+    seen.add(key);
+    cleaned.push(s);
+  }
+
+  if (!cleaned.length) return res.status(400).send("Add at least one other user");
+  if (cleaned.length > 9) return res.status(400).send("Too many participants");
+
+  fetchUsersByNames(cleaned, (err, users) => {
+    if (err) return res.status(500).send("Failed to create thread");
+    if (users.length !== cleaned.length) return res.status(404).send("User not found");
+
+    const now = Date.now();
+    const isGroup = users.length + 1 > 2 || !!title;
+
+    db.run(
+      `INSERT INTO dm_threads (title, is_group, created_by, created_at) VALUES (?, ?, ?, ?)`,
+      [title || null, isGroup ? 1 : 0, req.session.user.id, now],
+      function (insertErr) {
+        if (insertErr) {
+          console.error("dm thread insert failed", insertErr);
+          return res.status(500).send("Failed to create thread");
+        }
+        const threadId = this.lastID;
+
+        const participantIds = users.map((u) => u.id);
+        participantIds.push(req.session.user.id);
+
+        for (const uid of participantIds) {
+          db.run(
+            `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
+            [threadId, uid, req.session.user.id, now]
+          );
+        }
+
+        const allNames = users.map((u) => u.username);
+        allNames.push(req.session.user.username);
+
+        for (const uid of participantIds) {
+          const sid = socketIdByUserId.get(uid);
+          if (sid) {
+            const sock = io.sockets.sockets.get(sid);
+            if (sock) sock.join(`dm:${threadId}`);
+            io.to(sid).emit("dm thread invited", {
+              threadId,
+              title,
+              isGroup,
+              participants: allNames,
+            });
+          }
+        }
+
+        res.json({ ok: true, threadId });
+      }
+    );
+  });
+});
+
 // ---- Real-time presence tracking
 const onlineState = new Map(); // userId -> { room, status }
 const socketIdByUserId = new Map(); // userId -> socket.id
@@ -573,6 +812,20 @@ io.on("connection", (socket) => {
   );
 
   socket.currentRoom = null;
+  socket.dmThreads = new Set();
+
+  db.all(
+    `SELECT thread_id FROM dm_participants WHERE user_id = ?`,
+    [socket.user.id],
+    (_e, rows) => {
+      for (const r of rows || []) {
+        const tid = Number(r.thread_id);
+        if (!Number.isFinite(tid)) continue;
+        socket.dmThreads.add(tid);
+        socket.join(`dm:${tid}`);
+      }
+    }
+  );
 
   socket.on("join room", ({ room, status }) => {
     room = String(room || "").trim().toLowerCase();
@@ -673,6 +926,75 @@ io.on("connection", (socket) => {
       set.delete(socket.user.username);
       broadcastTyping(room);
     }
+  });
+
+  socket.on("dm join", ({ threadId }) => {
+    const tid = Number(threadId);
+    if (!Number.isInteger(tid)) return;
+
+    loadThreadForUser(tid, socket.user.id, (err, thread) => {
+      if (err) return;
+      socket.dmThreads.add(tid);
+      socket.join(`dm:${tid}`);
+
+      db.all(
+        `SELECT id, thread_id, user_id, username, text, ts FROM dm_messages WHERE thread_id=? ORDER BY ts DESC LIMIT 50`,
+        [tid],
+        (_e, rows) => {
+          const msgs = (rows || []).reverse();
+          socket.emit("dm history", {
+            threadId: tid,
+            title: thread.title || "",
+            isGroup: !!thread.is_group,
+            participants: thread.participants || [],
+            messages: msgs,
+          });
+        }
+      );
+    });
+  });
+
+  socket.on("dm message", ({ threadId, text }) => {
+    const tid = Number(threadId);
+    const body = String(text || "").trim().slice(0, 800);
+    if (!Number.isInteger(tid) || !body) return;
+
+    loadThreadForUser(tid, socket.user.id, (err, thread) => {
+      if (err) return;
+      const ts = Date.now();
+
+      db.run(
+        `INSERT INTO dm_messages (thread_id, user_id, username, text, ts) VALUES (?, ?, ?, ?, ?)`,
+        [tid, socket.user.id, socket.user.username, body, ts],
+        function (insertErr) {
+          if (insertErr) return;
+          const payload = {
+            threadId: tid,
+            messageId: this.lastID,
+            userId: socket.user.id,
+            user: socket.user.username,
+            text: body,
+            ts,
+          };
+          io.to(`dm:${tid}`).emit("dm message", payload);
+          if (Array.isArray(thread.participants)) {
+            db.all(
+              `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
+              [tid],
+              (_e2, rows) => {
+                for (const r of rows || []) {
+                  const sid = socketIdByUserId.get(r.user_id);
+                  const s = sid ? io.sockets.sockets.get(sid) : null;
+                  if (s && !s.rooms.has(`dm:${tid}`)) {
+                    s.emit("dm message", payload);
+                  }
+                }
+              }
+            );
+          }
+        }
+      );
+    });
   });
 
   socket.on("status change", ({ status }) => {
