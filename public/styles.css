@@ -482,6 +482,84 @@ textarea{ min-height:90px; resize:vertical; }
   input, textarea, select{ font-size:16px; }
   .uploadPreview{ margin: 6px 10px; padding: 8px 10px; gap: 10px; }
 }
+/* Rooms header */
+.chanHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:10px 12px;
+  border-top:1px solid var(--line);
+  border-bottom:1px solid var(--line);
+}
+.smallIcon{
+  width:32px;
+  height:32px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:10px;
+}
+
+/* Message layout: avatar | main | actions */
+.msgMain{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  min-width:0;
+}
+
+/* Actions rail (hidden unless hover on desktop, or forced open on mobile via JS) */
+.msgActions{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  padding-top:2px;
+  opacity:0;
+  pointer-events:none;
+  transition: opacity .15s ease;
+}
+
+@media (hover:hover){
+  .msg:hover .msgActions{
+    opacity:1;
+    pointer-events:auto;
+  }
+}
+
+/* JS can force show on mobile (long press) */
+.msg.showActions .msgActions{
+  opacity:1;
+  pointer-events:auto;
+}
+
+/* Reaction picker popover */
+.reactionMenu{
+  position:fixed;
+  z-index:9999;
+  display:none;
+  padding:10px;
+  border-radius:14px;
+  background: var(--panel2);
+  border:1px solid var(--line);
+  box-shadow: 0 14px 40px rgba(0,0,0,.35);
+  max-width:260px;
+}
+.reactionMenu.open{ display:block; }
+.reactionGrid{
+  display:grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap:6px;
+}
+.reactionMenu button{
+  border:1px solid var(--line);
+  background: var(--soft);
+  color: var(--text);
+  border-radius:12px;
+  padding:8px 0;
+  cursor:pointer;
+  font-weight:900;
+}
+.reactionMenu button:hover{ background:#00000033; }
 
 @media (max-width: 760px){
   .modalGrid{ grid-template-columns: 1fr; }
