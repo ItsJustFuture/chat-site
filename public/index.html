@@ -1863,7 +1863,19 @@ button, .chan, .mItem { -webkit-tap-highlight-color: transparent; }
           fileInput.value = "";
           clearUploadPreview();
         }
+// Mobile: keep input usable with on-screen keyboard
+msgInput.addEventListener("focus", () => {
+  setTimeout(() => {
+    msgInput.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, 150);
+});
 
+// After send, keep focus for faster chatting
+function refocusMsg(){
+  if (window.innerWidth <= 980) {
+    setTimeout(() => msgInput.focus(), 50);
+  }
+}
         socket.emit("chat message", {
           text,
           attachmentUrl: attachment?.url || "",
@@ -1873,6 +1885,7 @@ button, .chan, .mItem { -webkit-tap-highlight-color: transparent; }
         });
 
         msgInput.value="";
+        refocusMsg();
         socket.emit("stop typing");
       }catch(e){
         addSystem(`Upload failed: ${e.message}`);
