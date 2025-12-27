@@ -351,8 +351,9 @@ app.use((req, res, next) => {
       "default-src 'self'",
       "script-src 'self'",
       "script-src-elem 'self'",
-      // we use an external stylesheet, so no unsafe-inline required
-      "style-src 'self'",
+      // Inline style attributes are set by the client JS (e.g. show/hide panels),
+      // so allow them alongside our external stylesheet.
+      "style-src 'self' 'unsafe-inline'",
       // allow avatars/uploads + blob previews on client
       "img-src 'self' data: blob:",
       "media-src 'self' blob:",
