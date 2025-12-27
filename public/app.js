@@ -3,18 +3,77 @@
 
 let socket = null;
 let me = null;
+let progression = { gold: 0, xp: 0, level: 1, xpIntoLevel: 0, xpForNextLevel: 100 };
 let currentRoom = "main";
 let lastUsers = [];
 const reactionsCache = Object.create(null);
 const msgIndex = [];
+let dmThreads = [];
+let activeDmId = null;
+const dmMessages = new Map();
+const badgeDefaults = { direct: "#ed4245", group: "#5865f2" };
+let badgePrefs = { ...badgeDefaults };
+let directBadgePending = false;
+let groupBadgePending = false;
+const dmThemeDefaults = { background: "#1e1f22" };
+let dmThemePrefs = { ...dmThemeDefaults };
+let levelToastTimer = null;
+let rightPanelMode = "rooms";
+let activeMenuTab = "changelog";
+let changelogEntries = [];
+let changelogLoaded = false;
+let changelogDirty = false;
+let editingChangelogId = null;
+let latestChangelogEntry = null;
+
+const THEME_LIST = [
+  { name: "Minimal Dark", mode: "Dark" },
+  { name: "Minimal Dark (High Contrast)", mode: "Dark" },
+  { name: "Cyberpunk Neon", mode: "Dark" },
+  { name: "Cyberpunk Neon (Midnight)", mode: "Dark" },
+  { name: "Fantasy Tavern", mode: "Dark" },
+  { name: "Fantasy Tavern (Ember)", mode: "Dark" },
+  { name: "Space Explorer", mode: "Dark" },
+  { name: "Space Explorer (Nebula)", mode: "Dark" },
+  { name: "Minimal Light", mode: "Light" },
+  { name: "Minimal Light (High Contrast)", mode: "Light" },
+  { name: "Pastel Light", mode: "Light" },
+  { name: "Paper / Parchment", mode: "Light" },
+  { name: "Sky Light", mode: "Light" },
+];
+const DEFAULT_THEME = "Minimal Dark";
+let currentTheme = document.body?.getAttribute("data-theme") || DEFAULT_THEME;
+let themeFilter = "all";
 
 let modalTargetUsername = null;
 let pendingFile = null;
 let uploadXhr = null;
+let memberMenuUser = null;
 
 // ---- DOM
 const authWrap = document.getElementById("authWrap");
 const app = document.getElementById("app");
+const addRoomBtn = document.getElementById("addRoomBtn");
+const menuToggleBtn = document.getElementById("menuToggleBtn");
+const chanHeaderTitle = document.getElementById("chanHeaderTitle");
+const roomsPanel = document.getElementById("roomsPanel");
+const menuPanel = document.getElementById("menuPanel");
+const menuNav = document.getElementById("menuNav");
+const latestUpdate = document.getElementById("latestUpdate");
+const latestUpdateTitle = document.getElementById("latestUpdateTitle");
+const latestUpdateDate = document.getElementById("latestUpdateDate");
+const latestUpdateBody = document.getElementById("latestUpdateBody");
+const latestUpdateViewBtn = document.getElementById("latestUpdateViewBtn");
+const changelogList = document.getElementById("changelogList");
+const changelogMsg = document.getElementById("changelogMsg");
+const changelogActions = document.getElementById("changelogActions");
+const changelogNewBtn = document.getElementById("changelogNewBtn");
+const changelogEditor = document.getElementById("changelogEditor");
+const changelogTitleInput = document.getElementById("changelogTitleInput");
+const changelogBodyInput = document.getElementById("changelogBodyInput");
+const changelogSaveBtn = document.getElementById("changelogSaveBtn");
+const changelogCancelBtn = document.getElementById("changelogCancelBtn");
+const changelogEditMsg = document.getElementById("changelogEditMsg");
 
 const authUser = document.getElementById("authUser");
 const authPass = document.getElementById("authPass");
@@ -28,7 +87,20 @@ const roomTitle = document.getElementById("roomTitle");
 
 const msgs = document.getElementById("msgs");
 const typingEl = document.getElementById("typing");
+const diceOverlay = document.getElementById("diceOverlay");
+const diceFace = document.getElementById("diceFace");
+const diceHint = document.getElementById("diceHint");
+const confettiLayer = document.getElementById("confettiLayer");
 const memberList = document.getElementById("memberList");
+const memberGold = document.getElementById("memberGold");
+const memberMenu = document.getElementById("memberMenu");
+const memberMenuName = document.getElementById("memberMenuName");
+const memberViewProfileBtn = document.getElementById("memberViewProfileBtn");
+const memberDmBtn = document.getElementById("memberDmBtn");
+const commandPopup = document.getElementById("commandPopup");
+const commandPopupTitle = document.getElementById("commandPopupTitle");
+const commandPopupBody = document.getElementById("commandPopupBody");
+const commandPopupClose = document.getElementById("commandPopupClose");
 
 const msgInput = document.getElementById("msgInput");
 const sendBtn = document.getElementById("sendBtn");
@@ -43,6 +115,32 @@ const meRole = document.getElementById("meRole");
 const meStatusText = document.getElementById("meStatusText");
 const statusSelect = document.getElementById("statusSelect");
 const profileBtn = document.getElementById("profileBtn");
+
+// dms
+const dmPanel = document.getElementById("dmPanel");
+const dmToggleBtn = document.getElementById("dmToggleBtn");
+const groupDmToggleBtn = document.getElementById("groupDmToggleBtn");
+const dmCloseBtn = document.getElementById("dmCloseBtn");
+const dmThreadList = document.getElementById("dmThreadList");
+const dmMsg = document.getElementById("dmMsg");
+const dmMetaTitle = document.getElementById("dmMetaTitle");
+const dmMetaPeople = document.getElementById("dmMetaPeople");
+const dmMessagesEl = document.getElementById("dmMessages");
+const dmText = document.getElementById("dmText");
+const dmSendBtn = document.getElementById("dmSendBtn");
+const dmUserBtn = document.getElementById("dmUserBtn");
+const dmSettingsBtn = document.getElementById("dmSettingsBtn");
+const dmSettingsMenu = document.getElementById("dmSettingsMenu");
+const dmDeleteHistoryBtn = document.getElementById("dmDeleteHistoryBtn");
+const dmReportBtn = document.getElementById("dmReportBtn");
+const dmBgColor = document.getElementById("dmBgColor");
+const dmBgColorText = document.getElementById("dmBgColorText");
+
+const customNav = document.getElementById("customNav");
+const themeGrid = document.getElementById("themeGrid");
+const themeMsg = document.getElementById("themeMsg");
+const themeFilterButtons = Array.from(document.querySelectorAll("[data-theme-filter]"));
+const customNavButtons = Array.from(document.querySelectorAll(".customNavBtn"));
 
 // drawers
 const drawerOverlay = document.getElementById("drawerOverlay");
@@ -80,18 +178,33 @@ const infoStatus = document.getElementById("infoStatus");
 // tabs/views
 const tabInfo = document.getElementById("tabInfo");
 const tabAbout = document.getElementById("tabAbout");
-const tabMedia = document.getElementById("tabMedia");
+const tabCustomize = document.getElementById("tabCustomize");
 const tabModeration = document.getElementById("tabModeration");
 
 const viewInfo = document.getElementById("viewInfo");
 const viewAbout = document.getElementById("viewAbout");
-const viewMedia = document.getElementById("viewMedia");
+const viewCustomize = document.getElementById("viewCustomize");
 const viewModeration = document.getElementById("viewModeration");
 
 const bioRender = document.getElementById("bioRender");
 const copyProfileLinkBtn = document.getElementById("copyProfileLinkBtn");
 const copyUsernameBtn = document.getElementById("copyUsernameBtn");
 const mediaMsg = document.getElementById("mediaMsg");
+const customizeMsg = document.getElementById("customizeMsg");
+const levelBadge = document.getElementById("levelBadge");
+const xpText = document.getElementById("xpText");
+const xpProgress = document.getElementById("xpProgress");
+const xpNote = document.getElementById("xpNote");
+const levelToast = document.getElementById("levelToast");
+const levelToastText = document.getElementById("levelToastText");
+
+const directBadgeColor = document.getElementById("directBadgeColor");
+const groupBadgeColor = document.getElementById("groupBadgeColor");
+const directBadgeColorText = document.getElementById("directBadgeColorText");
+const groupBadgeColorText = document.getElementById("groupBadgeColorText");
+const saveBadgePrefsBtn = document.getElementById("saveBadgePrefsBtn");
+const dmBadgeDot = document.getElementById("dmBadgeDot");
+const groupDmBadgeDot = document.getElementById("groupDmBadgeDot");
 
 // my profile edit
 const myProfileEdit = document.getElementById("myProfileEdit");
@@ -145,6 +258,7 @@ function escapeHtml(s){
     "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;"
   }[m]));
 }
+function normKey(u){ return String(u||"").trim().toLowerCase(); }
 function fmtAbs(ts){
   if(!ts) return "—";
   const n = Number(ts);
@@ -164,18 +278,36 @@ function bytesToNice(n){
   while(n >= 1024 && u < units.length-1){ n /= 1024; u++; }
   return `${n.toFixed(u===0?0:1)} ${units[u]}`;
 }
+function previewText(text, max=180){
+  const raw = String(text || "").trim();
+  if(raw.length <= max) return raw;
+  return `${raw.slice(0, max - 1)}…`;
+}
 
 const ROLES = ["Guest","User","VIP","Moderator","Admin","Co-owner","Owner"];
 function roleRank(role){ const i=ROLES.indexOf(role); return i===-1?1:i; }
 
+const STATUS_ALIASES = {
+  "Do Not Disturb": "DnD",
+  "Listening to Music": "Music",
+  "Looking to Chat": "Chatting",
+  "Invisible": "Lurking",
+};
+function normalizeStatusLabel(status, fallback=""){
+  const raw = String(status || "").trim();
+  if(!raw) return fallback;
+  return STATUS_ALIASES[raw] || raw;
+}
+
 function statusDotColor(status){
-  switch(status){
+  const normalized = normalizeStatusLabel(status, "Online");
+  switch(normalized){
     case "Online": return "var(--ok)";
     case "Away": return "var(--warn)";
     case "Busy": return "var(--danger)";
-    case "Do Not Disturb": return "var(--danger)";
+    case "DnD": return "var(--danger)";
     case "Idle": return "var(--gray)";
-    case "Invisible": return "var(--gray)";
+    case "Lurking": return "var(--gray)";
     default: return "var(--accent)";
   }
 }
@@ -214,7 +346,7 @@ function avatarNode(url, fallbackText){
   wrap.style.alignItems="center";
   wrap.style.justifyContent="center";
   wrap.style.fontWeight="900";
-  wrap.style.background="#444";
+  wrap.style.background="var(--avatar-bg)";
   wrap.textContent=(fallbackText||"?").slice(0,1).toUpperCase();
   return wrap;
 }
@@ -230,6 +362,33 @@ function addSystem(text){
   div.textContent=text;
   msgs.appendChild(div);
   msgs.scrollTop=msgs.scrollHeight;
+}
+
+let commandPopupDismissed=false;
+function hideCommandPopup(){
+  commandPopup.classList.remove("show");
+}
+function showCommandPopup(title, bodyHtml){
+  commandPopupDismissed=false;
+  commandPopupTitle.textContent=title;
+  commandPopupBody.innerHTML=bodyHtml;
+  commandPopup.classList.add("show");
+}
+commandPopupClose?.addEventListener("click", ()=>{ commandPopupDismissed=true; hideCommandPopup(); });
+
+function handleCommandResponse(payload){
+  if(commandPopupDismissed) commandPopupDismissed=false;
+  if(payload.type === "help" && Array.isArray(payload.commands)){
+    const roleLabel = payload.role || me?.role || "";
+    const items = payload.commands.map(cmd=>{
+      return `<div class="commandHelpItem"><div class="name">/${escapeHtml(cmd.name)}</div><div class="small">${escapeHtml(cmd.description||"")}</div><div class="usage">${escapeHtml(cmd.usage||"")}</div><div class="small">Example: ${escapeHtml(cmd.example||"")}</div></div>`;
+    }).join("");
+    showCommandPopup(`Commands you can use (Role: ${roleLabel})`, `<div class="commandHelpList">${items}</div>`);
+    return;
+  }
+  const msg = escapeHtml(payload?.message || "No response");
+  const title = payload?.ok ? "Command" : "Command error";
+  showCommandPopup(title, msg);
 }
 
 function applyMentions(text){
@@ -266,29 +425,323 @@ function renderBBCode(input){
   });
   return s;
 }
+function loadBadgePrefsFromStorage(){
+  try{
+    const raw = localStorage.getItem("dmBadgePrefs");
+    const parsed = raw ? JSON.parse(raw) : {};
+    return { ...badgeDefaults, ...parsed };
+  }catch{
+    return { ...badgeDefaults };
+  }
+}
+function saveBadgePrefsToStorage(){
+  try{ localStorage.setItem("dmBadgePrefs", JSON.stringify(badgePrefs)); }
+  catch{}
+}
+function isValidCssColor(color){
+  const c = String(color || "").trim();
+  if(!c) return false;
+  const s = new Option().style;
+  s.color = c;
+  return s.color !== "";
+}
+function normalizeColorForInput(color, fallback){
+  const hexOk = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+  if(hexOk.test(color || "")) return color;
+  if(hexOk.test(fallback || "")) return fallback;
+  return "#000000";
+}
+function sanitizeColor(raw, fallback, hardDefault){
+  if(isValidCssColor(raw)) return raw.trim();
+  if(isValidCssColor(fallback)) return fallback.trim();
+  if(isValidCssColor(hardDefault)) return hardDefault.trim();
+  return hardDefault || badgeDefaults.direct;
+}
+function loadDmThemePrefsFromStorage(){
+  try {
+    const raw = localStorage.getItem("dmThemePrefs");
+    const parsed = raw ? JSON.parse(raw) : {};
+    return { ...dmThemeDefaults, ...parsed };
+  } catch {
+    return { ...dmThemeDefaults };
+  }
+}
+function saveDmThemePrefsToStorage(){
+  try { localStorage.setItem("dmThemePrefs", JSON.stringify(dmThemePrefs)); }
+  catch{}
+}
+function applyDmThemePrefs(){
+  const bg = sanitizeColor(dmThemePrefs.background, dmThemeDefaults.background, dmThemeDefaults.background);
+  dmThemePrefs.background = bg;
+  document.documentElement.style.setProperty("--dm-bg", bg);
+  if(dmBgColor) dmBgColor.value = normalizeColorForInput(bg, dmThemeDefaults.background);
+  if(dmBgColorText) dmBgColorText.value = bg;
+}
+
+function sanitizeThemeName(name){
+  const match = THEME_LIST.find((t) => t.name === name);
+  return match ? match.name : DEFAULT_THEME;
+}
+function getStoredTheme(){
+  try{ return localStorage.getItem("theme") || ""; }
+  catch{ return ""; }
+}
+function setStoredTheme(theme){
+  try{ localStorage.setItem("theme", theme); }
+  catch{}
+}
+async function fetchThemePreference(){
+  if(!me) return null;
+  try{
+    const res = await fetch("/api/me/theme");
+    if(!res.ok) return null;
+    const data = await res.json();
+    return data?.theme || null;
+  }catch{
+    return null;
+  }
+}
+async function persistThemePreference(theme){
+  if(!me) return;
+  try{
+    const res = await fetch("/api/me/theme", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ theme })
+    });
+    if(res.ok){
+      const data = await res.json();
+      if(data?.theme) me.theme = data.theme;
+    }
+  }catch{}
+}
+function applyTheme(themeName, { persist=true, silent=false } = {}){
+  const safe = sanitizeThemeName(themeName || DEFAULT_THEME);
+  currentTheme = safe;
+  document.body?.setAttribute("data-theme", safe);
+  setStoredTheme(safe);
+  if(persist) persistThemePreference(safe);
+  renderThemeGrid();
+  if(themeMsg && !silent){
+    themeMsg.textContent = `Theme applied: ${safe}`;
+    setTimeout(() => { if(themeMsg.textContent.startsWith("Theme applied")) themeMsg.textContent = ""; }, 2400);
+  }
+}
+function createThemeThumbnail(themeName){
+  const wrap = document.createElement("div");
+  wrap.className = "themeThumbnail";
+  wrap.setAttribute("data-theme", themeName);
+  wrap.innerHTML = `
+    <div class="themeMiniLayout">
+      <div class="themeMiniSidebar">
+        <div class="miniItem"></div>
+        <div class="miniItem"></div>
+        <div class="miniItem"></div>
+      </div>
+      <div class="themeMiniMain">
+        <div class="themeMiniMsg">
+          <div class="themeMiniAvatar"></div>
+          <div class="themeMiniBubble">Hey there!</div>
+        </div>
+        <div class="themeMiniMsg">
+          <div class="themeMiniAvatar"></div>
+          <div class="themeMiniBubble self">All set?</div>
+        </div>
+        <div class="themeMiniButton">Action</div>
+      </div>
+    </div>
+  `;
+  return wrap;
+}
+function renderThemeGrid(){
+  if(!themeGrid) return;
+  themeGrid.innerHTML = "";
+  const filtered = THEME_LIST.filter((t) => {
+    if(themeFilter === "dark") return t.mode === "Dark";
+    if(themeFilter === "light") return t.mode === "Light";
+    return true;
+  });
+  for(const theme of filtered){
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = `themeCard${currentTheme === theme.name ? " selected" : ""}`;
+    card.dataset.themeName = theme.name;
+    card.innerHTML = `
+      <div class="themeCardHeader">
+        <div>
+          <div class="themeLabel">${escapeHtml(theme.name)}</div>
+          <div class="themeMode">${escapeHtml(theme.mode)}</div>
+        </div>
+        <div class="themeCheck">✓</div>
+      </div>
+    `;
+    card.appendChild(createThemeThumbnail(theme.name));
+    card.addEventListener("click", () => applyTheme(theme.name, { persist:true }));
+    themeGrid.appendChild(card);
+  }
+}
+function setThemeFilter(filter){
+  themeFilter = filter;
+  themeFilterButtons.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.themeFilter === filter);
+  });
+  renderThemeGrid();
+}
+function switchCustomizationSection(section){
+  customNavButtons.forEach((btn) => {
+    const isActive = btn.dataset.section === section;
+    btn.classList.toggle("active", isActive);
+  });
+  document.querySelectorAll(".customPanel").forEach((panel) => {
+    panel.classList.toggle("active", panel.id === `customPanel${section[0].toUpperCase()}${section.slice(1)}`);
+  });
+}
+function initCustomizationUi(){
+  customNavButtons.forEach((btn) => {
+    btn.addEventListener("click", () => switchCustomizationSection(btn.dataset.section));
+  });
+  themeFilterButtons.forEach((btn) => {
+    btn.addEventListener("click", () => setThemeFilter(btn.dataset.themeFilter));
+  });
+  renderThemeGrid();
+}
+async function loadThemePreference(){
+  let desired = sanitizeThemeName(getStoredTheme() || currentTheme || DEFAULT_THEME);
+  if(me){
+    if(me.theme) desired = sanitizeThemeName(me.theme);
+    else {
+      const serverTheme = await fetchThemePreference();
+      if(serverTheme) desired = sanitizeThemeName(serverTheme);
+    }
+  }
+  applyTheme(desired, { persist:false, silent:true });
+}
+
+function applyBadgePrefs(){
+  if(directBadgeColorText) directBadgeColorText.value = badgePrefs.direct;
+  if(groupBadgeColorText) groupBadgeColorText.value = badgePrefs.group;
+  if(directBadgeColor) directBadgeColor.value = normalizeColorForInput(badgePrefs.direct, badgeDefaults.direct);
+  if(groupBadgeColor) groupBadgeColor.value = normalizeColorForInput(badgePrefs.group, badgeDefaults.group);
+  if(dmBadgeDot) dmBadgeDot.style.backgroundColor = badgePrefs.direct;
+  if(groupDmBadgeDot) groupDmBadgeDot.style.backgroundColor = badgePrefs.group;
+}
+function setBadgeVisibility(kind, visible){
+  const el = kind === "group" ? groupDmBadgeDot : dmBadgeDot;
+  if(kind === "group") groupBadgePending = visible; else directBadgePending = visible;
+  if(el) el.style.display = visible ? "block" : "none";
+}
+function clearDmBadges(){
+  setBadgeVisibility("direct", false);
+  setBadgeVisibility("group", false);
+}
+function isGroupThread(threadId){
+  const meta = dmThreads.find((t) => t.id === threadId);
+  return !!(meta?.is_group || meta?.isGroup);
+}
+function markDmNotification(threadId, isGroupHint){
+  const isGroup = typeof isGroupHint === "boolean" ? isGroupHint : isGroupThread(threadId);
+  if(dmPanel?.classList.contains("open") && activeDmId === threadId) return;
+  setBadgeVisibility(isGroup ? "group" : "direct", true);
+}
+badgePrefs = loadBadgePrefsFromStorage();
+applyBadgePrefs();
+dmThemePrefs = loadDmThemePrefsFromStorage();
+applyDmThemePrefs();
+initCustomizationUi();
+const EMOJI_CHOICES = ["😀","😁","😂","🙂","😉","😍","😘","💀","🤔","😤","😢","😡","🔥","🖕","♥️","💯","👍","👎","🎉","👀"];
+
+let reactionMenuEl = null;
+let reactionMenuFor = null;
+let reactionMenuRow = null;
+
+function ensureReactionMenu(){
+  if(reactionMenuEl) return;
+  reactionMenuEl = document.createElement("div");
+  reactionMenuEl.className = "reactionMenu";
+  reactionMenuEl.innerHTML = `<div class="reactionGrid"></div>`;
+  document.body.appendChild(reactionMenuEl);
+
+  // click outside closes
+  document.addEventListener("mousedown", (e)=>{
+    if(reactionMenuEl?.classList.contains("open") && !reactionMenuEl.contains(e.target)){
+      closeReactionMenu();
+    }
+  });
+  document.addEventListener("keydown", (e)=>{
+    if(e.key === "Escape") closeReactionMenu();
+  });
+  window.addEventListener("scroll", ()=>closeReactionMenu(), {passive:true});
+}
+
+function openReactionMenu(messageId, anchorEl, rowEl){
+  ensureReactionMenu();
+  reactionMenuFor = messageId;
+  reactionMenuRow = rowEl;
+
+  const grid = reactionMenuEl.querySelector(".reactionGrid");
+  grid.innerHTML = "";
+
+  for(const em of EMOJI_CHOICES){
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = em;
+    b.onclick = ()=>{
+      socket?.emit("reaction", { messageId, emoji: em });
+      closeReactionMenu();
+    };
+    grid.appendChild(b);
+  }
+
+  // position near anchor
+  const rect = anchorEl.getBoundingClientRect();
+  reactionMenuEl.classList.add("open");
+
+  // place above if possible, else below
+  const menuRect = reactionMenuEl.getBoundingClientRect();
+  let x = Math.min(window.innerWidth - menuRect.width - 12, Math.max(12, rect.left));
+  let y = rect.top - menuRect.height - 10;
+  if(y < 12) y = rect.bottom + 10;
+
+  reactionMenuEl.style.left = `${x}px`;
+  reactionMenuEl.style.top = `${y}px`;
+
+  // on mobile, force show actions while menu is open
+  if(rowEl) rowEl.classList.add("showActions");
+}
+
+function closeReactionMenu(){
+  if(!reactionMenuEl) return;
+  reactionMenuEl.classList.remove("open");
+  if(reactionMenuRow) reactionMenuRow.classList.remove("showActions");
+  reactionMenuFor = null;
+  reactionMenuRow = null;
+}
 
 function addMessage(m){
-  const wrap=document.createElement("div");
-  wrap.className="msg"+(m.user===me.username?" self":"");
-  wrap.dataset.mid=m.messageId;
+  const row = document.createElement("div");
+  row.className = "msg" + (m.user === me.username ? " self" : "");
+  row.dataset.mid = m.messageId;
 
-  const av=document.createElement("div");
-  av.className="msgAvatar";
+  const av = document.createElement("div");
+  av.className = "msgAvatar";
   av.appendChild(avatarNode(m.avatar, m.user));
 
-  const bubble=document.createElement("div");
-  bubble.className="bubble";
+  const main = document.createElement("div");
+  main.className = "msgMain";
 
-  const meta=document.createElement("div");
-  meta.className="metaLine";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+
+  const meta = document.createElement("div");
+  meta.className = "metaLine";
   meta.innerHTML = `
     <span class="uName">${escapeHtml(roleIcon(m.role))} ${escapeHtml(m.user)}</span>
     <span class="badge" style="color:${roleBadgeColor(m.role)}">${escapeHtml(m.role)}</span>
     <span class="ts">${new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span>
   `;
 
-  const text=document.createElement("div");
-  text.className="text";
+  const text = document.createElement("div");
+  text.className = "text";
   text.innerHTML = applyMentions(m.text);
 
   bubble.appendChild(meta);
@@ -319,38 +772,61 @@ function addMessage(m){
     bubble.appendChild(att);
   }
 
-  const actions=document.createElement("div");
-  actions.className="actions";
-  const emojis=["😀","😂","🔥","❤️","👍"];
-  for(const e of emojis){
-    const b=document.createElement("button");
-    b.className="reactBtn";
-    b.textContent=e;
-    b.onclick=()=>socket?.emit("reaction",{messageId:m.messageId, emoji:e});
-    actions.appendChild(b);
-  }
+  // reactions display (below bubble, not inside it)
+  const reacts = document.createElement("div");
+  reacts.className = "reactions";
+  reacts.id = "reacts-" + m.messageId;
+
+  main.appendChild(bubble);
+  main.appendChild(reacts);
+
+  // actions rail: ONE reaction button (+ delete for mods)
+  const actions = document.createElement("div");
+  actions.className = "msgActions";
+
+  const reactToggle = document.createElement("button");
+  reactToggle.className = "reactBtn";
+  reactToggle.type = "button";
+  reactToggle.textContent = "❤️‍🔥";
+  reactToggle.title = "React";
+  reactToggle.onclick = (e)=>{
+    e.stopPropagation();
+    if(reactionMenuFor === m.messageId) closeReactionMenu();
+    else openReactionMenu(m.messageId, reactToggle, row);
+  };
+  actions.appendChild(reactToggle);
+
   if(roleRank(me.role) >= roleRank("Moderator")){
-    const del=document.createElement("button");
-    del.className="reactBtn";
-    del.textContent="🗑️";
-    del.title="Delete message";
-    del.onclick=()=>socket?.emit("mod delete message",{messageId:m.messageId});
+    const del = document.createElement("button");
+    del.className = "reactBtn";
+    del.type = "button";
+    del.textContent = "🗑️";
+    del.title = "Delete message";
+    del.onclick = (e)=>{
+      e.stopPropagation();
+      socket?.emit("mod delete message", { messageId: m.messageId });
+    };
     actions.appendChild(del);
   }
-  bubble.appendChild(actions);
 
-  const reacts=document.createElement("div");
-  reacts.className="reactions";
-  reacts.id="reacts-"+m.messageId;
-  bubble.appendChild(reacts);
+  // mobile: long press bubble opens reaction menu
+  let pressTimer = null;
+  bubble.addEventListener("touchstart", ()=>{
+    pressTimer = setTimeout(()=>{
+      openReactionMenu(m.messageId, bubble, row);
+    }, 450);
+  }, {passive:true});
+  bubble.addEventListener("touchend", ()=>{ clearTimeout(pressTimer); });
+  bubble.addEventListener("touchcancel", ()=>{ clearTimeout(pressTimer); });
 
-  wrap.appendChild(av);
-  wrap.appendChild(bubble);
+  row.appendChild(av);
+  row.appendChild(main);
+  row.appendChild(actions);
 
-  msgs.appendChild(wrap);
-  msgs.scrollTop=msgs.scrollHeight;
+  msgs.appendChild(row);
+  msgs.scrollTop = msgs.scrollHeight;
 
-  msgIndex.push({ id: m.messageId, el: wrap, textLower: (m.user+" "+m.text).toLowerCase() });
+  msgIndex.push({ id: m.messageId, el: row, textLower: (m.user+" "+m.text).toLowerCase() });
 }
 
 function renderReactions(messageId, reactionsMap){
@@ -371,6 +847,80 @@ function renderReactions(messageId, reactionsMap){
   });
 }
 
+function closeMemberMenu(){
+  if (!memberMenu) return;
+  memberMenu.classList.remove("open");
+  memberMenuUser = null;
+}
+
+function openMemberMenu(user, anchor){
+  if (!memberMenu || !membersPane) {
+    openMemberProfile(user.name);
+    return;
+  }
+
+  memberMenuUser = user;
+  if (memberMenuName) memberMenuName.textContent = `${roleIcon(user.role)} ${user.name}`;
+  memberMenu.classList.add("open");
+
+  const paneRect = membersPane.getBoundingClientRect();
+  const rect = anchor.getBoundingClientRect();
+  const top = rect.top - paneRect.top + membersPane.scrollTop + rect.height + 6;
+  const left = rect.left - paneRect.left + 6;
+  memberMenu.style.top = `${top}px`;
+  memberMenu.style.left = `${left}px`;
+}
+
+function updateGoldUI(){
+  if (!memberGold) return;
+  if (progression && progression.gold != null) {
+    const g = Number(progression.gold || 0);
+    memberGold.textContent = `Gold: ${g.toLocaleString()}`;
+    memberGold.classList.add("show");
+  } else {
+    memberGold.classList.remove("show");
+  }
+}
+
+function renderLevelProgress(data, isSelf){
+  const info = data || progression || {};
+  const levelVal = Number(info.level || progression.level || 1);
+  if (levelBadge) levelBadge.textContent = `Level ${levelVal}`;
+
+  const hasXp = isSelf && typeof info.xpIntoLevel === "number" && typeof info.xpForNextLevel === "number" && info.xpForNextLevel > 0;
+  if (xpText) {
+    xpText.style.display = "block";
+    xpText.textContent = hasXp ? `XP: ${Math.max(0, info.xpIntoLevel || 0)} / ${info.xpForNextLevel}` : "XP hidden";
+  }
+  if (xpProgress) {
+    const pct = hasXp ? Math.max(0, Math.min(100, ((info.xpIntoLevel || 0) / info.xpForNextLevel) * 100)) : 0;
+    xpProgress.style.width = `${pct}%`;
+  }
+  if (xpNote) xpNote.style.display = hasXp ? "block" : "none";
+}
+
+function applyProgressionPayload(payload){
+  if (!payload) return;
+  const next = { ...progression };
+  if (payload.gold != null) next.gold = Number(payload.gold || 0);
+  if (payload.level != null) next.level = Number(payload.level) || next.level;
+  if (payload.xp != null || payload.xpIntoLevel != null || payload.xpForNextLevel != null) {
+    if (payload.xp != null) next.xp = Number(payload.xp || 0);
+    if (payload.xpIntoLevel != null) next.xpIntoLevel = Number(payload.xpIntoLevel || 0);
+    if (payload.xpForNextLevel != null) next.xpForNextLevel = Number(payload.xpForNextLevel || 100);
+  }
+  progression = next;
+  updateGoldUI();
+}
+
+function showLevelToast(level){
+  if (!levelToast || !levelToastText) return;
+  clearTimeout(levelToastTimer);
+  levelToastText.textContent = `Level ${level}!`;
+  levelToast.classList.add("show");
+  levelToastTimer = setTimeout(() => levelToast.classList.remove("show"), 3200);
+}
+
 function renderMembers(users){
   lastUsers = users || [];
   memberList.innerHTML="";
@@ -385,7 +935,8 @@ function renderMembers(users){
 
     const dot=document.createElement("div");
     dot.className="dot";
-    dot.style.background=statusDotColor(u.status);
+    const statusLabel = normalizeStatusLabel(u.status, "Online");
+    dot.style.background=statusDotColor(statusLabel);
 
     const meta=document.createElement("div");
     meta.className="mMeta";
@@ -396,7 +947,7 @@ function renderMembers(users){
 
     const sub=document.createElement("div");
     sub.className="mSub";
-    sub.textContent=`${u.role} • ${u.status}${u.mood?(" • "+u.mood):""}`;
+    sub.textContent=`${u.role} • ${statusLabel}${u.mood?(" • "+u.mood):""}`;
 
     meta.appendChild(name);
     meta.appendChild(sub);
@@ -405,9 +956,74 @@ function renderMembers(users){
     row.appendChild(dot);
     row.appendChild(meta);
 
-    row.onclick = () => openMemberProfile(u.name);
+    row.onclick = (ev) => {
+      ev.stopPropagation();
+      openMemberMenu(u, row);
+    };
     memberList.appendChild(row);
   });
+}
+
+async function loadProgression(){
+  try{
+    const res = await fetch("/api/me/progression");
+    if(!res.ok) return;
+    const data = await res.json();
+    applyProgressionPayload(data);
+  }catch{}
+}
+
+// ---- Dice Room client effects
+const DICE_FACES = ["⚀","⚁","⚂","⚃","⚄","⚅"];
+let diceAnimTimer = null;
+
+function setDiceOverlayVisible(visible, hintText = "Rolling…", rolling = false){
+  if(!diceOverlay || !diceFace || !diceHint) return;
+  diceOverlay.classList.toggle("show", !!visible);
+  diceHint.textContent = hintText;
+  const card = diceOverlay.querySelector(".diceCard");
+  if(card) card.classList.toggle("rolling", !!rolling);
+}
+
+function playDiceAnimation(finalValue, won){
+  if(!diceOverlay || !diceFace) return;
+  clearTimeout(diceAnimTimer);
+  setDiceOverlayVisible(true, "Rolling…", true);
+
+  const start = Date.now();
+  const dur = 900;
+  const tick = () => {
+    const t = Date.now() - start;
+    const idx = Math.floor(Math.random() * 6);
+    diceFace.textContent = DICE_FACES[idx];
+    if(t < dur){
+      diceAnimTimer = setTimeout(tick, 85);
+    }else{
+      const v = Math.max(1, Math.min(6, Number(finalValue) || 1));
+      diceFace.textContent = DICE_FACES[v-1];
+      setDiceOverlayVisible(true, won ? "JACKPOT!" : "Nice roll", false);
+      diceAnimTimer = setTimeout(() => setDiceOverlayVisible(false), 650);
+    }
+  };
+  tick();
+}
+
+function popConfetti(){
+  if(!confettiLayer) return;
+  // clear any old pieces
+  confettiLayer.innerHTML = "";
+  const pieces = 22;
+  const w = confettiLayer.clientWidth || 600;
+  for(let i=0;i<pieces;i++){
+    const el = document.createElement("div");
+    el.className = "confetti";
+    el.style.left = `${Math.floor(Math.random() * Math.max(1, w - 10))}px`;
+    el.style.top = `${Math.floor(Math.random() * 40)}px`;
+    el.style.transform = `translateY(-20px) rotate(${Math.floor(Math.random()*180)}deg)`;
+    el.style.background = `hsl(${Math.floor(Math.random()*360)}, 85%, 60%)`;
+    confettiLayer.appendChild(el);
+  }
+  setTimeout(()=>{ if(confettiLayer) confettiLayer.innerHTML = ""; }, 1100);
 }
 
 // Search filter
@@ -428,6 +1044,7 @@ function closeDrawers(){
   channelsPane?.classList.remove("open");
   membersPane?.classList.remove("open");
   drawerOverlay?.classList.remove("show");
+  closeMemberMenu();
 }
 function openChannels(){
   membersPane?.classList.remove("open");
@@ -444,8 +1061,324 @@ openMembersBtn?.addEventListener("click", openMembers);
 drawerOverlay?.addEventListener("click", closeDrawers);
 document.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeDrawers(); });
 
-// upload button icon -> open file picker
-pickFileBtn?.addEventListener("click", () => fileInput.click());
+// dms (rebuilt)
+let dmSettingsOpen = false;
+function closeDmSettingsMenu(){
+  dmSettingsOpen = false;
+  dmSettingsMenu?.classList.remove("open");
+  dmSettingsBtn?.setAttribute("aria-expanded", "false");
+}
+function toggleDmSettingsMenu(){
+  if (!dmSettingsMenu) return;
+  dmSettingsOpen = !dmSettingsOpen;
+  dmSettingsMenu.classList.toggle("open", dmSettingsOpen);
+  dmSettingsBtn?.setAttribute("aria-expanded", dmSettingsOpen ? "true" : "false");
+}
+
+function threadLabel(t){
+  const parts = (t.participants || []);
+  const others = parts.filter(p => p !== me?.username);
+  if (t.title) return t.title;
+  if (t.is_group) return others.join(", ") || "Group chat";
+  return others[0] || "Direct Message";
+}
+
+function renderThreadItem(t){
+  const div = document.createElement("div");
+  div.className = "dmItem" + (t.id === activeDmId ? " active" : "");
+  const label = threadLabel(t);
+  const preview = t.last_text ? String(t.last_text).slice(0, 80) : "No messages yet";
+  div.innerHTML = `
+    <div class="name">${escapeHtml(label)}</div>
+    <div class="small">${escapeHtml(preview)}</div>
+  `;
+  div.onclick = () => openDmThread(t.id);
+  return div;
+}
+
+function renderDmThreads(){
+  dmThreadList.innerHTML = "";
+
+  const sections = [
+    {
+      title: "Direct messages",
+      emptyText: "No direct messages yet. Start one from Members.",
+      items: dmThreads.filter((t) => !t.is_group)
+    },
+    {
+      title: "Group chats",
+      emptyText: "No group chats yet.",
+      items: dmThreads.filter((t) => t.is_group)
+    }
+  ];
+
+  for (const section of sections) {
+    const head = document.createElement("div");
+    head.className = "dmSectionTitle";
+    head.textContent = section.title;
+    dmThreadList.appendChild(head);
+
+    if (!section.items.length) {
+      const empty = document.createElement("div");
+      empty.className = "dmEmpty";
+      empty.textContent = section.emptyText;
+      dmThreadList.appendChild(empty);
+      continue;
+    }
+
+    for (const t of section.items) dmThreadList.appendChild(renderThreadItem(t));
+  }
+}
+
+async function loadDmThreads(){
+  try {
+    const res = await fetch("/dm/threads");
+    if (!res.ok) {
+      dmMsg.textContent = "Could not load threads.";
+      return;
+    }
+    const raw = await res.json();
+    dmThreads = (raw || []).map((t) => ({ ...t, is_group: !!t.is_group }));
+    renderDmThreads();
+  } catch {
+    dmMsg.textContent = "Could not load threads.";
+  }
+}
+
+async function startDirectMessage(username){
+  if (!username || username === me?.username) return;
+
+  openDmPanel();
+  closeMemberMenu();
+
+  if (!dmThreads.length) await loadDmThreads();
+
+  const existing = dmThreads.find((t) => !t.is_group && (t.participants || []).includes(username));
+  if (existing) {
+    openDmThread(existing.id);
+    return;
+  }
+
+  dmMsg.textContent = "Preparing chat...";
+  try {
+    const res = await fetch("/dm/thread", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ participants: [username], kind: "direct" })
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      dmMsg.textContent = text || "Could not start DM.";
+      return;
+    }
+
+    const data = await res.json();
+    dmMsg.textContent = data.reused ? "Opened existing DM." : "DM ready. Send a message to save it.";
+
+    if (data.threadId) {
+      upsertThreadMeta(data.threadId, { participants: [username, me?.username].filter(Boolean), is_group: false });
+      openDmThread(data.threadId);
+    }
+  } catch {
+    dmMsg.textContent = "Could not start DM.";
+  }
+}
+
+function openDmPanel(){
+  dmPanel.classList.add("open");
+  dmMsg.textContent = "";
+  clearDmBadges();
+
+  // load threads if we haven't yet
+  if (!dmThreads.length) loadDmThreads();
+  else renderDmThreads();
+}
+
+function closeDmPanel(){
+  dmPanel.classList.remove("open");
+  closeDmSettingsMenu();
+}
+
+function renderDmMessages(threadId){
+  dmMessagesEl.innerHTML = "";
+  const msgsArr = dmMessages.get(threadId) || [];
+
+  if (!msgsArr.length) {
+    const empty = document.createElement("div");
+    empty.className = "dmEmpty";
+    empty.textContent = "No messages yet. Say hi to save this thread.";
+    dmMessagesEl.appendChild(empty);
+    return;
+  }
+
+  for (const m of msgsArr) {
+    const wrap = document.createElement("div");
+    wrap.className = "dmBubble" + (m.user === me.username ? " self" : "");
+
+    const meta = document.createElement("div");
+    meta.className = "dmMetaRow";
+    meta.innerHTML = `<span>${escapeHtml(m.user)}</span><span>${new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span>`;
+    wrap.appendChild(meta);
+
+    const text = document.createElement("div");
+    text.innerHTML = applyMentions(m.text || "");
+    wrap.appendChild(text);
+
+    dmMessagesEl.appendChild(wrap);
+  }
+
+  dmMessagesEl.scrollTop = dmMessagesEl.scrollHeight;
+}
+
+function setDmMeta(thread){
+  if (!thread) {
+    dmMetaTitle.textContent = "Pick a thread";
+    dmMetaPeople.textContent = "";
+    return;
+  }
+  dmMetaTitle.textContent = threadLabel(thread);
+  dmMetaPeople.textContent = (thread.participants || []).join(", ");
+}
+
+function openDmThread(threadId){
+  activeDmId = threadId;
+  renderDmThreads();
+
+  const meta = dmThreads.find(t => t.id === threadId);
+  setDmMeta(meta);
+  if (meta) setBadgeVisibility(meta.is_group ? "group" : "direct", false);
+
+  dmMessagesEl.innerHTML = "<div class='dmEmpty'>Loading...</div>";
+  socket?.emit("dm join", { threadId });
+}
+
+async function deleteDmHistory(){
+  if (!activeDmId) {
+    dmMsg.textContent = "Pick a thread first.";
+    return;
+  }
+
+  const meta = dmThreads.find((t) => t.id === activeDmId);
+  const label = meta ? threadLabel(meta) : "this DM";
+  const ok = confirm(`Delete all messages in "${label}" for everyone?`);
+  if (!ok) return;
+
+  dmMsg.textContent = "Deleting history...";
+  try {
+    const res = await fetch(`/dm/thread/${activeDmId}/messages`, { method: "DELETE" });
+    if (!res.ok) {
+      const text = await res.text();
+      dmMsg.textContent = text || "Could not delete history.";
+      return;
+    }
+
+    dmMessages.set(activeDmId, []);
+    const thread = dmThreads.find((t) => t.id === activeDmId);
+    if (thread) {
+      thread.last_text = "";
+      thread.last_ts = null;
+    }
+    renderDmMessages(activeDmId);
+    renderDmThreads();
+    dmMsg.textContent = "History cleared.";
+    closeDmSettingsMenu();
+  } catch {
+    dmMsg.textContent = "Could not delete history.";
+  }
+}
+
+function upsertThreadMeta(tid, updater){
+  const idx = dmThreads.findIndex(t => t.id === tid);
+  if (idx === -1) dmThreads.unshift({ id: tid, participants: [], ...updater });
+  else dmThreads[idx] = { ...dmThreads[idx], ...updater };
+  renderDmThreads();
+}
+
+function sendDmMessage(){
+  if (!activeDmId) return;
+  const txt = dmText.value.trim();
+  if (!txt) return;
+  socket?.emit("dm message", { threadId: activeDmId, text: txt });
+  dmText.value = "";
+}
+
+dmToggleBtn?.addEventListener("click", openDmPanel);
+groupDmToggleBtn?.addEventListener("click", openDmPanel);
+
+dmCloseBtn?.addEventListener("click", closeDmPanel);
+dmSendBtn?.addEventListener("click", sendDmMessage);
+dmSettingsBtn?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleDmSettingsMenu();
+});
+dmDeleteHistoryBtn?.addEventListener("click", deleteDmHistory);
+dmReportBtn?.addEventListener("click", () => {
+  dmMsg.textContent = "Report feature coming soon.";
+  closeDmSettingsMenu();
+});
+
+document.addEventListener("click", (e) => {
+  if (!dmSettingsOpen) return;
+  if (dmSettingsMenu?.contains(e.target)) return;
+  if (dmSettingsBtn?.contains(e.target)) return;
+  closeDmSettingsMenu();
+});
+
+dmBgColor?.addEventListener("input", () => {
+  dmThemePrefs.background = dmBgColor.value;
+  if(dmBgColorText) dmBgColorText.value = dmBgColor.value;
+  applyDmThemePrefs();
+  saveDmThemePrefsToStorage();
+});
+dmBgColorText?.addEventListener("input", () => {
+  const safe = sanitizeColor(dmBgColorText.value, dmThemePrefs.background, dmThemeDefaults.background);
+  dmThemePrefs.background = safe;
+  applyDmThemePrefs();
+  saveDmThemePrefsToStorage();
+});
+
+memberViewProfileBtn?.addEventListener("click", () => {
+  if (memberMenuUser) openMemberProfile(memberMenuUser.name);
+  closeMemberMenu();
+});
+
+memberDmBtn?.addEventListener("click", () => {
+  if (memberMenuUser) startDirectMessage(memberMenuUser.name);
+});
+
+document.addEventListener("click", (e) => {
+  if (!memberMenu?.classList.contains("open")) return;
+  if (memberMenu.contains(e.target)) return;
+  if (e.target.closest(".mItem")) return;
+  closeMemberMenu();
+});
+membersPane?.addEventListener("scroll", closeMemberMenu);
+
+dmText?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendDmMessage();
+  }
+});
+
+// "Message" button on profile -> always direct DM
+dmUserBtn?.addEventListener("click", () => {
+  if (modalTargetUsername) {
+    closeModal();
+    startDirectMessage(modalTargetUsername);
+  }
+});
+
+// upload button icon -> open file picker (except Dice Room)
+pickFileBtn?.addEventListener("click", () => {
+  if(!socket) return;
+  if(isDiceRoom()){
+    socket.emit("dice:roll");
+    return;
+  }
+  fileInput.click();
+});
 
 // upload preview
 function showUploadPreview(file){
@@ -531,13 +1464,13 @@ function setTab(tab){
   }
   viewInfo.style.display = tab==="info" ? "block" : "none";
   viewAbout.style.display = tab==="about" ? "block" : "none";
-  viewMedia.style.display = tab==="media" ? "block" : "none";
+  viewCustomize.style.display = tab==="customize" ? "block" : "none";
   viewModeration.style.display = tab==="moderation" ? "block" : "none";
   focusActiveTab();
 }
 tabInfo.addEventListener("click", ()=>setTab("info"));
 tabAbout.addEventListener("click", ()=>setTab("about"));
-tabMedia.addEventListener("click", ()=>setTab("media"));
+tabCustomize.addEventListener("click", ()=>setTab("customize"));
 tabModeration.addEventListener("click", async ()=>{
   setTab("moderation");
   await refreshLogs();
@@ -552,24 +1485,45 @@ function closeModal(){
   modMsg.textContent="";
   logsMsg.textContent="";
   mediaMsg.textContent="";
+  if (customizeMsg) customizeMsg.textContent = "";
 }
 closeModalBtn.addEventListener("click", closeModal);
 modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
 
 // rooms
+function roomDisplayName(room){
+  return room === "diceroom" ? "Dice Room" : room;
+}
+function isDiceRoom(){
+  return currentRoom === "diceroom";
+}
+function updatePickFileBtn(){
+  if(!pickFileBtn) return;
+  if(isDiceRoom()){
+    pickFileBtn.textContent = "🎲";
+    pickFileBtn.title = "Roll Dice";
+  }else{
+    pickFileBtn.textContent = "📷";
+    pickFileBtn.title = "Upload";
+  }
+}
+
 function setActiveRoom(room){
-  currentRoom=room;
-  nowRoom.textContent=`#${room}`;
-  roomTitle.textContent=room;
-  msgInput.placeholder=`Message #${room}`;
+  currentRoom = room;
+  const display = roomDisplayName(room);
+  nowRoom.textContent = display;
+  roomTitle.textContent = display;
+  msgInput.placeholder = `Message ${display}`;
+  updatePickFileBtn();
   document.querySelectorAll(".chan").forEach(el=>{
-    el.classList.toggle("active", el.dataset.room===room);
+    el.classList.toggle("active", el.dataset.room === room);
   });
 }
 function joinRoom(room){
+  room = sanitizeRoomClient(room) || "main";
   setActiveRoom(room);
   clearMsgs();
-  socket?.emit("join room", { room, status: statusSelect.value || "Online" });
+  socket?.emit("join room", { room, status: normalizeStatusLabel(statusSelect.value, "Online") });
   closeDrawers();
 }
 chanList.addEventListener("click", (e)=>{
@@ -578,6 +1532,286 @@ chanList.addEventListener("click", (e)=>{
   const r=el.dataset.room;
   if(r && r!==currentRoom) joinRoom(r);
 });
+function sanitizeRoomClient(r){
+  r = String(r || "").trim().replace(/^#+/, "").toLowerCase();
+  r = r.replace(/[^a-z0-9_-]/g, "").slice(0,24);
+  return r;
+}
+
+function renderRoomsList(rooms){
+  chanList.innerHTML = "";
+  for(const r of rooms || []){
+    const div = document.createElement("div");
+    div.className = "chan" + (r === currentRoom ? " active" : "");
+    div.dataset.room = r;
+    div.textContent = roomDisplayName(r); // no '#'
+    chanList.appendChild(div);
+  }
+}
+
+async function loadRooms(){
+  const {res, text} = await api("/rooms", { method:"GET" });
+  if(!res.ok) return;
+  try{
+    const rooms = JSON.parse(text);
+    renderRoomsList(rooms);
+  }catch{}
+}
+
+async function createRoomFlow(){
+  const raw = prompt("New room name (letters/numbers/_/-):");
+  if(!raw) return;
+  const name = sanitizeRoomClient(raw);
+  if(!name){ addSystem("Invalid room name."); return; }
+
+  const {res, text} = await api("/rooms", {
+    method:"POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ name })
+  });
+  if(!res.ok){
+    addSystem(text || "Failed to create room.");
+    return;
+  }
+
+  // rooms will also update via socket event, but we can refresh immediately:
+  await loadRooms();
+  joinRoom(name);
+}
+
+function updateRoomControlsVisibility(){
+  if(addRoomBtn){
+    const canCreate = me && roleRank(me.role) >= roleRank("Co-owner");
+    addRoomBtn.style.display = rightPanelMode === "rooms" && canCreate ? "inline-flex" : "none";
+  }
+}
+
+function setRightPanelMode(mode){
+  rightPanelMode = mode === "menu" ? "menu" : "rooms";
+  if(roomsPanel) roomsPanel.style.display = rightPanelMode === "rooms" ? "flex" : "none";
+  if(menuPanel) menuPanel.style.display = rightPanelMode === "menu" ? "flex" : "none";
+  if(chanHeaderTitle) chanHeaderTitle.textContent = rightPanelMode === "menu" ? "Menu" : "Rooms";
+  if(menuToggleBtn) menuToggleBtn.classList.toggle("active", rightPanelMode === "menu");
+  updateRoomControlsVisibility();
+  if(rightPanelMode === "menu" && activeMenuTab === "changelog") ensureChangelogLoaded();
+}
+
+function setMenuTab(tab){
+  activeMenuTab = tab || "changelog";
+  document.querySelectorAll("[data-menu-tab]").forEach((btn)=>{
+    btn.classList.toggle("active", btn.dataset.menuTab === activeMenuTab);
+  });
+  document.querySelectorAll("[data-menu-section]").forEach((section)=>{
+    section.classList.toggle("active", section.dataset.menuSection === activeMenuTab);
+  });
+  if(activeMenuTab === "changelog") ensureChangelogLoaded();
+}
+
+function updateChangelogControlsVisibility(){
+  const isOwner = me && roleRank(me.role) >= roleRank("Owner");
+  if(changelogActions) changelogActions.style.display = isOwner ? "flex" : "none";
+  if(!isOwner) closeChangelogEditor();
+}
+
+function openChangelogEditor(entry){
+  if(!changelogEditor) return;
+  editingChangelogId = entry?.id || null;
+  if(changelogTitleInput) changelogTitleInput.value = entry?.title || "";
+  if(changelogBodyInput) changelogBodyInput.value = entry?.body || "";
+  if(changelogEditMsg) changelogEditMsg.textContent = "";
+  changelogEditor.style.display = "block";
+  changelogTitleInput?.focus();
+}
+
+function closeChangelogEditor(){
+  editingChangelogId = null;
+  if(changelogEditor) changelogEditor.style.display = "none";
+  if(changelogTitleInput) changelogTitleInput.value = "";
+  if(changelogBodyInput) changelogBodyInput.value = "";
+  if(changelogEditMsg) changelogEditMsg.textContent = "";
+}
+
+async function loadChangelog(force=false){
+  if(!force && changelogLoaded && !changelogDirty) return;
+  if(changelogMsg) changelogMsg.textContent = "Loading changelog...";
+  const {res, text} = await api("/api/changelog", { method:"GET" });
+  if(!res.ok){
+    if(changelogMsg) changelogMsg.textContent = res.status === 403 ? "You do not have permission." : "Failed to load changelog.";
+    changelogEntries = [];
+    renderChangelogList();
+    return;
+  }
+
+  try{
+    const rows = JSON.parse(text || "[]");
+    changelogEntries = Array.isArray(rows) ? rows : [];
+  }catch{
+    changelogEntries = [];
+  }
+
+  changelogLoaded = true;
+  changelogDirty = false;
+  if(changelogMsg) changelogMsg.textContent = changelogEntries.length ? "" : "No changelog entries yet.";
+  renderChangelogList();
+}
+
+function renderChangelogList(){
+  if(!changelogList) return;
+  changelogList.innerHTML = "";
+  if(!changelogEntries.length){
+    const empty = document.createElement("div");
+    empty.className = "small muted";
+    empty.textContent = "No changelog entries yet.";
+    changelogList.appendChild(empty);
+    return;
+  }
+
+  const isOwner = me && roleRank(me.role) >= roleRank("Owner");
+  for(const entry of changelogEntries){
+    const wrap = document.createElement("div");
+    wrap.className = "changelogEntry";
+
+    const header = document.createElement("div");
+    header.className = "changelogEntryHeader";
+
+    const metaBlock = document.createElement("div");
+    metaBlock.style.display = "flex";
+    metaBlock.style.flexDirection = "column";
+    metaBlock.style.gap = "4px";
+
+    const title = document.createElement("div");
+    title.className = "changelogEntryTitle";
+    title.textContent = entry.title || "(untitled)";
+    const meta = document.createElement("div");
+    meta.className = "changelogEntryMeta";
+    meta.textContent = entry.createdAt ? new Date(entry.createdAt).toLocaleString() : "";
+
+    metaBlock.appendChild(title);
+    metaBlock.appendChild(meta);
+    header.appendChild(metaBlock);
+
+    if(isOwner){
+      const actions = document.createElement("div");
+      actions.className = "changelogActions";
+      const editBtn = document.createElement("button");
+      editBtn.className = "btn secondary";
+      editBtn.type = "button";
+      editBtn.textContent = "Edit";
+      editBtn.addEventListener("click", ()=>openChangelogEditor(entry));
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn danger";
+      delBtn.type = "button";
+      delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", ()=>deleteChangelogEntry(entry.id));
+
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+      header.appendChild(actions);
+    }
+
+    const body = document.createElement("div");
+    body.className = "changelogBody";
+    body.innerHTML = escapeHtml(entry.body || "").replace(/\n/g, "<br>");
+
+    wrap.appendChild(header);
+    wrap.appendChild(body);
+    changelogList.appendChild(wrap);
+  }
+}
+
+async function saveChangelogEntry(){
+  if(!changelogTitleInput || !changelogBodyInput) return;
+  const title = changelogTitleInput.value.trim();
+  const body = changelogBodyInput.value.trim();
+  if(!title){ if(changelogEditMsg) changelogEditMsg.textContent = "Title is required."; return; }
+
+  if(changelogEditMsg) changelogEditMsg.textContent = "Saving...";
+  const payload = { title, body };
+  const path = editingChangelogId ? `/api/changelog/${editingChangelogId}` : "/api/changelog";
+  const method = editingChangelogId ? "PUT" : "POST";
+  const {res, text} = await api(path, {
+    method,
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(payload)
+  });
+  if(!res.ok){
+    if(changelogEditMsg) changelogEditMsg.textContent = text || "Failed to save entry.";
+    return;
+  }
+
+  closeChangelogEditor();
+  await loadChangelog(true);
+  await loadLatestUpdateSnippet();
+}
+
+async function deleteChangelogEntry(id){
+  if(!id) return;
+  if(!confirm("Delete this entry?")) return;
+  const {res, text} = await api(`/api/changelog/${id}`, {
+    method:"DELETE",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ confirm:true })
+  });
+  if(!res.ok){
+    alert(text || "Failed to delete entry.");
+    return;
+  }
+  await loadChangelog(true);
+  await loadLatestUpdateSnippet();
+}
+
+async function loadLatestUpdateSnippet(){
+  if(latestUpdate) latestUpdate.style.display = "none";
+  const {res, text} = await api("/api/changelog?limit=1", { method:"GET" });
+  if(!res.ok) return;
+  try{
+    const rows = JSON.parse(text || "[]");
+    latestChangelogEntry = Array.isArray(rows) && rows.length ? rows[0] : null;
+  }catch{
+    latestChangelogEntry = null;
+  }
+  renderLatestUpdateSnippet();
+}
+
+function renderLatestUpdateSnippet(){
+  if(!latestUpdate) return;
+  if(!latestChangelogEntry){
+    latestUpdate.style.display = "none";
+    return;
+  }
+  latestUpdate.style.display = "block";
+  if(latestUpdateTitle) latestUpdateTitle.textContent = latestChangelogEntry.title || "(untitled)";
+  if(latestUpdateDate) latestUpdateDate.textContent = latestChangelogEntry.createdAt ? new Date(latestChangelogEntry.createdAt).toLocaleString() : "";
+  if(latestUpdateBody) latestUpdateBody.textContent = previewText(latestChangelogEntry.body || "", 200);
+}
+
+if(menuToggleBtn){
+  menuToggleBtn.addEventListener("click", ()=>{
+    const next = rightPanelMode === "menu" ? "rooms" : "menu";
+    if(next === "menu") setMenuTab(activeMenuTab || "changelog");
+    setRightPanelMode(next);
+  });
+}
+if(menuNav){
+  menuNav.addEventListener("click", (e)=>{
+    const btn = e.target.closest("[data-menu-tab]");
+    if(!btn) return;
+    setRightPanelMode("menu");
+    setMenuTab(btn.dataset.menuTab);
+  });
+}
+if(latestUpdateViewBtn){
+  latestUpdateViewBtn.addEventListener("click", ()=>{
+    setMenuTab("changelog");
+    setRightPanelMode("menu");
+    menuPanel?.scrollTo({ top:0, behavior:"smooth" });
+  });
+}
+if(changelogNewBtn) changelogNewBtn.addEventListener("click", ()=>openChangelogEditor());
+if(changelogCancelBtn) changelogCancelBtn.addEventListener("click", closeChangelogEditor);
+if(changelogSaveBtn) changelogSaveBtn.addEventListener("click", saveChangelogEntry);
+closeChangelogEditor();
 
 // typing/send
 let typingDebounce=null;
@@ -631,13 +1865,15 @@ let idleTimer=null;
 let lastNonIdleStatus="Online";
 function resetIdle(){
   if(statusSelect.value==="Idle"){
-    statusSelect.value=lastNonIdleStatus;
-    socket?.emit("status change",{status:statusSelect.value});
+    const restoredStatus = normalizeStatusLabel(lastNonIdleStatus, "Online");
+    statusSelect.value=restoredStatus;
+    socket?.emit("status change",{status:restoredStatus});
+    meStatusText.textContent = restoredStatus;
   }
   clearTimeout(idleTimer);
   idleTimer=setTimeout(()=>{
     if(statusSelect.value!=="Idle"){
-      lastNonIdleStatus=statusSelect.value;
+      lastNonIdleStatus=normalizeStatusLabel(statusSelect.value, "Online");
       statusSelect.value="Idle";
       socket?.emit("status change",{status:"Idle"});
       meStatusText.textContent="Idle";
@@ -649,9 +1885,11 @@ function resetIdle(){
 });
 
 statusSelect.addEventListener("change", ()=>{
-  if(statusSelect.value!=="Idle") lastNonIdleStatus=statusSelect.value;
-  socket?.emit("status change", {status: statusSelect.value});
-  meStatusText.textContent = statusSelect.value;
+  const selected = normalizeStatusLabel(statusSelect.value, "Online");
+  statusSelect.value = selected;
+  if(selected!=="Idle") lastNonIdleStatus=selected;
+  socket?.emit("status change", {status: selected});
+  meStatusText.textContent = selected;
   resetIdle();
 });
 
@@ -700,14 +1938,18 @@ async function loadMyProfile(){
   const p=await res.json();
   me.username = p.username;
   me.role = p.role;
+  me.level = p.level || me.level;
+
+  applyProgressionPayload(p);
 
   meName.textContent=p.username;
   meRole.textContent=`${roleIcon(p.role)} ${p.role}`;
   meAvatar.innerHTML="";
   meAvatar.appendChild(avatarNode(p.avatar, p.username));
+  renderLevelProgress(progression, true);
 }
 
-function fillProfileUI(p){
+function fillProfileUI(p, isSelf){
   modalAvatar.innerHTML="";
   modalAvatar.appendChild(avatarNode(p.avatar, p.username));
   modalName.textContent=p.username;
@@ -720,9 +1962,16 @@ function fillProfileUI(p){
   infoCreated.textContent = fmtCreated(p.created_at);
   infoLastSeen.textContent = p.last_seen ? fmtAbs(p.last_seen) : "—";
   infoRoom.textContent = p.current_room ? `#${p.current_room}` : (p.last_room ? `#${p.last_room}` : "—");
-  infoStatus.textContent = p.last_status || "—";
+  const statusLabel = normalizeStatusLabel(p.last_status, "");
+  infoStatus.textContent = statusLabel || "—";
 
   bioRender.innerHTML = p.bio ? renderBBCode(p.bio) : "(no bio)";
+  renderLevelProgress(p, isSelf);
+}
+function syncCustomizationUI(){
+  badgePrefs = loadBadgePrefsFromStorage();
+  applyBadgePrefs();
+  if (customizeMsg) customizeMsg.textContent = "";
 }
 
 async function openMyProfile(){
@@ -730,11 +1979,13 @@ async function openMyProfile(){
   const res=await fetch("/profile");
   if(!res.ok) return;
   const p=await res.json();
+  applyProgressionPayload(p);
 
   modalTitle.textContent="My Profile";
   modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
 
-  fillProfileUI(p);
+  fillProfileUI(p, true);
+  syncCustomizationUI();
 
   myProfileEdit.style.display="block";
   memberModTools.style.display="none";
@@ -769,7 +2020,7 @@ saveProfileBtn.addEventListener("click", async ()=>{
   }
   profileMsg.textContent="Saved!";
   await loadMyProfile();
-  socket?.emit("join room", { room: currentRoom, status: statusSelect.value || "Online" });
+  socket?.emit("join room", { room: currentRoom, status: normalizeStatusLabel(statusSelect.value, "Online") });
   await openMyProfile();
 });
 refreshProfileBtn.addEventListener("click", openMyProfile);
@@ -781,10 +2032,13 @@ async function openMemberProfile(username){
   const res=await fetch("/profile/" + encodeURIComponent(username));
   if(!res.ok) return;
   const p=await res.json();
+  const isSelf = !!me && normKey(me.username) === normKey(p.username);
+  if (isSelf) applyProgressionPayload(p);
 
   modalTitle.textContent="Member Profile";
   modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
-  fillProfileUI(p);
+  fillProfileUI(p, isSelf);
+  syncCustomizationUI();
 
   myProfileEdit.style.display="none";
 
@@ -808,6 +2062,35 @@ copyProfileLinkBtn.addEventListener("click", async ()=>{
   const link = `${location.origin}/#profile:${encodeURIComponent(u)}`;
   try{ await navigator.clipboard.writeText(link); mediaMsg.textContent="Copied profile link."; }
   catch{ mediaMsg.textContent="Copy failed (browser blocked)."; }
+});
+saveBadgePrefsBtn?.addEventListener("click", () => {
+  const directRaw = directBadgeColorText?.value || directBadgeColor?.value || badgePrefs.direct || badgeDefaults.direct;
+  const groupRaw = groupBadgeColorText?.value || groupBadgeColor?.value || badgePrefs.group || badgeDefaults.group;
+  badgePrefs = {
+    direct: sanitizeColor(directRaw, directBadgeColor?.value, badgeDefaults.direct),
+    group: sanitizeColor(groupRaw, groupBadgeColor?.value, badgeDefaults.group),
+  };
+  applyBadgePrefs();
+  saveBadgePrefsToStorage();
+  if (customizeMsg) customizeMsg.textContent = "Saved badge colors.";
+});
+directBadgeColor?.addEventListener("input", () => {
+  if(directBadgeColorText) directBadgeColorText.value = directBadgeColor.value;
+  if(dmBadgeDot) dmBadgeDot.style.backgroundColor = directBadgeColor.value;
+});
+groupBadgeColor?.addEventListener("input", () => {
+  if(groupBadgeColorText) groupBadgeColorText.value = groupBadgeColor.value;
+  if(groupDmBadgeDot) groupDmBadgeDot.style.backgroundColor = groupBadgeColor.value;
+});
+directBadgeColorText?.addEventListener("input", () => {
+  const safe = sanitizeColor(directBadgeColorText.value, directBadgeColor?.value, badgeDefaults.direct);
+  if(directBadgeColor) directBadgeColor.value = normalizeColorForInput(safe, badgeDefaults.direct);
+  if(dmBadgeDot) dmBadgeDot.style.backgroundColor = safe;
+});
+groupBadgeColorText?.addEventListener("input", () => {
+  const safe = sanitizeColor(groupBadgeColorText.value, groupBadgeColor?.value, badgeDefaults.group);
+  if(groupBadgeColor) groupBadgeColor.value = normalizeColorForInput(safe, badgeDefaults.group);
+  if(groupDmBadgeDot) groupDmBadgeDot.style.backgroundColor = safe;
 });
 
 // moderation quick tools
@@ -939,24 +2222,91 @@ refreshLogsBtn.addEventListener("click", refreshLogs);
 
 // start app
 async function startApp(){
-  const meRes = await fetch("/me");
-  me = await meRes.json();
+  let meRes;
+  try{
+    meRes = await fetch("/me");
+  }catch(err){
+    console.error("Failed to reach /me:", err);
+    authMsg.textContent = "Unable to reach the server. Please try again.";
+    return;
+  }
+
+  if(!meRes?.ok){
+    authMsg.textContent = "Please login.";
+    return;
+  }
+
+  try{
+    me = await meRes.json();
+  }catch(err){
+    console.error("Invalid /me response:", err);
+    authMsg.textContent = "Server response was invalid. Please refresh and try again.";
+    return;
+  }
+
   if(!me){ authMsg.textContent="Please login."; return; }
+
+  await loadThemePreference();
 
   authWrap.style.display="none";
   app.style.display="block";
 
   await loadMyProfile();
+  await loadProgression();
+  renderLevelProgress(progression, true);
+
+  setRightPanelMode("rooms");
+  setMenuTab(activeMenuTab);
+  updateChangelogControlsVisibility();
+  updateRoomControlsVisibility();
 
   socket = io();
+  socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
+  socket.on("changelog updated", ()=>{
+    changelogDirty = true;
+    if(rightPanelMode === "menu" && activeMenuTab === "changelog") loadChangelog(true);
+    loadLatestUpdateSnippet();
+  });
+  await loadRooms();
+  await loadLatestUpdateSnippet();
+  await loadDmThreads();
+
+  // show Create Room button only for Co-owner+
+  if(addRoomBtn){
+    addRoomBtn.addEventListener("click", createRoomFlow);
+  }
+  updateRoomControlsVisibility();
 
   socket.on("system", addSystem);
+  socket.on("dice:error", ({ message }) => {
+    if(message) addSystem(`🎲 ${message}`);
+  });
+  socket.on("dice:result", ({ value, won }) => {
+    // animate only on server-confirmed result
+    playDiceAnimation(value, !!won);
+    if(won) popConfetti();
+    // refresh gold/xp UI
+    loadProgression();
+  });
+  socket.on("dice:rolled", ({ value, won }) => {
+    // optional: let everyone in Dice Room see the animation too
+    if(!isDiceRoom()) return;
+    playDiceAnimation(value, !!won);
+    if(won) popConfetti();
+  });
+  socket.on("command response", handleCommandResponse);
   socket.on("user list", (users)=>renderMembers(users));
   socket.on("typing update", (names)=>{
     const others=(names||[]).filter(n=>n!==me.username);
     typingEl.textContent = others.length
       ? (others.length===1 ? `${others[0]} is typing...` : `${others.join(", ")} are typing...`)
       : "";
+  });
+  socket.on("level up", ({ level }) => {
+    if(level) progression.level = level;
+    showLevelToast(level || "");
+    loadProgression();
+    renderLevelProgress(progression, true);
   });
   socket.on("history", (history)=>{
     clearMsgs();
@@ -967,16 +2317,86 @@ async function startApp(){
     addMessage(m);
     applySearch();
   });
-  socket.on("reaction update", ({messageId,reactions})=>{
-    renderReactions(messageId,reactions);
-  });
-  socket.on("message deleted", ({messageId})=>{
-    const el=document.querySelector(`[data-mid="${messageId}"] .text`);
-    if(el) el.textContent="[message deleted]";
+    socket.on("reaction update", ({ messageId, reactions }) => {
+    renderReactions(messageId, reactions);
   });
 
-  joinRoom("main");
-  meStatusText.textContent = statusSelect.value || "Online";
+  socket.on("message deleted", ({ messageId }) => {
+    const row = document.querySelector(`[data-mid="${messageId}"]`);
+    if (row) row.remove();
+
+    const idx = msgIndex.findIndex((x) => String(x.id) === String(messageId));
+    if (idx !== -1) msgIndex.splice(idx, 1);
+
+    closeReactionMenu();
+  });
+
+  socket.on("dm history", (payload) => {
+    const { threadId, messages = [], participants = [], title = "" } = payload || {};
+    const lastText = messages.length
+      ? messages[messages.length - 1].text || ""
+      : (dmThreads.find((t) => t.id === threadId)?.last_text || "");
+
+    const lastTs = messages.length
+      ? messages[messages.length - 1].ts
+      : (dmThreads.find((t) => t.id === threadId)?.last_ts || Date.now());
+
+    upsertThreadMeta(threadId, {
+      participants,
+      title,
+      last_text: lastText,
+      last_ts: lastTs,
+      is_group: !!payload?.isGroup,
+    });
+
+    dmMessages.set(threadId, messages);
+    renderDmThreads();
+
+    if (activeDmId === threadId) {
+      setDmMeta(dmThreads.find((t) => t.id === threadId));
+      renderDmMessages(threadId);
+    }
+  });
+
+  socket.on("dm history cleared", ({ threadId }) => {
+    if (!threadId) return;
+    dmMessages.set(threadId, []);
+    const meta = dmThreads.find((t) => t.id === threadId);
+    if (meta) {
+      meta.last_text = "";
+      meta.last_ts = null;
+    }
+    if (activeDmId === threadId) {
+      renderDmMessages(threadId);
+      dmMsg.textContent = "History was cleared.";
+    }
+    renderDmThreads();
+  });
+
+  socket.on("dm message", (m) => {
+    const arr = dmMessages.get(m.threadId) || [];
+    arr.push(m);
+    dmMessages.set(m.threadId, arr);
+
+    upsertThreadMeta(m.threadId, { last_text: m.text || "", last_ts: m.ts });
+
+    if (!dmThreads.find((t) => t.id === m.threadId)) loadDmThreads();
+
+    if (activeDmId !== m.threadId) {
+      markDmNotification(m.threadId, isGroupThread(m.threadId));
+    }
+
+    if (activeDmId === m.threadId) {
+      renderDmMessages(m.threadId);
+    }
+  });
+
+  socket.on("dm thread invited", () => {
+    loadDmThreads();
+  });
+
+  joinRoom("main"); // main will exist from seeded rooms
+  meStatusText.textContent = normalizeStatusLabel(statusSelect.value, "Online");
   resetIdle();
 
   // hash profile links
@@ -994,12 +2414,18 @@ async function startApp(){
 
 // boot: if already logged in, auto start
 (async function boot(){
-  const res = await fetch("/me");
-  me = await res.json();
-  if(me){
-    authWrap.style.display="none";
-    app.style.display="block";
-    await startApp();
+  try{
+    const res = await fetch("/me");
+    if(!res.ok) return;
+
+    me = await res.json();
+    if(me){
+      authWrap.style.display="none";
+      app.style.display="block";
+      await startApp();
+    }
+  }catch(err){
+    console.warn("Skipping auto-start due to /me failure", err);
   }
 })();
 

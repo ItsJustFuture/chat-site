@@ -4,149 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Chat Site</title>
-
-  <style>
-    :root{
-      --bg:#313338;
-      --panel:#2b2d31;
-      --panel2:#1e1f22;
-      --text:#dbdee1;
-      --muted:#949ba4;
-      --accent:#5865f2;
-      --bubble:#3a3c43;
-      --bubbleSelf:#5865f2;
-      --danger:#ed4245;
-      --ok:#23a55a;
-      --warn:#f0b132;
-      --gray:#80848e;
-    }
-    *{ box-sizing:border-box; }
-    body{ margin:0; font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif; background:var(--bg); color:var(--text); height:100vh; }
-
-    /* auth */
-    #authWrap{ height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
-    .authCard{ width:380px; background:var(--panel); border:1px solid #00000033; border-radius:14px; padding:18px; }
-    .authTitle{ font-size:18px; font-weight:800; margin:0 0 10px 0; }
-    .field{ display:flex; flex-direction:column; gap:6px; margin:10px 0; }
-    .field label{ font-size:12px; color:var(--muted); }
-    .field input, textarea, select{
-      padding:10px 12px; border-radius:10px; border:1px solid #00000033;
-      background:var(--panel2); color:var(--text); outline:none;
-    }
-    textarea{ min-height:90px; resize:vertical; }
-    .row{ display:flex; gap:10px; }
-    button{ border:0; border-radius:10px; padding:10px 12px; cursor:pointer; color:white; background:var(--accent); font-weight:800; }
-    button.secondary{ background:#4e5058; }
-    button.danger{ background:var(--danger); }
-    .msgline{ margin-top:10px; font-size:12px; color:var(--muted); min-height:16px; }
-
-    /* app layout */
-    #app{ height:100vh; display:none; }
-    .layout{ height:100%; display:flex; }
-
-    /* channels */
-    .channels{ width:260px; background:var(--panel2); border-right:1px solid #00000033; padding:10px; display:flex; flex-direction:column; gap:10px; }
-    .brand{ display:flex; justify-content:space-between; align-items:center; padding:10px; background:var(--panel); border-radius:12px; }
-    .brand strong{ font-size:14px; }
-    .chanList{ background:var(--panel); border-radius:12px; padding:8px; display:flex; flex-direction:column; gap:4px; flex:1; overflow:auto; }
-    .chan{ padding:8px 10px; border-radius:10px; cursor:pointer; color:var(--muted); display:flex; align-items:center; gap:8px; }
-    .chan:hover{ background:#3a3c4333; color:var(--text); }
-    .chan.active{ background:#3a3c43; color:var(--text); }
-    .hash{ color:#9aa0a6; }
-
-    .bottomBar{ background:var(--panel); border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:10px; }
-    .meRow{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
-    .meLeft{ display:flex; align-items:center; gap:10px; min-width:0; }
-    .meAvatar{ width:34px; height:34px; border-radius:50%; background:#444; overflow:hidden; }
-    .meAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
-    .meMeta{ min-width:0; display:flex; flex-direction:column; gap:2px; }
-    .meName{ font-size:13px; font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .meRole{ font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    select{ width:100%; }
-
-    /* chat */
-    .chat{ flex:1; display:flex; flex-direction:column; min-width:0; }
-    .topbar{
-      height:52px; background:var(--panel2); border-bottom:1px solid #00000033;
-      display:flex; align-items:center; justify-content:space-between; padding:0 14px; gap:10px;
-    }
-    .roomTitle{ font-weight:900; display:flex; gap:8px; align-items:center; }
-    .roomTitle span{ color:var(--muted); }
-
-    .searchWrap{ display:flex; gap:8px; align-items:center; }
-    .searchWrap input{
-      width:260px; max-width:40vw;
-      padding:10px 12px; border-radius:10px; border:1px solid #00000033;
-      background:var(--panel); color:var(--text);
-    }
-
-    .msgs{ flex:1; overflow:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
-    .sys{ align-self:center; color:var(--muted); font-size:12px; padding:6px 10px; border-radius:999px; background:#00000022; }
-
-    .msg{ display:flex; gap:10px; align-items:flex-start; max-width:900px; }
-    .msg.self{ align-self:flex-end; flex-direction:row-reverse; }
-    .msgAvatar{ width:38px; height:38px; border-radius:50%; background:#444; overflow:hidden; flex:0 0 auto; }
-    .msgAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
-    .bubble{
-      background:var(--bubble); padding:10px 12px; border-radius:14px; display:flex; flex-direction:column; gap:6px;
-      min-width:140px; max-width:min(70vw, 720px);
-      word-wrap:break-word;
-    }
-    .self .bubble{ background:var(--bubbleSelf); }
-    .metaLine{ display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
-    .uName{ font-weight:900; font-size:13px; }
-    .badge{
-      font-size:10px; font-weight:900; padding:3px 6px; border-radius:999px;
-      border:1px solid #00000033; background:#00000022;
-    }
-    .ts{ font-size:11px; color:var(--muted); }
-    .self .ts{ color:#e9e9ff; opacity:.85; }
-    .text{ font-size:14px; line-height:1.35; }
-    .mention{ background:#00000022; border:1px solid #00000033; padding:0 4px; border-radius:6px; }
-
-    .actions{ display:flex; gap:8px; flex-wrap:wrap; }
-    .reactBtn{ border:0; border-radius:10px; padding:6px 8px; background:#00000022; color:var(--text); cursor:pointer; font-weight:900; }
-    .reactBtn:hover{ background:#00000033; }
-
-    .reactions{ display:flex; gap:6px; flex-wrap:wrap; margin-top:2px; }
-    .reactPill{ background:#00000022; border:1px solid #00000033; border-radius:999px; padding:4px 8px; font-size:12px; font-weight:900; }
-
-    .typing{ height:22px; padding:0 14px; color:var(--muted); font-size:12px; display:flex; align-items:center; }
-
-    .inputBar{ padding:12px; background:var(--panel2); border-top:1px solid #00000033; display:flex; gap:10px; }
-    .inputBar input{
-      flex:1; padding:12px 12px; border-radius:12px; border:1px solid #00000033;
-      background:var(--panel); color:var(--text); outline:none;
-    }
-
-    /* members */
-    .members{ width:290px; background:var(--panel2); border-left:1px solid #00000033; padding:10px; overflow:auto; }
-    .members h3{ margin:6px 6px 10px; font-size:12px; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; }
-    .mItem{ padding:8px 8px; border-radius:12px; display:flex; align-items:center; gap:10px; cursor:pointer; }
-    .mItem:hover{ background:#00000022; }
-    .mAvatar{ width:30px; height:30px; border-radius:50%; background:#444; overflow:hidden; flex:0 0 auto; }
-    .mAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
-    .dot{ width:10px; height:10px; border-radius:50%; flex:0 0 auto; background:var(--gray); }
-    .mMeta{ display:flex; flex-direction:column; gap:2px; min-width:0; }
-    .mName{ font-weight:900; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .mSub{ font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-
-    /* profile modal */
-    #modal{ position:fixed; inset:0; background:#00000088; display:none; align-items:center; justify-content:center; padding:18px; }
-    .modalCard{ width:min(620px, 96vw); background:var(--panel); border-radius:16px; border:1px solid #00000033; padding:14px; }
-    .modalTop{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
-    .modalTop strong{ font-size:14px; }
-    .modalGrid{ display:grid; grid-template-columns: 140px 1fr; gap:12px; }
-    .pAvatar{ width:130px; height:130px; border-radius:18px; background:var(--panel2); overflow:hidden; }
-    .pAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
-    .small{ font-size:12px; color:var(--muted); }
-    .modPanel{ margin-top:12px; padding-top:12px; border-top:1px solid #00000033; display:none; }
-    .modRow{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-    .modRow input{ width:120px; }
-
-    @media (max-width: 980px){ .members{ display:none; } }
-    @media (max-width: 760px){ .channels{ width:220px; } .modalGrid{ grid-template-columns:1fr; } }
-  </style>
+  <script src="/theme-init.js"></script>
+  <link rel="stylesheet" href="/styles.css">
 </head>
 
 <body>
@@ -166,8 +25,8 @@
       </div>
 
       <div class="row">
-        <button id="loginBtn">Login</button>
-        <button id="regBtn" class="secondary">Register</button>
+        <button class="btn" id="loginBtn" type="button">Login</button>
+        <button class="btn secondary" id="regBtn" type="button">Register</button>
       </div>
 
       <div class="msgline" id="authMsg"></div>
@@ -178,16 +37,107 @@
   <div id="app">
     <div class="layout">
       <aside class="channels" id="channelsPane">
-        <div class="brand">
-          <strong>Chat Site</strong>
-          <div class="small" id="nowRoom">#main</div>
-        </div>
+       <div class="brand">
+  <strong>Chat Site</strong>
+  <div class="small" id="nowRoom">main</div>
+</div>
 
-        <div class="chanList" id="chanList">
-          <div class="chan active" data-room="main"><span class="hash">#</span> main</div>
-          <div class="chan" data-room="nsfw"><span class="hash">#</span> NSFW</div>
-          <div class="chan" data-room="music"><span class="hash">#</span> music</div>
+<div class="chanHeader">
+  <div class="small" id="chanHeaderTitle">Rooms</div>
+  <div class="row" style="gap:6px;">
+    <button class="iconBtn smallIcon" id="menuToggleBtn" type="button" title="Menu">☰</button>
+    <button class="iconBtn smallIcon" id="addRoomBtn" type="button" title="Create room">＋</button>
+  </div>
+</div>
+
+<div class="roomsPanel" id="roomsPanel">
+  <div class="latestUpdate" id="latestUpdate">
+    <div class="latestUpdateTop">
+      <div class="latestUpdateHeading">
+        <div class="small muted">Latest update</div>
+        <div class="latestUpdateTitle" id="latestUpdateTitle">—</div>
+        <div class="small" id="latestUpdateDate"></div>
+      </div>
+      <button class="btn secondary" id="latestUpdateViewBtn" type="button">View</button>
+    </div>
+    <div class="latestUpdateBody" id="latestUpdateBody"></div>
+  </div>
+
+  <div class="chanList" id="chanList">
+    <!-- will be rendered by app.js from /rooms -->
+  </div>
+</div>
+
+<div class="menuPanel" id="menuPanel">
+  <div class="menuNav" id="menuNav">
+    <button class="menuTab active" data-menu-tab="changelog" type="button">Changelog</button>
+    <button class="menuTab" data-menu-tab="rules" type="button">Rules</button>
+    <button class="menuTab" data-menu-tab="faq" type="button">FAQ</button>
+    <button class="menuTab" data-menu-tab="credits" type="button">Credits</button>
+  </div>
+
+  <div class="menuContent">
+    <div class="menuSection" data-menu-section="changelog">
+      <div class="menuSectionHeader">
+        <div>
+          <div class="title">Changelog</div>
+          <div class="small muted">Newest updates appear first.</div>
         </div>
+        <div class="menuActions" id="changelogActions">
+          <button class="btn" id="changelogNewBtn" type="button">New entry</button>
+        </div>
+      </div>
+
+      <div class="card" id="changelogEditor">
+        <div class="field">
+          <label for="changelogTitleInput">Title</label>
+          <input id="changelogTitleInput" maxlength="120" placeholder="What's new?">
+        </div>
+        <div class="field">
+          <label for="changelogBodyInput">Details</label>
+          <textarea id="changelogBodyInput" rows="4" maxlength="8000" placeholder="Describe the change..."></textarea>
+        </div>
+        <div class="row" style="align-items:center; gap:10px; flex-wrap:wrap;">
+          <button class="btn" id="changelogSaveBtn" type="button">Save</button>
+          <button class="btn secondary" id="changelogCancelBtn" type="button">Cancel</button>
+          <div class="msgline" id="changelogEditMsg"></div>
+        </div>
+      </div>
+
+      <div class="msgline" id="changelogMsg"></div>
+      <div class="changelogList" id="changelogList"></div>
+    </div>
+
+    <div class="menuSection" data-menu-section="rules">
+      <div class="menuSectionHeader">
+        <div class="title">Rules</div>
+      </div>
+      <div class="card muted">Coming soon.</div>
+    </div>
+
+    <div class="menuSection" data-menu-section="faq">
+      <div class="menuSectionHeader">
+        <div class="title">FAQ</div>
+      </div>
+      <div class="card muted">Coming soon.</div>
+    </div>
+
+    <div class="menuSection" data-menu-section="credits">
+      <div class="menuSectionHeader">
+        <div class="title">Credits</div>
+      </div>
+      <div class="card muted">Coming soon.</div>
+    </div>
+  </div>
+</div>
+
+<div class="commandPopup" id="commandPopup" aria-live="polite">
+  <div class="commandPopupHeader">
+    <div class="commandPopupTitle" id="commandPopupTitle">Command</div>
+    <button class="iconBtn" id="commandPopupClose" type="button" title="Dismiss">✕</button>
+  </div>
+  <div class="commandPopupBody" id="commandPopupBody"></div>
+</div>
 
         <div class="bottomBar">
           <div class="meRow">
@@ -198,9 +148,10 @@
                 <div class="meRole" id="meRole">...</div>
               </div>
             </div>
-            <div class="row" style="gap:8px;">
-              <button class="secondary" id="profileBtn">Profile</button>
-              <button class="danger" id="logoutBtn">Logout</button>
+
+            <div class="row" style="gap:8px; align-items:center;">
+              <div class="meStatusText" id="meStatusText">Online</div>
+              <button class="iconBtn" id="profileBtn" type="button" title="Profile">👤</button>
             </div>
           </div>
 
@@ -208,37 +159,88 @@
             <option>Online</option>
             <option>Away</option>
             <option>Busy</option>
-            <option>Do Not Disturb</option>
+            <option>DnD</option>
             <option>Idle</option>
             <option>Gaming</option>
-            <option>Listening to Music</option>
+            <option>Music</option>
             <option>Working</option>
-            <option>Looking to Chat</option>
-            <option>Invisible</option>
+            <option>Chatting</option>
+            <option>Lurking</option>
           </select>
         </div>
       </aside>
 
       <main class="chat">
         <div class="topbar">
-          <div class="roomTitle"><span>#</span><span id="roomTitle">general</span></div>
-          <div class="searchWrap">
-            <input id="searchInput" placeholder="Search messages...">
+          <div class="row" style="align-items:center; gap:10px;">
+            <button class="iconBtn mobOnly" id="openChannelsBtn" type="button" title="Channels">☰</button>
+           <div class="roomTitle"><span id="roomTitle">main</span></div>
+          </div>
+
+            <div class="row" style="align-items:center; gap:10px;">
+            <div class="searchWrap">
+              <input id="searchInput" placeholder="Search messages...">
+            </div>
+            <button class="iconBtn withBadge" id="dmToggleBtn" type="button" title="Direct messages">💬<span class="notifDot" id="dmBadgeDot" title="New DMs"></span></button>
+            <button class="iconBtn withBadge" id="groupDmToggleBtn" type="button" title="Group chats">👪<span class="notifDot right" id="groupDmBadgeDot" title="New group DMs"></span></button>
+            <button class="iconBtn mobOnly" id="openMembersBtn" type="button" title="Members">👥</button>
           </div>
         </div>
 
         <div class="msgs" id="msgs"></div>
+        <!-- Dice Room UI overlays (rendered only when needed) -->
+        <div id="diceOverlay" class="diceOverlay" aria-hidden="true">
+          <div class="diceCard">
+            <div class="diceFace" id="diceFace">🎲</div>
+            <div class="diceHint" id="diceHint">Rolling…</div>
+          </div>
+        </div>
+        <div id="confettiLayer" class="confettiLayer" aria-hidden="true"></div>
         <div class="typing" id="typing"></div>
 
+        <div id="uploadPreview" class="uploadPreview">
+          <div class="uploadLeft">
+            <div id="previewThumb" class="previewThumb"></div>
+            <div class="uploadMeta">
+              <div id="uploadName" class="uploadName"></div>
+              <div id="uploadInfo" class="uploadInfo"></div>
+            </div>
+          </div>
+          <div class="uploadRight">
+            <div class="progressWrap">
+              <div id="uploadProgress" class="progressBar"></div>
+            </div>
+            <button class="btn secondary" id="cancelUploadBtn" type="button">Cancel</button>
+          </div>
+        </div>
+
         <div class="inputBar">
-          <input id="msgInput" placeholder="Message #general" maxlength="800">
-          <button id="sendBtn">Send</button>
+         <input id="msgInput" type="text" placeholder="Message main" maxlength="800">
+
+          <!-- hidden native input -->
+          <input id="fileInput" type="file" accept="image/*,video/mp4,video/quicktime">
+
+          <!-- camera icon button -->
+          <button class="iconBtn" id="pickFileBtn" type="button" title="Upload">📷</button>
+
+          <button class="btn" id="sendBtn" type="button">Send</button>
         </div>
       </main>
 
       <aside class="members drawer" id="membersPane">
         <h3>Members</h3>
+        <div class="memberGold" id="memberGold" aria-live="polite"></div>
         <div id="memberList"></div>
+        <div id="memberMenu" class="memberMenu">
+          <div class="memberMenuHeader">
+            <div class="memberMenuName" id="memberMenuName"></div>
+            <div class="small" id="memberMenuHint">Quick actions</div>
+          </div>
+          <div class="memberMenuActions">
+            <button class="btn secondary" id="memberViewProfileBtn" type="button">View profile</button>
+            <button class="btn" id="memberDmBtn" type="button">DM</button>
+          </div>
+        </div>
       </aside>
     </div>
   </div>
@@ -246,714 +248,332 @@
   <!-- Mobile overlay -->
   <div id="drawerOverlay" class="overlay"></div>
 
-  <!-- PROFILE / MODAL -->
-  <div id="modal">
-    <div class="modalCard">
-      <div class="modalTop">
-        <strong id="modalTitle">Profile</strong>
-        <button class="secondary" id="closeModalBtn">Close</button>
+  <!-- DM PANEL -->
+  <div id="dmPanel" class="dmPanel">
+    <div class="dmHeader">
+      <div>
+        <div class="title">Direct Messages</div>
+        <div class="small">Start a DM from the members list.</div>
       </div>
+      <button class="iconBtn" id="dmCloseBtn" type="button" title="Close">✕</button>
+    </div>
 
-      <div class="small" id="modalMeta"></div>
+    <div class="dmNotice" id="dmMsg"></div>
 
-      <div class="tabs" id="tabs">
-        <div class="tab active" data-tab="info" id="tabInfo">Info</div>
-        <div class="tab" data-tab="about" id="tabAbout">About</div>
-        <div class="tab" data-tab="media" id="tabMedia">Media</div>
-        <div class="tab" data-tab="moderation" id="tabModeration" style="display:none;">Moderation</div>
-      </div>
-
-      <div id="viewInfo">
-        <div class="modalGrid">
-          <div>
-            <div class="pAvatar" id="modalAvatar"></div>
+    <div class="dmContent">
+      <div class="dmThreads" id="dmThreadList"></div>
+      <div class="dmConversation">
+        <div class="dmMeta">
+          <div class="dmMetaText">
+            <div class="title" id="dmMetaTitle">Pick a thread</div>
+            <div class="small" id="dmMetaPeople"></div>
           </div>
-
-          <div>
-            <div class="row" style="align-items:center;">
-              <div style="font-weight:900; font-size:16px;" id="modalName"></div>
-              <div class="badge" id="modalRole"></div>
-            </div>
-            <div class="small" id="modalMood"></div>
-
-            <div class="sectionTitle">Details</div>
-            <div class="infoGrid">
-              <div class="infoItem"><div class="k">Age</div><div class="v" id="infoAge">—</div></div>
-              <div class="infoItem"><div class="k">Gender</div><div class="v" id="infoGender">—</div></div>
-              <div class="infoItem"><div class="k">Created</div><div class="v" id="infoCreated">—</div></div>
-              <div class="infoItem"><div class="k">Last seen</div><div class="v" id="infoLastSeen">—</div></div>
-              <div class="infoItem"><div class="k">Current room</div><div class="v" id="infoRoom">—</div></div>
-              <div class="infoItem"><div class="k">Status</div><div class="v" id="infoStatus">—</div></div>
-            </div>
-
-            <div id="myProfileEdit" style="display:none; margin-top:12px;">
-              <div class="sectionTitle">Edit my profile</div>
-              <div class="panelBox">
-                <div class="field">
-                  <label>Avatar</label>
-                  <input id="avatarFile" type="file" accept="image/*">
-                  <div class="small">Max 2MB. PNG/JPG/WEBP/GIF.</div>
+          <div class="dmMetaActions">
+            <button class="iconBtn secondary" id="dmSettingsBtn" type="button" title="DM settings">⚙️</button>
+            <div class="dmSettingsMenu" id="dmSettingsMenu">
+              <div class="dmSettingsRow">
+                <button class="btn danger" id="dmDeleteHistoryBtn" type="button">Delete history</button>
+                <div class="small">Remove every message in this DM for all participants.</div>
+              </div>
+              <div class="dmSettingsRow">
+                <div class="small">DM background</div>
+                <div class="colorInputRow tight">
+                  <input id="dmBgColor" type="color" aria-label="DM background color">
+                  <input id="dmBgColorText" type="text" placeholder="#1e1f22 or blue" aria-label="DM background color text">
                 </div>
-
-                <div class="field">
-                  <label>Mood</label>
-                  <input id="editMood" placeholder="e.g. chilling">
-                </div>
-
-                <div class="row">
-                  <div class="field" style="flex:1;">
-                    <label>Age (18+)</label>
-                    <input id="editAge" type="number" min="18" max="120" placeholder="18+">
-                  </div>
-                  <div class="field" style="flex:1;">
-                    <label>Gender</label>
-                    <select id="editGender">
-                      <option value="">Prefer not to say</option>
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
-                      <option value="Non-binary">Non-binary</option>
-                      <option value="Transgender">Transgender</option>
-                      <option value="Genderfluid">Genderfluid</option>
-                      <option value="Agender">Agender</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div class="field">
-                  <label>Bio (BBCode supported)</label>
-                  <textarea id="editBio" placeholder="[b]bold[/b] [i]italics[/i] [url=https://...]link[/url] [quote]...[/quote]"></textarea>
-                </div>
-
-            <div class="row">
-              <button id="saveProfileBtn">Save</button>
-              <button class="secondary" id="refreshProfileBtn">Refresh</button>
-            </div>
-
-            <div class="msgline" id="profileMsg"></div>
-          </div>
-
-          <!-- Mod tools -->
-          <div class="modPanel" id="modPanel">
-            <div style="font-weight:900; margin-bottom:8px;">Moderator Tools</div>
-            <div class="modRow">
-              <button id="kickBtn" class="secondary">Kick</button>
-              <input id="muteMins" type="number" min="1" max="1440" placeholder="mute mins">
-              <button id="muteBtn" class="secondary">Mute</button>
-              <input id="banMins" type="number" min="0" max="100000" placeholder="ban mins (0=perm)">
-              <button id="banBtn" class="danger">Ban</button>
-            </div>
-            <div class="small" style="margin-top:6px;">
-              (Ban blocks login and kicks them if online.)
+                <div class="small">Change the backdrop behind your DM threads and conversation.</div>
+              </div>
+              <div class="dmSettingsRow">
+                <button class="btn secondary" id="dmReportBtn" type="button">Report DM (coming soon)</button>
+              </div>
             </div>
           </div>
-
+        </div>
+        <div class="dmMessages" id="dmMessages"></div>
+        <div class="dmInput">
+          <input id="dmText" placeholder="Message" maxlength="800">
+          <button class="btn" id="dmSendBtn" type="button">Send</button>
         </div>
       </div>
     </div>
   </div>
 
+  <!-- PROFILE / MODAL -->
+  <div id="modal">
+    <div class="modalCard">
+      <div class="modalTop">
+        <strong id="modalTitle">Profile</strong>
+        <button class="btn secondary" id="closeModalBtn" type="button">Close</button>
+      </div>
+
+      <div class="modalBody">
+        <div class="small" id="modalMeta"></div>
+
+        <div class="tabs" id="tabs">
+          <div class="tab active" data-tab="info" id="tabInfo">Info</div>
+          <div class="tab" data-tab="about" id="tabAbout">About</div>
+          <div class="tab" data-tab="customize" id="tabCustomize">Customization</div>
+          <div class="tab" data-tab="moderation" id="tabModeration" style="display:none;">Moderation</div>
+        </div>
+
+        <div class="modalContent" id="modalContent">
+          <div id="viewInfo">
+            <div class="modalGrid">
+              <div>
+                <div class="pAvatar" id="modalAvatar"></div>
+              </div>
+
+              <div>
+                <div class="row" style="align-items:center;">
+                  <div style="font-weight:900; font-size:16px;" id="modalName"></div>
+                  <div class="badge" id="modalRole"></div>
+                </div>
+                <div class="small" id="modalMood"></div>
+
+                <div class="sectionTitle">Details</div>
+                <div class="infoGrid">
+                  <div class="infoItem"><div class="k">Age</div><div class="v" id="infoAge">—</div></div>
+                  <div class="infoItem"><div class="k">Gender</div><div class="v" id="infoGender">—</div></div>
+                  <div class="infoItem"><div class="k">Created</div><div class="v" id="infoCreated">—</div></div>
+                  <div class="infoItem"><div class="k">Last seen</div><div class="v" id="infoLastSeen">—</div></div>
+                  <div class="infoItem"><div class="k">Current room</div><div class="v" id="infoRoom">—</div></div>
+                  <div class="infoItem"><div class="k">Status</div><div class="v" id="infoStatus">—</div></div>
+                </div>
+
+                <div class="sectionTitle">Account Level</div>
+                <div class="panelBox" id="levelPanel">
+                  <div class="row" style="align-items:center; justify-content:space-between;">
+                    <div class="badge" id="levelBadge">Level 1</div>
+                    <div class="small" id="xpText">XP: 0 / 100</div>
+                  </div>
+                  <div class="progressShell">
+                    <div class="progressFill" id="xpProgress"></div>
+                  </div>
+                  <div class="small" id="xpNote">XP is only visible to you.</div>
+                </div>
+
+                <div class="row" style="gap:8px; margin-top:10px; flex-wrap:wrap;">
+                  <button class="btn secondary" id="dmUserBtn" type="button">Message</button>
+                  <button class="btn secondary" id="copyUsernameBtn" type="button">Copy username</button>
+                  <button class="btn secondary" id="copyProfileLinkBtn" type="button">Copy profile link</button>
+                </div>
+                <div class="msgline" id="mediaMsg"></div>
+
+                <div id="myProfileEdit" style="display:none; margin-top:12px;">
+                  <div class="sectionTitle">Edit my profile</div>
+                  <div class="panelBox">
+                    <div class="field">
+                      <label>Avatar</label>
+                      <input id="avatarFile" type="file" accept="image/*">
+                      <div class="small">Max 2MB. PNG/JPG/WEBP/GIF.</div>
+                    </div>
+
+                    <div class="field">
+                      <label>Mood</label>
+                      <input id="editMood" placeholder="e.g. chilling">
+                    </div>
+
+                    <div class="row">
+                      <div class="field" style="flex:1;">
+                        <label>Age (18+)</label>
+                        <input id="editAge" type="number" min="18" max="120" placeholder="18+">
+                      </div>
+                      <div class="field" style="flex:1;">
+                        <label>Gender</label>
+                        <select id="editGender">
+                          <option value="">Prefer not to say</option>
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                          <option value="Non-binary">Non-binary</option>
+                          <option value="Transgender">Transgender</option>
+                          <option value="Genderfluid">Genderfluid</option>
+                          <option value="Agender">Agender</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="field">
+                      <label>Bio (BBCode supported)</label>
+                      <textarea id="editBio" placeholder="[b]bold[/b] [i]italics[/i] [url=https://...]link[/url] [quote]...[/quote]"></textarea>
+                    </div>
+
+                    <div class="row">
+                      <button class="btn" id="saveProfileBtn" type="button">Save</button>
+                      <button class="btn secondary" id="refreshProfileBtn" type="button">Refresh</button>
+                      <button class="btn danger" id="logoutBtn" type="button">Logout</button>
+                    </div>
+
+                    <div class="msgline" id="profileMsg"></div>
+                  </div>
+                </div>
+
+                <div id="memberModTools" style="display:none; margin-top:12px;">
+                  <div class="sectionTitle">Moderator tools</div>
+                  <div class="panelBox">
+                    <div class="row" style="align-items:center;">
+                      <input id="quickReason" placeholder="Reason (required)" style="flex:1; min-width:220px;">
+                      <input id="quickMuteMins" type="number" min="1" max="1440" placeholder="mute mins" style="width:120px;">
+                      <input id="quickBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:160px;">
+                    </div>
+                    <div class="row" style="margin-top:8px;">
+                      <button class="btn secondary" id="quickKickBtn" type="button">Kick</button>
+                      <button class="btn secondary" id="quickMuteBtn" type="button">Mute</button>
+                      <button class="btn danger" id="quickBanBtn" type="button">Ban</button>
+                    </div>
+                    <div class="msgline" id="quickModMsg"></div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+          <div id="viewAbout" style="display:none;">
+            <div class="sectionTitle">Bio</div>
+            <div class="bioRender" id="bioRender">(no bio)</div>
+            <div class="small" style="margin-top:8px;">
+              BBCode: [b] [i] [u] [s] [quote] [code] [url=] [img]
+            </div>
+          </div>
+
+          <div id="viewCustomize" style="display:none;">
+            <div class="sectionTitle">Customization</div>
+            <div class="panelBox customizeShell">
+              <div class="customNav" id="customNav">
+                <button class="customNavBtn active" data-section="themes" type="button">Themes</button>
+                <button class="customNavBtn" data-section="badges" type="button">Badges</button>
+              </div>
+
+              <div class="customContent">
+                <div class="customPanel active" id="customPanelThemes">
+                  <div class="themeFilters">
+                    <button class="pillBtn active" data-theme-filter="all" type="button">All</button>
+                    <button class="pillBtn" data-theme-filter="dark" type="button">Dark</button>
+                    <button class="pillBtn" data-theme-filter="light" type="button">Light</button>
+                  </div>
+                  <div class="themeGrid" id="themeGrid"></div>
+                  <div class="msgline" id="themeMsg"></div>
+                </div>
+
+                <div class="customPanel" id="customPanelBadges">
+                  <div class="field">
+                    <label>Direct message badge color</label>
+                    <div class="colorInputRow">
+                      <input id="directBadgeColor" type="color" aria-label="Direct message badge color">
+                      <input id="directBadgeColorText" type="text" placeholder="#ed4245 or red" aria-label="Direct message badge color text">
+                    </div>
+                  </div>
+
+                  <div class="field">
+                    <label>Group DM badge color</label>
+                    <div class="colorInputRow">
+                      <input id="groupBadgeColor" type="color" aria-label="Group DM badge color">
+                      <input id="groupBadgeColorText" type="text" placeholder="#5865f2 or blue" aria-label="Group DM badge color text">
+                    </div>
+                  </div>
+
+                  <div class="row" style="margin-top:6px;">
+                    <button class="btn" id="saveBadgePrefsBtn" type="button">Save badge colors</button>
+                  </div>
+
+                  <div class="msgline" id="customizeMsg"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="viewModeration" style="display:none;">
+            <div class="sectionTitle">Moderation panel</div>
+
+            <div class="panelBox">
+              <div class="row" style="align-items:center;">
+                <input id="modUser" placeholder="Target username" style="flex:1; min-width:220px;">
+                <input id="modReason" placeholder="Reason (required)" style="flex:2; min-width:240px;">
+              </div>
+
+              <div class="row" style="align-items:center; margin-top:8px;">
+                <input id="modMuteMins" type="number" min="1" max="1440" placeholder="mute mins" style="width:140px;">
+                <input id="modBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:190px;">
+
+                <button class="btn secondary" id="modKickBtn" type="button">Kick</button>
+                <button class="btn secondary" id="modMuteBtn" type="button">Mute</button>
+                <button class="btn danger" id="modBanBtn" type="button">Ban</button>
+
+                <button class="btn secondary" id="modUnmuteBtn" type="button">Unmute</button>
+                <button class="btn secondary" id="modUnbanBtn" type="button">Unban</button>
+                <button class="btn secondary" id="modWarnBtn" type="button">Warn</button>
+
+                <button class="btn secondary" id="modOpenProfileBtn" type="button">View profile</button>
+              </div>
+
+              <div class="row" style="align-items:center; margin-top:10px;">
+                <select id="modSetRole" style="width:220px;">
+                  <option value="">Set role (Owner only)</option>
+                  <option>Owner</option>
+                  <option>Co-owner</option>
+                  <option>Admin</option>
+                  <option>Moderator</option>
+                  <option>VIP</option>
+                  <option>User</option>
+                  <option>Guest</option>
+                </select>
+                <button class="btn secondary" id="modSetRoleBtn" type="button">Apply role</button>
+              </div>
+
+              <div class="msgline" id="modMsg"></div>
+            </div>
+
+            <div class="sectionTitle">Moderation logs</div>
+            <div class="panelBox">
+              <div class="row" style="align-items:center;">
+                <input id="logUser" placeholder="Filter by user (actor or target)" style="flex:1; min-width:220px;">
+                <select id="logAction" style="width:220px;">
+                  <option value="">All actions</option>
+                  <option value="KICK">KICK</option>
+                  <option value="MUTE">MUTE</option>
+                  <option value="BAN">BAN</option>
+                  <option value="DELETE_MESSAGE">DELETE_MESSAGE</option>
+                  <option value="UNMUTE">UNMUTE</option>
+                  <option value="UNBAN">UNBAN</option>
+                  <option value="WARN">WARN</option>
+                  <option value="SET_ROLE">SET_ROLE</option>
+                </select>
+                <select id="logLimit" style="width:160px;">
+                  <option value="25">Last 25</option>
+                  <option value="50" selected>Last 50</option>
+                  <option value="100">Last 100</option>
+                  <option value="200">Last 200</option>
+                </select>
+                <button class="btn secondary" id="refreshLogsBtn" type="button">Refresh</button>
+              </div>
+
+              <div class="msgline" id="logsMsg"></div>
+
+              <div style="overflow:auto; margin-top:8px;">
+                <table class="logTable">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Actor</th>
+                      <th>Action</th>
+                      <th>Target</th>
+                      <th>Room</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody id="logsBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="levelToast">🎉 <span id="levelToastText">Level up!</span></div>
+
   <script src="/socket.io/socket.io.js"></script>
-  <script>
-    // ---------- State ----------
-    let socket = null;
-    let me = null;
-    let currentRoom = "general";
-    let lastUsers = []; // member list cache
-    const reactionsCache = Object.create(null);
-    const msgIndex = []; // for search (store {id, el, textLower})
-
-    // ---------- DOM ----------
-    const authWrap = document.getElementById("authWrap");
-    const app = document.getElementById("app");
-    const authUser = document.getElementById("authUser");
-    const authPass = document.getElementById("authPass");
-    const authMsg = document.getElementById("authMsg");
-    const loginBtn = document.getElementById("loginBtn");
-    const regBtn = document.getElementById("regBtn");
-
-    const chanList = document.getElementById("chanList");
-    const nowRoom = document.getElementById("nowRoom");
-    const roomTitle = document.getElementById("roomTitle");
-    const msgs = document.getElementById("msgs");
-    const typingEl = document.getElementById("typing");
-    const memberList = document.getElementById("memberList");
-
-    const msgInput = document.getElementById("msgInput");
-    const sendBtn = document.getElementById("sendBtn");
-    const searchInput = document.getElementById("searchInput");
-
-    const meAvatar = document.getElementById("meAvatar");
-    const meName = document.getElementById("meName");
-    const meRole = document.getElementById("meRole");
-    const statusSelect = document.getElementById("statusSelect");
-    const logoutBtn = document.getElementById("logoutBtn");
-    const profileBtn = document.getElementById("profileBtn");
-
-    // modal
-    const modal = document.getElementById("modal");
-    const closeModalBtn = document.getElementById("closeModalBtn");
-    const modalTitle = document.getElementById("modalTitle");
-    const modalMeta = document.getElementById("modalMeta");
-    const modalAvatar = document.getElementById("modalAvatar");
-    const modalName = document.getElementById("modalName");
-    const modalRole = document.getElementById("modalRole");
-    const modalMood = document.getElementById("modalMood");
-    const modalAgeGender = document.getElementById("modalAgeGender");
-    const modalBio = document.getElementById("modalBio");
-
-    const myProfileEdit = document.getElementById("myProfileEdit");
-    const avatarFile = document.getElementById("avatarFile");
-    const editMood = document.getElementById("editMood");
-    const editAge = document.getElementById("editAge");
-    const editGender = document.getElementById("editGender");
-    const editBio = document.getElementById("editBio");
-    const saveProfileBtn = document.getElementById("saveProfileBtn");
-    const refreshProfileBtn = document.getElementById("refreshProfileBtn");
-    const profileMsg = document.getElementById("profileMsg");
-
-    const modPanel = document.getElementById("modPanel");
-    const kickBtn = document.getElementById("kickBtn");
-    const muteMins = document.getElementById("muteMins");
-    const muteBtn = document.getElementById("muteBtn");
-    const banMins = document.getElementById("banMins");
-    const banBtn = document.getElementById("banBtn");
-
-    let modalTargetUsername = null;
-
-    // ---------- Helpers ----------
-    function escapeHtml(s){
-      return String(s).replace(/[&<>"']/g, m => ({
-        "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;"
-      }[m]));
-    }
-
-    function fmtTime(ts){
-      return new Date(ts).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
-    }
-
-    function statusDotColor(status){
-      switch(status){
-        case "Online": return "var(--ok)";
-        case "Away": return "var(--warn)";
-        case "Busy": return "var(--danger)";
-        case "Do Not Disturb": return "var(--danger)";
-        case "Idle": return "var(--gray)";
-        case "Chatting": return "var(--ok)";
-        default: return "var(--accent)";
-      }
-    }
-
-    function roleBadgeColor(role){
-      switch(role){
-        case "Owner": return "#f0b132";
-        case "Co-owner": return "#e67e22";
-        case "Admin": return "#ed4245";
-        case "Moderator": return "#3498db";
-        case "VIP": return "#9b59b6";
-        case "Guest": return "#95a5a6";
-        default: return "#bdc3c7";
-      }
-    }
-
-    function roleIcon(role){
-      switch(role){
-        case "Owner": return "👑";
-        case "Co-owner": return "⭐";
-        case "Admin": return "🛡️";
-        case "Moderator": return "🔧";
-        case "VIP": return "💎";
-        case "Guest": return "👥";
-        default: return "👤";
-      }
-    }
-
-    function roleRank(role){
-      switch(role){
-        case "Owner": return 6;
-        case "Co-owner": return 5;
-        case "Admin": return 4;
-        case "Moderator": return 3;
-        case "VIP": return 2;
-        case "User": return 1;
-        case "Guest": return 0;
-        default: return 1;
-      }
-    }
-
-    function avatarNode(url, fallbackText){
-      if(url){
-        const img = document.createElement("img");
-        img.src = url;
-        img.alt = "avatar";
-        return img;
-      }
-      const wrap = document.createElement("div");
-      wrap.style.width="100%"; wrap.style.height="100%";
-      wrap.style.display="flex"; wrap.style.alignItems="center"; wrap.style.justifyContent="center";
-      wrap.style.fontWeight="900"; wrap.style.background="#444";
-      wrap.textContent=(fallbackText||"?").slice(0,1).toUpperCase();
-      return wrap;
-    }
-
-    function clearMsgs(){
-      msgs.innerHTML="";
-      typingEl.textContent="";
-      msgIndex.length = 0;
-    }
-
-    function addSystem(text){
-      const div=document.createElement("div");
-      div.className="sys";
-      div.textContent=text;
-      msgs.appendChild(div);
-      msgs.scrollTop=msgs.scrollHeight;
-    }
-
-    function applyMentions(text){
-      // highlight @me.username occurrences
-      const u = me?.username ? me.username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : null;
-      if(!u) return escapeHtml(text);
-      const re = new RegExp(`@${u}\\b`, "gi");
-      return escapeHtml(text).replace(re, (m)=>`<span class="mention">${m}</span>`);
-    }
-
-    function addMessage(m){
-      const wrap=document.createElement("div");
-      wrap.className="msg"+(m.user===me.username?" self":"");
-      wrap.dataset.mid=m.messageId;
-
-      const av=document.createElement("div");
-      av.className="msgAvatar";
-      av.appendChild(avatarNode(m.avatar, m.user));
-
-      const bubble=document.createElement("div");
-      bubble.className="bubble";
-
-      const meta=document.createElement("div");
-      meta.className="metaLine";
-      meta.innerHTML = `
-        <span class="uName">${escapeHtml(roleIcon(m.role))} ${escapeHtml(m.user)}</span>
-        <span class="badge" style="color:${roleBadgeColor(m.role)}">${escapeHtml(m.role)}</span>
-        <span class="ts">${fmtTime(m.ts)}</span>
-      `;
-
-      const text=document.createElement("div");
-      text.className="text";
-      text.innerHTML = applyMentions(m.text);
-
-      const actions=document.createElement("div");
-      actions.className="actions";
-
-      const emojis=["😀","😂","🔥","❤️","👍"];
-      for(const e of emojis){
-        const b=document.createElement("button");
-        b.className="reactBtn";
-        b.textContent=e;
-        b.onclick=()=>socket?.emit("reaction",{messageId:m.messageId, emoji:e});
-        actions.appendChild(b);
-      }
-
-      // delete button for mods/admin/owner (and only visible if role >= Moderator)
-      if(roleRank(me.role) >= roleRank("Moderator")){
-        const del=document.createElement("button");
-        del.className="reactBtn";
-        del.textContent="🗑️";
-        del.title="Delete message";
-        del.onclick=()=>socket?.emit("mod delete message",{messageId:m.messageId});
-        actions.appendChild(del);
-      }
-
-      const reacts=document.createElement("div");
-      reacts.className="reactions";
-      reacts.id="reacts-"+m.messageId;
-
-      bubble.appendChild(meta);
-      bubble.appendChild(text);
-      bubble.appendChild(actions);
-      bubble.appendChild(reacts);
-
-      wrap.appendChild(av);
-      wrap.appendChild(bubble);
-
-      msgs.appendChild(wrap);
-      msgs.scrollTop=msgs.scrollHeight;
-
-      msgIndex.push({ id: m.messageId, el: wrap, textLower: (m.user+" "+m.text).toLowerCase() });
-    }
-
-    function renderReactions(messageId, reactionsMap){
-      reactionsCache[messageId] = reactionsMap || {};
-      const counts = {};
-      for(const u in reactionsCache[messageId]){
-        const em = reactionsCache[messageId][u];
-        counts[em]=(counts[em]||0)+1;
-      }
-      const container=document.getElementById("reacts-"+messageId);
-      if(!container) return;
-      container.innerHTML="";
-      Object.entries(counts).forEach(([emoji,count])=>{
-        const pill=document.createElement("div");
-        pill.className="reactPill";
-        pill.textContent=`${emoji} ${count}`;
-        container.appendChild(pill);
-      });
-    }
-
-    function renderMembers(users){
-      lastUsers = users || [];
-      memberList.innerHTML="";
-      lastUsers.forEach(u=>{
-        const row=document.createElement("div");
-        row.className="mItem";
-        row.dataset.username = u.name;
-
-        const av=document.createElement("div");
-        av.className="mAvatar";
-        av.appendChild(avatarNode(u.avatar, u.name));
-
-        const dot=document.createElement("div");
-        dot.className="dot";
-        dot.style.background=statusDotColor(u.status);
-
-        const meta=document.createElement("div");
-        meta.className="mMeta";
-
-        const name=document.createElement("div");
-        name.className="mName";
-        name.textContent=`${roleIcon(u.role)} ${u.name}`;
-
-        const sub=document.createElement("div");
-        sub.className="mSub";
-        sub.textContent=`${u.role} • ${u.status}${u.mood?(" • "+u.mood):""}`;
-
-        meta.appendChild(name);
-        meta.appendChild(sub);
-
-        row.appendChild(av);
-        row.appendChild(dot);
-        row.appendChild(meta);
-
-        row.onclick = () => openMemberProfile(u.name);
-
-        memberList.appendChild(row);
-      });
-    }
-
-    // ---------- Search ----------
-    function applySearch(){
-      const q = searchInput.value.trim().toLowerCase();
-      if(!q){
-        msgIndex.forEach(m => m.el.style.display = "");
-        return;
-      }
-      msgIndex.forEach(m => {
-        m.el.style.display = m.textLower.includes(q) ? "" : "none";
-      });
-    }
-    searchInput.addEventListener("input", applySearch);
-
-    // ---------- Auto-idle ----------
-    let idleTimer=null;
-    let lastNonIdleStatus="Online";
-    function resetIdle(){
-      if(statusSelect.value==="Idle"){
-        statusSelect.value=lastNonIdleStatus;
-        socket?.emit("status change",{status:statusSelect.value});
-      }
-      clearTimeout(idleTimer);
-      idleTimer=setTimeout(()=>{
-        if(statusSelect.value!=="Idle"){
-          lastNonIdleStatus=statusSelect.value;
-          statusSelect.value="Idle";
-          socket?.emit("status change",{status:"Idle"});
-        }
-      },120000);
-    }
-    ["mousemove","keydown","click","touchstart"].forEach(evt=>{
-      document.addEventListener(evt, resetIdle, {passive:true});
-    });
-
-    // ---------- Auth ----------
-    async function api(path, options){
-      const res = await fetch(path, options);
-      const text = await res.text().catch(()=> "");
-      return { res, text };
-    }
-
-    async function doLogin(){
-      authMsg.textContent="Logging in...";
-      const {res,text}=await api("/login",{
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({username:authUser.value,password:authPass.value})
-      });
-      if(!res.ok){ authMsg.textContent=text||"Login failed."; return; }
-      await startApp();
-    }
-
-    async function doRegister(){
-      authMsg.textContent="Registering...";
-      const {res,text}=await api("/register",{
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({username:authUser.value,password:authPass.value})
-      });
-      if(!res.ok){ authMsg.textContent=text||"Register failed."; return; }
-      authMsg.textContent="Registered! Now click Login.";
-    }
-
-    loginBtn.addEventListener("click", doLogin);
-    regBtn.addEventListener("click", doRegister);
-    authPass.addEventListener("keydown", (e)=>{ if(e.key==="Enter") doLogin(); });
-
-    async function startApp(){
-      const meRes = await fetch("/me");
-      me = await meRes.json();
-      if(!me){ authMsg.textContent="Please login."; return; }
-
-      authWrap.style.display="none";
-      app.style.display="block";
-
-      await loadMyProfile();
-
-      socket = io();
-
-      socket.on("connect_error", (err)=>{
-        console.error(err);
-        addSystem("Socket auth failed. Try logging out/in.");
-      });
-
-      socket.on("system", addSystem);
-
-      socket.on("user list", (users)=>renderMembers(users));
-
-      socket.on("typing update", (names)=>{
-        const others=(names||[]).filter(n=>n!==me.username);
-        typingEl.textContent = others.length ? (others.length===1? `${others[0]} is typing...` : `${others.join(", ")} are typing...`) : "";
-      });
-
-      socket.on("history", (history)=>{
-        clearMsgs();
-        (history||[]).forEach(m=>addMessage(m));
-        applySearch();
-      });
-
-      socket.on("chat message", (m)=>{
-        addMessage(m);
-        applySearch();
-      });
-
-      socket.on("reaction update", ({messageId,reactions})=>{
-        renderReactions(messageId,reactions);
-      });
-
-      socket.on("message deleted", ({messageId})=>{
-        const el = document.querySelector(`[data-mid="${messageId}"] .text`);
-        if(el) el.textContent = "[message deleted]";
-      });
-
-      joinRoom("general");
-      resetIdle();
-    }
-
-    async function doLogout(){
-      await fetch("/logout", {method:"POST"});
-      location.reload();
-    }
-    logoutBtn.addEventListener("click", doLogout);
-
-    // ---------- Rooms ----------
-    function setActiveRoom(room){
-      currentRoom=room;
-      nowRoom.textContent=`#${room}`;
-      roomTitle.textContent=room;
-      msgInput.placeholder=`Message #${room}`;
-      document.querySelectorAll(".chan").forEach(el=>{
-        el.classList.toggle("active", el.dataset.room===room);
-      });
-    }
-
-    function joinRoom(room){
-      setActiveRoom(room);
-      clearMsgs();
-      socket?.emit("join room", { room, status: statusSelect.value || "Online" });
-    }
-
-    chanList.addEventListener("click", (e)=>{
-      const el=e.target.closest(".chan");
-      if(!el) return;
-      const r=el.dataset.room;
-      if(r && r!==currentRoom) joinRoom(r);
-    });
-
-    // ---------- Sending + typing ----------
-    let typingDebounce=null;
-    function emitTyping(){
-      if(!socket) return;
-      socket.emit("typing");
-      clearTimeout(typingDebounce);
-      typingDebounce=setTimeout(()=>socket.emit("stop typing"), 900);
-    }
-
-    msgInput.addEventListener("input", emitTyping);
-    msgInput.addEventListener("keydown",(e)=>{
-      if(e.key==="Enter"){ e.preventDefault(); sendMessage(); }
-    });
-    sendBtn.addEventListener("click", sendMessage);
-
-    function sendMessage(){
-      if(!socket) return;
-      const text=msgInput.value;
-      if(!text.trim()) return;
-      socket.emit("chat message", { text });
-      msgInput.value="";
-      socket.emit("stop typing");
-    }
-
-    statusSelect.addEventListener("change", ()=>{
-      if(statusSelect.value!=="Idle") lastNonIdleStatus=statusSelect.value;
-      socket?.emit("status change", {status: statusSelect.value});
-      resetIdle();
-    });
-
-    // ---------- Modal profiles ----------
-    function openModal(){
-      modal.style.display="flex";
-    }
-    function closeModal(){
-      modal.style.display="none";
-      myProfileEdit.style.display="none";
-      modPanel.style.display="none";
-      profileMsg.textContent="";
-      modalTargetUsername=null;
-    }
-    closeModalBtn.addEventListener("click", closeModal);
-    modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
-
-    profileBtn.addEventListener("click", async ()=>{
-      await openMyProfile();
-    });
-
-    async function loadMyProfile(){
-      const res = await fetch("/profile");
-      if(!res.ok) return;
-      const p = await res.json();
-
-      // me strip
-      me.username = p.username;
-      me.role = p.role;
-      meName.textContent = p.username;
-      meRole.textContent = `${roleIcon(p.role)} ${p.role}`;
-      meAvatar.innerHTML="";
-      meAvatar.appendChild(avatarNode(p.avatar, p.username));
-    }
-
-    async function openMyProfile(){
-      const res = await fetch("/profile");
-      if(!res.ok) return;
-      const p = await res.json();
-
-      modalTitle.textContent="My Profile";
-      modalMeta.textContent=`Created: ${new Date(p.created_at).toLocaleString()}`;
-      modalAvatar.innerHTML=""; modalAvatar.appendChild(avatarNode(p.avatar, p.username));
-      modalName.textContent=p.username;
-      modalRole.textContent=`${roleIcon(p.role)} ${p.role}`;
-      modalRole.style.color=roleBadgeColor(p.role);
-      modalMood.textContent=p.mood ? `Mood: ${p.mood}` : "Mood: (none)";
-      modalAgeGender.textContent = `Age: ${p.age ?? "—"} • Gender: ${p.gender ?? "—"}`;
-      modalBio.value = p.bio || "";
-
-      myProfileEdit.style.display="block";
-      modPanel.style.display="none";
-
-      editMood.value = p.mood || "";
-      editAge.value = p.age ?? "";
-      editGender.value = p.gender || "";
-      editBio.value = p.bio || "";
-      avatarFile.value = "";
-      profileMsg.textContent="";
-
-      openModal();
-    }
-
-    saveProfileBtn.addEventListener("click", async ()=>{
-      profileMsg.textContent="Saving...";
-      const form=new FormData();
-      form.append("mood", editMood.value);
-      form.append("age", editAge.value);
-      form.append("gender", editGender.value);
-      form.append("bio", editBio.value);
-      if(avatarFile.files[0]) form.append("avatar", avatarFile.files[0]);
-
-      const res = await fetch("/profile", {method:"POST", body: form});
-      if(!res.ok){ profileMsg.textContent="Save failed."; return; }
-
-      profileMsg.textContent="Saved!";
-      await loadMyProfile();
-      // refresh member list info by rejoin
-      socket?.emit("join room", { room: currentRoom, status: statusSelect.value || "Online" });
-      // refresh modal view
-      await openMyProfile();
-    });
-
-    refreshProfileBtn.addEventListener("click", openMyProfile);
-
-    async function openMemberProfile(username){
-      modalTargetUsername = username;
-      const res = await fetch("/profile/" + encodeURIComponent(username));
-      if(!res.ok) return;
-
-      const p = await res.json();
-
-      modalTitle.textContent="Member Profile";
-      modalMeta.textContent=`Created: ${new Date(p.created_at).toLocaleString()}`;
-      modalAvatar.innerHTML=""; modalAvatar.appendChild(avatarNode(p.avatar, p.username));
-      modalName.textContent=p.username;
-      modalRole.textContent=`${roleIcon(p.role)} ${p.role}`;
-      modalRole.style.color=roleBadgeColor(p.role);
-      modalMood.textContent=p.mood ? `Mood: ${p.mood}` : "Mood: (none)";
-      modalAgeGender.textContent = `Age: ${p.age ?? "—"} • Gender: ${p.gender ?? "—"}`;
-      modalBio.value = p.bio || "";
-
-      myProfileEdit.style.display="none";
-
-      // show mod tools only if I have permission
-      const iCanMod = roleRank(me.role) >= roleRank("Moderator") && roleRank(me.role) > roleRank(p.role);
-      modPanel.style.display = iCanMod ? "block" : "none";
-
-      openModal();
-    }
-
-    // mod buttons
-    kickBtn.addEventListener("click", ()=>{
-      if(!modalTargetUsername) return;
-      socket?.emit("mod kick", { username: modalTargetUsername });
-      closeModal();
-    });
-
-    muteBtn.addEventListener("click", ()=>{
-      if(!modalTargetUsername) return;
-      const mins = Number(muteMins.value || 10);
-      socket?.emit("mod mute", { username: modalTargetUsername, minutes: mins, reason: "" });
-      closeModal();
-    });
-
-    banBtn.addEventListener("click", ()=>{
-      if(!modalTargetUsername) return;
-      const mins = Number(banMins.value || 0);
-      socket?.emit("mod ban", { username: modalTargetUsername, minutes: mins, reason: "" });
-      closeModal();
-    });
-
-    // ---------- Boot ----------
-    (async function boot(){
-      const res = await fetch("/me");
-      me = await res.json();
-      if(me){
-        authWrap.style.display="none";
-        app.style.display="block";
-        await startApp();
-      }
-    })();
-  </script>
+  <script src="/app.js" defer></script>
 </body>
 </html>
