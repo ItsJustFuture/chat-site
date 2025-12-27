@@ -598,8 +598,20 @@ body{
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   background:var(--bg);
   color:var(--text);
+  /* Default fallback */
   height:100vh;
   overflow:hidden;
+}
+
+/* Prefer dynamic viewport on modern mobile browsers (prevents cropped panels) */
+@supports (height: 100dvh){
+  body{ height:100dvh; }
+  #app{ height:100dvh; }
+  #authWrap{ height:100dvh; }
+  /* Fixed drawers/panels should also match dynamic viewport */
+  .channels{ height:100dvh; }
+  .members.drawer{ height:100dvh; }
+  .dmPanel{ height:100dvh; }
 }
 a{ color:inherit; }
 button{ font-family:inherit; }
@@ -1291,7 +1303,8 @@ textarea{ min-height:90px; resize:vertical; }
 }
 
 @media (max-width: 980px){
-  .mobOnly{ display:flex; }
+  /* Mobile-only header buttons should behave like icon buttons */
+  .mobOnly{ display:inline-flex; }
   .members{ display:none; }
 
   .topbar{ position: sticky; top: 0; z-index: 40; padding:0 10px; gap:8px; }
@@ -1324,6 +1337,7 @@ textarea{ min-height:90px; resize:vertical; }
     transition:transform .18s ease;
     z-index:75;
     box-shadow: 12px 0 30px rgba(0,0,0,.55);
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
   .channels.open{ transform:translateX(0); }
 
@@ -1335,6 +1349,7 @@ textarea{ min-height:90px; resize:vertical; }
     transition:transform .18s ease;
     z-index:75;
     box-shadow: -12px 0 30px rgba(0,0,0,.55);
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
   .members.drawer.open{ transform:translateX(0); }
 
