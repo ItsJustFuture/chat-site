@@ -155,37 +155,12 @@
     <div class="dmHeader">
       <div>
         <div class="title">Direct Messages</div>
-        <div class="small">Start a DM from the members list or create a quick group.</div>
+        <div class="small">Start a DM from the members list.</div>
       </div>
-      <div class="row" style="gap:6px;">
-        <button class="iconBtn secondary" id="dmAddUserBtn" type="button" title="Add user to DM">➕</button>
-        <button class="iconBtn" id="dmCloseBtn" type="button" title="Close">✕</button>
-      </div>
+      <button class="iconBtn" id="dmCloseBtn" type="button" title="Close">✕</button>
     </div>
 
-    <div class="dmCreate">
-      <div class="dmCreateTop">
-        <div class="small" id="dmModeLabel">Mode: Direct Message</div>
-        <div class="dmModeSwitch">
-          <button class="chip active" id="dmDirectModeBtn" type="button">Direct</button>
-          <button class="chip" id="dmGroupModeBtn" type="button">Group</button>
-        </div>
-      </div>
-      <div class="dmHelper" id="dmDirectHelper">Click a name in Members to open a DM instantly. We only save it after the first message.</div>
-      <div class="dmHelper group" id="dmGroupHelper">Invite multiple people or give your group a title to get started.</div>
-      <div class="dmInputs" id="dmInputs">
-        <div class="dmParticipantsRow" id="dmParticipantsRow">
-          <input id="dmParticipants" placeholder="Add people (comma separated)">
-        </div>
-        <div class="dmTitleRow" id="dmTitleRow">
-          <input id="dmTitle" placeholder="Group title (optional)">
-        </div>
-      </div>
-      <div class="dmActions">
-        <button class="btn" id="dmCreateBtn" type="button">Start chat</button>
-        <div class="msgline" id="dmMsg"></div>
-      </div>
-    </div>
+    <div class="dmNotice" id="dmMsg"></div>
 
     <div class="dmContent">
       <div class="dmThreads" id="dmThreadList"></div>

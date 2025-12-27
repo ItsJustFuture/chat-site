@@ -63,20 +63,8 @@ const profileBtn = document.getElementById("profileBtn");
 const dmPanel = document.getElementById("dmPanel");
 const dmToggleBtn = document.getElementById("dmToggleBtn");
 const groupDmToggleBtn = document.getElementById("groupDmToggleBtn");
-const dmModeLabel = document.getElementById("dmModeLabel");
-const dmDirectModeBtn = document.getElementById("dmDirectModeBtn");
-const dmGroupModeBtn = document.getElementById("dmGroupModeBtn");
 const dmCloseBtn = document.getElementById("dmCloseBtn");
-const dmAddUserBtn = document.getElementById("dmAddUserBtn");
 const dmThreadList = document.getElementById("dmThreadList");
-const dmParticipantsInput = document.getElementById("dmParticipants");
-const dmTitleInput = document.getElementById("dmTitle");
-const dmInputs = document.getElementById("dmInputs");
-const dmParticipantsRow = document.getElementById("dmParticipantsRow");
-const dmTitleRow = document.getElementById("dmTitleRow");
-const dmDirectHelper = document.getElementById("dmDirectHelper");
-const dmGroupHelper = document.getElementById("dmGroupHelper");
-const dmCreateBtn = document.getElementById("dmCreateBtn");
 const dmMsg = document.getElementById("dmMsg");
 const dmMetaTitle = document.getElementById("dmMetaTitle");
 const dmMetaPeople = document.getElementById("dmMetaPeople");
@@ -705,16 +693,7 @@ drawerOverlay?.addEventListener("click", closeDrawers);
 document.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeDrawers(); });
 
 // dms (rebuilt)
-let dmCreateMode = "direct"; // "direct" | "group"
-let groupAddVisible = true;
 let dmSettingsOpen = false;
-
-function setGroupAddVisibility(show){
-  groupAddVisible = !!show;
-  if (dmParticipantsRow) dmParticipantsRow.classList.toggle("hidden", !groupAddVisible);
-  dmAddUserBtn?.classList.toggle("dmAddActive", groupAddVisible);
-  dmAddUserBtn?.setAttribute("aria-pressed", groupAddVisible ? "true" : "false");
-}
 function closeDmSettingsMenu(){
   dmSettingsOpen = false;
   dmSettingsMenu?.classList.remove("open");
@@ -725,46 +704,6 @@ function toggleDmSettingsMenu(){
   dmSettingsOpen = !dmSettingsOpen;
   dmSettingsMenu.classList.toggle("open", dmSettingsOpen);
   dmSettingsBtn?.setAttribute("aria-expanded", dmSettingsOpen ? "true" : "false");
-}
-
-function setDmCreateMode(mode){
-  dmCreateMode = (mode === "group") ? "group" : "direct";
-
-  const isDirect = dmCreateMode === "direct";
-  const createBox = dmPanel?.querySelector(".dmCreate");
-  createBox?.classList.toggle("direct", isDirect);
-  createBox?.classList.toggle("group", !isDirect);
-  dmDirectModeBtn?.classList.toggle("active", isDirect);
-  dmGroupModeBtn?.classList.toggle("active", !isDirect);
-
-  if (dmModeLabel) dmModeLabel.textContent = `Mode: ${isDirect ? "Direct Message" : "Group Chat"}`;
-
-  if (dmCreateBtn) dmCreateBtn.textContent = isDirect ? "Start DM" : "Start group chat";
-
-  if (dmAddUserBtn) dmAddUserBtn.style.display = isDirect ? "none" : "inline-flex";
-  if (!isDirect && !groupAddVisible) setGroupAddVisibility(true);
-  if (isDirect) setGroupAddVisibility(false);
-
-  if (dmInputs) dmInputs.style.display = isDirect ? "none" : "flex";
-  if (dmTitleRow) dmTitleRow.style.display = isDirect ? "none" : "block";
-
-  if (dmParticipantsInput) {
-    dmParticipantsInput.placeholder = isDirect
-      ? "Pick someone from Members to start a DM"
-      : "Add people (comma separated)";
-    dmParticipantsInput.readOnly = isDirect;
-    dmParticipantsInput.classList.toggle("readonly", isDirect);
-  }
-
-  if (dmDirectHelper) dmDirectHelper.style.display = isDirect ? "block" : "none";
-  if (dmGroupHelper) dmGroupHelper.style.display = isDirect ? "none" : "block";
-
-  if (dmTitleInput) {
-    dmTitleInput.disabled = isDirect;
-    if (isDirect) dmTitleInput.value = "";
-  }
-
-  renderDmThreads();
 }
 
 function threadLabel(t){
@@ -791,25 +730,35 @@ function renderThreadItem(t){
 function renderDmThreads(){
   dmThreadList.innerHTML = "";
 
-  const viewingGroup = dmCreateMode === "group";
-  const threads = dmThreads.filter((t) => viewingGroup ? !!t.is_group : !t.is_group);
+  const sections = [
+    {
+      title: "Direct messages",
+      emptyText: "No direct messages yet. Start one from Members.",
+      items: dmThreads.filter((t) => !t.is_group)
+    },
+    {
+      title: "Group chats",
+      emptyText: "No group chats yet.",
+      items: dmThreads.filter((t) => t.is_group)
+    }
+  ];
 
-  const head = document.createElement("div");
-  head.className = "dmSectionTitle";
-  head.textContent = viewingGroup ? "Group chats" : "Direct messages";
-  dmThreadList.appendChild(head);
+  for (const section of sections) {
+    const head = document.createElement("div");
+    head.className = "dmSectionTitle";
+    head.textContent = section.title;
+    dmThreadList.appendChild(head);
 
-  if (!threads.length) {
-    const empty = document.createElement("div");
-    empty.className = "dmEmpty";
-    empty.textContent = viewingGroup
-      ? "No group chats yet. Start one with the add user button."
-      : "No direct messages yet. Start one from Members.";
-    dmThreadList.appendChild(empty);
-    return;
+    if (!section.items.length) {
+      const empty = document.createElement("div");
+      empty.className = "dmEmpty";
+      empty.textContent = section.emptyText;
+      dmThreadList.appendChild(empty);
+      continue;
+    }
+
+    for (const t of section.items) dmThreadList.appendChild(renderThreadItem(t));
   }
-
-  for (const t of threads) dmThreadList.appendChild(renderThreadItem(t));
 }
 
 async function loadDmThreads(){
@@ -830,12 +779,10 @@ async function loadDmThreads(){
 async function startDirectMessage(username){
   if (!username || username === me?.username) return;
 
-  openDmPanel({ mode: "direct" });
+  openDmPanel();
   closeMemberMenu();
 
   if (!dmThreads.length) await loadDmThreads();
-
-  if (dmParticipantsInput) dmParticipantsInput.value = username;
 
   const existing = dmThreads.find((t) => !t.is_group && (t.participants || []).includes(username));
   if (existing) {
@@ -869,17 +816,14 @@ async function startDirectMessage(username){
   }
 }
 
-function openDmPanel({ mode = "direct", prefill = "" } = {}){
+function openDmPanel(){
   dmPanel.classList.add("open");
   dmMsg.textContent = "";
-
-  setDmCreateMode(mode);
   clearDmBadges();
-
-  if (prefill && dmParticipantsInput) dmParticipantsInput.value = prefill;
 
   // load threads if we haven't yet
   if (!dmThreads.length) loadDmThreads();
+  else renderDmThreads();
 }
 
 function closeDmPanel(){
@@ -982,65 +926,6 @@ function upsertThreadMeta(tid, updater){
   renderDmThreads();
 }
 
-async function createDmThread(opts = {}){
-  dmMsg.textContent = "Creating...";
-
-  const providedParticipants = Array.isArray(opts.participants) ? opts.participants : null;
-  const namesRaw = providedParticipants ? providedParticipants.join(",") : dmParticipantsInput.value.trim();
-  const title = String(opts.title ?? dmTitleInput?.value ?? "").trim();
-
-  if (!namesRaw) {
-    dmMsg.textContent = dmCreateMode === "group"
-      ? "Add at least two usernames (comma separated)."
-      : "Add one username.";
-    return;
-  }
-
-  const names = (providedParticipants || namesRaw.split(","))
-    .map(s => String(s).trim())
-    .filter(Boolean);
-
-  // client-side enforcement
-  if (dmCreateMode === "direct" && names.length !== 1) {
-    dmMsg.textContent = "Direct messages must have exactly 1 participant.";
-    return;
-  }
-  if (dmCreateMode === "group" && names.length < 2 && !title) {
-    dmMsg.textContent = "Group chats need 2+ participants (or a title).";
-    return;
-  }
-
-  try {
-    const res = await fetch("/dm/thread", {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({
-        participants: names,
-        title,
-        kind: dmCreateMode
-      })
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      dmMsg.textContent = text || "Could not create.";
-      return;
-    }
-
-    const data = await res.json();
-    dmMsg.textContent = data.reused ? "Opened existing DM." : "Thread created.";
-
-    // reset fields
-    dmParticipantsInput.value = "";
-    dmTitleInput.value = "";
-
-    await loadDmThreads();
-    if (data.threadId) openDmThread(data.threadId);
-  } catch {
-    dmMsg.textContent = "Could not create.";
-  }
-}
-
 function sendDmMessage(){
   if (!activeDmId) return;
   const txt = dmText.value.trim();
@@ -1049,17 +934,10 @@ function sendDmMessage(){
   dmText.value = "";
 }
 
-dmToggleBtn?.addEventListener("click", () => openDmPanel({ mode: "direct" }));
-groupDmToggleBtn?.addEventListener("click", () => openDmPanel({ mode: "group" }));
-dmDirectModeBtn?.addEventListener("click", () => setDmCreateMode("direct"));
-dmGroupModeBtn?.addEventListener("click", () => setDmCreateMode("group"));
-dmAddUserBtn?.addEventListener("click", () => {
-  if (dmCreateMode !== "group") return;
-  setGroupAddVisibility(!groupAddVisible);
-});
+dmToggleBtn?.addEventListener("click", openDmPanel);
+groupDmToggleBtn?.addEventListener("click", openDmPanel);
 
 dmCloseBtn?.addEventListener("click", closeDmPanel);
-dmCreateBtn?.addEventListener("click", createDmThread);
 dmSendBtn?.addEventListener("click", sendDmMessage);
 dmSettingsBtn?.addEventListener("click", (e) => {
   e.stopPropagation();
