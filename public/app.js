@@ -18,6 +18,7 @@ let groupBadgePending = false;
 let modalTargetUsername = null;
 let pendingFile = null;
 let uploadXhr = null;
+let memberMenuUser = null;
 
 // ---- DOM
 const authWrap = document.getElementById("authWrap");
@@ -37,6 +38,10 @@ const roomTitle = document.getElementById("roomTitle");
 const msgs = document.getElementById("msgs");
 const typingEl = document.getElementById("typing");
 const memberList = document.getElementById("memberList");
+const memberMenu = document.getElementById("memberMenu");
+const memberMenuName = document.getElementById("memberMenuName");
+const memberViewProfileBtn = document.getElementById("memberViewProfileBtn");
+const memberDmBtn = document.getElementById("memberDmBtn");
 
 const msgInput = document.getElementById("msgInput");
 const sendBtn = document.getElementById("sendBtn");
@@ -57,11 +62,15 @@ const dmPanel = document.getElementById("dmPanel");
 const dmToggleBtn = document.getElementById("dmToggleBtn");
 const groupDmToggleBtn = document.getElementById("groupDmToggleBtn");
 const dmModeLabel = document.getElementById("dmModeLabel");
+const dmDirectModeBtn = document.getElementById("dmDirectModeBtn");
+const dmGroupModeBtn = document.getElementById("dmGroupModeBtn");
 const dmCloseBtn = document.getElementById("dmCloseBtn");
 const dmRefreshBtn = document.getElementById("dmRefreshBtn");
 const dmThreadList = document.getElementById("dmThreadList");
 const dmParticipantsInput = document.getElementById("dmParticipants");
 const dmTitleInput = document.getElementById("dmTitle");
+const dmDirectHelper = document.getElementById("dmDirectHelper");
+const dmGroupHelper = document.getElementById("dmGroupHelper");
 const dmCreateBtn = document.getElementById("dmCreateBtn");
 const dmMsg = document.getElementById("dmMsg");
 const dmMetaTitle = document.getElementById("dmMetaTitle");
@@ -561,6 +570,30 @@ function renderReactions(messageId, reactionsMap){
   });
 }
 
+function closeMemberMenu(){
+  if (!memberMenu) return;
+  memberMenu.classList.remove("open");
+  memberMenuUser = null;
+}
+
+function openMemberMenu(user, anchor){
+  if (!memberMenu || !membersPane) {
+    openMemberProfile(user.name);
+    return;
+  }
+
+  memberMenuUser = user;
+  if (memberMenuName) memberMenuName.textContent = `${roleIcon(user.role)} ${user.name}`;
+  memberMenu.classList.add("open");
+
+  const paneRect = membersPane.getBoundingClientRect();
+  const rect = anchor.getBoundingClientRect();
+  const top = rect.top - paneRect.top + membersPane.scrollTop + rect.height + 6;
+  const left = rect.left - paneRect.left + 6;
+  memberMenu.style.top = `${top}px`;
+  memberMenu.style.left = `${left}px`;
+}
+
 function renderMembers(users){
   lastUsers = users || [];
   memberList.innerHTML="";
@@ -595,7 +628,10 @@ function renderMembers(users){
     row.appendChild(dot);
     row.appendChild(meta);
 
-    row.onclick = () => openMemberProfile(u.name);
+    row.onclick = (ev) => {
+      ev.stopPropagation();
+      openMemberMenu(u, row);
+    };
     memberList.appendChild(row);
   });
 }
@@ -618,6 +654,7 @@ function closeDrawers(){
   channelsPane?.classList.remove("open");
   membersPane?.classList.remove("open");
   drawerOverlay?.classList.remove("show");
+  closeMemberMenu();
 }
 function openChannels(){
   membersPane?.classList.remove("open");
@@ -640,24 +677,32 @@ let dmCreateMode = "direct"; // "direct" | "group"
 function setDmCreateMode(mode){
   dmCreateMode = (mode === "group") ? "group" : "direct";
 
-  // style + label
-  dmPanel?.querySelector(".dmCreate")?.classList.toggle("direct", dmCreateMode === "direct");
-  dmPanel?.querySelector(".dmCreate")?.classList.toggle("group", dmCreateMode === "group");
+  const isDirect = dmCreateMode === "direct";
+  const createBox = dmPanel?.querySelector(".dmCreate");
+  createBox?.classList.toggle("direct", isDirect);
+  createBox?.classList.toggle("group", !isDirect);
+  dmDirectModeBtn?.classList.toggle("active", isDirect);
+  dmGroupModeBtn?.classList.toggle("active", !isDirect);
 
-  if (dmModeLabel) dmModeLabel.textContent = `Mode: ${dmCreateMode === "group" ? "Group Chat" : "Direct Message"}`;
+  if (dmModeLabel) dmModeLabel.textContent = `Mode: ${isDirect ? "Direct Message" : "Group Chat"}`;
 
-  // button text hint
-  if (dmCreateBtn) dmCreateBtn.textContent = dmCreateMode === "group" ? "Start group chat" : "Start DM";
+  if (dmCreateBtn) dmCreateBtn.textContent = isDirect ? "Start DM" : "Start group chat";
 
-  // placeholder hints
   if (dmParticipantsInput) {
-    dmParticipantsInput.placeholder = dmCreateMode === "group"
-      ? "Add people (comma separated)"
-      : "Add one person (username)";
+    dmParticipantsInput.placeholder = isDirect
+      ? "Pick someone from Members to start a DM"
+      : "Add people (comma separated)";
+    dmParticipantsInput.readOnly = isDirect;
+    dmParticipantsInput.classList.toggle("readonly", isDirect);
   }
 
-  // if switching to direct, clear title
-  if (dmCreateMode === "direct" && dmTitleInput) dmTitleInput.value = "";
+  if (dmDirectHelper) dmDirectHelper.style.display = isDirect ? "block" : "none";
+  if (dmGroupHelper) dmGroupHelper.style.display = isDirect ? "none" : "block";
+
+  if (dmTitleInput) {
+    dmTitleInput.disabled = isDirect;
+    if (isDirect) dmTitleInput.value = "";
+  }
 }
 
 function threadLabel(t){
@@ -691,6 +736,7 @@ function renderDmThreads(){
 
   const direct = dmThreads.filter(t => !t.is_group);
   const groups = dmThreads.filter(t => !!t.is_group);
+  const visibleDirect = direct.filter(t => !!t.last_text);
 
   const addSection = (title, items, emptyText) => {
     const head = document.createElement("div");
@@ -709,7 +755,7 @@ function renderDmThreads(){
     for (const t of items) dmThreadList.appendChild(renderThreadItem(t));
   };
 
-  addSection("Direct messages", direct, "No direct messages yet.");
+  addSection("Direct messages", visibleDirect, "No direct messages yet. Start one from Members.");
   addSection("Group chats", groups, "No group chats yet.");
 }
 
@@ -725,6 +771,48 @@ async function loadDmThreads(){
     renderDmThreads();
   } catch {
     dmMsg.textContent = "Could not load threads.";
+  }
+}
+
+async function startDirectMessage(username){
+  if (!username || username === me?.username) return;
+
+  openDmPanel({ mode: "direct" });
+  closeMemberMenu();
+
+  if (!dmThreads.length) await loadDmThreads();
+
+  if (dmParticipantsInput) dmParticipantsInput.value = username;
+
+  const existing = dmThreads.find((t) => !t.is_group && (t.participants || []).includes(username));
+  if (existing) {
+    openDmThread(existing.id);
+    return;
+  }
+
+  dmMsg.textContent = "Preparing chat...";
+  try {
+    const res = await fetch("/dm/thread", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ participants: [username], kind: "direct" })
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      dmMsg.textContent = text || "Could not start DM.";
+      return;
+    }
+
+    const data = await res.json();
+    dmMsg.textContent = data.reused ? "Opened existing DM." : "DM ready. Send a message to save it.";
+
+    if (data.threadId) {
+      upsertThreadMeta(data.threadId, { participants: [username, me?.username].filter(Boolean), is_group: false });
+      openDmThread(data.threadId);
+    }
+  } catch {
+    dmMsg.textContent = "Could not start DM.";
   }
 }
 
@@ -752,7 +840,7 @@ function renderDmMessages(threadId){
   if (!msgsArr.length) {
     const empty = document.createElement("div");
     empty.className = "dmEmpty";
-    empty.textContent = "No messages yet.";
+    empty.textContent = "No messages yet. Say hi to save this thread.";
     dmMessagesEl.appendChild(empty);
     return;
   }
@@ -805,11 +893,12 @@ function upsertThreadMeta(tid, updater){
   renderDmThreads();
 }
 
-async function createDmThread(){
+async function createDmThread(opts = {}){
   dmMsg.textContent = "Creating...";
 
-  const namesRaw = dmParticipantsInput.value.trim();
-  const title = dmTitleInput.value.trim();
+  const providedParticipants = Array.isArray(opts.participants) ? opts.participants : null;
+  const namesRaw = providedParticipants ? providedParticipants.join(",") : dmParticipantsInput.value.trim();
+  const title = String(opts.title ?? dmTitleInput?.value ?? "").trim();
 
   if (!namesRaw) {
     dmMsg.textContent = dmCreateMode === "group"
@@ -818,7 +907,9 @@ async function createDmThread(){
     return;
   }
 
-  const names = namesRaw.split(",").map(s => s.trim()).filter(Boolean);
+  const names = (providedParticipants || namesRaw.split(","))
+    .map(s => String(s).trim())
+    .filter(Boolean);
 
   // client-side enforcement
   if (dmCreateMode === "direct" && names.length !== 1) {
@@ -871,11 +962,30 @@ function sendDmMessage(){
 
 dmToggleBtn?.addEventListener("click", () => openDmPanel({ mode: "direct" }));
 groupDmToggleBtn?.addEventListener("click", () => openDmPanel({ mode: "group" }));
+dmDirectModeBtn?.addEventListener("click", () => setDmCreateMode("direct"));
+dmGroupModeBtn?.addEventListener("click", () => setDmCreateMode("group"));
 
 dmCloseBtn?.addEventListener("click", closeDmPanel);
 dmRefreshBtn?.addEventListener("click", loadDmThreads);
 dmCreateBtn?.addEventListener("click", createDmThread);
 dmSendBtn?.addEventListener("click", sendDmMessage);
+
+memberViewProfileBtn?.addEventListener("click", () => {
+  if (memberMenuUser) openMemberProfile(memberMenuUser.name);
+  closeMemberMenu();
+});
+
+memberDmBtn?.addEventListener("click", () => {
+  if (memberMenuUser) startDirectMessage(memberMenuUser.name);
+});
+
+document.addEventListener("click", (e) => {
+  if (!memberMenu?.classList.contains("open")) return;
+  if (memberMenu.contains(e.target)) return;
+  if (e.target.closest(".mItem")) return;
+  closeMemberMenu();
+});
+membersPane?.addEventListener("scroll", closeMemberMenu);
 
 dmText?.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
@@ -888,7 +998,7 @@ dmText?.addEventListener("keydown", (e) => {
 dmUserBtn?.addEventListener("click", () => {
   if (modalTargetUsername) {
     closeModal();
-    openDmPanel({ mode: "direct", prefill: modalTargetUsername });
+    startDirectMessage(modalTargetUsername);
   }
 });
 
