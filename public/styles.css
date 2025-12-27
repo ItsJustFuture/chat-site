@@ -598,20 +598,8 @@ body{
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   background:var(--bg);
   color:var(--text);
-  /* Default fallback */
   height:100vh;
   overflow:hidden;
-}
-
-/* Prefer dynamic viewport on modern mobile browsers (prevents cropped panels) */
-@supports (height: 100dvh){
-  body{ height:100dvh; }
-  #app{ height:100dvh; }
-  #authWrap{ height:100dvh; }
-  /* Fixed drawers/panels should also match dynamic viewport */
-  .channels{ height:100dvh; }
-  .members.drawer{ height:100dvh; }
-  .dmPanel{ height:100dvh; }
 }
 a{ color:inherit; }
 button{ font-family:inherit; }
@@ -801,7 +789,7 @@ textarea{ min-height:90px; resize:vertical; }
 .iconBtn:hover{ filter:brightness(1.05); }
 
 /* Chat */
-.chat{ flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; position:relative; }
+.chat{ flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; }
 .topbar{
   height:54px;
   background:var(--panel2);
@@ -823,72 +811,6 @@ textarea{ min-height:90px; resize:vertical; }
 }
 
 .msgs{ flex:1; overflow:auto; padding:14px; display:flex; flex-direction:column; gap:10px; min-height:0; }
-
-/* Dice Room overlays */
-.diceOverlay{
-  position:absolute;
-  inset:0;
-  display:none;
-  align-items:center;
-  justify-content:center;
-  pointer-events:none;
-  z-index:50;
-}
-.diceOverlay.show{ display:flex; }
-.diceCard{
-  min-width: 160px;
-  padding: 16px 18px;
-  border-radius: 18px;
-  background: color-mix(in srgb, var(--panel2) 90%, transparent);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadowMd);
-  backdrop-filter: blur(6px);
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  gap: 8px;
-}
-.diceFace{
-  font-size: 54px;
-  line-height: 1;
-  filter: drop-shadow(0 10px 18px color-mix(in srgb, var(--shadowColor) 55%, transparent));
-}
-.diceHint{
-  font-size: 12px;
-  color: var(--muted);
-}
-.diceCard.rolling .diceFace{
-  animation: diceWiggle 220ms ease-in-out infinite;
-}
-@keyframes diceWiggle{
-  0%{ transform: translateY(0) rotate(0deg) scale(1); }
-  35%{ transform: translateY(-6px) rotate(-10deg) scale(1.03); }
-  70%{ transform: translateY(2px) rotate(12deg) scale(0.98); }
-  100%{ transform: translateY(0) rotate(0deg) scale(1); }
-}
-
-.confettiLayer{
-  position:absolute;
-  left:0; right:0;
-  top: 54px; /* below topbar */
-  bottom: 86px; /* above input bar */
-  pointer-events:none;
-  overflow:hidden;
-  z-index:40;
-}
-.confetti{
-  position:absolute;
-  width: 8px;
-  height: 12px;
-  border-radius: 3px;
-  opacity: 0.95;
-  animation: confettiFall 900ms ease-out forwards;
-}
-@keyframes confettiFall{
-  0%{ transform: translateY(-20px) rotate(0deg); opacity: 0; }
-  10%{ opacity: 1; }
-  100%{ transform: translateY(320px) rotate(260deg); opacity: 0; }
-}
 .sys{
   align-self:center; color:var(--messageSystemText); font-size:12px;
   padding:6px 10px; border-radius:999px;
@@ -1303,8 +1225,7 @@ textarea{ min-height:90px; resize:vertical; }
 }
 
 @media (max-width: 980px){
-  /* Mobile-only header buttons should behave like icon buttons */
-  .mobOnly{ display:inline-flex; }
+  .mobOnly{ display:flex; }
   .members{ display:none; }
 
   .topbar{ position: sticky; top: 0; z-index: 40; padding:0 10px; gap:8px; }
@@ -1337,7 +1258,6 @@ textarea{ min-height:90px; resize:vertical; }
     transition:transform .18s ease;
     z-index:75;
     box-shadow: 12px 0 30px rgba(0,0,0,.55);
-    padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
   .channels.open{ transform:translateX(0); }
 
@@ -1349,7 +1269,6 @@ textarea{ min-height:90px; resize:vertical; }
     transition:transform .18s ease;
     z-index:75;
     box-shadow: -12px 0 30px rgba(0,0,0,.55);
-    padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
   .members.drawer.open{ transform:translateX(0); }
 

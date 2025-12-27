@@ -87,10 +87,6 @@ const roomTitle = document.getElementById("roomTitle");
 
 const msgs = document.getElementById("msgs");
 const typingEl = document.getElementById("typing");
-const diceOverlay = document.getElementById("diceOverlay");
-const diceFace = document.getElementById("diceFace");
-const diceHint = document.getElementById("diceHint");
-const confettiLayer = document.getElementById("confettiLayer");
 const memberList = document.getElementById("memberList");
 const memberGold = document.getElementById("memberGold");
 const memberMenu = document.getElementById("memberMenu");
@@ -973,59 +969,6 @@ async function loadProgression(){
   }catch{}
 }
 
-// ---- Dice Room client effects
-const DICE_FACES = ["⚀","⚁","⚂","⚃","⚄","⚅"];
-let diceAnimTimer = null;
-
-function setDiceOverlayVisible(visible, hintText = "Rolling…", rolling = false){
-  if(!diceOverlay || !diceFace || !diceHint) return;
-  diceOverlay.classList.toggle("show", !!visible);
-  diceHint.textContent = hintText;
-  const card = diceOverlay.querySelector(".diceCard");
-  if(card) card.classList.toggle("rolling", !!rolling);
-}
-
-function playDiceAnimation(finalValue, won){
-  if(!diceOverlay || !diceFace) return;
-  clearTimeout(diceAnimTimer);
-  setDiceOverlayVisible(true, "Rolling…", true);
-
-  const start = Date.now();
-  const dur = 900;
-  const tick = () => {
-    const t = Date.now() - start;
-    const idx = Math.floor(Math.random() * 6);
-    diceFace.textContent = DICE_FACES[idx];
-    if(t < dur){
-      diceAnimTimer = setTimeout(tick, 85);
-    }else{
-      const v = Math.max(1, Math.min(6, Number(finalValue) || 1));
-      diceFace.textContent = DICE_FACES[v-1];
-      setDiceOverlayVisible(true, won ? "JACKPOT!" : "Nice roll", false);
-      diceAnimTimer = setTimeout(() => setDiceOverlayVisible(false), 650);
-    }
-  };
-  tick();
-}
-
-function popConfetti(){
-  if(!confettiLayer) return;
-  // clear any old pieces
-  confettiLayer.innerHTML = "";
-  const pieces = 22;
-  const w = confettiLayer.clientWidth || 600;
-  for(let i=0;i<pieces;i++){
-    const el = document.createElement("div");
-    el.className = "confetti";
-    el.style.left = `${Math.floor(Math.random() * Math.max(1, w - 10))}px`;
-    el.style.top = `${Math.floor(Math.random() * 40)}px`;
-    el.style.transform = `translateY(-20px) rotate(${Math.floor(Math.random()*180)}deg)`;
-    el.style.background = `hsl(${Math.floor(Math.random()*360)}, 85%, 60%)`;
-    confettiLayer.appendChild(el);
-  }
-  setTimeout(()=>{ if(confettiLayer) confettiLayer.innerHTML = ""; }, 1100);
-}
-
 // Search filter
 function applySearch(){
   const q = searchInput.value.trim().toLowerCase();
@@ -1370,15 +1313,8 @@ dmUserBtn?.addEventListener("click", () => {
   }
 });
 
-// upload button icon -> open file picker (except Dice Room)
-pickFileBtn?.addEventListener("click", () => {
-  if(!socket) return;
-  if(isDiceRoom()){
-    socket.emit("dice:roll");
-    return;
-  }
-  fileInput.click();
-});
+// upload button icon -> open file picker
+pickFileBtn?.addEventListener("click", () => fileInput.click());
 
 // upload preview
 function showUploadPreview(file){
@@ -1491,30 +1427,11 @@ closeModalBtn.addEventListener("click", closeModal);
 modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
 
 // rooms
-function roomDisplayName(room){
-  return room === "diceroom" ? "Dice Room" : room;
-}
-function isDiceRoom(){
-  return currentRoom === "diceroom";
-}
-function updatePickFileBtn(){
-  if(!pickFileBtn) return;
-  if(isDiceRoom()){
-    pickFileBtn.textContent = "🎲";
-    pickFileBtn.title = "Roll Dice";
-  }else{
-    pickFileBtn.textContent = "📷";
-    pickFileBtn.title = "Upload";
-  }
-}
-
 function setActiveRoom(room){
   currentRoom = room;
-  const display = roomDisplayName(room);
-  nowRoom.textContent = display;
-  roomTitle.textContent = display;
-  msgInput.placeholder = `Message ${display}`;
-  updatePickFileBtn();
+  nowRoom.textContent = room;
+  roomTitle.textContent = room;
+  msgInput.placeholder = `Message ${room}`;
   document.querySelectorAll(".chan").forEach(el=>{
     el.classList.toggle("active", el.dataset.room === room);
   });
@@ -1544,7 +1461,7 @@ function renderRoomsList(rooms){
     const div = document.createElement("div");
     div.className = "chan" + (r === currentRoom ? " active" : "");
     div.dataset.room = r;
-    div.textContent = roomDisplayName(r); // no '#'
+    div.textContent = r; // no '#'
     chanList.appendChild(div);
   }
 }
@@ -1584,6 +1501,11 @@ function updateRoomControlsVisibility(){
     const canCreate = me && roleRank(me.role) >= roleRank("Co-owner");
     addRoomBtn.style.display = rightPanelMode === "rooms" && canCreate ? "inline-flex" : "none";
   }
+}
+
+function ensureChangelogLoaded(force = false){
+  if (activeMenuTab !== "changelog") return;
+  return loadChangelog(force);
 }
 
 function setRightPanelMode(mode){
@@ -2261,6 +2183,13 @@ async function startApp(){
   updateRoomControlsVisibility();
 
   socket = io();
+  socket.on("connect_error", (err) => {
+  addSystem(`⚠️ Realtime connection failed: ${err?.message || err}`);
+});
+
+socket.on("disconnect", (reason) => {
+  addSystem(`⚠️ Disconnected: ${reason}`);
+});
   socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   socket.on("changelog updated", ()=>{
     changelogDirty = true;
@@ -2278,22 +2207,6 @@ async function startApp(){
   updateRoomControlsVisibility();
 
   socket.on("system", addSystem);
-  socket.on("dice:error", ({ message }) => {
-    if(message) addSystem(`🎲 ${message}`);
-  });
-  socket.on("dice:result", ({ value, won }) => {
-    // animate only on server-confirmed result
-    playDiceAnimation(value, !!won);
-    if(won) popConfetti();
-    // refresh gold/xp UI
-    loadProgression();
-  });
-  socket.on("dice:rolled", ({ value, won }) => {
-    // optional: let everyone in Dice Room see the animation too
-    if(!isDiceRoom()) return;
-    playDiceAnimation(value, !!won);
-    if(won) popConfetti();
-  });
   socket.on("command response", handleCommandResponse);
   socket.on("user list", (users)=>renderMembers(users));
   socket.on("typing update", (names)=>{

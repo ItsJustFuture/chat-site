@@ -101,7 +101,7 @@ db.serialize(() => {
   addColumnIfMissing("rooms", "maintenance_mode", "maintenance_mode INTEGER NOT NULL DEFAULT 0");
 
   // seed default rooms
-  const seedRooms = ["main", "nsfw", "music", "diceroom"];
+  const seedRooms = ["main", "nsfw", "music"];
   for (const r of seedRooms) {
     db.run(`INSERT OR IGNORE INTO rooms (name, created_by, created_at) VALUES (?, NULL, ?)`, [r, Date.now()]);
   }
@@ -123,7 +123,9 @@ db.serialize(() => {
     ["xp", "xp INTEGER NOT NULL DEFAULT 0"],
     ["lastXpMessageAt", "lastXpMessageAt INTEGER"],
     ["lastDailyLoginAt", "lastDailyLoginAt INTEGER"],
-    ["lastDiceRollAt", "lastDiceRollAt INTEGER"],
+    ["lastGoldTickAt", "lastGoldTickAt INTEGER"],
+    ["lastMessageGoldAt", "lastMessageGoldAt INTEGER"],
+    ["lastDailyLoginGoldAt", "lastDailyLoginGoldAt INTEGER"],
   ];
   for (const [col, ddl] of userColumns) addColumnIfMissing("users", col, ddl);
 
@@ -369,25 +371,37 @@ app.use((req, res, next) => {
 });
 
 // ---- Sessions (works locally + Render)
-app.use(
-  session({
-    store: new SQLiteStore({ db: "sessions.sqlite", dir: __dirname }),
-    secret: process.env.SESSION_SECRET || "dev_secret_change_me",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      sameSite: "lax",
-      // secure cookies in production (Render). With trust proxy set, this will work.
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 1000 * 60 * 60 * 24 * 7,
-    },
-  })
-);
+const sessionMiddleware = session({
+  store: new SQLiteStore({ db: "sessions.sqlite", dir: __dirname }),
+  secret: process.env.SESSION_SECRET || "dev_secret_change_me",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 1000 * 60 * 60 * 24 * 7,
+  },
+});
+
+app.use(sessionMiddleware);
+
 // ---- Static
 app.use("/uploads", express.static(UPLOADS_DIR));
 app.use("/avatars", express.static(AVATARS_DIR));
-app.use(express.static(PUBLIC_DIR));
+// IMPORTANT: avoid stale-cached frontend assets causing "UI is broken" after deploy.
+// We disable caching for html/js/css so clients always receive the latest UI+handlers.
+app.use(
+  express.static(PUBLIC_DIR, {
+    etag: false,
+    maxAge: 0,
+    setHeaders(res, filePath) {
+      if (/(\.html|\.js|\.css)$/i.test(filePath)) {
+        res.setHeader("Cache-Control", "no-store");
+      }
+    },
+  })
+);
 
 // ---- Helpers
 function normalizeUsername(u) {
@@ -515,6 +529,10 @@ const ALLOWED_THEMES = [
   "Paper / Parchment",
   "Sky Light",
 ];
+
+const GOLD_TICK_MS = 5_000;
+const MESSAGE_GOLD_COOLDOWN_MS = 5 * 60 * 1000;
+const DAILY_GOLD_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 db.get(`SELECT value FROM config WHERE key='maintenance'`, [], (_e, row) => {
   maintenanceState.enabled = row?.value === "on";
@@ -1135,6 +1153,61 @@ function awardDailyLoginXp(user) {
   );
 }
 
+function initGoldTick(userId, now = Date.now()) {
+  db.run("UPDATE users SET lastGoldTickAt = ? WHERE id = ?", [now, userId]);
+}
+
+function awardPassiveGold(userId, cb) {
+  const now = Date.now();
+  db.get("SELECT lastGoldTickAt FROM users WHERE id = ?", [userId], (err, row) => {
+    if (err || !row) return cb?.(err || new Error("missing"));
+
+    const last = Number(row.lastGoldTickAt || 0);
+    if (!last) {
+      db.run("UPDATE users SET lastGoldTickAt = ? WHERE id = ?", [now, userId], () => cb?.(null, 0));
+      return;
+    }
+
+    const elapsed = now - last;
+    const ticks = Math.floor(elapsed / GOLD_TICK_MS);
+    if (ticks <= 0) return cb?.(null, 0);
+
+    const newTickTs = last + ticks * GOLD_TICK_MS;
+    db.run(
+      "UPDATE users SET gold = gold + ?, lastGoldTickAt = ? WHERE id = ?",
+      [ticks, newTickTs, userId],
+      (updateErr) => cb?.(updateErr, ticks)
+    );
+  });
+}
+
+function awardMessageGold(userId, cb) {
+  const now = Date.now();
+  db.get("SELECT lastMessageGoldAt FROM users WHERE id = ?", [userId], (err, row) => {
+    if (err || !row) return cb?.(err || new Error("missing"));
+    const last = Number(row.lastMessageGoldAt || 0);
+    if (last && now - last < MESSAGE_GOLD_COOLDOWN_MS) return cb?.(null, 0);
+
+    db.run(
+      "UPDATE users SET gold = gold + 5, lastMessageGoldAt = ? WHERE id = ?",
+      [now, userId],
+      (updateErr) => cb?.(updateErr, updateErr ? 0 : 5)
+    );
+  });
+}
+
+function awardDailyLoginGold(user) {
+  const now = Date.now();
+  const last = Number(user.lastDailyLoginGoldAt || 0);
+  if (last && now - last < DAILY_GOLD_COOLDOWN_MS) return;
+
+  db.run(
+    "UPDATE users SET gold = gold + 50, lastDailyLoginGoldAt = ? WHERE id = ?",
+    [now, user.id],
+    () => {}
+  );
+}
+
 function progressionFromRow(row, includePrivate) {
   const info = levelInfo(row?.xp || 0);
   const base = { level: info.level };
@@ -1377,6 +1450,8 @@ app.post("/login", (req, res) => {
 
       db.run("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]);
       awardDailyLoginXp(row);
+      awardDailyLoginGold(row);
+      initGoldTick(row.id);
 
       // Ensure session is actually persisted before replying
       req.session.save((saveErr) => {
@@ -1403,10 +1478,35 @@ app.get("/me", (req, res) => {
 });
 
 app.get("/api/me/progression", requireLogin, (_req, res) => {
-  db.get("SELECT gold, xp FROM users WHERE id = ?", [_req.session.user.id], (err, row) => {
-    if (err || !row) return res.status(404).send("Not found");
-    return res.json(progressionFromRow(row, true));
-  });
+  const uid = _req.session.user.id;
+  const finish = () => {
+    db.get("SELECT gold, xp FROM users WHERE id = ?", [uid], (err, row) => {
+      if (err || !row) return res.status(404).send("Not found");
+      return res.json(progressionFromRow(row, true));
+    });
+  };
+
+  if (onlineState.has(uid)) {
+    awardPassiveGold(uid, finish);
+  } else {
+    finish();
+  }
+});
+
+app.get("/api/me/gold", requireLogin, (req, res) => {
+  const uid = req.session.user.id;
+  const finish = () => {
+    db.get("SELECT gold FROM users WHERE id = ?", [uid], (err, row) => {
+      if (err || !row) return res.status(404).send("Not found");
+      return res.json({ gold: Number(row.gold || 0) });
+    });
+  };
+
+  if (onlineState.has(uid)) {
+    awardPassiveGold(uid, finish);
+  } else {
+    finish();
+  }
 });
 
 app.get("/api/me/theme", requireLogin, (req, res) => {
@@ -1915,6 +2015,10 @@ setInterval(() => {
     onlineXpTrack.set(uid, { lastTs: now, carryMs: remainder });
     if (gains > 0) applyXpGain(uid, gains);
   }
+
+  for (const uid of onlineState.keys()) {
+    awardPassiveGold(uid);
+  }
 }, 20_000);
 
 // ---- Helpers for punishments
@@ -1932,19 +2036,10 @@ function isPunished(userId, type, cb) {
 
 // ---- Socket auth middleware (session)
 io.use((socket, next) => {
-  // express-session is cookie-based; socket.io shares cookies.
-  // We just trust that the client loaded the page after login.
-  // If not logged in, disconnect.
-  const req = socket.request;
-  const res = req.res || {};
-  session({
-    store: new SQLiteStore({ db: "sessions.sqlite", dir: __dirname }),
-    secret: process.env.SESSION_SECRET || "dev_secret_change_me",
-    resave: false,
-    saveUninitialized: false,
-    cookie: { httpOnly: true, sameSite: "lax", secure: !!process.env.RENDER },
-  })(req, res, () => {
-    if (!req.session?.user?.id) return next(new Error("Not authenticated"));
+  sessionMiddleware(socket.request, socket.request.res || {}, () => {
+    if (!socket.request.session?.user?.id) {
+      return next(new Error("Not authenticated"));
+    }
     next();
   });
 });
@@ -1990,7 +2085,12 @@ function emitUserList(room) {
 
 // ---- Socket handlers
 io.on("connection", (socket) => {
-  const sessUser = socket.request.session.user;
+  const sessUser = socket.request.session?.user;
+  if (!sessUser?.id) {
+    socket.disconnect(true);
+    return;
+  }
+
   socket.user = {
     id: sessUser.id,
     username: sessUser.username,
@@ -2002,6 +2102,7 @@ io.on("connection", (socket) => {
 
   socketIdByUserId.set(socket.user.id, socket.id);
   onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
+  initGoldTick(socket.user.id);
 
   // Load profile bits for presence
   db.get(
@@ -2063,6 +2164,7 @@ function doJoin(room, status) {
 
   onlineState.set(socket.user.id, { room, status: socket.user.status });
   onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
+  awardPassiveGold(socket.user.id);
 
   db.run("UPDATE users SET last_room=?, last_status=? WHERE id=?", [
     room,
@@ -2218,66 +2320,6 @@ function doJoin(room, status) {
     if (socket.currentRoom) emitUserList(socket.currentRoom);
   });
 
-  // ---- Dice Room mini-game
-  socket.on("dice:roll", () => {
-    const room = socket.currentRoom;
-    if (room !== "diceroom") {
-      socket.emit("dice:error", { message: "You can only roll in Dice Room." });
-      return;
-    }
-
-    const now = Date.now();
-    db.get(
-      "SELECT gold, lastDiceRollAt FROM users WHERE id = ?",
-      [socket.user.id],
-      (err, row) => {
-        if (err || !row) {
-          socket.emit("dice:error", { message: "Unable to roll right now." });
-          return;
-        }
-
-        const last = Number(row.lastDiceRollAt || 0);
-        if (last && now - last < 2000) {
-          socket.emit("dice:error", { message: "Slow down! You can roll again in a moment." });
-          return;
-        }
-
-        const gold = Number(row.gold || 0);
-        if (gold < 50) {
-          socket.emit("dice:error", { message: "You need at least 50 Gold to roll." });
-          return;
-        }
-
-        const value = Math.floor(Math.random() * 6) + 1;
-        const won = value === 6;
-        const deltaGold = won ? 500 : -50;
-
-        const sql = won
-          ? "UPDATE users SET gold = gold + 500, lastDiceRollAt = ? WHERE id = ?"
-          : "UPDATE users SET gold = gold - 50, lastDiceRollAt = ? WHERE id = ?";
-
-        db.run(sql, [now, socket.user.id], (updErr) => {
-          if (updErr) {
-            socket.emit("dice:error", { message: "Unable to roll right now." });
-            return;
-          }
-
-          // result for roller (so client can animate and refresh)
-          socket.emit("dice:result", { value, won, deltaGold });
-
-          // optional: other users can also animate
-          io.to(room).emit("dice:rolled", { user: socket.user.username, value, won });
-
-          // centered system message (no totals)
-          const msg = won
-            ? `${socket.user.username} rolled a 6 🎉 (+500 Gold!)`
-            : `${socket.user.username} rolled a ${value} 🎲 (-50 Gold!)`;
-          io.to(room).emit("system", msg);
-        });
-      }
-    );
-  });
-
   socket.on("chat message", (payload) => {
     const room = socket.currentRoom;
     if (!room) return;
@@ -2307,6 +2349,8 @@ function doJoin(room, status) {
         const attachmentType = String(payload?.attachmentType || "").slice(0, 20);
         const attachmentMime = String(payload?.attachmentMime || "").slice(0, 60);
         const attachmentSize = Number(payload?.attachmentSize || 0) || 0;
+
+        awardPassiveGold(socket.user.id);
 
         // maintenance / lock / slowmode enforcement
         if (maintenanceState.enabled && !requireMinRole(socket.user.role, "Moderator")) {
@@ -2352,6 +2396,7 @@ function doJoin(room, status) {
               ],
               function () {
                 awardMessageXp(socket.user.id);
+                awardMessageGold(socket.user.id);
                 const msg = {
                   messageId: this.lastID,
                   room,
@@ -2649,6 +2694,7 @@ function doJoin(room, status) {
     onlineState.delete(socket.user.id);
     msgRate.delete(socket.id);
     onlineXpTrack.delete(socket.user.id);
+    initGoldTick(socket.user.id);
 
     db.run("UPDATE users SET last_seen=? WHERE id=?", [Date.now(), socket.user.id]);
 
