@@ -1503,6 +1503,11 @@ function updateRoomControlsVisibility(){
   }
 }
 
+function ensureChangelogLoaded(force = false){
+  if (activeMenuTab !== "changelog") return;
+  return loadChangelog(force);
+}
+
 function setRightPanelMode(mode){
   rightPanelMode = mode === "menu" ? "menu" : "rooms";
   if(roomsPanel) roomsPanel.style.display = rightPanelMode === "rooms" ? "flex" : "none";
