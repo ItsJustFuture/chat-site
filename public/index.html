@@ -50,6 +50,14 @@
   <!-- will be rendered by app.js from /rooms -->
 </div>
 
+<div class="commandPopup" id="commandPopup" aria-live="polite">
+  <div class="commandPopupHeader">
+    <div class="commandPopupTitle" id="commandPopupTitle">Command</div>
+    <button class="iconBtn" id="commandPopupClose" type="button" title="Dismiss">✕</button>
+  </div>
+  <div class="commandPopupBody" id="commandPopupBody"></div>
+</div>
+
         <div class="bottomBar">
           <div class="meRow">
             <div class="meLeft">
@@ -132,6 +140,7 @@
 
       <aside class="members drawer" id="membersPane">
         <h3>Members</h3>
+        <div class="memberGold" id="memberGold" aria-live="polite"></div>
         <div id="memberList"></div>
         <div id="memberMenu" class="memberMenu">
           <div class="memberMenuHeader">
@@ -238,6 +247,18 @@
               <div class="infoItem"><div class="k">Last seen</div><div class="v" id="infoLastSeen">—</div></div>
               <div class="infoItem"><div class="k">Current room</div><div class="v" id="infoRoom">—</div></div>
               <div class="infoItem"><div class="k">Status</div><div class="v" id="infoStatus">—</div></div>
+            </div>
+
+            <div class="sectionTitle">Account Level</div>
+            <div class="panelBox" id="levelPanel">
+              <div class="row" style="align-items:center; justify-content:space-between;">
+                <div class="badge" id="levelBadge">Level 1</div>
+                <div class="small" id="xpText">XP: 0 / 100</div>
+              </div>
+              <div class="progressShell">
+                <div class="progressFill" id="xpProgress"></div>
+              </div>
+              <div class="small" id="xpNote">XP is only visible to you.</div>
             </div>
 
             <div class="row" style="gap:8px; margin-top:10px; flex-wrap:wrap;">
@@ -439,6 +460,8 @@
 
     </div>
   </div>
+
+  <div id="levelToast">🎉 <span id="levelToastText">Level up!</span></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/app.js" defer></script>

@@ -95,6 +95,11 @@ db.serialize(() => {
     )
   `);
 
+  addColumnIfMissing("rooms", "slowmode_seconds", "slowmode_seconds INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing("rooms", "is_locked", "is_locked INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing("rooms", "pinned_message_ids", "pinned_message_ids TEXT");
+  addColumnIfMissing("rooms", "maintenance_mode", "maintenance_mode INTEGER NOT NULL DEFAULT 0");
+
   // seed default rooms
   const seedRooms = ["main", "nsfw", "music"];
   for (const r of seedRooms) {
@@ -113,6 +118,10 @@ db.serialize(() => {
     ["last_seen", "last_seen INTEGER"],
     ["last_room", "last_room TEXT"],
     ["last_status", "last_status TEXT"],
+    ["gold", "gold INTEGER NOT NULL DEFAULT 0"],
+    ["xp", "xp INTEGER NOT NULL DEFAULT 0"],
+    ["lastXpMessageAt", "lastXpMessageAt INTEGER"],
+    ["lastDailyLoginAt", "lastDailyLoginAt INTEGER"],
   ];
   for (const [col, ddl] of userColumns) addColumnIfMissing("users", col, ddl);
 
@@ -169,6 +178,29 @@ db.serialize(() => {
       target_username TEXT,
       room TEXT,
       details TEXT
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS command_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      executor_id INTEGER NOT NULL,
+      executor_username TEXT NOT NULL,
+      executor_role TEXT NOT NULL,
+      command_name TEXT NOT NULL,
+      args_json TEXT,
+      target_ids TEXT,
+      room TEXT,
+      success INTEGER NOT NULL,
+      error TEXT,
+      ts INTEGER NOT NULL
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS config (
+      key TEXT PRIMARY KEY,
+      value TEXT
     )
   `);
     // ---- DM tables (make sure these exist at startup)
@@ -394,8 +426,690 @@ function canModerate(actorRole, targetRole) {
   // can only moderate lower roles
   return roleRank(actorRole) > roleRank(targetRole);
 }
+const ROLE_DISPLAY = {
+  Moderator: "Moderator",
+  Admin: "Admin",
+  "Co-owner": "Co-Owner",
+  Owner: "Owner",
+};
+
+function findUserByMention(raw, cb) {
+  const name = sanitizeUsername(String(raw || "").replace(/^@+/, ""));
+  if (!name) return cb(new Error("User not found"));
+  db.get(
+    `SELECT id, username, role FROM users
+     WHERE lower(username)=lower(?)
+     ORDER BY CASE WHEN username=? THEN 0 ELSE 1 END LIMIT 1`,
+    [name, name],
+    (err, row) => {
+      if (err || !row) return cb(new Error("User not found"));
+      cb(null, row);
+    }
+  );
+}
+
+function logCommandAudit({ executor, commandName, args, targets, room, success, error }) {
+  db.run(
+    `INSERT INTO command_audit (executor_id, executor_username, executor_role, command_name, args_json, target_ids, room, success, error, ts)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      executor.id,
+      executor.username,
+      executor.role,
+      commandName,
+      args ? JSON.stringify(args).slice(0, 2000) : null,
+      targets ? String(targets).slice(0, 500) : null,
+      room || null,
+      success ? 1 : 0,
+      error ? String(error).slice(0, 500) : null,
+      Date.now(),
+    ]
+  );
+}
+
+function parseCommand(text) {
+  const raw = String(text || "").trim();
+  if (!raw.startsWith("/")) return null;
+  const parts = raw.slice(1).split(/\s+/).filter(Boolean);
+  if (!parts.length) return null;
+  const [name, ...args] = parts;
+  return { name: name.toLowerCase(), args };
+}
+
+const slowmodeTracker = new Map(); // key `${room}:${userId}` -> last ts
+const godmodeUsers = new Set();
+const maintenanceState = { enabled: false };
+
+db.get(`SELECT value FROM config WHERE key='maintenance'`, [], (_e, row) => {
+  maintenanceState.enabled = row?.value === "on";
+});
+
+function dbGetAsync(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) return reject(err);
+      resolve(row);
+    });
+  });
+}
+
+function dbAllAsync(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) return reject(err);
+      resolve(rows || []);
+    });
+  });
+}
+
+function dbRunAsync(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function (err) {
+      if (err) return reject(err);
+      resolve(this);
+    });
+  });
+}
+
+const commandRegistry = {
+  help: {
+    minRole: "User",
+    description: "Show commands you can use",
+    usage: "/help",
+    example: "/help",
+    handler: async ({ socket }) => {
+      const actorRole = godmodeUsers.has(socket.user.id) ? "Owner" : socket.user.role;
+      const commands = Object.entries(commandRegistry)
+        .filter(([_k, v]) => requireMinRole(actorRole, v.minRole || "User"))
+        .map(([name, meta]) => ({
+          name,
+          description: meta.description,
+          usage: meta.usage,
+          example: meta.example,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return { ok: true, type: "help", commands, role: ROLE_DISPLAY[actorRole] || actorRole };
+    },
+  },
+  mute: {
+    minRole: "Moderator",
+    description: "Temporarily block a user from chatting",
+    usage: "/mute @user [minutes] [reason]",
+    example: "/mute @Sam 15 spam",
+    handler: async ({ args, actorRole, actor, room }) => {
+      if (!args[0]) return { ok: false, message: "Missing user" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
+      const minsRaw = Number(args[1] || 10);
+      const mins = clamp(minsRaw, 1, 1440);
+      const reason = args.slice(2).join(" ").slice(0, 180);
+      const expiresAt = Date.now() + mins * 60 * 1000;
+      await dbRunAsync(
+        `INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id, created_at) VALUES (?, 'mute', ?, ?, ?, ?)`,
+        [target.id, expiresAt, reason || null, actor.id, Date.now()]
+      );
+      return { ok: true, message: `Muted ${target.username} for ${mins} minutes${reason ? ` (${reason})` : ""}`, targets: target.id };
+    },
+  },
+  unmute: {
+    minRole: "Moderator",
+    description: "Remove mute from a user",
+    usage: "/unmute @user",
+    example: "/unmute @Sam",
+    handler: async ({ args, actorRole }) => {
+      if (!args[0]) return { ok: false, message: "Missing user" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
+      await dbRunAsync(`DELETE FROM punishments WHERE user_id=? AND type='mute'`, [target.id]);
+      return { ok: true, message: `Unmuted ${target.username}`, targets: target.id };
+    },
+  },
+  warn: {
+    minRole: "Moderator",
+    description: "Send a private warning",
+    usage: "/warn @user [reason]",
+    example: "/warn @Alex please chill",
+    handler: async ({ args, actorRole, actor }) => {
+      if (!args[0]) return { ok: false, message: "Missing user" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
+      const reason = args.slice(1).join(" ").slice(0, 180) || "No reason provided";
+      const sid = socketIdByUserId.get(target.id);
+      if (sid) io.to(sid).emit("system", `You were warned by ${actor.username}: ${reason}`);
+      logModAction({ actor, action: "WARN_COMMAND", targetUserId: target.id, targetUsername: target.username, room: null, details: reason });
+      return { ok: true, message: `Warned ${target.username}: ${reason}`, targets: target.id };
+    },
+  },
+  slowmode: {
+    minRole: "Moderator",
+    description: "Set room slowmode seconds",
+    usage: "/slowmode [seconds]",
+    example: "/slowmode 15",
+    handler: async ({ args, room }) => {
+      const sec = clamp(Number(args[0] || 0), 0, 3600);
+      await dbRunAsync(`UPDATE rooms SET slowmode_seconds=? WHERE name=?`, [sec, room]);
+      return { ok: true, message: `Slowmode set to ${sec} seconds for #${room}` };
+    },
+  },
+  clear: {
+    minRole: "Moderator",
+    description: "Delete last X messages",
+    usage: "/clear [amount]",
+    example: "/clear 5",
+    handler: async ({ args, room }) => {
+      const amt = clamp(Number(args[0] || 0), 1, 100);
+      const rows = await dbAllAsync(`SELECT id FROM messages WHERE room=? AND deleted=0 ORDER BY ts DESC LIMIT ?`, [room, amt]);
+      for (const r of rows) {
+        await dbRunAsync(`UPDATE messages SET deleted=1 WHERE id=?`, [r.id]);
+        io.to(room).emit("message deleted", { messageId: r.id });
+      }
+      return { ok: true, message: `Cleared ${rows.length} messages in #${room}` };
+    },
+  },
+  lockroom: {
+    minRole: "Moderator",
+    description: "Lock room for staff only",
+    usage: "/lockroom",
+    example: "/lockroom",
+    handler: async ({ room }) => {
+      await dbRunAsync(`UPDATE rooms SET is_locked=1 WHERE name=?`, [room]);
+      return { ok: true, message: `Room #${room} locked` };
+    },
+  },
+  unlockroom: {
+    minRole: "Moderator",
+    description: "Unlock room",
+    usage: "/unlockroom",
+    example: "/unlockroom",
+    handler: async ({ room }) => {
+      await dbRunAsync(`UPDATE rooms SET is_locked=0 WHERE name=?`, [room]);
+      return { ok: true, message: `Room #${room} unlocked` };
+    },
+  },
+  report: {
+    minRole: "Moderator",
+    description: "File a report",
+    usage: "/report @user [reason]",
+    example: "/report @BadUser harassment",
+    handler: async ({ args, actor, actorRole }) => {
+      if (!args[0]) return { ok: false, message: "Missing user" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      if (roleRank(target.role) >= roleRank(actorRole)) return { ok: false, message: "Permission denied" };
+      const reason = args.slice(1).join(" ").slice(0, 180) || "No reason";
+      logModAction({ actor, action: "REPORT", targetUserId: target.id, targetUsername: target.username, room: null, details: reason });
+      return { ok: true, message: `Reported ${target.username}: ${reason}` };
+    },
+  },
+  kick: {
+    minRole: "Admin",
+    description: "Kick a user",
+    usage: "/kick @user [reason]",
+    example: "/kick @Alex spam",
+    handler: async ({ args, actorRole }) => {
+      if (!args[0]) return { ok: false, message: "Missing user" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
+      const sid = socketIdByUserId.get(target.id);
+      if (sid) io.sockets.sockets.get(sid)?.disconnect(true);
+      return { ok: true, message: `Kicked ${target.username}` };
+    },
+  },
+  ban: {
+    minRole: "Admin",
+    description: "Ban a user",
+    usage: "/ban @user [hours|days|perm] [reason]",
+    example: "/ban @alex 24h spam",
+    handler: async ({ args, actorRole, actor }) => {
+      if (!args[0]) return { ok: false, message: "Missing user" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
+      const dur = (args[1] || "perm").toLowerCase();
+      let expiresAt = null;
+      if (dur.endsWith("h")) expiresAt = Date.now() + clamp(Number(dur.replace(/h$/, "")), 1, 240) * 60 * 60 * 1000;
+      else if (dur.endsWith("d")) expiresAt = Date.now() + clamp(Number(dur.replace(/d$/, "")), 1, 30) * 24 * 60 * 60 * 1000;
+      const reason = args.slice(expiresAt ? 2 : 1).join(" ").slice(0, 180) || null;
+      await dbRunAsync(
+        `INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id, created_at) VALUES (?, 'ban', ?, ?, ?, ?)`,
+        [target.id, expiresAt, reason, actor.id, Date.now()]
+      );
+      const sid = socketIdByUserId.get(target.id);
+      if (sid) io.sockets.sockets.get(sid)?.disconnect(true);
+      return { ok: true, message: `Banned ${target.username}${expiresAt ? " temporarily" : " permanently"}` };
+    },
+  },
+  unban: {
+    minRole: "Admin",
+    description: "Remove a ban",
+    usage: "/unban @user",
+    example: "/unban @alex",
+    handler: async ({ args, actorRole }) => {
+      if (!args[0]) return { ok: false, message: "Missing user" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
+      await dbRunAsync(`DELETE FROM punishments WHERE user_id=? AND type='ban'`, [target.id]);
+      return { ok: true, message: `Unbanned ${target.username}` };
+    },
+  },
+  banlist: {
+    minRole: "Admin",
+    description: "List bans",
+    usage: "/banlist",
+    example: "/banlist",
+    handler: async () => {
+      const rows = await dbAllAsync(
+        `SELECT p.user_id, u.username, p.expires_at, p.reason FROM punishments p JOIN users u ON u.id = p.user_id WHERE type='ban'`
+      );
+      const lines = rows.map((r) => `${r.username}${r.expires_at ? ` (until ${new Date(r.expires_at).toISOString()})` : " (perm)"}`);
+      return { ok: true, message: lines.join("\n") || "No active bans" };
+    },
+  },
+  rename: {
+    minRole: "Admin",
+    description: "Rename a user",
+    usage: "/rename @user newName",
+    example: "/rename @alex Alex2",
+    handler: async ({ args, actorRole }) => {
+      if (args.length < 2) return { ok: false, message: "Usage: /rename @user newName" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
+      const newName = sanitizeUsername(args.slice(1).join(" "));
+      if (!newName) return { ok: false, message: "Invalid name" };
+      await dbRunAsync(`UPDATE users SET username=? WHERE id=?`, [newName, target.id]);
+      return { ok: true, message: `Renamed to ${newName}` };
+    },
+  },
+  createroom: {
+    minRole: "Admin",
+    description: "Create room",
+    usage: "/createroom room-name",
+    example: "/createroom chill",
+    handler: async ({ args, actor }) => {
+      const name = sanitizeRoomName(args[0] || "");
+      if (!name) return { ok: false, message: "Invalid room" };
+      await dbRunAsync(`INSERT OR IGNORE INTO rooms (name, created_by, created_at) VALUES (?, ?, ?)`, [name, actor.id, Date.now()]);
+      io.emit("rooms update", (await dbAllAsync(`SELECT name FROM rooms ORDER BY name ASC`)).map((r) => r.name));
+      return { ok: true, message: `Created room #${name}` };
+    },
+  },
+  deleteroom: {
+    minRole: "Admin",
+    description: "Delete room",
+    usage: "/deleteroom room-name",
+    example: "/deleteroom chill",
+    handler: async ({ args }) => {
+      const name = sanitizeRoomName(args[0] || "");
+      if (!name) return { ok: false, message: "Invalid room" };
+      await dbRunAsync(`DELETE FROM rooms WHERE name=?`, [name]);
+      await dbRunAsync(`DELETE FROM messages WHERE room=?`, [name]);
+      io.emit("rooms update", (await dbAllAsync(`SELECT name FROM rooms ORDER BY name ASC`)).map((r) => r.name));
+      return { ok: true, message: `Deleted room #${name}` };
+    },
+  },
+  movemsg: {
+    minRole: "Admin",
+    description: "Move a message",
+    usage: "/movemsg messageId room",
+    example: "/movemsg 12 general",
+    handler: async ({ args }) => {
+      const msgId = Number(args[0]);
+      const dest = sanitizeRoomName(args[1] || "");
+      if (!msgId || !dest) return { ok: false, message: "Missing arguments" };
+      await dbRunAsync(`UPDATE messages SET room=? WHERE id=?`, [dest, msgId]);
+      return { ok: true, message: `Moved message ${msgId} to #${dest}` };
+    },
+  },
+  staffnote: {
+    minRole: "Admin",
+    description: "Add staff note",
+    usage: "/staffnote @user [note]",
+    example: "/staffnote @alex good contributor",
+    handler: async ({ args, actorRole, actor }) => {
+      if (!args[0]) return { ok: false, message: "Missing user" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
+      const note = args.slice(1).join(" ").slice(0, 400) || "(no note)";
+      logModAction({ actor, action: "STAFF_NOTE", targetUserId: target.id, targetUsername: target.username, details: note });
+      return { ok: true, message: `Noted: ${note}` };
+    },
+  },
+  giverole: {
+    minRole: "Co-owner",
+    description: "Grant role up to Admin",
+    usage: "/giverole @user role",
+    example: "/giverole @sam Admin",
+    handler: async ({ args, actorRole }) => {
+      if (args.length < 2) return { ok: false, message: "Missing arguments" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      const role = args[1].replace(/-/g, " ");
+      if (!ROLES.includes(role)) return { ok: false, message: "Unknown role" };
+      if (roleRank(role) >= roleRank("Owner")) return { ok: false, message: "Cannot grant Owner" };
+      if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
+      await dbRunAsync(`UPDATE users SET role=? WHERE id=?`, [role, target.id]);
+      return { ok: true, message: `Role set to ${role} for ${target.username}` };
+    },
+  },
+  removerole: {
+    minRole: "Co-owner",
+    description: "Remove a role",
+    usage: "/removerole @user role",
+    example: "/removerole @sam Moderator",
+    handler: async ({ args, actorRole }) => {
+      if (args.length < 2) return { ok: false, message: "Missing arguments" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      const role = args[1].replace(/-/g, " ");
+      if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
+      if (roleRank(role) >= roleRank(actorRole)) return { ok: false, message: "Cannot remove equal role" };
+      await dbRunAsync(`UPDATE users SET role='User' WHERE id=?`, [target.id]);
+      return { ok: true, message: `Removed role from ${target.username}` };
+    },
+  },
+  givegold: {
+    minRole: "Co-owner",
+    description: "Add gold",
+    usage: "/givegold @user amount",
+    example: "/givegold @sam 50",
+    handler: async ({ args }) => {
+      const amt = Number(args[1]);
+      if (!args[0] || !Number.isFinite(amt)) return { ok: false, message: "Missing arguments" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      await dbRunAsync(`UPDATE users SET gold = gold + ? WHERE id=?`, [amt, target.id]);
+      return { ok: true, message: `Gave ${amt} gold to ${target.username}` };
+    },
+  },
+  setgold: {
+    minRole: "Co-owner",
+    description: "Set user gold",
+    usage: "/setgold @user amount",
+    example: "/setgold @sam 0",
+    handler: async ({ args }) => {
+      const amt = Number(args[1]);
+      if (!args[0] || !Number.isFinite(amt)) return { ok: false, message: "Missing arguments" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      await dbRunAsync(`UPDATE users SET gold=? WHERE id=?`, [amt, target.id]);
+      return { ok: true, message: `Set gold for ${target.username} to ${amt}` };
+    },
+  },
+  resetxp: {
+    minRole: "Co-owner",
+    description: "Reset XP",
+    usage: "/resetxp @user",
+    example: "/resetxp @sam",
+    handler: async ({ args }) => {
+      if (!args[0]) return { ok: false, message: "Missing user" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      await dbRunAsync(`UPDATE users SET xp=0 WHERE id=?`, [target.id]);
+      return { ok: true, message: `Reset XP for ${target.username}` };
+    },
+  },
+  setlevel: {
+    minRole: "Co-owner",
+    description: "Set level",
+    usage: "/setlevel @user level",
+    example: "/setlevel @sam 5",
+    handler: async ({ args }) => {
+      const level = Number(args[1]);
+      if (!args[0] || !Number.isFinite(level) || level < 1) return { ok: false, message: "Missing arguments" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      let xpNeeded = 0;
+      for (let i = 1; i < Math.floor(level); i++) xpNeeded += i * 100;
+      await dbRunAsync(`UPDATE users SET xp=? WHERE id=?`, [xpNeeded, target.id]);
+      return { ok: true, message: `Set level ${level} for ${target.username}` };
+    },
+  },
+  pinmsg: {
+    minRole: "Co-owner",
+    description: "Pin message",
+    usage: "/pinmsg messageId",
+    example: "/pinmsg 12",
+    handler: async ({ args, room }) => {
+      const mid = Number(args[0]);
+      if (!mid) return { ok: false, message: "Missing message id" };
+      const row = await dbGetAsync(`SELECT pinned_message_ids FROM rooms WHERE name=?`, [room]);
+      let arr = [];
+      if (row?.pinned_message_ids) {
+        try {
+          arr = JSON.parse(row.pinned_message_ids) || [];
+        } catch (e) {
+          arr = [];
+        }
+      }
+      if (!arr.includes(mid)) arr.push(mid);
+      await dbRunAsync(`UPDATE rooms SET pinned_message_ids=? WHERE name=?`, [JSON.stringify(arr.slice(-20)), room]);
+      return { ok: true, message: `Pinned message ${mid} in #${room}` };
+    },
+  },
+  announcement: {
+    minRole: "Co-owner",
+    description: "Broadcast message",
+    usage: "/announcement message",
+    example: "/announcement Maintenance soon",
+    handler: async ({ args }) => {
+      const msg = args.join(" ").trim();
+      if (!msg) return { ok: false, message: "Missing message" };
+      io.emit("system", `[Announcement] ${msg}`);
+      return { ok: true, message: "Announcement sent" };
+    },
+  },
+  maintenance: {
+    minRole: "Co-owner",
+    description: "Toggle maintenance mode",
+    usage: "/maintenance on|off",
+    example: "/maintenance on",
+    handler: async ({ args }) => {
+      const val = (args[0] || "").toLowerCase();
+      if (val !== "on" && val !== "off") return { ok: false, message: "Use on|off" };
+      maintenanceState.enabled = val === "on";
+      await dbRunAsync(`INSERT INTO config (key, value) VALUES ('maintenance', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [val]);
+      io.emit("system", `Maintenance mode ${val}`);
+      return { ok: true, message: `Maintenance ${val}` };
+    },
+  },
+  wipeuser: {
+    minRole: "Owner",
+    description: "Delete a user",
+    usage: "/wipeuser @user confirm",
+    example: "/wipeuser @alex confirm",
+    handler: async ({ args }) => {
+      if (args[1] !== "confirm") return { ok: false, message: "Missing confirm" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      await dbRunAsync(`DELETE FROM users WHERE id=?`, [target.id]);
+      await dbRunAsync(`DELETE FROM messages WHERE user_id=?`, [target.id]);
+      await dbRunAsync(`DELETE FROM punishments WHERE user_id=?`, [target.id]);
+      return { ok: true, message: `Wiped user ${target.username}` };
+    },
+  },
+  wipegold: {
+    minRole: "Owner",
+    description: "Reset all gold",
+    usage: "/wipegold confirm",
+    example: "/wipegold confirm",
+    handler: async ({ args }) => {
+      if (args[0] !== "confirm") return { ok: false, message: "Missing confirm" };
+      await dbRunAsync(`UPDATE users SET gold=0`);
+      return { ok: true, message: "All gold reset" };
+    },
+  },
+  wipelevels: {
+    minRole: "Owner",
+    description: "Reset all XP",
+    usage: "/wipelevels confirm",
+    example: "/wipelevels confirm",
+    handler: async ({ args }) => {
+      if (args[0] !== "confirm") return { ok: false, message: "Missing confirm" };
+      await dbRunAsync(`UPDATE users SET xp=0`);
+      return { ok: true, message: "All levels reset" };
+    },
+  },
+  forcereload: {
+    minRole: "Owner",
+    description: "Reload server state",
+    usage: "/forcereload",
+    example: "/forcereload",
+    handler: async () => ({ ok: true, message: "Reloaded config" }),
+  },
+  setconfig: {
+    minRole: "Owner",
+    description: "Set config flag",
+    usage: "/setconfig key value",
+    example: "/setconfig maintenance off",
+    handler: async ({ args }) => {
+      if (args.length < 2) return { ok: false, message: "Missing key/value" };
+      const key = args[0];
+      const val = args.slice(1).join(" ");
+      await dbRunAsync(`INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [key, val]);
+      if (key === "maintenance") maintenanceState.enabled = val === "on";
+      return { ok: true, message: `Config ${key} set` };
+    },
+  },
+  auditlog: {
+    minRole: "Owner",
+    description: "View command log",
+    usage: "/auditlog",
+    example: "/auditlog",
+    handler: async () => {
+      const rows = await dbAllAsync(
+        `SELECT executor_username, command_name, success, error, ts FROM command_audit ORDER BY ts DESC LIMIT 50`
+      );
+      const lines = rows.map((r) => `${new Date(r.ts).toISOString()} - ${r.executor_username}: ${r.command_name} ${r.success ? "ok" : "fail"}${r.error ? ` (${r.error})` : ""}`);
+      return { ok: true, message: lines.join("\n") || "No audit entries" };
+    },
+  },
+  godmode: {
+    minRole: "Owner",
+    description: "Toggle godmode",
+    usage: "/godmode on|off",
+    example: "/godmode on",
+    handler: async ({ args, actor }) => {
+      const val = (args[0] || "").toLowerCase();
+      if (val !== "on" && val !== "off") return { ok: false, message: "Use on|off" };
+      if (val === "on") godmodeUsers.add(actor.id);
+      else godmodeUsers.delete(actor.id);
+      return { ok: true, message: `Godmode ${val}` };
+    },
+  },
+};
+
+async function executeCommand(socket, rawText, room) {
+  const parsed = parseCommand(rawText);
+  if (!parsed) return false;
+  const actor = socket.user;
+  const actorRole = godmodeUsers.has(actor.id) ? "Owner" : socket.request.session.user.role;
+  const meta = commandRegistry[parsed.name];
+  if (!meta) {
+    socket.emit("command response", { ok: false, message: "Unknown command" });
+    logCommandAudit({ executor: actor, commandName: parsed.name, args: parsed.args, room, success: false, error: "Unknown" });
+    return true;
+  }
+  if (!requireMinRole(actorRole, meta.minRole || "User")) {
+    const msg = "Permission denied";
+    socket.emit("command response", { ok: false, message: msg });
+    logCommandAudit({ executor: actor, commandName: parsed.name, args: parsed.args, room, success: false, error: msg });
+    return true;
+  }
+
+  try {
+    const result = await meta.handler({ args: parsed.args, room, socket, actor, actorRole });
+    const payload = { ok: !!result.ok, message: result.message, type: result.type || "info" };
+    if (result.commands) payload.commands = result.commands;
+    if (result.role) payload.role = result.role;
+    socket.emit("command response", payload);
+    logCommandAudit({ executor: actor, commandName: parsed.name, args: parsed.args, room, success: !!result.ok, targets: result.targets });
+  } catch (err) {
+    socket.emit("command response", { ok: false, message: err.message || "Command failed" });
+    logCommandAudit({ executor: actor, commandName: parsed.name, args: parsed.args, room, success: false, error: err.message });
+  }
+  return true;
+}
 const AUTO_OWNER = new Set(["iri"]);
 const AUTO_COOWNERS = new Set(["lola henderson", "amelia"]);
+
+function levelInfo(xpRaw) {
+  let xp = Math.max(0, Math.floor(Number(xpRaw) || 0));
+  let level = 1;
+  let remaining = xp;
+  while (remaining >= level * 100) {
+    remaining -= level * 100;
+    level += 1;
+  }
+  const xpForNextLevel = level * 100;
+  return { level, xpIntoLevel: remaining, xpForNextLevel };
+}
+
+function emitLevelUp(userId, newLevel) {
+  const sid = socketIdByUserId.get(userId);
+  if (sid) io.to(sid).emit("level up", { level: newLevel });
+}
+
+function applyXpGain(userId, delta, cb) {
+  const amount = Math.max(0, Math.floor(Number(delta) || 0));
+  if (!amount) return cb?.(null, null);
+
+  db.get("SELECT xp FROM users WHERE id = ?", [userId], (err, row) => {
+    if (err || !row) return cb?.(err || new Error("missing"));
+
+    const prevXp = Math.max(0, Math.floor(Number(row.xp) || 0));
+    const prevLevel = levelInfo(prevXp).level;
+    const newXp = prevXp + amount;
+    const info = levelInfo(newXp);
+
+    db.run("UPDATE users SET xp = ? WHERE id = ?", [newXp, userId], () => {
+      if (info.level > prevLevel) emitLevelUp(userId, info.level);
+      cb?.(null, { xp: newXp, ...info });
+    });
+  });
+}
+
+function awardMessageXp(userId) {
+  const now = Date.now();
+  db.get("SELECT xp, lastXpMessageAt FROM users WHERE id = ?", [userId], (err, row) => {
+    if (err || !row) return;
+    if (row.lastXpMessageAt && now - row.lastXpMessageAt < 30_000) return;
+
+    const prevXp = Math.max(0, Math.floor(Number(row.xp) || 0));
+    const prevLevel = levelInfo(prevXp).level;
+    const newXp = prevXp + 5;
+    const info = levelInfo(newXp);
+
+    db.run(
+      "UPDATE users SET xp = ?, lastXpMessageAt = ? WHERE id = ?",
+      [newXp, now, userId],
+      () => {
+        if (info.level > prevLevel) emitLevelUp(userId, info.level);
+      }
+    );
+  });
+}
+
+function awardDailyLoginXp(user) {
+  const now = Date.now();
+  const last = Number(user.lastDailyLoginAt || 0);
+  if (last && now - last < 24 * 60 * 60 * 1000) return;
+
+  const prevXp = Math.max(0, Math.floor(Number(user.xp) || 0));
+  const prevLevel = levelInfo(prevXp).level;
+  const newXp = prevXp + 25;
+  const info = levelInfo(newXp);
+
+  db.run(
+    "UPDATE users SET xp = ?, lastDailyLoginAt = ? WHERE id = ?",
+    [newXp, now, user.id],
+    () => {
+      if (info.level > prevLevel) emitLevelUp(user.id, info.level);
+    }
+  );
+}
+
+function progressionFromRow(row, includePrivate) {
+  const info = levelInfo(row?.xp || 0);
+  const base = { level: info.level };
+  if (includePrivate) {
+    base.gold = Number(row?.gold || 0);
+    base.xp = Number(row?.xp || 0);
+    base.xpIntoLevel = info.xpIntoLevel;
+    base.xpForNextLevel = info.xpForNextLevel;
+  }
+  return base;
+}
 
 function fetchUsersByNames(usernames, cb) {
   const cleaned = Array.from(
@@ -555,6 +1269,7 @@ app.post("/login", (req, res) => {
       req.session.user = { id: row.id, username: row.username, role: row.role };
 
       db.run("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]);
+      awardDailyLoginXp(row);
 
       // Ensure session is actually persisted before replying
       req.session.save((saveErr) => {
@@ -572,6 +1287,26 @@ app.post("/logout", (req, res) => {
 app.get("/me", (req, res) => {
   if (!req.session?.user?.id) return res.json(null);
   return res.json(req.session.user);
+});
+
+app.get("/api/me/progression", requireLogin, (_req, res) => {
+  db.get("SELECT gold, xp FROM users WHERE id = ?", [_req.session.user.id], (err, row) => {
+    if (err || !row) return res.status(404).send("Not found");
+    return res.json(progressionFromRow(row, true));
+  });
+});
+
+app.post("/api/me/award-gold", requireLogin, (req, res) => {
+  if (process.env.ALLOW_DEV_AWARD_GOLD !== "1") return res.status(404).send("Not found");
+  const amount = clamp(req.body?.amount ?? req.body?.gold ?? 0, 1, 100000);
+  if (!amount) return res.status(400).send("Invalid amount");
+
+  db.run("UPDATE users SET gold = gold + ? WHERE id = ?", [amount, req.session.user.id], (err) => {
+    if (err) return res.status(500).send("Failed");
+    db.get("SELECT gold FROM users WHERE id = ?", [req.session.user.id], (_e, row) => {
+      return res.json({ ok: true, gold: row?.gold || 0 });
+    });
+  });
 });
 // ---- Rooms API
 app.get("/rooms", requireLogin, (_req, res) => {
@@ -613,18 +1348,30 @@ app.post("/rooms", requireLogin, (req, res) => {
 // ---- Profile routes
 app.get("/profile", requireLogin, (req, res) => {
   db.get(
-    `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status
+    `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp
      FROM users WHERE id = ?`,
     [req.session.user.id],
     (err, row) => {
       if (err || !row) return res.status(404).send("Not found");
       const live = onlineState.get(row.id);
       const lastStatus = normalizeStatus(live?.status || row.last_status, "");
-      return res.json({
-        ...row,
-        current_room: live?.room || null,
+      const payload = {
+        id: row.id,
+        username: row.username,
+        role: row.role,
+        avatar: row.avatar,
+        bio: row.bio,
+        mood: row.mood,
+        age: row.age,
+        gender: row.gender,
+        created_at: row.created_at,
+        last_seen: row.last_seen,
+        last_room: row.last_room,
         last_status: lastStatus || null,
-      });
+        current_room: live?.room || null,
+        ...progressionFromRow(row, true),
+      };
+      return res.json(payload);
     }
   );
 });
@@ -634,18 +1381,31 @@ app.get("/profile/:username", requireLogin, (req, res) => {
   if (!u) return res.status(400).send("Bad username");
 
   db.get(
-    `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status
+    `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp
      FROM users WHERE lower(username) = lower(?)`,
     [u],
     (err, row) => {
       if (err || !row) return res.status(404).send("Not found");
       const live = onlineState.get(row.id);
       const lastStatus = normalizeStatus(live?.status || row.last_status, "");
-      return res.json({
-        ...row,
-        current_room: live?.room || null,
+      const includePrivate = req.session.user.id === row.id;
+      const payload = {
+        id: row.id,
+        username: row.username,
+        role: row.role,
+        avatar: row.avatar,
+        bio: row.bio,
+        mood: row.mood,
+        age: row.age,
+        gender: row.gender,
+        created_at: row.created_at,
+        last_seen: row.last_seen,
+        last_room: row.last_room,
         last_status: lastStatus || null,
-      });
+        current_room: live?.room || null,
+        ...progressionFromRow(row, includePrivate),
+      };
+      return res.json(payload);
     }
   );
 });
@@ -932,6 +1692,24 @@ const onlineState = new Map(); // userId -> { room, status }
 const socketIdByUserId = new Map(); // userId -> socket.id
 const typingByRoom = new Map(); // room -> Set(username)
 const msgRate = new Map(); // socket.id -> { lastTs, count }
+const onlineXpTrack = new Map(); // userId -> { lastTs, carryMs }
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [uid, track] of onlineXpTrack.entries()) {
+    if (!onlineState.has(uid)) {
+      onlineXpTrack.delete(uid);
+      continue;
+    }
+    const lastTs = track.lastTs || now;
+    const elapsed = Math.max(0, now - lastTs);
+    const total = (track.carryMs || 0) + elapsed;
+    const gains = Math.floor(total / 100_000);
+    const remainder = total % 100_000;
+    onlineXpTrack.set(uid, { lastTs: now, carryMs: remainder });
+    if (gains > 0) applyXpGain(uid, gains);
+  }
+}, 20_000);
 
 // ---- Helpers for punishments
 function isPunished(userId, type, cb) {
@@ -1017,6 +1795,7 @@ io.on("connection", (socket) => {
   };
 
   socketIdByUserId.set(socket.user.id, socket.id);
+  onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
 
   // Load profile bits for presence
   db.get(
@@ -1077,6 +1856,7 @@ function doJoin(room, status) {
   socket.user.status = normalizeStatus(status || socket.user.status, "Online");
 
   onlineState.set(socket.user.id, { room, status: socket.user.status });
+  onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
 
   db.run("UPDATE users SET last_room=?, last_status=? WHERE id=?", [
     room,
@@ -1253,42 +2033,75 @@ function doJoin(room, status) {
         if (muted) return;
 
         const text = String(payload?.text || "").slice(0, 800);
+        if (text.trim().startsWith("/")) {
+          executeCommand(socket, text, room);
+          return;
+        }
         const attachmentUrl = String(payload?.attachmentUrl || "").slice(0, 400);
         const attachmentType = String(payload?.attachmentType || "").slice(0, 20);
         const attachmentMime = String(payload?.attachmentMime || "").slice(0, 60);
         const attachmentSize = Number(payload?.attachmentSize || 0) || 0;
 
-        db.run(
-          `INSERT INTO messages (room, user_id, username, role, avatar, text, ts, attachment_url, attachment_type, attachment_mime, attachment_size)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            room,
-            socket.user.id,
-            socket.user.username,
-            socket.user.role,
-            socket.user.avatar || "",
-            text,
-            Date.now(),
-            attachmentUrl || null,
-            attachmentType || null,
-            attachmentMime || null,
-            attachmentSize || null,
-          ],
-          function () {
-            const msg = {
-              messageId: this.lastID,
-              room,
-              user: socket.user.username,
-              role: socket.user.role,
-              avatar: socket.user.avatar || "",
-              text,
-              ts: Date.now(),
-              attachmentUrl: attachmentUrl || "",
-              attachmentType: attachmentType || "",
-              attachmentMime: attachmentMime || "",
-              attachmentSize: attachmentSize || 0,
-            };
-            io.to(room).emit("chat message", msg);
+        // maintenance / lock / slowmode enforcement
+        if (maintenanceState.enabled && !requireMinRole(socket.user.role, "Moderator")) {
+          socket.emit("command response", { ok: false, message: "Site is in maintenance mode" });
+          return;
+        }
+
+        db.get(
+          `SELECT slowmode_seconds, is_locked FROM rooms WHERE name=?`,
+          [room],
+          (_err, settings) => {
+            const slowSeconds = Number(settings?.slowmode_seconds || 0);
+            const locked = Number(settings?.is_locked || 0) === 1;
+            if (locked && !requireMinRole(socket.user.role, "Moderator")) {
+              socket.emit("command response", { ok: false, message: "Room is locked" });
+              return;
+            }
+            if (slowSeconds > 0 && !requireMinRole(socket.user.role, "Moderator")) {
+              const key = `${room}:${socket.user.id}`;
+              const last = slowmodeTracker.get(key) || 0;
+              if (Date.now() - last < slowSeconds * 1000) {
+                socket.emit("command response", { ok: false, message: `Slowmode: wait ${Math.ceil((slowSeconds * 1000 - (Date.now() - last)) / 1000)}s` });
+                return;
+              }
+              slowmodeTracker.set(key, Date.now());
+            }
+
+            db.run(
+              `INSERT INTO messages (room, user_id, username, role, avatar, text, ts, attachment_url, attachment_type, attachment_mime, attachment_size)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                room,
+                socket.user.id,
+                socket.user.username,
+                socket.user.role,
+                socket.user.avatar || "",
+                text,
+                Date.now(),
+                attachmentUrl || null,
+                attachmentType || null,
+                attachmentMime || null,
+                attachmentSize || null,
+              ],
+              function () {
+                awardMessageXp(socket.user.id);
+                const msg = {
+                  messageId: this.lastID,
+                  room,
+                  user: socket.user.username,
+                  role: socket.user.role,
+                  avatar: socket.user.avatar || "",
+                  text,
+                  ts: Date.now(),
+                  attachmentUrl: attachmentUrl || "",
+                  attachmentType: attachmentType || "",
+                  attachmentMime: attachmentMime || "",
+                  attachmentSize: attachmentSize || 0,
+                };
+                io.to(room).emit("chat message", msg);
+              }
+            );
           }
         );
       });
@@ -1569,6 +2382,7 @@ function doJoin(room, status) {
     socketIdByUserId.delete(socket.user.id);
     onlineState.delete(socket.user.id);
     msgRate.delete(socket.id);
+    onlineXpTrack.delete(socket.user.id);
 
     db.run("UPDATE users SET last_seen=? WHERE id=?", [Date.now(), socket.user.id]);
 
@@ -1587,3 +2401,9 @@ function doJoin(room, status) {
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
+
+// Manual test checklist:
+// - Gold only shows for the signed-in user and never appears in other member/profile payloads.
+// - XP gains apply at +1 per 100s online, +5 per message (max once per 30s), and +25 per daily login (once per 24h).
+// - Daily login XP does not trigger again within 24 hours.
+// - Level math (100 * level to next) matches the progress bar and level-up toast when crossing thresholds.

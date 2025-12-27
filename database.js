@@ -66,6 +66,10 @@ db.serialize(() => {
     ["last_seen", "last_seen INTEGER"],
     ["last_room", "last_room TEXT"],
     ["last_status", "last_status TEXT"],
+    ["gold", "gold INTEGER NOT NULL DEFAULT 0"],
+    ["xp", "xp INTEGER NOT NULL DEFAULT 0"],
+    ["lastXpMessageAt", "lastXpMessageAt INTEGER"],
+    ["lastDailyLoginAt", "lastDailyLoginAt INTEGER"],
   ];
   for (const [col, ddl] of userColumns) addColumnIfMissing("users", col, ddl);
 
@@ -88,6 +92,41 @@ db.serialize(() => {
       attachment_size INTEGER
     )
   `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS command_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      executor_id INTEGER NOT NULL,
+      executor_username TEXT NOT NULL,
+      executor_role TEXT NOT NULL,
+      command_name TEXT NOT NULL,
+      args_json TEXT,
+      target_ids TEXT,
+      room TEXT,
+      success INTEGER NOT NULL,
+      error TEXT,
+      ts INTEGER NOT NULL
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS config (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS rooms (
+      name TEXT PRIMARY KEY,
+      created_by INTEGER,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  addColumnIfMissing("rooms", "slowmode_seconds", "slowmode_seconds INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing("rooms", "is_locked", "is_locked INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing("rooms", "pinned_message_ids", "pinned_message_ids TEXT");
+  addColumnIfMissing("rooms", "maintenance_mode", "maintenance_mode INTEGER NOT NULL DEFAULT 0");
 
   db.run(`
     CREATE TABLE IF NOT EXISTS reactions (
