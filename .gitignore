@@ -3,3 +3,4 @@ chat.db
 .env
 uploads/
 public/avatars/
+sessions.sqlite
