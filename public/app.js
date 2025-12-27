@@ -18,6 +18,13 @@ let groupBadgePending = false;
 const dmThemeDefaults = { background: "#1e1f22" };
 let dmThemePrefs = { ...dmThemeDefaults };
 let levelToastTimer = null;
+let rightPanelMode = "rooms";
+let activeMenuTab = "changelog";
+let changelogEntries = [];
+let changelogLoaded = false;
+let changelogDirty = false;
+let editingChangelogId = null;
+let latestChangelogEntry = null;
 
 const THEME_LIST = [
   { name: "Minimal Dark", mode: "Dark" },
@@ -47,6 +54,26 @@ let memberMenuUser = null;
 const authWrap = document.getElementById("authWrap");
 const app = document.getElementById("app");
 const addRoomBtn = document.getElementById("addRoomBtn");
+const menuToggleBtn = document.getElementById("menuToggleBtn");
+const chanHeaderTitle = document.getElementById("chanHeaderTitle");
+const roomsPanel = document.getElementById("roomsPanel");
+const menuPanel = document.getElementById("menuPanel");
+const menuNav = document.getElementById("menuNav");
+const latestUpdate = document.getElementById("latestUpdate");
+const latestUpdateTitle = document.getElementById("latestUpdateTitle");
+const latestUpdateDate = document.getElementById("latestUpdateDate");
+const latestUpdateBody = document.getElementById("latestUpdateBody");
+const latestUpdateViewBtn = document.getElementById("latestUpdateViewBtn");
+const changelogList = document.getElementById("changelogList");
+const changelogMsg = document.getElementById("changelogMsg");
+const changelogActions = document.getElementById("changelogActions");
+const changelogNewBtn = document.getElementById("changelogNewBtn");
+const changelogEditor = document.getElementById("changelogEditor");
+const changelogTitleInput = document.getElementById("changelogTitleInput");
+const changelogBodyInput = document.getElementById("changelogBodyInput");
+const changelogSaveBtn = document.getElementById("changelogSaveBtn");
+const changelogCancelBtn = document.getElementById("changelogCancelBtn");
+const changelogEditMsg = document.getElementById("changelogEditMsg");
 
 const authUser = document.getElementById("authUser");
 const authPass = document.getElementById("authPass");
@@ -246,6 +273,11 @@ function bytesToNice(n){
   let u = 0;
   while(n >= 1024 && u < units.length-1){ n /= 1024; u++; }
   return `${n.toFixed(u===0?0:1)} ${units[u]}`;
+}
+function previewText(text, max=180){
+  const raw = String(text || "").trim();
+  if(raw.length <= max) return raw;
+  return `${raw.slice(0, max - 1)}…`;
 }
 
 const ROLES = ["Guest","User","VIP","Moderator","Admin","Co-owner","Owner"];
@@ -1464,6 +1496,240 @@ async function createRoomFlow(){
   joinRoom(name);
 }
 
+function updateRoomControlsVisibility(){
+  if(addRoomBtn){
+    const canCreate = me && roleRank(me.role) >= roleRank("Co-owner");
+    addRoomBtn.style.display = rightPanelMode === "rooms" && canCreate ? "inline-flex" : "none";
+  }
+}
+
+function setRightPanelMode(mode){
+  rightPanelMode = mode === "menu" ? "menu" : "rooms";
+  if(roomsPanel) roomsPanel.style.display = rightPanelMode === "rooms" ? "flex" : "none";
+  if(menuPanel) menuPanel.style.display = rightPanelMode === "menu" ? "flex" : "none";
+  if(chanHeaderTitle) chanHeaderTitle.textContent = rightPanelMode === "menu" ? "Menu" : "Rooms";
+  if(menuToggleBtn) menuToggleBtn.classList.toggle("active", rightPanelMode === "menu");
+  updateRoomControlsVisibility();
+  if(rightPanelMode === "menu" && activeMenuTab === "changelog") ensureChangelogLoaded();
+}
+
+function setMenuTab(tab){
+  activeMenuTab = tab || "changelog";
+  document.querySelectorAll("[data-menu-tab]").forEach((btn)=>{
+    btn.classList.toggle("active", btn.dataset.menuTab === activeMenuTab);
+  });
+  document.querySelectorAll("[data-menu-section]").forEach((section)=>{
+    section.classList.toggle("active", section.dataset.menuSection === activeMenuTab);
+  });
+  if(activeMenuTab === "changelog") ensureChangelogLoaded();
+}
+
+function updateChangelogControlsVisibility(){
+  const isOwner = me && roleRank(me.role) >= roleRank("Owner");
+  if(changelogActions) changelogActions.style.display = isOwner ? "flex" : "none";
+  if(!isOwner) closeChangelogEditor();
+}
+
+function openChangelogEditor(entry){
+  if(!changelogEditor) return;
+  editingChangelogId = entry?.id || null;
+  if(changelogTitleInput) changelogTitleInput.value = entry?.title || "";
+  if(changelogBodyInput) changelogBodyInput.value = entry?.body || "";
+  if(changelogEditMsg) changelogEditMsg.textContent = "";
+  changelogEditor.style.display = "block";
+  changelogTitleInput?.focus();
+}
+
+function closeChangelogEditor(){
+  editingChangelogId = null;
+  if(changelogEditor) changelogEditor.style.display = "none";
+  if(changelogTitleInput) changelogTitleInput.value = "";
+  if(changelogBodyInput) changelogBodyInput.value = "";
+  if(changelogEditMsg) changelogEditMsg.textContent = "";
+}
+
+async function loadChangelog(force=false){
+  if(!force && changelogLoaded && !changelogDirty) return;
+  if(changelogMsg) changelogMsg.textContent = "Loading changelog...";
+  const {res, text} = await api("/api/changelog", { method:"GET" });
+  if(!res.ok){
+    if(changelogMsg) changelogMsg.textContent = res.status === 403 ? "You do not have permission." : "Failed to load changelog.";
+    changelogEntries = [];
+    renderChangelogList();
+    return;
+  }
+
+  try{
+    const rows = JSON.parse(text || "[]");
+    changelogEntries = Array.isArray(rows) ? rows : [];
+  }catch{
+    changelogEntries = [];
+  }
+
+  changelogLoaded = true;
+  changelogDirty = false;
+  if(changelogMsg) changelogMsg.textContent = changelogEntries.length ? "" : "No changelog entries yet.";
+  renderChangelogList();
+}
+
+function renderChangelogList(){
+  if(!changelogList) return;
+  changelogList.innerHTML = "";
+  if(!changelogEntries.length){
+    const empty = document.createElement("div");
+    empty.className = "small muted";
+    empty.textContent = "No changelog entries yet.";
+    changelogList.appendChild(empty);
+    return;
+  }
+
+  const isOwner = me && roleRank(me.role) >= roleRank("Owner");
+  for(const entry of changelogEntries){
+    const wrap = document.createElement("div");
+    wrap.className = "changelogEntry";
+
+    const header = document.createElement("div");
+    header.className = "changelogEntryHeader";
+
+    const metaBlock = document.createElement("div");
+    metaBlock.style.display = "flex";
+    metaBlock.style.flexDirection = "column";
+    metaBlock.style.gap = "4px";
+
+    const title = document.createElement("div");
+    title.className = "changelogEntryTitle";
+    title.textContent = entry.title || "(untitled)";
+    const meta = document.createElement("div");
+    meta.className = "changelogEntryMeta";
+    meta.textContent = entry.createdAt ? new Date(entry.createdAt).toLocaleString() : "";
+
+    metaBlock.appendChild(title);
+    metaBlock.appendChild(meta);
+    header.appendChild(metaBlock);
+
+    if(isOwner){
+      const actions = document.createElement("div");
+      actions.className = "changelogActions";
+      const editBtn = document.createElement("button");
+      editBtn.className = "btn secondary";
+      editBtn.type = "button";
+      editBtn.textContent = "Edit";
+      editBtn.addEventListener("click", ()=>openChangelogEditor(entry));
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn danger";
+      delBtn.type = "button";
+      delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", ()=>deleteChangelogEntry(entry.id));
+
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+      header.appendChild(actions);
+    }
+
+    const body = document.createElement("div");
+    body.className = "changelogBody";
+    body.innerHTML = escapeHtml(entry.body || "").replace(/\n/g, "<br>");
+
+    wrap.appendChild(header);
+    wrap.appendChild(body);
+    changelogList.appendChild(wrap);
+  }
+}
+
+async function saveChangelogEntry(){
+  if(!changelogTitleInput || !changelogBodyInput) return;
+  const title = changelogTitleInput.value.trim();
+  const body = changelogBodyInput.value.trim();
+  if(!title){ if(changelogEditMsg) changelogEditMsg.textContent = "Title is required."; return; }
+
+  if(changelogEditMsg) changelogEditMsg.textContent = "Saving...";
+  const payload = { title, body };
+  const path = editingChangelogId ? `/api/changelog/${editingChangelogId}` : "/api/changelog";
+  const method = editingChangelogId ? "PUT" : "POST";
+  const {res, text} = await api(path, {
+    method,
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(payload)
+  });
+  if(!res.ok){
+    if(changelogEditMsg) changelogEditMsg.textContent = text || "Failed to save entry.";
+    return;
+  }
+
+  closeChangelogEditor();
+  await loadChangelog(true);
+  await loadLatestUpdateSnippet();
+}
+
+async function deleteChangelogEntry(id){
+  if(!id) return;
+  if(!confirm("Delete this entry?")) return;
+  const {res, text} = await api(`/api/changelog/${id}`, {
+    method:"DELETE",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ confirm:true })
+  });
+  if(!res.ok){
+    alert(text || "Failed to delete entry.");
+    return;
+  }
+  await loadChangelog(true);
+  await loadLatestUpdateSnippet();
+}
+
+async function loadLatestUpdateSnippet(){
+  if(latestUpdate) latestUpdate.style.display = "none";
+  const {res, text} = await api("/api/changelog?limit=1", { method:"GET" });
+  if(!res.ok) return;
+  try{
+    const rows = JSON.parse(text || "[]");
+    latestChangelogEntry = Array.isArray(rows) && rows.length ? rows[0] : null;
+  }catch{
+    latestChangelogEntry = null;
+  }
+  renderLatestUpdateSnippet();
+}
+
+function renderLatestUpdateSnippet(){
+  if(!latestUpdate) return;
+  if(!latestChangelogEntry){
+    latestUpdate.style.display = "none";
+    return;
+  }
+  latestUpdate.style.display = "block";
+  if(latestUpdateTitle) latestUpdateTitle.textContent = latestChangelogEntry.title || "(untitled)";
+  if(latestUpdateDate) latestUpdateDate.textContent = latestChangelogEntry.createdAt ? new Date(latestChangelogEntry.createdAt).toLocaleString() : "";
+  if(latestUpdateBody) latestUpdateBody.textContent = previewText(latestChangelogEntry.body || "", 200);
+}
+
+if(menuToggleBtn){
+  menuToggleBtn.addEventListener("click", ()=>{
+    const next = rightPanelMode === "menu" ? "rooms" : "menu";
+    if(next === "menu") setMenuTab(activeMenuTab || "changelog");
+    setRightPanelMode(next);
+  });
+}
+if(menuNav){
+  menuNav.addEventListener("click", (e)=>{
+    const btn = e.target.closest("[data-menu-tab]");
+    if(!btn) return;
+    setRightPanelMode("menu");
+    setMenuTab(btn.dataset.menuTab);
+  });
+}
+if(latestUpdateViewBtn){
+  latestUpdateViewBtn.addEventListener("click", ()=>{
+    setMenuTab("changelog");
+    setRightPanelMode("menu");
+    menuPanel?.scrollTo({ top:0, behavior:"smooth" });
+  });
+}
+if(changelogNewBtn) changelogNewBtn.addEventListener("click", ()=>openChangelogEditor());
+if(changelogCancelBtn) changelogCancelBtn.addEventListener("click", closeChangelogEditor);
+if(changelogSaveBtn) changelogSaveBtn.addEventListener("click", saveChangelogEntry);
+closeChangelogEditor();
+
 // typing/send
 let typingDebounce=null;
 function emitTyping(){
@@ -1886,16 +2152,27 @@ async function startApp(){
   await loadProgression();
   renderLevelProgress(progression, true);
 
-  socket = io();
-socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
-await loadRooms();
-await loadDmThreads();
+  setRightPanelMode("rooms");
+  setMenuTab(activeMenuTab);
+  updateChangelogControlsVisibility();
+  updateRoomControlsVisibility();
 
-// show Create Room button only for Co-owner+
-if(addRoomBtn){
-  addRoomBtn.style.display = (roleRank(me.role) >= roleRank("Co-owner")) ? "inline-flex" : "none";
-  addRoomBtn.addEventListener("click", createRoomFlow);
-}
+  socket = io();
+  socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
+  socket.on("changelog updated", ()=>{
+    changelogDirty = true;
+    if(rightPanelMode === "menu" && activeMenuTab === "changelog") loadChangelog(true);
+    loadLatestUpdateSnippet();
+  });
+  await loadRooms();
+  await loadLatestUpdateSnippet();
+  await loadDmThreads();
+
+  // show Create Room button only for Co-owner+
+  if(addRoomBtn){
+    addRoomBtn.addEventListener("click", createRoomFlow);
+  }
+  updateRoomControlsVisibility();
 
   socket.on("system", addSystem);
   socket.on("command response", handleCommandResponse);
