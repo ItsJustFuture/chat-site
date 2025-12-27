@@ -368,21 +368,21 @@ app.use((req, res, next) => {
 });
 
 // ---- Sessions (works locally + Render)
-app.use(
-  session({
-    store: new SQLiteStore({ db: "sessions.sqlite", dir: __dirname }),
-    secret: process.env.SESSION_SECRET || "dev_secret_change_me",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      sameSite: "lax",
-      // secure cookies in production (Render). With trust proxy set, this will work.
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 1000 * 60 * 60 * 24 * 7,
-    },
-  })
-);
+const sessionMiddleware = session({
+  store: new SQLiteStore({ db: "sessions.sqlite", dir: __dirname }),
+  secret: process.env.SESSION_SECRET || "dev_secret_change_me",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 1000 * 60 * 60 * 24 * 7,
+  },
+});
+
+app.use(sessionMiddleware);
+
 // ---- Static
 app.use("/uploads", express.static(UPLOADS_DIR));
 app.use("/avatars", express.static(AVATARS_DIR));
@@ -1930,12 +1930,15 @@ function isPunished(userId, type, cb) {
 }
 
 // ---- Socket auth middleware (session)
+// ---- Socket auth middleware (session)
 io.use((socket, next) => {
-  // express-session is cookie-based; socket.io shares cookies.
-  // We just trust that the client loaded the page after login.
-  // If not logged in, disconnect.
-  const req = socket.request;
-  const res = req.res || {};
+  sessionMiddleware(socket.request, socket.request.res || {}, () => {
+    if (!socket.request.session?.user?.id) {
+      return next(new Error("Not authenticated"));
+    }
+    next();
+  });
+});
   session({
     store: new SQLiteStore({ db: "sessions.sqlite", dir: __dirname }),
     secret: process.env.SESSION_SECRET || "dev_secret_change_me",
@@ -1989,7 +1992,12 @@ function emitUserList(room) {
 
 // ---- Socket handlers
 io.on("connection", (socket) => {
-  const sessUser = socket.request.session.user;
+  const sessUser = socket.request.session?.user;
+  if (!sessUser?.id) {
+    socket.disconnect(true);
+    return;
+  }
+
   socket.user = {
     id: sessUser.id,
     username: sessUser.username,
@@ -1998,6 +2006,7 @@ io.on("connection", (socket) => {
     mood: "",
     avatar: "",
   };
+});
 
   socketIdByUserId.set(socket.user.id, socket.id);
   onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
