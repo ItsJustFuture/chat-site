@@ -19,6 +19,25 @@ const dmThemeDefaults = { background: "#1e1f22" };
 let dmThemePrefs = { ...dmThemeDefaults };
 let levelToastTimer = null;
 
+const THEME_LIST = [
+  { name: "Minimal Dark", mode: "Dark" },
+  { name: "Minimal Dark (High Contrast)", mode: "Dark" },
+  { name: "Cyberpunk Neon", mode: "Dark" },
+  { name: "Cyberpunk Neon (Midnight)", mode: "Dark" },
+  { name: "Fantasy Tavern", mode: "Dark" },
+  { name: "Fantasy Tavern (Ember)", mode: "Dark" },
+  { name: "Space Explorer", mode: "Dark" },
+  { name: "Space Explorer (Nebula)", mode: "Dark" },
+  { name: "Minimal Light", mode: "Light" },
+  { name: "Minimal Light (High Contrast)", mode: "Light" },
+  { name: "Pastel Light", mode: "Light" },
+  { name: "Paper / Parchment", mode: "Light" },
+  { name: "Sky Light", mode: "Light" },
+];
+const DEFAULT_THEME = "Minimal Dark";
+let currentTheme = document.body?.getAttribute("data-theme") || DEFAULT_THEME;
+let themeFilter = "all";
+
 let modalTargetUsername = null;
 let pendingFile = null;
 let uploadXhr = null;
@@ -85,6 +104,12 @@ const dmDeleteHistoryBtn = document.getElementById("dmDeleteHistoryBtn");
 const dmReportBtn = document.getElementById("dmReportBtn");
 const dmBgColor = document.getElementById("dmBgColor");
 const dmBgColorText = document.getElementById("dmBgColorText");
+
+const customNav = document.getElementById("customNav");
+const themeGrid = document.getElementById("themeGrid");
+const themeMsg = document.getElementById("themeMsg");
+const themeFilterButtons = Array.from(document.querySelectorAll("[data-theme-filter]"));
+const customNavButtons = Array.from(document.querySelectorAll(".customNavBtn"));
 
 // drawers
 const drawerOverlay = document.getElementById("drawerOverlay");
@@ -416,6 +441,146 @@ function applyDmThemePrefs(){
   if(dmBgColor) dmBgColor.value = normalizeColorForInput(bg, dmThemeDefaults.background);
   if(dmBgColorText) dmBgColorText.value = bg;
 }
+
+function sanitizeThemeName(name){
+  const match = THEME_LIST.find((t) => t.name === name);
+  return match ? match.name : DEFAULT_THEME;
+}
+function getStoredTheme(){
+  try{ return localStorage.getItem("theme") || ""; }
+  catch{ return ""; }
+}
+function setStoredTheme(theme){
+  try{ localStorage.setItem("theme", theme); }
+  catch{}
+}
+async function fetchThemePreference(){
+  if(!me) return null;
+  try{
+    const res = await fetch("/api/me/theme");
+    if(!res.ok) return null;
+    const data = await res.json();
+    return data?.theme || null;
+  }catch{
+    return null;
+  }
+}
+async function persistThemePreference(theme){
+  if(!me) return;
+  try{
+    const res = await fetch("/api/me/theme", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ theme })
+    });
+    if(res.ok){
+      const data = await res.json();
+      if(data?.theme) me.theme = data.theme;
+    }
+  }catch{}
+}
+function applyTheme(themeName, { persist=true, silent=false } = {}){
+  const safe = sanitizeThemeName(themeName || DEFAULT_THEME);
+  currentTheme = safe;
+  document.body?.setAttribute("data-theme", safe);
+  setStoredTheme(safe);
+  if(persist) persistThemePreference(safe);
+  renderThemeGrid();
+  if(themeMsg && !silent){
+    themeMsg.textContent = `Theme applied: ${safe}`;
+    setTimeout(() => { if(themeMsg.textContent.startsWith("Theme applied")) themeMsg.textContent = ""; }, 2400);
+  }
+}
+function createThemeThumbnail(themeName){
+  const wrap = document.createElement("div");
+  wrap.className = "themeThumbnail";
+  wrap.setAttribute("data-theme", themeName);
+  wrap.innerHTML = `
+    <div class="themeMiniLayout">
+      <div class="themeMiniSidebar">
+        <div class="miniItem"></div>
+        <div class="miniItem"></div>
+        <div class="miniItem"></div>
+      </div>
+      <div class="themeMiniMain">
+        <div class="themeMiniMsg">
+          <div class="themeMiniAvatar"></div>
+          <div class="themeMiniBubble">Hey there!</div>
+        </div>
+        <div class="themeMiniMsg">
+          <div class="themeMiniAvatar"></div>
+          <div class="themeMiniBubble self">All set?</div>
+        </div>
+        <div class="themeMiniButton">Action</div>
+      </div>
+    </div>
+  `;
+  return wrap;
+}
+function renderThemeGrid(){
+  if(!themeGrid) return;
+  themeGrid.innerHTML = "";
+  const filtered = THEME_LIST.filter((t) => {
+    if(themeFilter === "dark") return t.mode === "Dark";
+    if(themeFilter === "light") return t.mode === "Light";
+    return true;
+  });
+  for(const theme of filtered){
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = `themeCard${currentTheme === theme.name ? " selected" : ""}`;
+    card.dataset.themeName = theme.name;
+    card.innerHTML = `
+      <div class="themeCardHeader">
+        <div>
+          <div class="themeLabel">${escapeHtml(theme.name)}</div>
+          <div class="themeMode">${escapeHtml(theme.mode)}</div>
+        </div>
+        <div class="themeCheck">✓</div>
+      </div>
+    `;
+    card.appendChild(createThemeThumbnail(theme.name));
+    card.addEventListener("click", () => applyTheme(theme.name, { persist:true }));
+    themeGrid.appendChild(card);
+  }
+}
+function setThemeFilter(filter){
+  themeFilter = filter;
+  themeFilterButtons.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.themeFilter === filter);
+  });
+  renderThemeGrid();
+}
+function switchCustomizationSection(section){
+  customNavButtons.forEach((btn) => {
+    const isActive = btn.dataset.section === section;
+    btn.classList.toggle("active", isActive);
+  });
+  document.querySelectorAll(".customPanel").forEach((panel) => {
+    panel.classList.toggle("active", panel.id === `customPanel${section[0].toUpperCase()}${section.slice(1)}`);
+  });
+}
+function initCustomizationUi(){
+  customNavButtons.forEach((btn) => {
+    btn.addEventListener("click", () => switchCustomizationSection(btn.dataset.section));
+  });
+  themeFilterButtons.forEach((btn) => {
+    btn.addEventListener("click", () => setThemeFilter(btn.dataset.themeFilter));
+  });
+  renderThemeGrid();
+}
+async function loadThemePreference(){
+  let desired = sanitizeThemeName(getStoredTheme() || currentTheme || DEFAULT_THEME);
+  if(me){
+    if(me.theme) desired = sanitizeThemeName(me.theme);
+    else {
+      const serverTheme = await fetchThemePreference();
+      if(serverTheme) desired = sanitizeThemeName(serverTheme);
+    }
+  }
+  applyTheme(desired, { persist:false, silent:true });
+}
+
 function applyBadgePrefs(){
   if(directBadgeColorText) directBadgeColorText.value = badgePrefs.direct;
   if(groupBadgeColorText) groupBadgeColorText.value = badgePrefs.group;
@@ -446,6 +611,7 @@ badgePrefs = loadBadgePrefsFromStorage();
 applyBadgePrefs();
 dmThemePrefs = loadDmThemePrefsFromStorage();
 applyDmThemePrefs();
+initCustomizationUi();
 const EMOJI_CHOICES = ["😀","😁","😂","🙂","😉","😍","😘","💀","🤔","😤","😢","😡","🔥","🖕","♥️","💯","👍","👎","🎉","👀"];
 
 let reactionMenuEl = null;
@@ -1710,6 +1876,8 @@ async function startApp(){
   const meRes = await fetch("/me");
   me = await meRes.json();
   if(!me){ authMsg.textContent="Please login."; return; }
+
+  await loadThemePreference();
 
   authWrap.style.display="none";
   app.style.display="block";

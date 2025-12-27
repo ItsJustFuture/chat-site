@@ -118,6 +118,7 @@ db.serialize(() => {
     ["last_seen", "last_seen INTEGER"],
     ["last_room", "last_room TEXT"],
     ["last_status", "last_status TEXT"],
+    ["theme", "theme TEXT NOT NULL DEFAULT 'Minimal Dark'"],
     ["gold", "gold INTEGER NOT NULL DEFAULT 0"],
     ["xp", "xp INTEGER NOT NULL DEFAULT 0"],
     ["lastXpMessageAt", "lastXpMessageAt INTEGER"],
@@ -386,6 +387,10 @@ function sanitizeUsername(u) {
   u = u.replace(/[^\p{L}\p{N} _.'-]/gu, "").trim();
   return u.slice(0, 24);
 }
+function sanitizeThemeNameServer(name){
+  const n = String(name || "").trim();
+  return ALLOWED_THEMES.includes(n) ? n : DEFAULT_THEME;
+}
 function clamp(n, a, b) {
   n = Number(n);
   if (!Number.isFinite(n)) return a;
@@ -479,6 +484,22 @@ function parseCommand(text) {
 const slowmodeTracker = new Map(); // key `${room}:${userId}` -> last ts
 const godmodeUsers = new Set();
 const maintenanceState = { enabled: false };
+const DEFAULT_THEME = "Minimal Dark";
+const ALLOWED_THEMES = [
+  "Minimal Dark",
+  "Minimal Dark (High Contrast)",
+  "Cyberpunk Neon",
+  "Cyberpunk Neon (Midnight)",
+  "Fantasy Tavern",
+  "Fantasy Tavern (Ember)",
+  "Space Explorer",
+  "Space Explorer (Nebula)",
+  "Minimal Light",
+  "Minimal Light (High Contrast)",
+  "Pastel Light",
+  "Paper / Parchment",
+  "Sky Light",
+];
 
 db.get(`SELECT value FROM config WHERE key='maintenance'`, [], (_e, row) => {
   maintenanceState.enabled = row?.value === "on";
@@ -1265,8 +1286,10 @@ app.post("/login", (req, res) => {
         db.run("UPDATE users SET role = 'Co-owner' WHERE id = ?", [row.id]);
         row.role = "Co-owner";
       }
+      const theme = sanitizeThemeNameServer(row.theme);
+      if (!row.theme) db.run("UPDATE users SET theme = ? WHERE id = ?", [theme, row.id]);
 
-      req.session.user = { id: row.id, username: row.username, role: row.role };
+      req.session.user = { id: row.id, username: row.username, role: row.role, theme };
 
       db.run("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]);
       awardDailyLoginXp(row);
@@ -1286,13 +1309,37 @@ app.post("/logout", (req, res) => {
 
 app.get("/me", (req, res) => {
   if (!req.session?.user?.id) return res.json(null);
-  return res.json(req.session.user);
+  db.get("SELECT id, username, role, theme FROM users WHERE id = ?", [req.session.user.id], (err, row) => {
+    if (err || !row) return res.json(null);
+    const theme = sanitizeThemeNameServer(row.theme);
+    if (!row.theme) db.run("UPDATE users SET theme = ? WHERE id = ?", [theme, row.id]);
+    req.session.user = { id: row.id, username: row.username, role: row.role, theme };
+    return res.json(req.session.user);
+  });
 });
 
 app.get("/api/me/progression", requireLogin, (_req, res) => {
   db.get("SELECT gold, xp FROM users WHERE id = ?", [_req.session.user.id], (err, row) => {
     if (err || !row) return res.status(404).send("Not found");
     return res.json(progressionFromRow(row, true));
+  });
+});
+
+app.get("/api/me/theme", requireLogin, (req, res) => {
+  db.get("SELECT theme FROM users WHERE id = ?", [req.session.user.id], (err, row) => {
+    if (err || !row) return res.status(404).send("Not found");
+    const theme = sanitizeThemeNameServer(row.theme);
+    req.session.user.theme = theme;
+    return res.json({ theme });
+  });
+});
+
+app.post("/api/me/theme", requireLogin, (req, res) => {
+  const theme = sanitizeThemeNameServer(req.body?.theme);
+  db.run("UPDATE users SET theme = ? WHERE id = ?", [theme, req.session.user.id], (err) => {
+    if (err) return res.status(500).send("Failed");
+    req.session.user.theme = theme;
+    return res.json({ theme });
   });
 });
 
