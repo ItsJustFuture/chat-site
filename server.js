@@ -755,6 +755,7 @@ app.get("/dm/threads", requireLogin, (req, res) => {
      FROM dm_threads t
      INNER JOIN dm_participants p ON p.thread_id = t.id
      WHERE p.user_id = ?
+       AND (t.is_group = 1 OR EXISTS (SELECT 1 FROM dm_messages WHERE thread_id = t.id))
      ORDER BY COALESCE(last_ts, t.created_at) DESC`,
     [userId],
     (err, threads) => {

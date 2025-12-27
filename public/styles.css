@@ -71,7 +71,7 @@ textarea{ min-height:90px; resize:vertical; }
 
 /* APP LAYOUT */
 #app{ height:100vh; display:none; }
-.layout{ height:100%; display:flex; }
+.layout{ height:100%; display:flex; min-height:0; }
 
 /* Channels */
 .channels{
@@ -157,7 +157,7 @@ textarea{ min-height:90px; resize:vertical; }
 .iconBtn:hover{ filter:brightness(1.05); }
 
 /* Chat */
-.chat{ flex:1; display:flex; flex-direction:column; min-width:0; }
+.chat{ flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; }
 .topbar{
   height:54px;
   background:var(--panel2);
@@ -178,7 +178,7 @@ textarea{ min-height:90px; resize:vertical; }
   outline:none;
 }
 
-.msgs{ flex:1; overflow:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
+.msgs{ flex:1; overflow:auto; padding:14px; display:flex; flex-direction:column; gap:10px; min-height:0; }
 .sys{
   align-self:center; color:var(--muted); font-size:12px;
   padding:6px 10px; border-radius:999px;
@@ -255,6 +255,7 @@ textarea{ min-height:90px; resize:vertical; }
   display:flex;
   gap:10px;
   align-items:center;
+  flex-shrink:0;
 }
 .inputBar input[type="text"]{
   flex:1;
@@ -313,6 +314,7 @@ textarea{ min-height:90px; resize:vertical; }
   border-left:1px solid var(--line);
   padding:10px;
   overflow:auto;
+  position:relative;
 }
 .members h3{ margin:6px 6px 10px; font-size:12px; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; }
 .mItem{
@@ -331,6 +333,28 @@ textarea{ min-height:90px; resize:vertical; }
 .mMeta{ display:flex; flex-direction:column; gap:2px; min-width:0; }
 .mName{ font-weight:900; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .mSub{ font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+.memberMenu{
+  position:absolute;
+  top:0;
+  left:0;
+  background: rgba(24, 26, 33, .95);
+  border:1px solid var(--line);
+  box-shadow: var(--shadow);
+  border-radius:14px;
+  padding:12px;
+  display:none;
+  flex-direction:column;
+  gap:8px;
+  z-index: 8;
+  min-width: 230px;
+  max-width: calc(100% - 20px);
+}
+.memberMenu.open{ display:flex; }
+.memberMenuHeader{ display:flex; flex-direction:column; gap:4px; }
+.memberMenuName{ font-weight:900; }
+.memberMenuActions{ display:flex; gap:8px; flex-wrap:wrap; }
+.memberMenuActions .btn{ flex:1; }
 
 /* Modal/Profile */
 #modal{ position:fixed; inset:0; background:#00000088; display:none; align-items:center; justify-content:center; padding:18px; z-index: 80; }
@@ -405,18 +429,21 @@ textarea{ min-height:90px; resize:vertical; }
 /* DM panel */
 .dmPanel{
   position:fixed;
-  right:16px;
+  top:16px;
   bottom:16px;
-  width:min(520px, 94vw);
-  height:480px;
-  max-height:75vh;
-  background:var(--panel2);
+  right: calc(300px + 18px);
+  width:min(640px, 48vw);
+  height:auto;
+  max-height:none;
+  background:linear-gradient(135deg, rgba(255,255,255,.02), rgba(255,255,255,.04)), var(--panel2);
   border:1px solid var(--line);
-  border-radius:16px;
-  box-shadow: var(--shadow);
+  border-radius:20px;
+  box-shadow: 0 22px 60px rgba(0,0,0,.5);
   display:none;
   flex-direction:column;
   z-index:90;
+  overflow:hidden;
+  min-height:0;
 }
 .dmPanel.open{ display:flex; }
 .dmHeader{
@@ -427,24 +454,43 @@ textarea{ min-height:90px; resize:vertical; }
   gap:10px;
   border-bottom:1px solid var(--line);
 }
-.dmHeader .title{ font-weight:900; }
-.dmCreate{ padding:10px 14px; display:flex; flex-direction:column; gap:8px; border-bottom:1px solid var(--line); }
-.dmCreate input{ width:100%; }
-.dmContent{ flex:1; display:grid; grid-template-columns: 200px 1fr; min-height:0; }
-.dmThreads{ border-right:1px solid var(--line); overflow:auto; display:flex; flex-direction:column; }
-.dmItem{ padding:10px 12px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; flex-direction:column; gap:4px; }
+.dmHeader .title{ font-weight:900; letter-spacing:.01em; }
+.dmCreate{ padding:12px 14px; display:flex; flex-direction:column; gap:10px; border-bottom:1px solid var(--line); background: rgba(0,0,0,.12); }
+.dmCreateTop{ display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }
+.dmModeSwitch{ display:flex; gap:8px; }
+.dmHelper{ font-size:12px; color:var(--muted); background: rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); padding:10px; border-radius:12px; display:none; }
+.dmHelper.group{ display:none; }
+.dmInputs{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+.dmInputs input{ width:100%; }
+.dmInputs #dmTitle{ min-width:0; }
+.dmCreate.direct .dmInputs{ grid-template-columns: 1fr; }
+.dmInputs input.readonly{ opacity:0.85; cursor:not-allowed; }
+.dmCreate.direct .dmHelper{ display:block; }
+.dmCreate.direct .dmHelper.group{ display:none; }
+.dmCreate.direct #dmTitle{ display:none; }
+.dmCreate.direct #dmParticipants{ background: rgba(255,255,255,.06); border-style:dashed; }
+.dmCreate.group .dmHelper{ display:none; }
+.dmCreate.group .dmHelper.group{ display:block; }
+.dmActions{ display:flex; flex-direction:column; gap:6px; }
+.dmActions .btn{ align-self:flex-start; }
+.dmActions .msgline{ min-height:18px; }
+.chip{ padding:7px 12px; border-radius:12px; border:1px solid var(--line); background:var(--soft); font-weight:900; cursor:pointer; color:var(--text); }
+.chip.active{ background:#3a3c43; border-color:#00000055; }
+.dmContent{ flex:1; display:grid; grid-template-columns: 220px 1fr; min-height:0; backdrop-filter: blur(4px); }
+.dmThreads{ border-right:1px solid var(--line); overflow:auto; display:flex; flex-direction:column; min-height:0; }
+.dmItem{ padding:12px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; flex-direction:column; gap:4px; transition: background .12s ease, border-color .12s ease; }
 .dmItem:hover{ background:var(--panel); }
 .dmItem.active{ background:var(--bubble); }
 .dmItem .name{ font-weight:900; font-size:13px; }
 .dmItem .small{ color:var(--muted); font-size:11px; }
-.dmConversation{ display:flex; flex-direction:column; min-width:0; }
+.dmConversation{ display:flex; flex-direction:column; min-width:0; min-height:0; }
 .dmMeta{ padding:10px 12px; border-bottom:1px solid var(--line); }
 .dmMeta .title{ font-weight:900; }
-.dmMessages{ flex:1; overflow:auto; padding:10px 12px; display:flex; flex-direction:column; gap:8px; }
+.dmMessages{ flex:1; overflow:auto; padding:10px 12px; display:flex; flex-direction:column; gap:8px; min-height:0; }
 .dmBubble{ padding:9px 11px; border-radius:12px; background:var(--panel); border:1px solid var(--line); max-width:80%; }
 .dmBubble.self{ background:var(--bubbleSelf); color:white; margin-left:auto; }
 .dmMetaRow{ display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--muted); }
-.dmInput{ padding:10px 12px; border-top:1px solid var(--line); display:flex; gap:8px; }
+.dmInput{ padding:10px 12px; border-top:1px solid var(--line); display:flex; gap:8px; flex-shrink:0; background: var(--panel2); }
 .dmInput input{ flex:1; }
 .dmSectionTitle{
   padding:10px 12px;
@@ -456,9 +502,12 @@ textarea{ min-height:90px; resize:vertical; }
   border-bottom:1px solid var(--line);
   background: rgba(255,255,255,.03);
 }
-.dmCreate.direct #dmTitle{ display:none; }
 .dmEmpty{ color:var(--muted); font-size:12px; text-align:center; padding:12px; }
 .mobOnly{ display:none; }
+
+@media (max-width: 1260px){
+  .dmPanel{ right:16px; width:min(640px, 70vw); }
+}
 
 @media (max-width: 980px){
   .mobOnly{ display:flex; }
@@ -471,6 +520,21 @@ textarea{ min-height:90px; resize:vertical; }
   .bubble{ padding:9px 10px; border-radius:14px; max-width:94vw; }
   .typing{ padding:0 10px; height:18px; font-size:11px; }
   .inputBar{ padding:10px; gap:8px; position: sticky; bottom:0; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+
+  .dmPanel{
+    inset:0;
+    width:100vw;
+    height:100vh;
+    max-height:none;
+    border-radius:0;
+    border:0;
+    box-shadow:none;
+  }
+  .dmHeader{ position:sticky; top:0; background:var(--panel2); z-index:2; }
+  .dmInput{ position:sticky; bottom:0; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .dmContent{ grid-template-columns: 1fr; grid-template-rows: minmax(180px, 32vh) 1fr; }
+  .dmThreads{ border-right:0; border-bottom:1px solid var(--line); }
+  .dmMessages{ padding-bottom:14px; }
 
   .channels{
     position:fixed; top:0; left:0; height:100vh;
