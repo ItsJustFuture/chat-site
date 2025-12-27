@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Chat Site</title>
+  <script src="/theme-init.js"></script>
   <link rel="stylesheet" href="/styles.css">
 </head>
 
@@ -348,28 +349,47 @@
 
       <div id="viewCustomize" style="display:none;">
         <div class="sectionTitle">Customization</div>
-        <div class="panelBox">
-          <div class="field">
-            <label>Direct message badge color</label>
-            <div class="colorInputRow">
-              <input id="directBadgeColor" type="color" aria-label="Direct message badge color">
-              <input id="directBadgeColorText" type="text" placeholder="#ed4245 or red" aria-label="Direct message badge color text">
+        <div class="panelBox customizeShell">
+          <div class="customNav" id="customNav">
+            <button class="customNavBtn active" data-section="themes" type="button">Themes</button>
+            <button class="customNavBtn" data-section="badges" type="button">Badges</button>
+          </div>
+
+          <div class="customContent">
+            <div class="customPanel active" id="customPanelThemes">
+              <div class="themeFilters">
+                <button class="pillBtn active" data-theme-filter="all" type="button">All</button>
+                <button class="pillBtn" data-theme-filter="dark" type="button">Dark</button>
+                <button class="pillBtn" data-theme-filter="light" type="button">Light</button>
+              </div>
+              <div class="themeGrid" id="themeGrid"></div>
+              <div class="msgline" id="themeMsg"></div>
+            </div>
+
+            <div class="customPanel" id="customPanelBadges">
+              <div class="field">
+                <label>Direct message badge color</label>
+                <div class="colorInputRow">
+                  <input id="directBadgeColor" type="color" aria-label="Direct message badge color">
+                  <input id="directBadgeColorText" type="text" placeholder="#ed4245 or red" aria-label="Direct message badge color text">
+                </div>
+              </div>
+
+              <div class="field">
+                <label>Group DM badge color</label>
+                <div class="colorInputRow">
+                  <input id="groupBadgeColor" type="color" aria-label="Group DM badge color">
+                  <input id="groupBadgeColorText" type="text" placeholder="#5865f2 or blue" aria-label="Group DM badge color text">
+                </div>
+              </div>
+
+              <div class="row" style="margin-top:6px;">
+                <button class="btn" id="saveBadgePrefsBtn" type="button">Save badge colors</button>
+              </div>
+
+              <div class="msgline" id="customizeMsg"></div>
             </div>
           </div>
-
-          <div class="field">
-            <label>Group DM badge color</label>
-            <div class="colorInputRow">
-              <input id="groupBadgeColor" type="color" aria-label="Group DM badge color">
-              <input id="groupBadgeColorText" type="text" placeholder="#5865f2 or blue" aria-label="Group DM badge color text">
-            </div>
-          </div>
-
-          <div class="row" style="margin-top:6px;">
-            <button class="btn" id="saveBadgePrefsBtn" type="button">Save badge colors</button>
-          </div>
-
-          <div class="msgline" id="customizeMsg"></div>
         </div>
       </div>
 
