@@ -10,6 +10,10 @@ const msgIndex = [];
 let dmThreads = [];
 let activeDmId = null;
 const dmMessages = new Map();
+const badgeDefaults = { direct: "#ed4245", group: "#5865f2" };
+let badgePrefs = { ...badgeDefaults };
+let directBadgePending = false;
+let groupBadgePending = false;
 
 let modalTargetUsername = null;
 let pendingFile = null;
@@ -103,18 +107,27 @@ const infoStatus = document.getElementById("infoStatus");
 // tabs/views
 const tabInfo = document.getElementById("tabInfo");
 const tabAbout = document.getElementById("tabAbout");
-const tabMedia = document.getElementById("tabMedia");
+const tabCustomize = document.getElementById("tabCustomize");
 const tabModeration = document.getElementById("tabModeration");
 
 const viewInfo = document.getElementById("viewInfo");
 const viewAbout = document.getElementById("viewAbout");
-const viewMedia = document.getElementById("viewMedia");
+const viewCustomize = document.getElementById("viewCustomize");
 const viewModeration = document.getElementById("viewModeration");
 
 const bioRender = document.getElementById("bioRender");
 const copyProfileLinkBtn = document.getElementById("copyProfileLinkBtn");
 const copyUsernameBtn = document.getElementById("copyUsernameBtn");
 const mediaMsg = document.getElementById("mediaMsg");
+const customizeMsg = document.getElementById("customizeMsg");
+
+const directBadgeColor = document.getElementById("directBadgeColor");
+const groupBadgeColor = document.getElementById("groupBadgeColor");
+const directBadgeColorText = document.getElementById("directBadgeColorText");
+const groupBadgeColorText = document.getElementById("groupBadgeColorText");
+const saveBadgePrefsBtn = document.getElementById("saveBadgePrefsBtn");
+const dmBadgeDot = document.getElementById("dmBadgeDot");
+const groupDmBadgeDot = document.getElementById("groupDmBadgeDot");
 
 // my profile edit
 const myProfileEdit = document.getElementById("myProfileEdit");
@@ -289,6 +302,66 @@ function renderBBCode(input){
   });
   return s;
 }
+function loadBadgePrefsFromStorage(){
+  try{
+    const raw = localStorage.getItem("dmBadgePrefs");
+    const parsed = raw ? JSON.parse(raw) : {};
+    return { ...badgeDefaults, ...parsed };
+  }catch{
+    return { ...badgeDefaults };
+  }
+}
+function saveBadgePrefsToStorage(){
+  try{ localStorage.setItem("dmBadgePrefs", JSON.stringify(badgePrefs)); }
+  catch{}
+}
+function isValidCssColor(color){
+  const c = String(color || "").trim();
+  if(!c) return false;
+  const s = new Option().style;
+  s.color = c;
+  return s.color !== "";
+}
+function normalizeColorForInput(color, fallback){
+  const hexOk = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+  if(hexOk.test(color || "")) return color;
+  if(hexOk.test(fallback || "")) return fallback;
+  return "#000000";
+}
+function sanitizeColor(raw, fallback, hardDefault){
+  if(isValidCssColor(raw)) return raw.trim();
+  if(isValidCssColor(fallback)) return fallback.trim();
+  if(isValidCssColor(hardDefault)) return hardDefault.trim();
+  return hardDefault || badgeDefaults.direct;
+}
+function applyBadgePrefs(){
+  if(directBadgeColorText) directBadgeColorText.value = badgePrefs.direct;
+  if(groupBadgeColorText) groupBadgeColorText.value = badgePrefs.group;
+  if(directBadgeColor) directBadgeColor.value = normalizeColorForInput(badgePrefs.direct, badgeDefaults.direct);
+  if(groupBadgeColor) groupBadgeColor.value = normalizeColorForInput(badgePrefs.group, badgeDefaults.group);
+  if(dmBadgeDot) dmBadgeDot.style.backgroundColor = badgePrefs.direct;
+  if(groupDmBadgeDot) groupDmBadgeDot.style.backgroundColor = badgePrefs.group;
+}
+function setBadgeVisibility(kind, visible){
+  const el = kind === "group" ? groupDmBadgeDot : dmBadgeDot;
+  if(kind === "group") groupBadgePending = visible; else directBadgePending = visible;
+  if(el) el.style.display = visible ? "block" : "none";
+}
+function clearDmBadges(){
+  setBadgeVisibility("direct", false);
+  setBadgeVisibility("group", false);
+}
+function isGroupThread(threadId){
+  const meta = dmThreads.find((t) => t.id === threadId);
+  return !!(meta?.is_group || meta?.isGroup);
+}
+function markDmNotification(threadId, isGroupHint){
+  const isGroup = typeof isGroupHint === "boolean" ? isGroupHint : isGroupThread(threadId);
+  if(dmPanel?.classList.contains("open") && activeDmId === threadId) return;
+  setBadgeVisibility(isGroup ? "group" : "direct", true);
+}
+badgePrefs = loadBadgePrefsFromStorage();
+applyBadgePrefs();
 const EMOJI_CHOICES = ["😀","😁","😂","🙂","😉","😍","😘","💀","🤔","😤","😢","😡","🔥","🖕","♥️","💯","👍","👎","🎉","👀"];
 
 let reactionMenuEl = null;
@@ -647,7 +720,8 @@ async function loadDmThreads(){
       dmMsg.textContent = "Could not load threads.";
       return;
     }
-    dmThreads = await res.json();
+    const raw = await res.json();
+    dmThreads = (raw || []).map((t) => ({ ...t, is_group: !!t.is_group }));
     renderDmThreads();
   } catch {
     dmMsg.textContent = "Could not load threads.";
@@ -659,6 +733,7 @@ function openDmPanel({ mode = "direct", prefill = "" } = {}){
   dmMsg.textContent = "";
 
   setDmCreateMode(mode);
+  clearDmBadges();
 
   if (prefill && dmParticipantsInput) dmParticipantsInput.value = prefill;
 
@@ -717,6 +792,7 @@ function openDmThread(threadId){
 
   const meta = dmThreads.find(t => t.id === threadId);
   setDmMeta(meta);
+  if (meta) setBadgeVisibility(meta.is_group ? "group" : "direct", false);
 
   dmMessagesEl.innerHTML = "<div class='dmEmpty'>Loading...</div>";
   socket?.emit("dm join", { threadId });
@@ -903,13 +979,13 @@ function setTab(tab){
   }
   viewInfo.style.display = tab==="info" ? "block" : "none";
   viewAbout.style.display = tab==="about" ? "block" : "none";
-  viewMedia.style.display = tab==="media" ? "block" : "none";
+  viewCustomize.style.display = tab==="customize" ? "block" : "none";
   viewModeration.style.display = tab==="moderation" ? "block" : "none";
   focusActiveTab();
 }
 tabInfo.addEventListener("click", ()=>setTab("info"));
 tabAbout.addEventListener("click", ()=>setTab("about"));
-tabMedia.addEventListener("click", ()=>setTab("media"));
+tabCustomize.addEventListener("click", ()=>setTab("customize"));
 tabModeration.addEventListener("click", async ()=>{
   setTab("moderation");
   await refreshLogs();
@@ -924,6 +1000,7 @@ function closeModal(){
   modMsg.textContent="";
   logsMsg.textContent="";
   mediaMsg.textContent="";
+  if (customizeMsg) customizeMsg.textContent = "";
 }
 closeModalBtn.addEventListener("click", closeModal);
 modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
@@ -1143,6 +1220,11 @@ function fillProfileUI(p){
 
   bioRender.innerHTML = p.bio ? renderBBCode(p.bio) : "(no bio)";
 }
+function syncCustomizationUI(){
+  badgePrefs = loadBadgePrefsFromStorage();
+  applyBadgePrefs();
+  if (customizeMsg) customizeMsg.textContent = "";
+}
 
 async function openMyProfile(){
   closeDrawers();
@@ -1154,6 +1236,7 @@ async function openMyProfile(){
   modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
 
   fillProfileUI(p);
+  syncCustomizationUI();
 
   myProfileEdit.style.display="block";
   memberModTools.style.display="none";
@@ -1204,6 +1287,7 @@ async function openMemberProfile(username){
   modalTitle.textContent="Member Profile";
   modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
   fillProfileUI(p);
+  syncCustomizationUI();
 
   myProfileEdit.style.display="none";
 
@@ -1227,6 +1311,35 @@ copyProfileLinkBtn.addEventListener("click", async ()=>{
   const link = `${location.origin}/#profile:${encodeURIComponent(u)}`;
   try{ await navigator.clipboard.writeText(link); mediaMsg.textContent="Copied profile link."; }
   catch{ mediaMsg.textContent="Copy failed (browser blocked)."; }
+});
+saveBadgePrefsBtn?.addEventListener("click", () => {
+  const directRaw = directBadgeColorText?.value || directBadgeColor?.value || badgePrefs.direct || badgeDefaults.direct;
+  const groupRaw = groupBadgeColorText?.value || groupBadgeColor?.value || badgePrefs.group || badgeDefaults.group;
+  badgePrefs = {
+    direct: sanitizeColor(directRaw, directBadgeColor?.value, badgeDefaults.direct),
+    group: sanitizeColor(groupRaw, groupBadgeColor?.value, badgeDefaults.group),
+  };
+  applyBadgePrefs();
+  saveBadgePrefsToStorage();
+  if (customizeMsg) customizeMsg.textContent = "Saved badge colors.";
+});
+directBadgeColor?.addEventListener("input", () => {
+  if(directBadgeColorText) directBadgeColorText.value = directBadgeColor.value;
+  if(dmBadgeDot) dmBadgeDot.style.backgroundColor = directBadgeColor.value;
+});
+groupBadgeColor?.addEventListener("input", () => {
+  if(groupBadgeColorText) groupBadgeColorText.value = groupBadgeColor.value;
+  if(groupDmBadgeDot) groupDmBadgeDot.style.backgroundColor = groupBadgeColor.value;
+});
+directBadgeColorText?.addEventListener("input", () => {
+  const safe = sanitizeColor(directBadgeColorText.value, directBadgeColor?.value, badgeDefaults.direct);
+  if(directBadgeColor) directBadgeColor.value = normalizeColorForInput(safe, badgeDefaults.direct);
+  if(dmBadgeDot) dmBadgeDot.style.backgroundColor = safe;
+});
+groupBadgeColorText?.addEventListener("input", () => {
+  const safe = sanitizeColor(groupBadgeColorText.value, groupBadgeColor?.value, badgeDefaults.group);
+  if(groupBadgeColor) groupBadgeColor.value = normalizeColorForInput(safe, badgeDefaults.group);
+  if(groupDmBadgeDot) groupDmBadgeDot.style.backgroundColor = safe;
 });
 
 // moderation quick tools
@@ -1370,6 +1483,7 @@ async function startApp(){
   socket = io();
 socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
 await loadRooms();
+await loadDmThreads();
 
 // show Create Room button only for Co-owner+
 if(addRoomBtn){
@@ -1410,27 +1524,21 @@ if(addRoomBtn){
 
   socket.on("dm history", (payload) => {
     const { threadId, messages = [], participants = [], title = "" } = payload || {};
-    const existing = dmThreads.find((t) => t.id === threadId);
     const lastText = messages.length
       ? messages[messages.length - 1].text || ""
-      : (existing?.last_text || "");
+      : (dmThreads.find((t) => t.id === threadId)?.last_text || "");
 
-    if (existing) {
-      Object.assign(existing, {
-        participants,
-        title,
-        last_text: lastText,
-        last_ts: messages.length ? messages[messages.length - 1].ts : existing.last_ts,
-      });
-    } else {
-      dmThreads.unshift({
-        id: threadId,
-        participants,
-        title,
-        last_text: lastText,
-        last_ts: messages.length ? messages[messages.length - 1].ts : Date.now(),
-      });
-    }
+    const lastTs = messages.length
+      ? messages[messages.length - 1].ts
+      : (dmThreads.find((t) => t.id === threadId)?.last_ts || Date.now());
+
+    upsertThreadMeta(threadId, {
+      participants,
+      title,
+      last_text: lastText,
+      last_ts: lastTs,
+      is_group: !!payload?.isGroup,
+    });
 
     dmMessages.set(threadId, messages);
     renderDmThreads();
@@ -1447,6 +1555,12 @@ if(addRoomBtn){
     dmMessages.set(m.threadId, arr);
 
     upsertThreadMeta(m.threadId, { last_text: m.text || "", last_ts: m.ts });
+
+    if (!dmThreads.find((t) => t.id === m.threadId)) loadDmThreads();
+
+    if (activeDmId !== m.threadId) {
+      markDmNotification(m.threadId, isGroupThread(m.threadId));
+    }
 
     if (activeDmId === m.threadId) {
       renderDmMessages(m.threadId);

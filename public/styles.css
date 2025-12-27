@@ -50,6 +50,8 @@ button{ font-family:inherit; }
   outline:none;
 }
 textarea{ min-height:90px; resize:vertical; }
+.colorInputRow{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.colorInputRow input[type="text"]{ flex:1; min-width:140px; }
 .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
 .btn{
   border:0;
@@ -138,7 +140,19 @@ textarea{ min-height:90px; resize:vertical; }
   border:1px solid rgba(255,255,255,.08);
   display:flex; align-items:center; justify-content:center;
   font-size:16px; font-weight:900; cursor:pointer; user-select:none;
+  position:relative;
 }
+.iconBtn.withBadge{ padding:0 2px; }
+.notifDot{
+  position:absolute;
+  width:12px; height:12px;
+  border-radius:50%;
+  background:var(--danger);
+  top:-4px; left:-4px;
+  border:2px solid var(--panel2);
+  display:none;
+}
+.notifDot.right{ left:auto; right:-4px; }
 .iconBtn.secondary{ background:#3f4148; }
 .iconBtn:hover{ filter:brightness(1.05); }
 
@@ -573,7 +587,7 @@ textarea{ min-height:90px; resize:vertical; }
     display: flex;
     flex-direction: column;
   }
-  #viewInfo, #viewAbout, #viewMedia, #viewModeration{
+  #viewInfo, #viewAbout, #viewCustomize, #viewModeration{
     overflow:auto;
     -webkit-overflow-scrolling: touch;
     padding-right: 2px;
