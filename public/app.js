@@ -3,6 +3,7 @@
 
 let socket = null;
 let me = null;
+let progression = { gold: 0, xp: 0, level: 1, xpIntoLevel: 0, xpForNextLevel: 100 };
 let currentRoom = "main";
 let lastUsers = [];
 const reactionsCache = Object.create(null);
@@ -16,6 +17,7 @@ let directBadgePending = false;
 let groupBadgePending = false;
 const dmThemeDefaults = { background: "#1e1f22" };
 let dmThemePrefs = { ...dmThemeDefaults };
+let levelToastTimer = null;
 
 let modalTargetUsername = null;
 let pendingFile = null;
@@ -40,10 +42,15 @@ const roomTitle = document.getElementById("roomTitle");
 const msgs = document.getElementById("msgs");
 const typingEl = document.getElementById("typing");
 const memberList = document.getElementById("memberList");
+const memberGold = document.getElementById("memberGold");
 const memberMenu = document.getElementById("memberMenu");
 const memberMenuName = document.getElementById("memberMenuName");
 const memberViewProfileBtn = document.getElementById("memberViewProfileBtn");
 const memberDmBtn = document.getElementById("memberDmBtn");
+const commandPopup = document.getElementById("commandPopup");
+const commandPopupTitle = document.getElementById("commandPopupTitle");
+const commandPopupBody = document.getElementById("commandPopupBody");
+const commandPopupClose = document.getElementById("commandPopupClose");
 
 const msgInput = document.getElementById("msgInput");
 const sendBtn = document.getElementById("sendBtn");
@@ -128,6 +135,12 @@ const copyProfileLinkBtn = document.getElementById("copyProfileLinkBtn");
 const copyUsernameBtn = document.getElementById("copyUsernameBtn");
 const mediaMsg = document.getElementById("mediaMsg");
 const customizeMsg = document.getElementById("customizeMsg");
+const levelBadge = document.getElementById("levelBadge");
+const xpText = document.getElementById("xpText");
+const xpProgress = document.getElementById("xpProgress");
+const xpNote = document.getElementById("xpNote");
+const levelToast = document.getElementById("levelToast");
+const levelToastText = document.getElementById("levelToastText");
 
 const directBadgeColor = document.getElementById("directBadgeColor");
 const groupBadgeColor = document.getElementById("groupBadgeColor");
@@ -189,6 +202,7 @@ function escapeHtml(s){
     "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;"
   }[m]));
 }
+function normKey(u){ return String(u||"").trim().toLowerCase(); }
 function fmtAbs(ts){
   if(!ts) return "—";
   const n = Number(ts);
@@ -287,6 +301,33 @@ function addSystem(text){
   div.textContent=text;
   msgs.appendChild(div);
   msgs.scrollTop=msgs.scrollHeight;
+}
+
+let commandPopupDismissed=false;
+function hideCommandPopup(){
+  commandPopup.classList.remove("show");
+}
+function showCommandPopup(title, bodyHtml){
+  commandPopupDismissed=false;
+  commandPopupTitle.textContent=title;
+  commandPopupBody.innerHTML=bodyHtml;
+  commandPopup.classList.add("show");
+}
+commandPopupClose?.addEventListener("click", ()=>{ commandPopupDismissed=true; hideCommandPopup(); });
+
+function handleCommandResponse(payload){
+  if(commandPopupDismissed) commandPopupDismissed=false;
+  if(payload.type === "help" && Array.isArray(payload.commands)){
+    const roleLabel = payload.role || me?.role || "";
+    const items = payload.commands.map(cmd=>{
+      return `<div class="commandHelpItem"><div class="name">/${escapeHtml(cmd.name)}</div><div class="small">${escapeHtml(cmd.description||"")}</div><div class="usage">${escapeHtml(cmd.usage||"")}</div><div class="small">Example: ${escapeHtml(cmd.example||"")}</div></div>`;
+    }).join("");
+    showCommandPopup(`Commands you can use (Role: ${roleLabel})`, `<div class="commandHelpList">${items}</div>`);
+    return;
+  }
+  const msg = escapeHtml(payload?.message || "No response");
+  const title = payload?.ok ? "Command" : "Command error";
+  showCommandPopup(title, msg);
 }
 
 function applyMentions(text){
@@ -628,6 +669,56 @@ function openMemberMenu(user, anchor){
   memberMenu.style.left = `${left}px`;
 }
 
+function updateGoldUI(){
+  if (!memberGold) return;
+  if (progression && progression.gold != null) {
+    const g = Number(progression.gold || 0);
+    memberGold.textContent = `Gold: ${g.toLocaleString()}`;
+    memberGold.classList.add("show");
+  } else {
+    memberGold.classList.remove("show");
+  }
+}
+
+function renderLevelProgress(data, isSelf){
+  const info = data || progression || {};
+  const levelVal = Number(info.level || progression.level || 1);
+  if (levelBadge) levelBadge.textContent = `Level ${levelVal}`;
+
+  const hasXp = isSelf && typeof info.xpIntoLevel === "number" && typeof info.xpForNextLevel === "number" && info.xpForNextLevel > 0;
+  if (xpText) {
+    xpText.style.display = "block";
+    xpText.textContent = hasXp ? `XP: ${Math.max(0, info.xpIntoLevel || 0)} / ${info.xpForNextLevel}` : "XP hidden";
+  }
+  if (xpProgress) {
+    const pct = hasXp ? Math.max(0, Math.min(100, ((info.xpIntoLevel || 0) / info.xpForNextLevel) * 100)) : 0;
+    xpProgress.style.width = `${pct}%`;
+  }
+  if (xpNote) xpNote.style.display = hasXp ? "block" : "none";
+}
+
+function applyProgressionPayload(payload){
+  if (!payload) return;
+  const next = { ...progression };
+  if (payload.gold != null) next.gold = Number(payload.gold || 0);
+  if (payload.level != null) next.level = Number(payload.level) || next.level;
+  if (payload.xp != null || payload.xpIntoLevel != null || payload.xpForNextLevel != null) {
+    if (payload.xp != null) next.xp = Number(payload.xp || 0);
+    if (payload.xpIntoLevel != null) next.xpIntoLevel = Number(payload.xpIntoLevel || 0);
+    if (payload.xpForNextLevel != null) next.xpForNextLevel = Number(payload.xpForNextLevel || 100);
+  }
+  progression = next;
+  updateGoldUI();
+}
+
+function showLevelToast(level){
+  if (!levelToast || !levelToastText) return;
+  clearTimeout(levelToastTimer);
+  levelToastText.textContent = `Level ${level}!`;
+  levelToast.classList.add("show");
+  levelToastTimer = setTimeout(() => levelToast.classList.remove("show"), 3200);
+}
+
 function renderMembers(users){
   lastUsers = users || [];
   memberList.innerHTML="";
@@ -669,6 +760,15 @@ function renderMembers(users){
     };
     memberList.appendChild(row);
   });
+}
+
+async function loadProgression(){
+  try{
+    const res = await fetch("/api/me/progression");
+    if(!res.ok) return;
+    const data = await res.json();
+    applyProgressionPayload(data);
+  }catch{}
 }
 
 // Search filter
@@ -1323,14 +1423,18 @@ async function loadMyProfile(){
   const p=await res.json();
   me.username = p.username;
   me.role = p.role;
+  me.level = p.level || me.level;
+
+  applyProgressionPayload(p);
 
   meName.textContent=p.username;
   meRole.textContent=`${roleIcon(p.role)} ${p.role}`;
   meAvatar.innerHTML="";
   meAvatar.appendChild(avatarNode(p.avatar, p.username));
+  renderLevelProgress(progression, true);
 }
 
-function fillProfileUI(p){
+function fillProfileUI(p, isSelf){
   modalAvatar.innerHTML="";
   modalAvatar.appendChild(avatarNode(p.avatar, p.username));
   modalName.textContent=p.username;
@@ -1347,6 +1451,7 @@ function fillProfileUI(p){
   infoStatus.textContent = statusLabel || "—";
 
   bioRender.innerHTML = p.bio ? renderBBCode(p.bio) : "(no bio)";
+  renderLevelProgress(p, isSelf);
 }
 function syncCustomizationUI(){
   badgePrefs = loadBadgePrefsFromStorage();
@@ -1359,11 +1464,12 @@ async function openMyProfile(){
   const res=await fetch("/profile");
   if(!res.ok) return;
   const p=await res.json();
+  applyProgressionPayload(p);
 
   modalTitle.textContent="My Profile";
   modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
 
-  fillProfileUI(p);
+  fillProfileUI(p, true);
   syncCustomizationUI();
 
   myProfileEdit.style.display="block";
@@ -1411,10 +1517,12 @@ async function openMemberProfile(username){
   const res=await fetch("/profile/" + encodeURIComponent(username));
   if(!res.ok) return;
   const p=await res.json();
+  const isSelf = !!me && normKey(me.username) === normKey(p.username);
+  if (isSelf) applyProgressionPayload(p);
 
   modalTitle.textContent="Member Profile";
   modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
-  fillProfileUI(p);
+  fillProfileUI(p, isSelf);
   syncCustomizationUI();
 
   myProfileEdit.style.display="none";
@@ -1607,6 +1715,8 @@ async function startApp(){
   app.style.display="block";
 
   await loadMyProfile();
+  await loadProgression();
+  renderLevelProgress(progression, true);
 
   socket = io();
 socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
@@ -1620,12 +1730,19 @@ if(addRoomBtn){
 }
 
   socket.on("system", addSystem);
+  socket.on("command response", handleCommandResponse);
   socket.on("user list", (users)=>renderMembers(users));
   socket.on("typing update", (names)=>{
     const others=(names||[]).filter(n=>n!==me.username);
     typingEl.textContent = others.length
       ? (others.length===1 ? `${others[0]} is typing...` : `${others.join(", ")} are typing...`)
       : "";
+  });
+  socket.on("level up", ({ level }) => {
+    if(level) progression.level = level;
+    showLevelToast(level || "");
+    loadProgression();
+    renderLevelProgress(progression, true);
   });
   socket.on("history", (history)=>{
     clearMsgs();
