@@ -452,34 +452,19 @@ textarea{ min-height:90px; resize:vertical; }
   padding:12px 14px;
   display:flex;
   align-items:center;
+  gap:12px;
   justify-content:space-between;
-  gap:10px;
   border-bottom:1px solid var(--line);
 }
 .dmHeader .title{ font-weight:900; letter-spacing:.01em; }
-.dmCreate{ padding:12px 14px; display:flex; flex-direction:column; gap:10px; border-bottom:1px solid var(--line); background: rgba(0,0,0,.12); }
-.dmCreateTop{ display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }
-.dmModeSwitch{ display:flex; gap:8px; }
-.dmHelper{ font-size:12px; color:var(--muted); background: rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); padding:10px; border-radius:12px; display:none; }
-.dmHelper.group{ display:none; }
-.dmInputs{ display:flex; flex-direction:column; gap:10px; }
-.dmInputs input{ width:100%; }
-.dmInputs #dmTitle{ min-width:0; }
-.dmParticipantsRow{ display:block; }
-.dmParticipantsRow.hidden{ display:none; }
-.dmInputs input.readonly{ opacity:0.85; cursor:not-allowed; }
-.dmCreate.direct .dmInputs{ display:none; }
-.dmCreate.direct .dmHelper{ display:block; }
-.dmCreate.direct .dmHelper.group{ display:none; }
-.dmCreate.group .dmHelper{ display:none; }
-.dmCreate.group .dmHelper.group{ display:block; }
-.dmTitleRow{ display:block; }
-.dmAddActive{ background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.2); }
-.dmActions{ display:flex; flex-direction:column; gap:6px; }
-.dmActions .btn{ align-self:flex-start; }
-.dmActions .msgline{ min-height:18px; }
-.chip{ padding:7px 12px; border-radius:12px; border:1px solid var(--line); background:var(--soft); font-weight:900; cursor:pointer; color:var(--text); }
-.chip.active{ background:#3a3c43; border-color:#00000055; }
+.dmNotice{
+  padding:10px 14px;
+  border-bottom:1px solid var(--line);
+  min-height:18px;
+  font-size:12px;
+  color:var(--muted);
+  background: rgba(255,255,255,.03);
+}
 .dmContent{ flex:1; display:grid; grid-template-columns: 220px 1fr; min-height:0; backdrop-filter: blur(4px); background:var(--dm-bg); }
 .dmThreads{ border-right:1px solid var(--line); overflow:auto; display:flex; flex-direction:column; min-height:0; }
 .dmItem{ padding:12px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; flex-direction:column; gap:4px; transition: background .12s ease, border-color .12s ease; }
