@@ -123,6 +123,9 @@ db.serialize(() => {
     ["xp", "xp INTEGER NOT NULL DEFAULT 0"],
     ["lastXpMessageAt", "lastXpMessageAt INTEGER"],
     ["lastDailyLoginAt", "lastDailyLoginAt INTEGER"],
+    ["lastGoldTickAt", "lastGoldTickAt INTEGER"],
+    ["lastMessageGoldAt", "lastMessageGoldAt INTEGER"],
+    ["lastDailyLoginGoldAt", "lastDailyLoginGoldAt INTEGER"],
   ];
   for (const [col, ddl] of userColumns) addColumnIfMissing("users", col, ddl);
 
@@ -514,6 +517,10 @@ const ALLOWED_THEMES = [
   "Paper / Parchment",
   "Sky Light",
 ];
+
+const GOLD_TICK_MS = 5_000;
+const MESSAGE_GOLD_COOLDOWN_MS = 5 * 60 * 1000;
+const DAILY_GOLD_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 db.get(`SELECT value FROM config WHERE key='maintenance'`, [], (_e, row) => {
   maintenanceState.enabled = row?.value === "on";
@@ -1134,6 +1141,61 @@ function awardDailyLoginXp(user) {
   );
 }
 
+function initGoldTick(userId, now = Date.now()) {
+  db.run("UPDATE users SET lastGoldTickAt = ? WHERE id = ?", [now, userId]);
+}
+
+function awardPassiveGold(userId, cb) {
+  const now = Date.now();
+  db.get("SELECT lastGoldTickAt FROM users WHERE id = ?", [userId], (err, row) => {
+    if (err || !row) return cb?.(err || new Error("missing"));
+
+    const last = Number(row.lastGoldTickAt || 0);
+    if (!last) {
+      db.run("UPDATE users SET lastGoldTickAt = ? WHERE id = ?", [now, userId], () => cb?.(null, 0));
+      return;
+    }
+
+    const elapsed = now - last;
+    const ticks = Math.floor(elapsed / GOLD_TICK_MS);
+    if (ticks <= 0) return cb?.(null, 0);
+
+    const newTickTs = last + ticks * GOLD_TICK_MS;
+    db.run(
+      "UPDATE users SET gold = gold + ?, lastGoldTickAt = ? WHERE id = ?",
+      [ticks, newTickTs, userId],
+      (updateErr) => cb?.(updateErr, ticks)
+    );
+  });
+}
+
+function awardMessageGold(userId, cb) {
+  const now = Date.now();
+  db.get("SELECT lastMessageGoldAt FROM users WHERE id = ?", [userId], (err, row) => {
+    if (err || !row) return cb?.(err || new Error("missing"));
+    const last = Number(row.lastMessageGoldAt || 0);
+    if (last && now - last < MESSAGE_GOLD_COOLDOWN_MS) return cb?.(null, 0);
+
+    db.run(
+      "UPDATE users SET gold = gold + 5, lastMessageGoldAt = ? WHERE id = ?",
+      [now, userId],
+      (updateErr) => cb?.(updateErr, updateErr ? 0 : 5)
+    );
+  });
+}
+
+function awardDailyLoginGold(user) {
+  const now = Date.now();
+  const last = Number(user.lastDailyLoginGoldAt || 0);
+  if (last && now - last < DAILY_GOLD_COOLDOWN_MS) return;
+
+  db.run(
+    "UPDATE users SET gold = gold + 50, lastDailyLoginGoldAt = ? WHERE id = ?",
+    [now, user.id],
+    () => {}
+  );
+}
+
 function progressionFromRow(row, includePrivate) {
   const info = levelInfo(row?.xp || 0);
   const base = { level: info.level };
@@ -1376,6 +1438,8 @@ app.post("/login", (req, res) => {
 
       db.run("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]);
       awardDailyLoginXp(row);
+      awardDailyLoginGold(row);
+      initGoldTick(row.id);
 
       // Ensure session is actually persisted before replying
       req.session.save((saveErr) => {
@@ -1402,10 +1466,35 @@ app.get("/me", (req, res) => {
 });
 
 app.get("/api/me/progression", requireLogin, (_req, res) => {
-  db.get("SELECT gold, xp FROM users WHERE id = ?", [_req.session.user.id], (err, row) => {
-    if (err || !row) return res.status(404).send("Not found");
-    return res.json(progressionFromRow(row, true));
-  });
+  const uid = _req.session.user.id;
+  const finish = () => {
+    db.get("SELECT gold, xp FROM users WHERE id = ?", [uid], (err, row) => {
+      if (err || !row) return res.status(404).send("Not found");
+      return res.json(progressionFromRow(row, true));
+    });
+  };
+
+  if (onlineState.has(uid)) {
+    awardPassiveGold(uid, finish);
+  } else {
+    finish();
+  }
+});
+
+app.get("/api/me/gold", requireLogin, (req, res) => {
+  const uid = req.session.user.id;
+  const finish = () => {
+    db.get("SELECT gold FROM users WHERE id = ?", [uid], (err, row) => {
+      if (err || !row) return res.status(404).send("Not found");
+      return res.json({ gold: Number(row.gold || 0) });
+    });
+  };
+
+  if (onlineState.has(uid)) {
+    awardPassiveGold(uid, finish);
+  } else {
+    finish();
+  }
 });
 
 app.get("/api/me/theme", requireLogin, (req, res) => {
@@ -1914,6 +2003,10 @@ setInterval(() => {
     onlineXpTrack.set(uid, { lastTs: now, carryMs: remainder });
     if (gains > 0) applyXpGain(uid, gains);
   }
+
+  for (const uid of onlineState.keys()) {
+    awardPassiveGold(uid);
+  }
 }, 20_000);
 
 // ---- Helpers for punishments
@@ -1997,6 +2090,7 @@ io.on("connection", (socket) => {
 
   socketIdByUserId.set(socket.user.id, socket.id);
   onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
+  initGoldTick(socket.user.id);
 
   // Load profile bits for presence
   db.get(
@@ -2058,6 +2152,7 @@ function doJoin(room, status) {
 
   onlineState.set(socket.user.id, { room, status: socket.user.status });
   onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
+  awardPassiveGold(socket.user.id);
 
   db.run("UPDATE users SET last_room=?, last_status=? WHERE id=?", [
     room,
@@ -2243,6 +2338,8 @@ function doJoin(room, status) {
         const attachmentMime = String(payload?.attachmentMime || "").slice(0, 60);
         const attachmentSize = Number(payload?.attachmentSize || 0) || 0;
 
+        awardPassiveGold(socket.user.id);
+
         // maintenance / lock / slowmode enforcement
         if (maintenanceState.enabled && !requireMinRole(socket.user.role, "Moderator")) {
           socket.emit("command response", { ok: false, message: "Site is in maintenance mode" });
@@ -2287,6 +2384,7 @@ function doJoin(room, status) {
               ],
               function () {
                 awardMessageXp(socket.user.id);
+                awardMessageGold(socket.user.id);
                 const msg = {
                   messageId: this.lastID,
                   room,
@@ -2584,6 +2682,7 @@ function doJoin(room, status) {
     onlineState.delete(socket.user.id);
     msgRate.delete(socket.id);
     onlineXpTrack.delete(socket.user.id);
+    initGoldTick(socket.user.id);
 
     db.run("UPDATE users SET last_seen=? WHERE id=?", [Date.now(), socket.user.id]);
 
