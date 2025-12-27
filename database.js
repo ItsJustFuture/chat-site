@@ -165,6 +165,19 @@ db.serialize(() => {
   `);
 
   db.run(`
+    CREATE TABLE IF NOT EXISTS changelog_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      seq INTEGER NOT NULL UNIQUE,
+      title TEXT NOT NULL,
+      body TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      author_id INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_changelog_seq ON changelog_entries(seq)`);
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS dm_threads (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT,

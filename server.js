@@ -183,6 +183,19 @@ db.serialize(() => {
   `);
 
   db.run(`
+    CREATE TABLE IF NOT EXISTS changelog_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      seq INTEGER NOT NULL UNIQUE,
+      title TEXT NOT NULL,
+      body TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      author_id INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_changelog_seq ON changelog_entries(seq)`);
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS command_audit (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       executor_id INTEGER NOT NULL,
@@ -1210,6 +1223,75 @@ function requireLogin(req, res, next) {
   next();
 }
 
+const CHANGELOG_TITLE_MAX = 120;
+const CHANGELOG_BODY_MAX = 8000;
+
+function requireOwner(req, res, next) {
+  if (!req.session?.user?.id) return res.status(401).send("Not logged in");
+  if (!requireMinRole(req.session.user.role, "Owner")) return res.status(403).send("Forbidden");
+  next();
+}
+
+function toChangelogPayload(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    seq: row.seq,
+    title: row.title,
+    body: row.body || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    authorId: row.author_id,
+  };
+}
+
+function cleanChangelogInput(title, body) {
+  const cleanTitle = String(title || "").trim();
+  const cleanBody = String(body || "").trimEnd();
+  if (!cleanTitle) return { error: "Title is required" };
+  if (cleanTitle.length > CHANGELOG_TITLE_MAX) return { error: `Title must be at most ${CHANGELOG_TITLE_MAX} characters` };
+  if (cleanBody.length > CHANGELOG_BODY_MAX) return { error: `Body must be at most ${CHANGELOG_BODY_MAX} characters` };
+  return { title: cleanTitle, body: cleanBody };
+}
+
+function createChangelogEntry({ title, body, authorId }) {
+  return new Promise((resolve, reject) => {
+    db.serialize(() => {
+      db.run("BEGIN IMMEDIATE TRANSACTION", (beginErr) => {
+        if (beginErr) return reject(beginErr);
+
+        db.get("SELECT COALESCE(MAX(seq), 0) AS maxSeq FROM changelog_entries", [], (maxErr, row) => {
+          if (maxErr) return db.run("ROLLBACK", () => reject(maxErr));
+
+          const nextSeq = Number(row?.maxSeq || 0) + 1;
+          const now = Date.now();
+
+          db.run(
+            `INSERT INTO changelog_entries (seq, title, body, created_at, updated_at, author_id) VALUES (?, ?, ?, ?, ?, ?)`,
+            [nextSeq, title, body, now, now, authorId],
+            function (insErr) {
+              if (insErr) return db.run("ROLLBACK", () => reject(insErr));
+
+              db.run("COMMIT", (commitErr) => {
+                if (commitErr) return db.run("ROLLBACK", () => reject(commitErr));
+                resolve({
+                  id: this.lastID,
+                  seq: nextSeq,
+                  title,
+                  body,
+                  created_at: now,
+                  updated_at: now,
+                  author_id: authorId,
+                });
+              });
+            }
+          );
+        });
+      });
+    });
+  });
+}
+
 // ---- Auth routes
 app.post("/register", async (req, res) => {
   try {
@@ -1391,6 +1473,81 @@ app.post("/rooms", requireLogin, (req, res) => {
       }
     );
   });
+});
+
+// ---- Changelog API
+app.get("/api/changelog", requireLogin, async (req, res) => {
+  try {
+    const limit = clamp(req.query?.limit || 0, 0, 200);
+    const sql =
+      "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries ORDER BY seq DESC" +
+      (limit ? " LIMIT ?" : "");
+    const rows = await dbAllAsync(sql, limit ? [limit] : []);
+    return res.json(rows.map((r) => toChangelogPayload(r)));
+  } catch (err) {
+    return res.status(500).send("Failed to load changelog");
+  }
+});
+
+app.post("/api/changelog", requireOwner, async (req, res) => {
+  const cleaned = cleanChangelogInput(req.body?.title, req.body?.body);
+  if (cleaned.error) return res.status(400).send(cleaned.error);
+
+  try {
+    const entry = await createChangelogEntry({
+      title: cleaned.title,
+      body: cleaned.body,
+      authorId: req.session.user.id,
+    });
+    const payload = toChangelogPayload(entry);
+    io.emit("changelog updated");
+    return res.json(payload);
+  } catch (err) {
+    return res.status(500).send("Failed to create changelog entry");
+  }
+});
+
+app.put("/api/changelog/:id", requireOwner, async (req, res) => {
+  const id = Number(req.params?.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).send("Invalid entry id");
+
+  const cleaned = cleanChangelogInput(req.body?.title, req.body?.body);
+  if (cleaned.error) return res.status(400).send(cleaned.error);
+
+  try {
+    const now = Date.now();
+    const result = await dbRunAsync(
+      `UPDATE changelog_entries SET title=?, body=?, updated_at=? WHERE id=?`,
+      [cleaned.title, cleaned.body, now, id]
+    );
+    if (!result?.changes) return res.status(404).send("Entry not found");
+
+    const row = await dbGetAsync(
+      `SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries WHERE id=?`,
+      [id]
+    );
+    io.emit("changelog updated");
+    return res.json(toChangelogPayload(row));
+  } catch (err) {
+    return res.status(500).send("Failed to update changelog entry");
+  }
+});
+
+app.delete("/api/changelog/:id", requireOwner, async (req, res) => {
+  const id = Number(req.params?.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).send("Invalid entry id");
+
+  const confirmed = req.body?.confirm === true || req.body?.confirm === "true";
+  if (!confirmed) return res.status(400).send("Confirmation required");
+
+  try {
+    const result = await dbRunAsync(`DELETE FROM changelog_entries WHERE id=?`, [id]);
+    if (!result?.changes) return res.status(404).send("Entry not found");
+    io.emit("changelog updated");
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).send("Failed to delete changelog entry");
+  }
 });
 // ---- Profile routes
 app.get("/profile", requireLogin, (req, res) => {

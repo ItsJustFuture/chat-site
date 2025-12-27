@@ -43,12 +43,92 @@
 </div>
 
 <div class="chanHeader">
-  <div class="small">Rooms</div>
-  <button class="iconBtn smallIcon" id="addRoomBtn" type="button" title="Create room">＋</button>
+  <div class="small" id="chanHeaderTitle">Rooms</div>
+  <div class="row" style="gap:6px;">
+    <button class="iconBtn smallIcon" id="menuToggleBtn" type="button" title="Menu">☰</button>
+    <button class="iconBtn smallIcon" id="addRoomBtn" type="button" title="Create room">＋</button>
+  </div>
 </div>
 
-<div class="chanList" id="chanList">
-  <!-- will be rendered by app.js from /rooms -->
+<div class="roomsPanel" id="roomsPanel">
+  <div class="latestUpdate" id="latestUpdate">
+    <div class="latestUpdateTop">
+      <div class="latestUpdateHeading">
+        <div class="small muted">Latest update</div>
+        <div class="latestUpdateTitle" id="latestUpdateTitle">—</div>
+        <div class="small" id="latestUpdateDate"></div>
+      </div>
+      <button class="btn secondary" id="latestUpdateViewBtn" type="button">View</button>
+    </div>
+    <div class="latestUpdateBody" id="latestUpdateBody"></div>
+  </div>
+
+  <div class="chanList" id="chanList">
+    <!-- will be rendered by app.js from /rooms -->
+  </div>
+</div>
+
+<div class="menuPanel" id="menuPanel">
+  <div class="menuNav" id="menuNav">
+    <button class="menuTab active" data-menu-tab="changelog" type="button">Changelog</button>
+    <button class="menuTab" data-menu-tab="rules" type="button">Rules</button>
+    <button class="menuTab" data-menu-tab="faq" type="button">FAQ</button>
+    <button class="menuTab" data-menu-tab="credits" type="button">Credits</button>
+  </div>
+
+  <div class="menuContent">
+    <div class="menuSection" data-menu-section="changelog">
+      <div class="menuSectionHeader">
+        <div>
+          <div class="title">Changelog</div>
+          <div class="small muted">Newest updates appear first.</div>
+        </div>
+        <div class="menuActions" id="changelogActions">
+          <button class="btn" id="changelogNewBtn" type="button">New entry</button>
+        </div>
+      </div>
+
+      <div class="card" id="changelogEditor">
+        <div class="field">
+          <label for="changelogTitleInput">Title</label>
+          <input id="changelogTitleInput" maxlength="120" placeholder="What's new?">
+        </div>
+        <div class="field">
+          <label for="changelogBodyInput">Details</label>
+          <textarea id="changelogBodyInput" rows="4" maxlength="8000" placeholder="Describe the change..."></textarea>
+        </div>
+        <div class="row" style="align-items:center; gap:10px; flex-wrap:wrap;">
+          <button class="btn" id="changelogSaveBtn" type="button">Save</button>
+          <button class="btn secondary" id="changelogCancelBtn" type="button">Cancel</button>
+          <div class="msgline" id="changelogEditMsg"></div>
+        </div>
+      </div>
+
+      <div class="msgline" id="changelogMsg"></div>
+      <div class="changelogList" id="changelogList"></div>
+    </div>
+
+    <div class="menuSection" data-menu-section="rules">
+      <div class="menuSectionHeader">
+        <div class="title">Rules</div>
+      </div>
+      <div class="card muted">Coming soon.</div>
+    </div>
+
+    <div class="menuSection" data-menu-section="faq">
+      <div class="menuSectionHeader">
+        <div class="title">FAQ</div>
+      </div>
+      <div class="card muted">Coming soon.</div>
+    </div>
+
+    <div class="menuSection" data-menu-section="credits">
+      <div class="menuSectionHeader">
+        <div class="title">Credits</div>
+      </div>
+      <div class="card muted">Coming soon.</div>
+    </div>
+  </div>
 </div>
 
 <div class="commandPopup" id="commandPopup" aria-live="polite">
