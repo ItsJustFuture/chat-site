@@ -5,6 +5,8 @@ let socket = null;
 let me = null;
 let progression = { gold: 0, xp: 0, level: 1, xpIntoLevel: 0, xpForNextLevel: 100 };
 let currentRoom = "main";
+function displayRoomName(room){ return room==="diceroom" ? "Dice Room" : room; }
+
 let lastUsers = [];
 const reactionsCache = Object.create(null);
 const msgIndex = [];
@@ -1314,7 +1316,13 @@ dmUserBtn?.addEventListener("click", () => {
 });
 
 // upload button icon -> open file picker
-pickFileBtn?.addEventListener("click", () => fileInput.click());
+pickFileBtn?.addEventListener("click", () => {
+  if (currentRoom === "diceroom") {
+    socket?.emit("dice:roll");
+  } else {
+    fileInput.click();
+  }
+});
 
 // upload preview
 function showUploadPreview(file){
@@ -1429,9 +1437,20 @@ modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
 // rooms
 function setActiveRoom(room){
   currentRoom = room;
-  nowRoom.textContent = room;
-  roomTitle.textContent = room;
-  msgInput.placeholder = `Message ${room}`;
+  nowRoom.textContent = displayRoomName(room);
+  roomTitle.textContent = displayRoomName(room);
+  msgInput.placeholder = `Message ${displayRoomName(room)}`;
+
+  // Dice Room: swap upload button to dice roll
+  if (pickFileBtn) {
+    if (room === "diceroom") {
+      pickFileBtn.textContent = "🎲";
+      pickFileBtn.title = "Roll Dice";
+    } else {
+      pickFileBtn.textContent = "📷";
+      pickFileBtn.title = "Upload";
+    }
+  }
   document.querySelectorAll(".chan").forEach(el=>{
     el.classList.toggle("active", el.dataset.room === room);
   });
@@ -1461,7 +1480,7 @@ function renderRoomsList(rooms){
     const div = document.createElement("div");
     div.className = "chan" + (r === currentRoom ? " active" : "");
     div.dataset.room = r;
-    div.textContent = r; // no '#'
+    div.textContent = displayRoomName(r); // no '#'
     chanList.appendChild(div);
   }
 }
@@ -2207,6 +2226,63 @@ socket.on("disconnect", (reason) => {
   updateRoomControlsVisibility();
 
   socket.on("system", addSystem);
+
+  // Dice Room UI effects
+  const diceOverlay = document.createElement("div");
+  diceOverlay.id = "diceOverlay";
+  diceOverlay.style.display = "none";
+  const confettiLayer = document.createElement("div");
+  confettiLayer.id = "confettiLayer";
+  confettiLayer.style.display = "none";
+
+  // attach overlays to chat area
+  const chatMain = document.querySelector("main.chat") || document.getElementById("chatMain") || document.body;
+  chatMain.style.position = chatMain.style.position || "relative";
+  chatMain.appendChild(diceOverlay);
+  chatMain.appendChild(confettiLayer);
+
+  function showDiceAnimation(finalValue, won){
+    const faces = ["⚀","⚁","⚂","⚃","⚄","⚅"];
+    diceOverlay.style.display = "flex";
+    diceOverlay.textContent = "🎲";
+    let t = 0;
+    const iv = setInterval(()=>{
+      diceOverlay.textContent = faces[Math.floor(Math.random()*6)];
+      t += 1;
+      if (t >= 10){
+        clearInterval(iv);
+        diceOverlay.textContent = faces[finalValue-1] || "🎲";
+        setTimeout(()=>{ diceOverlay.style.display="none"; }, 350);
+        if (won) popConfetti();
+      }
+    }, 90);
+  }
+
+  function popConfetti(){
+    confettiLayer.innerHTML = "";
+    confettiLayer.style.display = "block";
+    for (let i=0;i<22;i++){
+      const s=document.createElement("span");
+      s.className="confetti";
+      s.style.left = (10 + Math.random()*80) + "%";
+      s.style.animationDelay = (Math.random()*0.15) + "s";
+      s.style.transform = `rotate(${Math.random()*360}deg)`;
+      confettiLayer.appendChild(s);
+    }
+    setTimeout(()=>{ confettiLayer.style.display="none"; confettiLayer.innerHTML=""; }, 900);
+  }
+
+  socket.on("dice:result", ({value, won}) => {
+    showDiceAnimation(value, won);
+    // refresh gold display if you already have a refresh_toggle function
+    if (typeof refreshMe === "function") refreshMe();
+  });
+  socket.on("dice:error", (msg)=> addSystem(msg));
+  socket.on("dice:rolled", ({value, won}) => {
+    // show animation for other rollers too (nice-to-have)
+    showDiceAnimation(value, won);
+  });
+
   socket.on("command response", handleCommandResponse);
   socket.on("user list", (users)=>renderMembers(users));
   socket.on("typing update", (names)=>{

@@ -101,7 +101,7 @@ db.serialize(() => {
   addColumnIfMissing("rooms", "maintenance_mode", "maintenance_mode INTEGER NOT NULL DEFAULT 0");
 
   // seed default rooms
-  const seedRooms = ["main", "nsfw", "music"];
+  const seedRooms = ["main", "nsfw", "music", "diceroom"];
   for (const r of seedRooms) {
     db.run(`INSERT OR IGNORE INTO rooms (name, created_by, created_at) VALUES (?, NULL, ?)`, [r, Date.now()]);
   }
@@ -126,6 +126,7 @@ db.serialize(() => {
     ["lastGoldTickAt", "lastGoldTickAt INTEGER"],
     ["lastMessageGoldAt", "lastMessageGoldAt INTEGER"],
     ["lastDailyLoginGoldAt", "lastDailyLoginGoldAt INTEGER"],
+    ["lastDiceRollAt", "lastDiceRollAt INTEGER"],
   ];
   for (const [col, ddl] of userColumns) addColumnIfMissing("users", col, ddl);
 
@@ -389,19 +390,7 @@ app.use(sessionMiddleware);
 // ---- Static
 app.use("/uploads", express.static(UPLOADS_DIR));
 app.use("/avatars", express.static(AVATARS_DIR));
-// IMPORTANT: avoid stale-cached frontend assets causing "UI is broken" after deploy.
-// We disable caching for html/js/css so clients always receive the latest UI+handlers.
-app.use(
-  express.static(PUBLIC_DIR, {
-    etag: false,
-    maxAge: 0,
-    setHeaders(res, filePath) {
-      if (/(\.html|\.js|\.css)$/i.test(filePath)) {
-        res.setHeader("Cache-Control", "no-store");
-      }
-    },
-  })
-);
+app.use(express.static(PUBLIC_DIR));
 
 // ---- Helpers
 function normalizeUsername(u) {
@@ -2140,6 +2129,62 @@ socket.on("join room", ({ room, status }) => {
     doJoin(finalRoom, status);
   });
 });
+
+  // Dice Room mini-game
+  socket.on("dice:roll", () => {
+    const room = socket.currentRoom;
+    if (room !== "diceroom") {
+      socket.emit("dice:error", "You can only roll dice in Dice Room.");
+      return;
+    }
+
+    const now = Date.now();
+    db.get(`SELECT gold, lastDiceRollAt FROM users WHERE id=?`, [socket.user.id], (err, row) => {
+      if (err || !row) {
+        socket.emit("dice:error", "Could not roll dice right now.");
+        return;
+      }
+
+      const last = Number(row.lastDiceRollAt || 0);
+      if (now - last < 2000) {
+        socket.emit("dice:error", `Slow down! Try again in ${Math.ceil((2000 - (now - last)) / 100) / 10}s.`);
+        return;
+      }
+
+      const gold = Number(row.gold || 0);
+      if (gold < 50) {
+        socket.emit("dice:error", "You need at least 50 Gold to roll.");
+        return;
+      }
+
+      const value = Math.floor(Math.random() * 6) + 1; // 1..6
+      const won = value === 6;
+      const deltaGold = won ? 500 : -50;
+
+      db.run(
+        `UPDATE users SET gold = MAX(0, gold + ?), lastDiceRollAt=? WHERE id=?`,
+        [deltaGold, now, socket.user.id],
+        (uerr) => {
+          if (uerr) {
+            socket.emit("dice:error", "Could not apply dice result.");
+            return;
+          }
+
+          // Inform roller (for animation + optional UI refresh)
+          socket.emit("dice:result", { value, won, deltaGold });
+
+          // Broadcast a centered non-bubble system message to the room
+          const msg = won
+            ? `${socket.user.username} rolled a 6 🎉 (+500 Gold!)`
+            : `${socket.user.username} rolled a ${value} 🎲 (-50 Gold!)`;
+          io.to(room).emit("system", msg);
+
+          // Optional event for others to animate too
+          io.to(room).emit("dice:rolled", { userId: socket.user.id, username: socket.user.username, value, won });
+        }
+      );
+    });
+  });
 
 function doJoin(room, status) {
   // leave old room
