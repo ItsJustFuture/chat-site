@@ -897,6 +897,22 @@ app.post("/dm/thread", requireLogin, (req, res) => {
   });
 });
 
+app.delete("/dm/thread/:id/messages", requireLogin, (req, res) => {
+  const tid = Number(req.params.id);
+  if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
+
+  loadThreadForUser(tid, req.session.user.id, (err) => {
+    if (err) return res.status(403).send("Not allowed");
+
+    db.run("DELETE FROM dm_messages WHERE thread_id = ?", [tid], (delErr) => {
+      if (delErr) return res.status(500).send("Failed to delete history");
+
+      io.to(`dm:${tid}`).emit("dm history cleared", { threadId: tid });
+      res.json({ ok: true });
+    });
+  });
+});
+
 // ---- Real-time presence tracking
 const onlineState = new Map(); // userId -> { room, status }
 const socketIdByUserId = new Map(); // userId -> socket.id
