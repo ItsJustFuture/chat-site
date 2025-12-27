@@ -212,14 +212,27 @@ function bytesToNice(n){
 const ROLES = ["Guest","User","VIP","Moderator","Admin","Co-owner","Owner"];
 function roleRank(role){ const i=ROLES.indexOf(role); return i===-1?1:i; }
 
+const STATUS_ALIASES = {
+  "Do Not Disturb": "DnD",
+  "Listening to Music": "Music",
+  "Looking to Chat": "Chatting",
+  "Invisible": "Lurking",
+};
+function normalizeStatusLabel(status, fallback=""){
+  const raw = String(status || "").trim();
+  if(!raw) return fallback;
+  return STATUS_ALIASES[raw] || raw;
+}
+
 function statusDotColor(status){
-  switch(status){
+  const normalized = normalizeStatusLabel(status, "Online");
+  switch(normalized){
     case "Online": return "var(--ok)";
     case "Away": return "var(--warn)";
     case "Busy": return "var(--danger)";
-    case "Do Not Disturb": return "var(--danger)";
+    case "DnD": return "var(--danger)";
     case "Idle": return "var(--gray)";
-    case "Invisible": return "var(--gray)";
+    case "Lurking": return "var(--gray)";
     default: return "var(--accent)";
   }
 }
@@ -629,7 +642,8 @@ function renderMembers(users){
 
     const dot=document.createElement("div");
     dot.className="dot";
-    dot.style.background=statusDotColor(u.status);
+    const statusLabel = normalizeStatusLabel(u.status, "Online");
+    dot.style.background=statusDotColor(statusLabel);
 
     const meta=document.createElement("div");
     meta.className="mMeta";
@@ -640,7 +654,7 @@ function renderMembers(users){
 
     const sub=document.createElement("div");
     sub.className="mSub";
-    sub.textContent=`${u.role} • ${u.status}${u.mood?(" • "+u.mood):""}`;
+    sub.textContent=`${u.role} • ${statusLabel}${u.mood?(" • "+u.mood):""}`;
 
     meta.appendChild(name);
     meta.appendChild(sub);
@@ -1128,7 +1142,7 @@ function joinRoom(room){
   room = sanitizeRoomClient(room) || "main";
   setActiveRoom(room);
   clearMsgs();
-  socket?.emit("join room", { room, status: statusSelect.value || "Online" });
+  socket?.emit("join room", { room, status: normalizeStatusLabel(statusSelect.value, "Online") });
   closeDrawers();
 }
 chanList.addEventListener("click", (e)=>{
@@ -1236,13 +1250,15 @@ let idleTimer=null;
 let lastNonIdleStatus="Online";
 function resetIdle(){
   if(statusSelect.value==="Idle"){
-    statusSelect.value=lastNonIdleStatus;
-    socket?.emit("status change",{status:statusSelect.value});
+    const restoredStatus = normalizeStatusLabel(lastNonIdleStatus, "Online");
+    statusSelect.value=restoredStatus;
+    socket?.emit("status change",{status:restoredStatus});
+    meStatusText.textContent = restoredStatus;
   }
   clearTimeout(idleTimer);
   idleTimer=setTimeout(()=>{
     if(statusSelect.value!=="Idle"){
-      lastNonIdleStatus=statusSelect.value;
+      lastNonIdleStatus=normalizeStatusLabel(statusSelect.value, "Online");
       statusSelect.value="Idle";
       socket?.emit("status change",{status:"Idle"});
       meStatusText.textContent="Idle";
@@ -1254,9 +1270,11 @@ function resetIdle(){
 });
 
 statusSelect.addEventListener("change", ()=>{
-  if(statusSelect.value!=="Idle") lastNonIdleStatus=statusSelect.value;
-  socket?.emit("status change", {status: statusSelect.value});
-  meStatusText.textContent = statusSelect.value;
+  const selected = normalizeStatusLabel(statusSelect.value, "Online");
+  statusSelect.value = selected;
+  if(selected!=="Idle") lastNonIdleStatus=selected;
+  socket?.emit("status change", {status: selected});
+  meStatusText.textContent = selected;
   resetIdle();
 });
 
@@ -1325,7 +1343,8 @@ function fillProfileUI(p){
   infoCreated.textContent = fmtCreated(p.created_at);
   infoLastSeen.textContent = p.last_seen ? fmtAbs(p.last_seen) : "—";
   infoRoom.textContent = p.current_room ? `#${p.current_room}` : (p.last_room ? `#${p.last_room}` : "—");
-  infoStatus.textContent = p.last_status || "—";
+  const statusLabel = normalizeStatusLabel(p.last_status, "");
+  infoStatus.textContent = statusLabel || "—";
 
   bioRender.innerHTML = p.bio ? renderBBCode(p.bio) : "(no bio)";
 }
@@ -1380,7 +1399,7 @@ saveProfileBtn.addEventListener("click", async ()=>{
   }
   profileMsg.textContent="Saved!";
   await loadMyProfile();
-  socket?.emit("join room", { room: currentRoom, status: statusSelect.value || "Online" });
+  socket?.emit("join room", { room: currentRoom, status: normalizeStatusLabel(statusSelect.value, "Online") });
   await openMyProfile();
 });
 refreshProfileBtn.addEventListener("click", openMyProfile);
@@ -1696,7 +1715,7 @@ if(addRoomBtn){
   });
 
   joinRoom("main"); // main will exist from seeded rooms
-  meStatusText.textContent = statusSelect.value || "Online";
+  meStatusText.textContent = normalizeStatusLabel(statusSelect.value, "Online");
   resetIdle();
 
   // hash profile links
