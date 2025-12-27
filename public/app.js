@@ -2178,6 +2178,13 @@ async function startApp(){
   updateRoomControlsVisibility();
 
   socket = io();
+  socket.on("connect_error", (err) => {
+  addSystem(`⚠️ Realtime connection failed: ${err?.message || err}`);
+});
+
+socket.on("disconnect", (reason) => {
+  addSystem(`⚠️ Disconnected: ${reason}`);
+});
   socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   socket.on("changelog updated", ()=>{
     changelogDirty = true;
