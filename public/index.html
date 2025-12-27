@@ -218,269 +218,271 @@
         <button class="btn secondary" id="closeModalBtn" type="button">Close</button>
       </div>
 
-      <div class="small" id="modalMeta"></div>
+      <div class="modalBody">
+        <div class="small" id="modalMeta"></div>
 
-      <div class="tabs" id="tabs">
-        <div class="tab active" data-tab="info" id="tabInfo">Info</div>
-        <div class="tab" data-tab="about" id="tabAbout">About</div>
-        <div class="tab" data-tab="customize" id="tabCustomize">Customization</div>
-        <div class="tab" data-tab="moderation" id="tabModeration" style="display:none;">Moderation</div>
-      </div>
+        <div class="tabs" id="tabs">
+          <div class="tab active" data-tab="info" id="tabInfo">Info</div>
+          <div class="tab" data-tab="about" id="tabAbout">About</div>
+          <div class="tab" data-tab="customize" id="tabCustomize">Customization</div>
+          <div class="tab" data-tab="moderation" id="tabModeration" style="display:none;">Moderation</div>
+        </div>
 
-      <div id="viewInfo">
-        <div class="modalGrid">
-          <div>
-            <div class="pAvatar" id="modalAvatar"></div>
-          </div>
-
-          <div>
-            <div class="row" style="align-items:center;">
-              <div style="font-weight:900; font-size:16px;" id="modalName"></div>
-              <div class="badge" id="modalRole"></div>
-            </div>
-            <div class="small" id="modalMood"></div>
-
-            <div class="sectionTitle">Details</div>
-            <div class="infoGrid">
-              <div class="infoItem"><div class="k">Age</div><div class="v" id="infoAge">—</div></div>
-              <div class="infoItem"><div class="k">Gender</div><div class="v" id="infoGender">—</div></div>
-              <div class="infoItem"><div class="k">Created</div><div class="v" id="infoCreated">—</div></div>
-              <div class="infoItem"><div class="k">Last seen</div><div class="v" id="infoLastSeen">—</div></div>
-              <div class="infoItem"><div class="k">Current room</div><div class="v" id="infoRoom">—</div></div>
-              <div class="infoItem"><div class="k">Status</div><div class="v" id="infoStatus">—</div></div>
-            </div>
-
-            <div class="sectionTitle">Account Level</div>
-            <div class="panelBox" id="levelPanel">
-              <div class="row" style="align-items:center; justify-content:space-between;">
-                <div class="badge" id="levelBadge">Level 1</div>
-                <div class="small" id="xpText">XP: 0 / 100</div>
+        <div class="modalContent" id="modalContent">
+          <div id="viewInfo">
+            <div class="modalGrid">
+              <div>
+                <div class="pAvatar" id="modalAvatar"></div>
               </div>
-              <div class="progressShell">
-                <div class="progressFill" id="xpProgress"></div>
-              </div>
-              <div class="small" id="xpNote">XP is only visible to you.</div>
-            </div>
 
-            <div class="row" style="gap:8px; margin-top:10px; flex-wrap:wrap;">
-              <button class="btn secondary" id="dmUserBtn" type="button">Message</button>
-              <button class="btn secondary" id="copyUsernameBtn" type="button">Copy username</button>
-              <button class="btn secondary" id="copyProfileLinkBtn" type="button">Copy profile link</button>
-            </div>
-            <div class="msgline" id="mediaMsg"></div>
-
-            <div id="myProfileEdit" style="display:none; margin-top:12px;">
-              <div class="sectionTitle">Edit my profile</div>
-              <div class="panelBox">
-                <div class="field">
-                  <label>Avatar</label>
-                  <input id="avatarFile" type="file" accept="image/*">
-                  <div class="small">Max 2MB. PNG/JPG/WEBP/GIF.</div>
-                </div>
-
-                <div class="field">
-                  <label>Mood</label>
-                  <input id="editMood" placeholder="e.g. chilling">
-                </div>
-
-                <div class="row">
-                  <div class="field" style="flex:1;">
-                    <label>Age (18+)</label>
-                    <input id="editAge" type="number" min="18" max="120" placeholder="18+">
-                  </div>
-                  <div class="field" style="flex:1;">
-                    <label>Gender</label>
-                    <select id="editGender">
-                      <option value="">Prefer not to say</option>
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
-                      <option value="Non-binary">Non-binary</option>
-                      <option value="Transgender">Transgender</option>
-                      <option value="Genderfluid">Genderfluid</option>
-                      <option value="Agender">Agender</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div class="field">
-                  <label>Bio (BBCode supported)</label>
-                  <textarea id="editBio" placeholder="[b]bold[/b] [i]italics[/i] [url=https://...]link[/url] [quote]...[/quote]"></textarea>
-                </div>
-
-                <div class="row">
-                  <button class="btn" id="saveProfileBtn" type="button">Save</button>
-                  <button class="btn secondary" id="refreshProfileBtn" type="button">Refresh</button>
-                  <button class="btn danger" id="logoutBtn" type="button">Logout</button>
-                </div>
-
-                <div class="msgline" id="profileMsg"></div>
-              </div>
-            </div>
-
-            <div id="memberModTools" style="display:none; margin-top:12px;">
-              <div class="sectionTitle">Moderator tools</div>
-              <div class="panelBox">
+              <div>
                 <div class="row" style="align-items:center;">
-                  <input id="quickReason" placeholder="Reason (required)" style="flex:1; min-width:220px;">
-                  <input id="quickMuteMins" type="number" min="1" max="1440" placeholder="mute mins" style="width:120px;">
-                  <input id="quickBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:160px;">
+                  <div style="font-weight:900; font-size:16px;" id="modalName"></div>
+                  <div class="badge" id="modalRole"></div>
                 </div>
-                <div class="row" style="margin-top:8px;">
-                  <button class="btn secondary" id="quickKickBtn" type="button">Kick</button>
-                  <button class="btn secondary" id="quickMuteBtn" type="button">Mute</button>
-                  <button class="btn danger" id="quickBanBtn" type="button">Ban</button>
+                <div class="small" id="modalMood"></div>
+
+                <div class="sectionTitle">Details</div>
+                <div class="infoGrid">
+                  <div class="infoItem"><div class="k">Age</div><div class="v" id="infoAge">—</div></div>
+                  <div class="infoItem"><div class="k">Gender</div><div class="v" id="infoGender">—</div></div>
+                  <div class="infoItem"><div class="k">Created</div><div class="v" id="infoCreated">—</div></div>
+                  <div class="infoItem"><div class="k">Last seen</div><div class="v" id="infoLastSeen">—</div></div>
+                  <div class="infoItem"><div class="k">Current room</div><div class="v" id="infoRoom">—</div></div>
+                  <div class="infoItem"><div class="k">Status</div><div class="v" id="infoStatus">—</div></div>
                 </div>
-                <div class="msgline" id="quickModMsg"></div>
+
+                <div class="sectionTitle">Account Level</div>
+                <div class="panelBox" id="levelPanel">
+                  <div class="row" style="align-items:center; justify-content:space-between;">
+                    <div class="badge" id="levelBadge">Level 1</div>
+                    <div class="small" id="xpText">XP: 0 / 100</div>
+                  </div>
+                  <div class="progressShell">
+                    <div class="progressFill" id="xpProgress"></div>
+                  </div>
+                  <div class="small" id="xpNote">XP is only visible to you.</div>
+                </div>
+
+                <div class="row" style="gap:8px; margin-top:10px; flex-wrap:wrap;">
+                  <button class="btn secondary" id="dmUserBtn" type="button">Message</button>
+                  <button class="btn secondary" id="copyUsernameBtn" type="button">Copy username</button>
+                  <button class="btn secondary" id="copyProfileLinkBtn" type="button">Copy profile link</button>
+                </div>
+                <div class="msgline" id="mediaMsg"></div>
+
+                <div id="myProfileEdit" style="display:none; margin-top:12px;">
+                  <div class="sectionTitle">Edit my profile</div>
+                  <div class="panelBox">
+                    <div class="field">
+                      <label>Avatar</label>
+                      <input id="avatarFile" type="file" accept="image/*">
+                      <div class="small">Max 2MB. PNG/JPG/WEBP/GIF.</div>
+                    </div>
+
+                    <div class="field">
+                      <label>Mood</label>
+                      <input id="editMood" placeholder="e.g. chilling">
+                    </div>
+
+                    <div class="row">
+                      <div class="field" style="flex:1;">
+                        <label>Age (18+)</label>
+                        <input id="editAge" type="number" min="18" max="120" placeholder="18+">
+                      </div>
+                      <div class="field" style="flex:1;">
+                        <label>Gender</label>
+                        <select id="editGender">
+                          <option value="">Prefer not to say</option>
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                          <option value="Non-binary">Non-binary</option>
+                          <option value="Transgender">Transgender</option>
+                          <option value="Genderfluid">Genderfluid</option>
+                          <option value="Agender">Agender</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="field">
+                      <label>Bio (BBCode supported)</label>
+                      <textarea id="editBio" placeholder="[b]bold[/b] [i]italics[/i] [url=https://...]link[/url] [quote]...[/quote]"></textarea>
+                    </div>
+
+                    <div class="row">
+                      <button class="btn" id="saveProfileBtn" type="button">Save</button>
+                      <button class="btn secondary" id="refreshProfileBtn" type="button">Refresh</button>
+                      <button class="btn danger" id="logoutBtn" type="button">Logout</button>
+                    </div>
+
+                    <div class="msgline" id="profileMsg"></div>
+                  </div>
+                </div>
+
+                <div id="memberModTools" style="display:none; margin-top:12px;">
+                  <div class="sectionTitle">Moderator tools</div>
+                  <div class="panelBox">
+                    <div class="row" style="align-items:center;">
+                      <input id="quickReason" placeholder="Reason (required)" style="flex:1; min-width:220px;">
+                      <input id="quickMuteMins" type="number" min="1" max="1440" placeholder="mute mins" style="width:120px;">
+                      <input id="quickBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:160px;">
+                    </div>
+                    <div class="row" style="margin-top:8px;">
+                      <button class="btn secondary" id="quickKickBtn" type="button">Kick</button>
+                      <button class="btn secondary" id="quickMuteBtn" type="button">Mute</button>
+                      <button class="btn danger" id="quickBanBtn" type="button">Ban</button>
+                    </div>
+                    <div class="msgline" id="quickModMsg"></div>
+                  </div>
+                </div>
+
               </div>
             </div>
-
-          </div>
-        </div>
-      </div>
-
-      <div id="viewAbout" style="display:none;">
-        <div class="sectionTitle">Bio</div>
-        <div class="bioRender" id="bioRender">(no bio)</div>
-        <div class="small" style="margin-top:8px;">
-          BBCode: [b] [i] [u] [s] [quote] [code] [url=] [img]
-        </div>
-      </div>
-
-      <div id="viewCustomize" style="display:none;">
-        <div class="sectionTitle">Customization</div>
-        <div class="panelBox customizeShell">
-          <div class="customNav" id="customNav">
-            <button class="customNavBtn active" data-section="themes" type="button">Themes</button>
-            <button class="customNavBtn" data-section="badges" type="button">Badges</button>
           </div>
 
-          <div class="customContent">
-            <div class="customPanel active" id="customPanelThemes">
-              <div class="themeFilters">
-                <button class="pillBtn active" data-theme-filter="all" type="button">All</button>
-                <button class="pillBtn" data-theme-filter="dark" type="button">Dark</button>
-                <button class="pillBtn" data-theme-filter="light" type="button">Light</button>
-              </div>
-              <div class="themeGrid" id="themeGrid"></div>
-              <div class="msgline" id="themeMsg"></div>
-            </div>
-
-            <div class="customPanel" id="customPanelBadges">
-              <div class="field">
-                <label>Direct message badge color</label>
-                <div class="colorInputRow">
-                  <input id="directBadgeColor" type="color" aria-label="Direct message badge color">
-                  <input id="directBadgeColorText" type="text" placeholder="#ed4245 or red" aria-label="Direct message badge color text">
-                </div>
-              </div>
-
-              <div class="field">
-                <label>Group DM badge color</label>
-                <div class="colorInputRow">
-                  <input id="groupBadgeColor" type="color" aria-label="Group DM badge color">
-                  <input id="groupBadgeColorText" type="text" placeholder="#5865f2 or blue" aria-label="Group DM badge color text">
-                </div>
-              </div>
-
-              <div class="row" style="margin-top:6px;">
-                <button class="btn" id="saveBadgePrefsBtn" type="button">Save badge colors</button>
-              </div>
-
-              <div class="msgline" id="customizeMsg"></div>
+          <div id="viewAbout" style="display:none;">
+            <div class="sectionTitle">Bio</div>
+            <div class="bioRender" id="bioRender">(no bio)</div>
+            <div class="small" style="margin-top:8px;">
+              BBCode: [b] [i] [u] [s] [quote] [code] [url=] [img]
             </div>
           </div>
+
+          <div id="viewCustomize" style="display:none;">
+            <div class="sectionTitle">Customization</div>
+            <div class="panelBox customizeShell">
+              <div class="customNav" id="customNav">
+                <button class="customNavBtn active" data-section="themes" type="button">Themes</button>
+                <button class="customNavBtn" data-section="badges" type="button">Badges</button>
+              </div>
+
+              <div class="customContent">
+                <div class="customPanel active" id="customPanelThemes">
+                  <div class="themeFilters">
+                    <button class="pillBtn active" data-theme-filter="all" type="button">All</button>
+                    <button class="pillBtn" data-theme-filter="dark" type="button">Dark</button>
+                    <button class="pillBtn" data-theme-filter="light" type="button">Light</button>
+                  </div>
+                  <div class="themeGrid" id="themeGrid"></div>
+                  <div class="msgline" id="themeMsg"></div>
+                </div>
+
+                <div class="customPanel" id="customPanelBadges">
+                  <div class="field">
+                    <label>Direct message badge color</label>
+                    <div class="colorInputRow">
+                      <input id="directBadgeColor" type="color" aria-label="Direct message badge color">
+                      <input id="directBadgeColorText" type="text" placeholder="#ed4245 or red" aria-label="Direct message badge color text">
+                    </div>
+                  </div>
+
+                  <div class="field">
+                    <label>Group DM badge color</label>
+                    <div class="colorInputRow">
+                      <input id="groupBadgeColor" type="color" aria-label="Group DM badge color">
+                      <input id="groupBadgeColorText" type="text" placeholder="#5865f2 or blue" aria-label="Group DM badge color text">
+                    </div>
+                  </div>
+
+                  <div class="row" style="margin-top:6px;">
+                    <button class="btn" id="saveBadgePrefsBtn" type="button">Save badge colors</button>
+                  </div>
+
+                  <div class="msgline" id="customizeMsg"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="viewModeration" style="display:none;">
+            <div class="sectionTitle">Moderation panel</div>
+
+            <div class="panelBox">
+              <div class="row" style="align-items:center;">
+                <input id="modUser" placeholder="Target username" style="flex:1; min-width:220px;">
+                <input id="modReason" placeholder="Reason (required)" style="flex:2; min-width:240px;">
+              </div>
+
+              <div class="row" style="align-items:center; margin-top:8px;">
+                <input id="modMuteMins" type="number" min="1" max="1440" placeholder="mute mins" style="width:140px;">
+                <input id="modBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:190px;">
+
+                <button class="btn secondary" id="modKickBtn" type="button">Kick</button>
+                <button class="btn secondary" id="modMuteBtn" type="button">Mute</button>
+                <button class="btn danger" id="modBanBtn" type="button">Ban</button>
+
+                <button class="btn secondary" id="modUnmuteBtn" type="button">Unmute</button>
+                <button class="btn secondary" id="modUnbanBtn" type="button">Unban</button>
+                <button class="btn secondary" id="modWarnBtn" type="button">Warn</button>
+
+                <button class="btn secondary" id="modOpenProfileBtn" type="button">View profile</button>
+              </div>
+
+              <div class="row" style="align-items:center; margin-top:10px;">
+                <select id="modSetRole" style="width:220px;">
+                  <option value="">Set role (Owner only)</option>
+                  <option>Owner</option>
+                  <option>Co-owner</option>
+                  <option>Admin</option>
+                  <option>Moderator</option>
+                  <option>VIP</option>
+                  <option>User</option>
+                  <option>Guest</option>
+                </select>
+                <button class="btn secondary" id="modSetRoleBtn" type="button">Apply role</button>
+              </div>
+
+              <div class="msgline" id="modMsg"></div>
+            </div>
+
+            <div class="sectionTitle">Moderation logs</div>
+            <div class="panelBox">
+              <div class="row" style="align-items:center;">
+                <input id="logUser" placeholder="Filter by user (actor or target)" style="flex:1; min-width:220px;">
+                <select id="logAction" style="width:220px;">
+                  <option value="">All actions</option>
+                  <option value="KICK">KICK</option>
+                  <option value="MUTE">MUTE</option>
+                  <option value="BAN">BAN</option>
+                  <option value="DELETE_MESSAGE">DELETE_MESSAGE</option>
+                  <option value="UNMUTE">UNMUTE</option>
+                  <option value="UNBAN">UNBAN</option>
+                  <option value="WARN">WARN</option>
+                  <option value="SET_ROLE">SET_ROLE</option>
+                </select>
+                <select id="logLimit" style="width:160px;">
+                  <option value="25">Last 25</option>
+                  <option value="50" selected>Last 50</option>
+                  <option value="100">Last 100</option>
+                  <option value="200">Last 200</option>
+                </select>
+                <button class="btn secondary" id="refreshLogsBtn" type="button">Refresh</button>
+              </div>
+
+              <div class="msgline" id="logsMsg"></div>
+
+              <div style="overflow:auto; margin-top:8px;">
+                <table class="logTable">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Actor</th>
+                      <th>Action</th>
+                      <th>Target</th>
+                      <th>Room</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody id="logsBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-
-      <div id="viewModeration" style="display:none;">
-        <div class="sectionTitle">Moderation panel</div>
-
-        <div class="panelBox">
-          <div class="row" style="align-items:center;">
-            <input id="modUser" placeholder="Target username" style="flex:1; min-width:220px;">
-            <input id="modReason" placeholder="Reason (required)" style="flex:2; min-width:240px;">
-          </div>
-
-          <div class="row" style="align-items:center; margin-top:8px;">
-            <input id="modMuteMins" type="number" min="1" max="1440" placeholder="mute mins" style="width:140px;">
-            <input id="modBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:190px;">
-
-            <button class="btn secondary" id="modKickBtn" type="button">Kick</button>
-            <button class="btn secondary" id="modMuteBtn" type="button">Mute</button>
-            <button class="btn danger" id="modBanBtn" type="button">Ban</button>
-
-            <button class="btn secondary" id="modUnmuteBtn" type="button">Unmute</button>
-            <button class="btn secondary" id="modUnbanBtn" type="button">Unban</button>
-            <button class="btn secondary" id="modWarnBtn" type="button">Warn</button>
-
-            <button class="btn secondary" id="modOpenProfileBtn" type="button">View profile</button>
-          </div>
-
-          <div class="row" style="align-items:center; margin-top:10px;">
-            <select id="modSetRole" style="width:220px;">
-              <option value="">Set role (Owner only)</option>
-              <option>Owner</option>
-              <option>Co-owner</option>
-              <option>Admin</option>
-              <option>Moderator</option>
-              <option>VIP</option>
-              <option>User</option>
-              <option>Guest</option>
-            </select>
-            <button class="btn secondary" id="modSetRoleBtn" type="button">Apply role</button>
-          </div>
-
-          <div class="msgline" id="modMsg"></div>
-        </div>
-
-        <div class="sectionTitle">Moderation logs</div>
-        <div class="panelBox">
-          <div class="row" style="align-items:center;">
-            <input id="logUser" placeholder="Filter by user (actor or target)" style="flex:1; min-width:220px;">
-            <select id="logAction" style="width:220px;">
-              <option value="">All actions</option>
-              <option value="KICK">KICK</option>
-              <option value="MUTE">MUTE</option>
-              <option value="BAN">BAN</option>
-              <option value="DELETE_MESSAGE">DELETE_MESSAGE</option>
-              <option value="UNMUTE">UNMUTE</option>
-              <option value="UNBAN">UNBAN</option>
-              <option value="WARN">WARN</option>
-              <option value="SET_ROLE">SET_ROLE</option>
-            </select>
-            <select id="logLimit" style="width:160px;">
-              <option value="25">Last 25</option>
-              <option value="50" selected>Last 50</option>
-              <option value="100">Last 100</option>
-              <option value="200">Last 200</option>
-            </select>
-            <button class="btn secondary" id="refreshLogsBtn" type="button">Refresh</button>
-          </div>
-
-          <div class="msgline" id="logsMsg"></div>
-
-          <div style="overflow:auto; margin-top:8px;">
-            <table class="logTable">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Actor</th>
-                  <th>Action</th>
-                  <th>Target</th>
-                  <th>Room</th>
-                  <th>Details</th>
-                </tr>
-              </thead>
-              <tbody id="logsBody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
     </div>
   </div>
-
   <div id="levelToast">🎉 <span id="levelToastText">Level up!</span></div>
 
   <script src="/socket.io/socket.io.js"></script>

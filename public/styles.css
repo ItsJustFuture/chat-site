@@ -953,9 +953,11 @@ textarea{ min-height:90px; resize:vertical; }
 
 /* Modal/Profile */
 #modal{ position:fixed; inset:0; background:color-mix(in srgb, var(--shadowColor) 75%, transparent); display:none; align-items:center; justify-content:center; padding:18px; z-index: 80; }
-.modalCard{ width:min(860px, 98vw); background:var(--panel); border-radius:18px; border:1px solid var(--border); padding:14px; box-shadow: var(--shadowLg); }
+.modalCard{ width:min(860px, 98vw); background:var(--panel); border-radius:18px; border:1px solid var(--border); padding:14px; box-shadow: var(--shadowLg); max-height:90vh; display:flex; flex-direction:column; }
 .modalTop{ display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; }
 .modalTop strong{ font-size:14px; }
+.modalBody{ display:flex; flex-direction:column; gap:10px; min-height:0; }
+.modalContent{ flex:1 1 auto; overflow:auto; -webkit-overflow-scrolling: touch; padding-right:2px; min-height:0; }
 .tabs{
   display:flex; gap:8px; flex-wrap:nowrap;
   margin:10px 0 12px;
@@ -1330,12 +1332,8 @@ textarea{ min-height:90px; resize:vertical; }
     height: 92vh;
     max-height: 92vh;
     border-radius: 16px;
-    display: flex;
-    flex-direction: column;
   }
-  #viewInfo, #viewAbout, #viewCustomize, #viewModeration{
-    overflow:auto;
-    -webkit-overflow-scrolling: touch;
+  .modalContent{
     padding-right: 2px;
   }
   .tabs{
