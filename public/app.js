@@ -2139,8 +2139,28 @@ refreshLogsBtn.addEventListener("click", refreshLogs);
 
 // start app
 async function startApp(){
-  const meRes = await fetch("/me");
-  me = await meRes.json();
+  let meRes;
+  try{
+    meRes = await fetch("/me");
+  }catch(err){
+    console.error("Failed to reach /me:", err);
+    authMsg.textContent = "Unable to reach the server. Please try again.";
+    return;
+  }
+
+  if(!meRes?.ok){
+    authMsg.textContent = "Please login.";
+    return;
+  }
+
+  try{
+    me = await meRes.json();
+  }catch(err){
+    console.error("Invalid /me response:", err);
+    authMsg.textContent = "Server response was invalid. Please refresh and try again.";
+    return;
+  }
+
   if(!me){ authMsg.textContent="Please login."; return; }
 
   await loadThemePreference();
@@ -2295,12 +2315,18 @@ async function startApp(){
 
 // boot: if already logged in, auto start
 (async function boot(){
-  const res = await fetch("/me");
-  me = await res.json();
-  if(me){
-    authWrap.style.display="none";
-    app.style.display="block";
-    await startApp();
+  try{
+    const res = await fetch("/me");
+    if(!res.ok) return;
+
+    me = await res.json();
+    if(me){
+      authWrap.style.display="none";
+      app.style.display="block";
+      await startApp();
+    }
+  }catch(err){
+    console.warn("Skipping auto-start due to /me failure", err);
   }
 })();
 
