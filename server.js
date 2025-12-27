@@ -375,6 +375,18 @@ function roleRank(role) {
   const idx = ROLES.indexOf(role);
   return idx === -1 ? 1 : idx;
 }
+const STATUS_ALIASES = {
+  "Do Not Disturb": "DnD",
+  "Listening to Music": "Music",
+  "Looking to Chat": "Chatting",
+  "Invisible": "Lurking",
+};
+function normalizeStatus(status, fallback = "Online") {
+  const raw = String(status || "").trim();
+  if (!raw) return fallback;
+  const normalized = STATUS_ALIASES[raw] || raw;
+  return normalized.slice(0, 32);
+}
 function requireMinRole(role, minRole) {
   return roleRank(role) >= roleRank(minRole);
 }
@@ -607,10 +619,11 @@ app.get("/profile", requireLogin, (req, res) => {
     (err, row) => {
       if (err || !row) return res.status(404).send("Not found");
       const live = onlineState.get(row.id);
+      const lastStatus = normalizeStatus(live?.status || row.last_status, "");
       return res.json({
         ...row,
         current_room: live?.room || null,
-        last_status: live?.status || row.last_status || null,
+        last_status: lastStatus || null,
       });
     }
   );
@@ -627,10 +640,11 @@ app.get("/profile/:username", requireLogin, (req, res) => {
     (err, row) => {
       if (err || !row) return res.status(404).send("Not found");
       const live = onlineState.get(row.id);
+      const lastStatus = normalizeStatus(live?.status || row.last_status, "");
       return res.json({
         ...row,
         current_room: live?.room || null,
-        last_status: live?.status || row.last_status || null,
+        last_status: lastStatus || null,
       });
     }
   );
@@ -965,10 +979,11 @@ function emitUserList(room) {
     for (const sid of sids) {
       const s = io.sockets.sockets.get(sid);
       if (!s?.user) continue;
+      const status = normalizeStatus(s.user.status, "Online");
       users.push({
         name: s.user.username,
         role: s.user.role,
-        status: s.user.status || "Online",
+        status,
         mood: s.user.mood || "",
         avatar: s.user.avatar || "",
       });
@@ -976,7 +991,10 @@ function emitUserList(room) {
   }
 
   // Sort by role then name
+  const lurkWeight = (status) => normalizeStatus(status, "Online") === "Lurking" ? 1 : 0;
   users.sort((a, b) => {
+    const lb = lurkWeight(a.status) - lurkWeight(b.status);
+    if (lb !== 0) return lb;
     const ra = roleRank(a.role);
     const rb = roleRank(b.role);
     if (ra !== rb) return rb - ra;
@@ -1056,7 +1074,7 @@ function doJoin(room, status) {
   socket.currentRoom = room;
   socket.join(room);
 
-  socket.user.status = String(status || socket.user.status || "Online").slice(0, 32);
+  socket.user.status = normalizeStatus(status || socket.user.status, "Online");
 
   onlineState.set(socket.user.id, { room, status: socket.user.status });
 
@@ -1203,7 +1221,7 @@ function doJoin(room, status) {
   });
 
   socket.on("status change", ({ status }) => {
-    status = String(status || "Online").slice(0, 32);
+    status = normalizeStatus(status, "Online");
     socket.user.status = status;
 
     const st = onlineState.get(socket.user.id);
