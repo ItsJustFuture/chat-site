@@ -158,7 +158,7 @@
         <div class="small">Start a DM from the members list or create a quick group.</div>
       </div>
       <div class="row" style="gap:6px;">
-        <button class="iconBtn secondary" id="dmRefreshBtn" type="button" title="Refresh">⟳</button>
+        <button class="iconBtn secondary" id="dmAddUserBtn" type="button" title="Add user to DM">➕</button>
         <button class="iconBtn" id="dmCloseBtn" type="button" title="Close">✕</button>
       </div>
     </div>
@@ -173,9 +173,13 @@
       </div>
       <div class="dmHelper" id="dmDirectHelper">Click a name in Members to open a DM instantly. We only save it after the first message.</div>
       <div class="dmHelper group" id="dmGroupHelper">Invite multiple people or give your group a title to get started.</div>
-      <div class="dmInputs">
-        <input id="dmParticipants" placeholder="Add people (comma separated)">
-        <input id="dmTitle" placeholder="Group title (optional)">
+      <div class="dmInputs" id="dmInputs">
+        <div class="dmParticipantsRow" id="dmParticipantsRow">
+          <input id="dmParticipants" placeholder="Add people (comma separated)">
+        </div>
+        <div class="dmTitleRow" id="dmTitleRow">
+          <input id="dmTitle" placeholder="Group title (optional)">
+        </div>
       </div>
       <div class="dmActions">
         <button class="btn" id="dmCreateBtn" type="button">Start chat</button>
@@ -187,8 +191,30 @@
       <div class="dmThreads" id="dmThreadList"></div>
       <div class="dmConversation">
         <div class="dmMeta">
-          <div class="title" id="dmMetaTitle">Pick a thread</div>
-          <div class="small" id="dmMetaPeople"></div>
+          <div class="dmMetaText">
+            <div class="title" id="dmMetaTitle">Pick a thread</div>
+            <div class="small" id="dmMetaPeople"></div>
+          </div>
+          <div class="dmMetaActions">
+            <button class="iconBtn secondary" id="dmSettingsBtn" type="button" title="DM settings">⚙️</button>
+            <div class="dmSettingsMenu" id="dmSettingsMenu">
+              <div class="dmSettingsRow">
+                <button class="btn danger" id="dmDeleteHistoryBtn" type="button">Delete history</button>
+                <div class="small">Remove every message in this DM for all participants.</div>
+              </div>
+              <div class="dmSettingsRow">
+                <div class="small">DM background</div>
+                <div class="colorInputRow tight">
+                  <input id="dmBgColor" type="color" aria-label="DM background color">
+                  <input id="dmBgColorText" type="text" placeholder="#1e1f22 or blue" aria-label="DM background color text">
+                </div>
+                <div class="small">Change the backdrop behind your DM threads and conversation.</div>
+              </div>
+              <div class="dmSettingsRow">
+                <button class="btn secondary" id="dmReportBtn" type="button">Report DM (coming soon)</button>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="dmMessages" id="dmMessages"></div>
         <div class="dmInput">

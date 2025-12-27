@@ -14,6 +14,8 @@ const badgeDefaults = { direct: "#ed4245", group: "#5865f2" };
 let badgePrefs = { ...badgeDefaults };
 let directBadgePending = false;
 let groupBadgePending = false;
+const dmThemeDefaults = { background: "#1e1f22" };
+let dmThemePrefs = { ...dmThemeDefaults };
 
 let modalTargetUsername = null;
 let pendingFile = null;
@@ -65,10 +67,13 @@ const dmModeLabel = document.getElementById("dmModeLabel");
 const dmDirectModeBtn = document.getElementById("dmDirectModeBtn");
 const dmGroupModeBtn = document.getElementById("dmGroupModeBtn");
 const dmCloseBtn = document.getElementById("dmCloseBtn");
-const dmRefreshBtn = document.getElementById("dmRefreshBtn");
+const dmAddUserBtn = document.getElementById("dmAddUserBtn");
 const dmThreadList = document.getElementById("dmThreadList");
 const dmParticipantsInput = document.getElementById("dmParticipants");
 const dmTitleInput = document.getElementById("dmTitle");
+const dmInputs = document.getElementById("dmInputs");
+const dmParticipantsRow = document.getElementById("dmParticipantsRow");
+const dmTitleRow = document.getElementById("dmTitleRow");
 const dmDirectHelper = document.getElementById("dmDirectHelper");
 const dmGroupHelper = document.getElementById("dmGroupHelper");
 const dmCreateBtn = document.getElementById("dmCreateBtn");
@@ -79,6 +84,12 @@ const dmMessagesEl = document.getElementById("dmMessages");
 const dmText = document.getElementById("dmText");
 const dmSendBtn = document.getElementById("dmSendBtn");
 const dmUserBtn = document.getElementById("dmUserBtn");
+const dmSettingsBtn = document.getElementById("dmSettingsBtn");
+const dmSettingsMenu = document.getElementById("dmSettingsMenu");
+const dmDeleteHistoryBtn = document.getElementById("dmDeleteHistoryBtn");
+const dmReportBtn = document.getElementById("dmReportBtn");
+const dmBgColor = document.getElementById("dmBgColor");
+const dmBgColorText = document.getElementById("dmBgColorText");
 
 // drawers
 const drawerOverlay = document.getElementById("drawerOverlay");
@@ -259,7 +270,7 @@ function avatarNode(url, fallbackText){
   wrap.style.alignItems="center";
   wrap.style.justifyContent="center";
   wrap.style.fontWeight="900";
-  wrap.style.background="#444";
+  wrap.style.background="var(--avatar-bg)";
   wrap.textContent=(fallbackText||"?").slice(0,1).toUpperCase();
   return wrap;
 }
@@ -343,6 +354,26 @@ function sanitizeColor(raw, fallback, hardDefault){
   if(isValidCssColor(hardDefault)) return hardDefault.trim();
   return hardDefault || badgeDefaults.direct;
 }
+function loadDmThemePrefsFromStorage(){
+  try {
+    const raw = localStorage.getItem("dmThemePrefs");
+    const parsed = raw ? JSON.parse(raw) : {};
+    return { ...dmThemeDefaults, ...parsed };
+  } catch {
+    return { ...dmThemeDefaults };
+  }
+}
+function saveDmThemePrefsToStorage(){
+  try { localStorage.setItem("dmThemePrefs", JSON.stringify(dmThemePrefs)); }
+  catch{}
+}
+function applyDmThemePrefs(){
+  const bg = sanitizeColor(dmThemePrefs.background, dmThemeDefaults.background, dmThemeDefaults.background);
+  dmThemePrefs.background = bg;
+  document.documentElement.style.setProperty("--dm-bg", bg);
+  if(dmBgColor) dmBgColor.value = normalizeColorForInput(bg, dmThemeDefaults.background);
+  if(dmBgColorText) dmBgColorText.value = bg;
+}
 function applyBadgePrefs(){
   if(directBadgeColorText) directBadgeColorText.value = badgePrefs.direct;
   if(groupBadgeColorText) groupBadgeColorText.value = badgePrefs.group;
@@ -371,6 +402,8 @@ function markDmNotification(threadId, isGroupHint){
 }
 badgePrefs = loadBadgePrefsFromStorage();
 applyBadgePrefs();
+dmThemePrefs = loadDmThemePrefsFromStorage();
+applyDmThemePrefs();
 const EMOJI_CHOICES = ["😀","😁","😂","🙂","😉","😍","😘","💀","🤔","😤","😢","😡","🔥","🖕","♥️","💯","👍","👎","🎉","👀"];
 
 let reactionMenuEl = null;
@@ -673,6 +706,26 @@ document.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeDrawers();
 
 // dms (rebuilt)
 let dmCreateMode = "direct"; // "direct" | "group"
+let groupAddVisible = true;
+let dmSettingsOpen = false;
+
+function setGroupAddVisibility(show){
+  groupAddVisible = !!show;
+  if (dmParticipantsRow) dmParticipantsRow.classList.toggle("hidden", !groupAddVisible);
+  dmAddUserBtn?.classList.toggle("dmAddActive", groupAddVisible);
+  dmAddUserBtn?.setAttribute("aria-pressed", groupAddVisible ? "true" : "false");
+}
+function closeDmSettingsMenu(){
+  dmSettingsOpen = false;
+  dmSettingsMenu?.classList.remove("open");
+  dmSettingsBtn?.setAttribute("aria-expanded", "false");
+}
+function toggleDmSettingsMenu(){
+  if (!dmSettingsMenu) return;
+  dmSettingsOpen = !dmSettingsOpen;
+  dmSettingsMenu.classList.toggle("open", dmSettingsOpen);
+  dmSettingsBtn?.setAttribute("aria-expanded", dmSettingsOpen ? "true" : "false");
+}
 
 function setDmCreateMode(mode){
   dmCreateMode = (mode === "group") ? "group" : "direct";
@@ -687,6 +740,13 @@ function setDmCreateMode(mode){
   if (dmModeLabel) dmModeLabel.textContent = `Mode: ${isDirect ? "Direct Message" : "Group Chat"}`;
 
   if (dmCreateBtn) dmCreateBtn.textContent = isDirect ? "Start DM" : "Start group chat";
+
+  if (dmAddUserBtn) dmAddUserBtn.style.display = isDirect ? "none" : "inline-flex";
+  if (!isDirect && !groupAddVisible) setGroupAddVisibility(true);
+  if (isDirect) setGroupAddVisibility(false);
+
+  if (dmInputs) dmInputs.style.display = isDirect ? "none" : "flex";
+  if (dmTitleRow) dmTitleRow.style.display = isDirect ? "none" : "block";
 
   if (dmParticipantsInput) {
     dmParticipantsInput.placeholder = isDirect
@@ -703,6 +763,8 @@ function setDmCreateMode(mode){
     dmTitleInput.disabled = isDirect;
     if (isDirect) dmTitleInput.value = "";
   }
+
+  renderDmThreads();
 }
 
 function threadLabel(t){
@@ -729,34 +791,25 @@ function renderThreadItem(t){
 function renderDmThreads(){
   dmThreadList.innerHTML = "";
 
-  if (!dmThreads.length) {
-    dmThreadList.innerHTML = `<div class="dmEmpty">No conversations yet.</div>`;
+  const viewingGroup = dmCreateMode === "group";
+  const threads = dmThreads.filter((t) => viewingGroup ? !!t.is_group : !t.is_group);
+
+  const head = document.createElement("div");
+  head.className = "dmSectionTitle";
+  head.textContent = viewingGroup ? "Group chats" : "Direct messages";
+  dmThreadList.appendChild(head);
+
+  if (!threads.length) {
+    const empty = document.createElement("div");
+    empty.className = "dmEmpty";
+    empty.textContent = viewingGroup
+      ? "No group chats yet. Start one with the add user button."
+      : "No direct messages yet. Start one from Members.";
+    dmThreadList.appendChild(empty);
     return;
   }
 
-  const direct = dmThreads.filter(t => !t.is_group);
-  const groups = dmThreads.filter(t => !!t.is_group);
-  const visibleDirect = direct.filter(t => !!t.last_text);
-
-  const addSection = (title, items, emptyText) => {
-    const head = document.createElement("div");
-    head.className = "dmSectionTitle";
-    head.textContent = title;
-    dmThreadList.appendChild(head);
-
-    if (!items.length) {
-      const empty = document.createElement("div");
-      empty.className = "dmEmpty";
-      empty.textContent = emptyText;
-      dmThreadList.appendChild(empty);
-      return;
-    }
-
-    for (const t of items) dmThreadList.appendChild(renderThreadItem(t));
-  };
-
-  addSection("Direct messages", visibleDirect, "No direct messages yet. Start one from Members.");
-  addSection("Group chats", groups, "No group chats yet.");
+  for (const t of threads) dmThreadList.appendChild(renderThreadItem(t));
 }
 
 async function loadDmThreads(){
@@ -831,6 +884,7 @@ function openDmPanel({ mode = "direct", prefill = "" } = {}){
 
 function closeDmPanel(){
   dmPanel.classList.remove("open");
+  closeDmSettingsMenu();
 }
 
 function renderDmMessages(threadId){
@@ -884,6 +938,41 @@ function openDmThread(threadId){
 
   dmMessagesEl.innerHTML = "<div class='dmEmpty'>Loading...</div>";
   socket?.emit("dm join", { threadId });
+}
+
+async function deleteDmHistory(){
+  if (!activeDmId) {
+    dmMsg.textContent = "Pick a thread first.";
+    return;
+  }
+
+  const meta = dmThreads.find((t) => t.id === activeDmId);
+  const label = meta ? threadLabel(meta) : "this DM";
+  const ok = confirm(`Delete all messages in "${label}" for everyone?`);
+  if (!ok) return;
+
+  dmMsg.textContent = "Deleting history...";
+  try {
+    const res = await fetch(`/dm/thread/${activeDmId}/messages`, { method: "DELETE" });
+    if (!res.ok) {
+      const text = await res.text();
+      dmMsg.textContent = text || "Could not delete history.";
+      return;
+    }
+
+    dmMessages.set(activeDmId, []);
+    const thread = dmThreads.find((t) => t.id === activeDmId);
+    if (thread) {
+      thread.last_text = "";
+      thread.last_ts = null;
+    }
+    renderDmMessages(activeDmId);
+    renderDmThreads();
+    dmMsg.textContent = "History cleared.";
+    closeDmSettingsMenu();
+  } catch {
+    dmMsg.textContent = "Could not delete history.";
+  }
 }
 
 function upsertThreadMeta(tid, updater){
@@ -964,11 +1053,43 @@ dmToggleBtn?.addEventListener("click", () => openDmPanel({ mode: "direct" }));
 groupDmToggleBtn?.addEventListener("click", () => openDmPanel({ mode: "group" }));
 dmDirectModeBtn?.addEventListener("click", () => setDmCreateMode("direct"));
 dmGroupModeBtn?.addEventListener("click", () => setDmCreateMode("group"));
+dmAddUserBtn?.addEventListener("click", () => {
+  if (dmCreateMode !== "group") return;
+  setGroupAddVisibility(!groupAddVisible);
+});
 
 dmCloseBtn?.addEventListener("click", closeDmPanel);
-dmRefreshBtn?.addEventListener("click", loadDmThreads);
 dmCreateBtn?.addEventListener("click", createDmThread);
 dmSendBtn?.addEventListener("click", sendDmMessage);
+dmSettingsBtn?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleDmSettingsMenu();
+});
+dmDeleteHistoryBtn?.addEventListener("click", deleteDmHistory);
+dmReportBtn?.addEventListener("click", () => {
+  dmMsg.textContent = "Report feature coming soon.";
+  closeDmSettingsMenu();
+});
+
+document.addEventListener("click", (e) => {
+  if (!dmSettingsOpen) return;
+  if (dmSettingsMenu?.contains(e.target)) return;
+  if (dmSettingsBtn?.contains(e.target)) return;
+  closeDmSettingsMenu();
+});
+
+dmBgColor?.addEventListener("input", () => {
+  dmThemePrefs.background = dmBgColor.value;
+  if(dmBgColorText) dmBgColorText.value = dmBgColor.value;
+  applyDmThemePrefs();
+  saveDmThemePrefsToStorage();
+});
+dmBgColorText?.addEventListener("input", () => {
+  const safe = sanitizeColor(dmBgColorText.value, dmThemePrefs.background, dmThemeDefaults.background);
+  dmThemePrefs.background = safe;
+  applyDmThemePrefs();
+  saveDmThemePrefsToStorage();
+});
 
 memberViewProfileBtn?.addEventListener("click", () => {
   if (memberMenuUser) openMemberProfile(memberMenuUser.name);
@@ -1657,6 +1778,21 @@ if(addRoomBtn){
       setDmMeta(dmThreads.find((t) => t.id === threadId));
       renderDmMessages(threadId);
     }
+  });
+
+  socket.on("dm history cleared", ({ threadId }) => {
+    if (!threadId) return;
+    dmMessages.set(threadId, []);
+    const meta = dmThreads.find((t) => t.id === threadId);
+    if (meta) {
+      meta.last_text = "";
+      meta.last_ts = null;
+    }
+    if (activeDmId === threadId) {
+      renderDmMessages(threadId);
+      dmMsg.textContent = "History was cleared.";
+    }
+    renderDmThreads();
   });
 
   socket.on("dm message", (m) => {
