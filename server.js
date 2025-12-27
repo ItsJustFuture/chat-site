@@ -1930,23 +1930,11 @@ function isPunished(userId, type, cb) {
 }
 
 // ---- Socket auth middleware (session)
-// ---- Socket auth middleware (session)
 io.use((socket, next) => {
   sessionMiddleware(socket.request, socket.request.res || {}, () => {
     if (!socket.request.session?.user?.id) {
       return next(new Error("Not authenticated"));
     }
-    next();
-  });
-});
-  session({
-    store: new SQLiteStore({ db: "sessions.sqlite", dir: __dirname }),
-    secret: process.env.SESSION_SECRET || "dev_secret_change_me",
-    resave: false,
-    saveUninitialized: false,
-    cookie: { httpOnly: true, sameSite: "lax", secure: !!process.env.RENDER },
-  })(req, res, () => {
-    if (!req.session?.user?.id) return next(new Error("Not authenticated"));
     next();
   });
 });
@@ -2006,7 +1994,6 @@ io.on("connection", (socket) => {
     mood: "",
     avatar: "",
   };
-});
 
   socketIdByUserId.set(socket.user.id, socket.id);
   onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
