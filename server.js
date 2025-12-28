@@ -376,8 +376,8 @@ app.use((req, res, next) => {
     "Content-Security-Policy",
     [
       "default-src 'self'",
-      "script-src 'self'",
-      "script-src-elem 'self'",
+      "script-src 'self' 'unsafe-eval'",
+      "script-src-elem 'self' 'unsafe-eval'",
       // Inline style attributes are set by the client JS (e.g. show/hide panels),
       // so allow them alongside our external stylesheet.
       "style-src 'self' 'unsafe-inline'",

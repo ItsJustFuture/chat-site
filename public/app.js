@@ -321,8 +321,6 @@ const refreshLogsBtn = document.getElementById("refreshLogsBtn");
 const logsMsg = document.getElementById("logsMsg");
 const logsBody = document.getElementById("logsBody");
 
-populateReasonPresets(quickReasonPresets, quickReason);
-populateReasonPresets(modReasonPresets, modReason);
 refreshModTargetOptions();
 
 // ---- helpers
@@ -430,6 +428,8 @@ function populateReasonPresets(container, targetInput){
     container.appendChild(btn);
   });
 }
+populateReasonPresets(quickReasonPresets, quickReason);
+populateReasonPresets(modReasonPresets, modReason);
 function avatarNode(url, fallbackText){
   const buildFallback = () => {
     const wrap=document.createElement("div");
