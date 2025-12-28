@@ -127,6 +127,7 @@ db.serialize(() => {
     ["lastMessageGoldAt", "lastMessageGoldAt INTEGER"],
     ["lastDailyLoginGoldAt", "lastDailyLoginGoldAt INTEGER"],
     ["lastDiceRollAt", "lastDiceRollAt INTEGER"],
+    ["dice_sixes", "dice_sixes INTEGER NOT NULL DEFAULT 0"],
   ];
   for (const [col, ddl] of userColumns) addColumnIfMissing("users", col, ddl);
 
@@ -149,6 +150,12 @@ db.serialize(() => {
       attachment_size INTEGER
     )
   `);
+
+  ensureColumns("messages", [
+    ["reply_to_id", "reply_to_id INTEGER"],
+    ["reply_to_user", "reply_to_user TEXT"],
+    ["reply_to_text", "reply_to_text TEXT"],
+  ]);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS reactions (
@@ -183,6 +190,15 @@ db.serialize(() => {
       target_username TEXT,
       room TEXT,
       details TEXT
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS profile_likes (
+      user_id INTEGER NOT NULL,
+      target_user_id INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, target_user_id)
     )
   `);
 
@@ -252,6 +268,12 @@ db.serialize(() => {
       ts INTEGER NOT NULL
     )
   `);
+
+  ensureColumns("dm_messages", [
+    ["reply_to_id", "reply_to_id INTEGER"],
+    ["reply_to_user", "reply_to_user TEXT"],
+    ["reply_to_text", "reply_to_text TEXT"],
+  ]);
 
   ensureColumns("dm_threads", [
     ["title", "title TEXT"],
@@ -856,6 +878,7 @@ const commandRegistry = {
       if (!args[0] || !Number.isFinite(amt)) return { ok: false, message: "Missing arguments" };
       const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
       await dbRunAsync(`UPDATE users SET gold = gold + ? WHERE id=?`, [amt, target.id]);
+      emitProgressionUpdate(target.id);
       return { ok: true, message: `Gave ${amt} gold to ${target.username}` };
     },
   },
@@ -869,6 +892,7 @@ const commandRegistry = {
       if (!args[0] || !Number.isFinite(amt)) return { ok: false, message: "Missing arguments" };
       const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
       await dbRunAsync(`UPDATE users SET gold=? WHERE id=?`, [amt, target.id]);
+      emitProgressionUpdate(target.id);
       return { ok: true, message: `Set gold for ${target.username} to ${amt}` };
     },
   },
@@ -969,6 +993,7 @@ const commandRegistry = {
     handler: async ({ args }) => {
       if (args[0] !== "confirm") return { ok: false, message: "Missing confirm" };
       await dbRunAsync(`UPDATE users SET gold=0`);
+      for (const uid of socketIdByUserId.keys()) emitProgressionUpdate(uid);
       return { ok: true, message: "All gold reset" };
     },
   },
@@ -1165,7 +1190,10 @@ function awardPassiveGold(userId, cb) {
     db.run(
       "UPDATE users SET gold = gold + ?, lastGoldTickAt = ? WHERE id = ?",
       [ticks, newTickTs, userId],
-      (updateErr) => cb?.(updateErr, ticks)
+      (updateErr) => {
+        if (!updateErr && ticks > 0) emitProgressionUpdate(userId);
+        cb?.(updateErr, ticks);
+      }
     );
   });
 }
@@ -1180,7 +1208,10 @@ function awardMessageGold(userId, cb) {
     db.run(
       "UPDATE users SET gold = gold + 5, lastMessageGoldAt = ? WHERE id = ?",
       [now, userId],
-      (updateErr) => cb?.(updateErr, updateErr ? 0 : 5)
+      (updateErr) => {
+        if (!updateErr) emitProgressionUpdate(userId);
+        cb?.(updateErr, updateErr ? 0 : 5);
+      }
     );
   });
 }
@@ -1193,7 +1224,7 @@ function awardDailyLoginGold(user) {
   db.run(
     "UPDATE users SET gold = gold + 50, lastDailyLoginGoldAt = ? WHERE id = ?",
     [now, user.id],
-    () => {}
+    () => emitProgressionUpdate(user.id)
   );
 }
 
@@ -1207,6 +1238,15 @@ function progressionFromRow(row, includePrivate) {
     base.xpForNextLevel = info.xpForNextLevel;
   }
   return base;
+}
+
+function emitProgressionUpdate(userId) {
+  const sid = socketIdByUserId.get(userId);
+  if (!sid) return;
+  db.get("SELECT gold, xp FROM users WHERE id = ?", [userId], (err, row) => {
+    if (err || !row) return;
+    io.to(sid).emit("progression:update", progressionFromRow(row, true));
+  });
 }
 
 function fetchUsersByNames(usernames, cb) {
@@ -1516,6 +1556,33 @@ app.post("/api/me/theme", requireLogin, (req, res) => {
   });
 });
 
+app.get("/api/leaderboards", requireLogin, async (_req, res) => {
+  try {
+    const [xpRows, goldRows, diceRows, likeRows] = await Promise.all([
+      dbAllAsync(`SELECT username, xp FROM users ORDER BY xp DESC LIMIT 20`),
+      dbAllAsync(`SELECT username, gold FROM users ORDER BY gold DESC LIMIT 20`),
+      dbAllAsync(`SELECT username, dice_sixes FROM users ORDER BY dice_sixes DESC LIMIT 20`),
+      dbAllAsync(
+        `SELECT u.username, COUNT(pl.user_id) AS likes
+         FROM users u
+         LEFT JOIN profile_likes pl ON pl.target_user_id = u.id
+         GROUP BY u.id
+         ORDER BY likes DESC
+         LIMIT 20`
+      ),
+    ]);
+
+    const xp = xpRows.map((r) => ({ username: r.username, level: levelInfo(r.xp || 0).level, xp: Number(r.xp || 0) }));
+    const gold = goldRows.map((r) => ({ username: r.username, gold: Number(r.gold || 0) }));
+    const dice = diceRows.map((r) => ({ username: r.username, sixes: Number(r.dice_sixes || 0) }));
+    const likes = likeRows.map((r) => ({ username: r.username, likes: Number(r.likes || 0) }));
+
+    return res.json({ xp, gold, dice, likes });
+  } catch (err) {
+    return res.status(500).json({ ok: false });
+  }
+});
+
 app.post("/api/me/award-gold", requireLogin, (req, res) => {
   if (process.env.ALLOW_DEV_AWARD_GOLD !== "1") return res.status(404).send("Not found");
   const amount = clamp(req.body?.amount ?? req.body?.gold ?? 0, 1, 100000);
@@ -1523,6 +1590,7 @@ app.post("/api/me/award-gold", requireLogin, (req, res) => {
 
   db.run("UPDATE users SET gold = gold + ? WHERE id = ?", [amount, req.session.user.id], (err) => {
     if (err) return res.status(500).send("Failed");
+    emitProgressionUpdate(req.session.user.id);
     db.get("SELECT gold FROM users WHERE id = ?", [req.session.user.id], (_e, row) => {
       return res.json({ ok: true, gold: row?.gold || 0 });
     });
@@ -1650,23 +1718,34 @@ app.get("/profile", requireLogin, (req, res) => {
       if (err || !row) return res.status(404).send("Not found");
       const live = onlineState.get(row.id);
       const lastStatus = normalizeStatus(live?.status || row.last_status, "");
-      const payload = {
-        id: row.id,
-        username: row.username,
-        role: row.role,
-        avatar: row.avatar,
-        bio: row.bio,
-        mood: row.mood,
-        age: row.age,
-        gender: row.gender,
-        created_at: row.created_at,
-        last_seen: row.last_seen,
-        last_room: row.last_room,
-        last_status: lastStatus || null,
-        current_room: live?.room || null,
-        ...progressionFromRow(row, true),
-      };
-      return res.json(payload);
+      db.get(
+        `SELECT
+          (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
+          EXISTS(SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?) AS liked
+        `,
+        [row.id, req.session.user.id, row.id],
+        (_likeErr, likesRow) => {
+          const payload = {
+            id: row.id,
+            username: row.username,
+            role: row.role,
+            avatar: row.avatar,
+            bio: row.bio,
+            mood: row.mood,
+            age: row.age,
+            gender: row.gender,
+            created_at: row.created_at,
+            last_seen: row.last_seen,
+            last_room: row.last_room,
+            last_status: lastStatus || null,
+            current_room: live?.room || null,
+            likes: Number(likesRow?.likes || 0),
+            likedByMe: !!Number(likesRow?.liked || 0),
+            ...progressionFromRow(row, true),
+          };
+          return res.json(payload);
+        }
+      );
     }
   );
 });
@@ -1684,25 +1763,80 @@ app.get("/profile/:username", requireLogin, (req, res) => {
       const live = onlineState.get(row.id);
       const lastStatus = normalizeStatus(live?.status || row.last_status, "");
       const includePrivate = req.session.user.id === row.id;
-      const payload = {
-        id: row.id,
-        username: row.username,
-        role: row.role,
-        avatar: row.avatar,
-        bio: row.bio,
-        mood: row.mood,
-        age: row.age,
-        gender: row.gender,
-        created_at: row.created_at,
-        last_seen: row.last_seen,
-        last_room: row.last_room,
-        last_status: lastStatus || null,
-        current_room: live?.room || null,
-        ...progressionFromRow(row, includePrivate),
-      };
-      return res.json(payload);
+      db.get(
+        `SELECT
+          (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
+          EXISTS(SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?) AS liked
+        `,
+        [row.id, req.session.user.id, row.id],
+        (_likeErr, likesRow) => {
+          const payload = {
+            id: row.id,
+            username: row.username,
+            role: row.role,
+            avatar: row.avatar,
+            bio: row.bio,
+            mood: row.mood,
+            age: row.age,
+            gender: row.gender,
+            created_at: row.created_at,
+            last_seen: row.last_seen,
+            last_room: row.last_room,
+            last_status: lastStatus || null,
+            current_room: live?.room || null,
+            likes: Number(likesRow?.likes || 0),
+            likedByMe: !!Number(likesRow?.liked || 0),
+            ...progressionFromRow(row, includePrivate),
+          };
+          return res.json(payload);
+        }
+      );
     }
   );
+});
+
+app.post("/profile/:username/like", requireLogin, (req, res) => {
+  const u = sanitizeUsername(req.params.username);
+  if (!u) return res.status(400).send("Bad username");
+
+  db.get(`SELECT id FROM users WHERE lower(username) = lower(?)`, [u], (err, target) => {
+    if (err || !target) return res.status(404).send("Not found");
+    if (target.id === req.session.user.id) return res.status(400).json({ ok: false, message: "You cannot like yourself." });
+
+    db.get(
+      `SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?`,
+      [req.session.user.id, target.id],
+      (_likeErr, row) => {
+        const now = Date.now();
+        const toggle = row
+          ? dbRunAsync(`DELETE FROM profile_likes WHERE user_id = ? AND target_user_id = ?`, [req.session.user.id, target.id])
+          : dbRunAsync(`INSERT INTO profile_likes (user_id, target_user_id, created_at) VALUES (?, ?, ?)`, [
+              req.session.user.id,
+              target.id,
+              now,
+            ]);
+
+        Promise.resolve(toggle)
+          .then(() => {
+            db.get(
+              `SELECT
+                (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
+                EXISTS(SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?) AS liked
+              `,
+              [target.id, req.session.user.id, target.id],
+              (_countErr, likesRow) => {
+                return res.json({
+                  ok: true,
+                  likes: Number(likesRow?.likes || 0),
+                  liked: !!Number(likesRow?.liked || 0),
+                });
+              }
+            );
+          })
+          .catch(() => res.status(500).json({ ok: false, message: "Could not update like" }));
+      }
+    );
+  });
 });
 
 // Avatar upload for profile edits (2MB)
@@ -1855,6 +1989,15 @@ app.get("/dm/threads", requireLogin, (req, res) => {
   );
 });
 
+app.get("/dm/thread/:id", requireLogin, (req, res) => {
+  const tid = Number(req.params.id);
+  if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
+  loadThreadForUser(tid, req.session.user.id, (err, thread) => {
+    if (err) return res.status(403).send("Not allowed");
+    return res.json(thread);
+  });
+});
+
 app.post("/dm/thread", requireLogin, (req, res) => {
   let participants = req.body?.participants;
   if (!Array.isArray(participants)) {
@@ -1963,6 +2106,90 @@ app.post("/dm/thread", requireLogin, (req, res) => {
         }
       );
     }
+  });
+});
+
+app.post("/dm/thread/:id/participants", requireLogin, (req, res) => {
+  const tid = Number(req.params.id);
+  if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
+
+  loadThreadForUser(tid, req.session.user.id, (err, thread) => {
+    if (err) return res.status(403).send("Not allowed");
+    if (!thread.is_group) return res.status(400).send("Only group DMs can add members");
+
+    let participants = req.body?.participants;
+    if (!Array.isArray(participants)) participants = [];
+
+    const cleaned = [];
+    const seen = new Set();
+    for (const name of participants || []) {
+      const s = sanitizeUsername(name);
+      const key = normKey(s);
+      if (!s || seen.has(key)) continue;
+      if (key === normKey(req.session.user.username)) continue;
+      seen.add(key);
+      cleaned.push(s);
+    }
+
+    if (!cleaned.length) return res.status(400).send("Pick at least one new member");
+
+    fetchUsersByNames(cleaned, (fetchErr, users) => {
+      if (fetchErr) return res.status(500).send("Failed to add members");
+      if (users.length !== cleaned.length) return res.status(404).send("User not found");
+
+      db.all(
+        `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
+        [tid],
+        (listErr, rows) => {
+          if (listErr) return res.status(500).send("Failed to add members");
+          const existingIds = new Set((rows || []).map((r) => r.user_id));
+          const newUsers = users.filter((u) => !existingIds.has(u.id));
+          if (!newUsers.length) return res.status(400).send("Everyone is already in the group");
+
+          const now = Date.now();
+          for (const u of newUsers) {
+            db.run(
+              `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
+              [tid, u.id, req.session.user.id, now]
+            );
+            const sid = socketIdByUserId.get(u.id);
+            if (sid) {
+              const sock = io.sockets.sockets.get(sid);
+              if (sock) sock.join(`dm:${tid}`);
+              io.to(sid).emit("dm thread invited", {
+                threadId: tid,
+                title: thread.title || null,
+                isGroup: true,
+                participants: thread.participants,
+              });
+            }
+          }
+
+          loadThreadForUser(tid, req.session.user.id, (infoErr, fresh) => {
+            if (infoErr) return res.status(500).send("Added but could not refresh");
+            return res.json({ ok: true, participants: fresh.participants });
+          });
+        }
+      );
+    });
+  });
+});
+
+app.post("/dm/thread/:id/leave", requireLogin, (req, res) => {
+  const tid = Number(req.params.id);
+  if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
+  loadThreadForUser(tid, req.session.user.id, (err, thread) => {
+    if (err) return res.status(403).send("Not allowed");
+    if (!thread.is_group) return res.status(400).send("Leaving only available in group chats");
+
+    db.run(
+      `DELETE FROM dm_participants WHERE thread_id = ? AND user_id = ?`,
+      [tid, req.session.user.id],
+      (delErr) => {
+        if (delErr) return res.status(500).send("Could not leave group");
+        return res.json({ ok: true });
+      }
+    );
   });
 });
 
@@ -2160,10 +2387,11 @@ socket.on("join room", ({ room, status }) => {
       const value = Math.floor(Math.random() * 6) + 1; // 1..6
       const won = value === 6;
       const deltaGold = won ? 500 : -50;
+      const sixGain = won ? 1 : 0;
 
       db.run(
-        `UPDATE users SET gold = MAX(0, gold + ?), lastDiceRollAt=? WHERE id=?`,
-        [deltaGold, now, socket.user.id],
+        `UPDATE users SET gold = MAX(0, gold + ?), lastDiceRollAt=?, dice_sixes = dice_sixes + ? WHERE id=?`,
+        [deltaGold, now, sixGain, socket.user.id],
         (uerr) => {
           if (uerr) {
             socket.emit("dice:error", "Could not apply dice result.");
@@ -2172,11 +2400,14 @@ socket.on("join room", ({ room, status }) => {
 
           // Inform roller (for animation + optional UI refresh)
           socket.emit("dice:result", { value, won, deltaGold });
+          emitProgressionUpdate(socket.user.id);
 
           // Broadcast a centered non-bubble system message to the room
+          const faces = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+          const face = faces[value - 1] || value;
           const msg = won
-            ? `${socket.user.username} rolled a 6 🎉 (+500 Gold!)`
-            : `${socket.user.username} rolled a ${value} 🎲 (-50 Gold!)`;
+            ? `${socket.user.username} rolled ${face} 🎉 (+500 Gold!)`
+            : `${socket.user.username} rolled ${face} 🎲 (-50 Gold!)`;
           io.to(room).emit("system", msg);
 
           // Optional event for others to animate too
@@ -2219,7 +2450,8 @@ function doJoin(room, status) {
 
   // Send history (exclude deleted messages entirely)
   db.all(
-    `SELECT id, room, username, role, avatar, text, ts, attachment_url, attachment_type, attachment_mime, attachment_size
+    `SELECT id, room, username, role, avatar, text, ts, attachment_url, attachment_type, attachment_mime, attachment_size,
+            reply_to_id, reply_to_user, reply_to_text
      FROM messages WHERE room=? AND deleted=0 ORDER BY ts ASC LIMIT 200`,
     [room],
     (_e, rows) => {
@@ -2235,6 +2467,9 @@ function doJoin(room, status) {
         attachmentType: r.attachment_type || "",
         attachmentMime: r.attachment_mime || "",
         attachmentSize: r.attachment_size || 0,
+        replyToId: r.reply_to_id || null,
+        replyToUser: r.reply_to_user || "",
+        replyToText: r.reply_to_text || "",
       }));
       socket.emit("history", history);
 
@@ -2294,10 +2529,21 @@ function doJoin(room, status) {
       socket.join(`dm:${tid}`);
 
       db.all(
-        `SELECT id, thread_id, user_id, username, text, ts FROM dm_messages WHERE thread_id=? ORDER BY ts DESC LIMIT 50`,
+        `SELECT id, thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text FROM dm_messages WHERE thread_id=? ORDER BY ts DESC LIMIT 50`,
         [tid],
         (_e, rows) => {
-          const msgs = (rows || []).reverse();
+          const msgs = (rows || []).reverse().map((r) => ({
+            messageId: r.id,
+            id: r.id,
+            threadId: r.thread_id,
+            userId: r.user_id,
+            user: r.username,
+            text: r.text,
+            ts: r.ts,
+            replyToId: r.reply_to_id || null,
+            replyToUser: r.reply_to_user || "",
+            replyToText: r.reply_to_text || "",
+          }));
           socket.emit("dm history", {
             threadId: tid,
             title: thread.title || "",
@@ -2310,7 +2556,7 @@ function doJoin(room, status) {
     });
   });
 
-  socket.on("dm message", ({ threadId, text }) => {
+  socket.on("dm message", ({ threadId, text, replyToId }) => {
     const tid = Number(threadId);
     const body = String(text || "").trim().slice(0, 800);
     if (!Number.isInteger(tid) || !body) return;
@@ -2319,37 +2565,60 @@ function doJoin(room, status) {
       if (err) return;
       const ts = Date.now();
 
-      db.run(
-        `INSERT INTO dm_messages (thread_id, user_id, username, text, ts) VALUES (?, ?, ?, ?, ?)`,
-        [tid, socket.user.id, socket.user.username, body, ts],
-        function (insertErr) {
-          if (insertErr) return;
-          const payload = {
-            threadId: tid,
-            messageId: this.lastID,
-            userId: socket.user.id,
-            user: socket.user.username,
-            text: body,
-            ts,
-          };
-          io.to(`dm:${tid}`).emit("dm message", payload);
-          if (Array.isArray(thread.participants)) {
-            db.all(
-              `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
-              [tid],
-              (_e2, rows) => {
-                for (const r of rows || []) {
-                  const sid = socketIdByUserId.get(r.user_id);
-                  const s = sid ? io.sockets.sockets.get(sid) : null;
-                  if (s && !s.rooms.has(`dm:${tid}`)) {
-                    s.emit("dm message", payload);
+      const replyId = Number(replyToId);
+      const doInsert = (replyMeta = {}) => {
+        const replyUser = replyMeta.user || null;
+        const replyText = replyMeta.text || null;
+        const replyPk = Number.isInteger(replyMeta.id) ? replyMeta.id : null;
+
+        db.run(
+          `INSERT INTO dm_messages (thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [tid, socket.user.id, socket.user.username, body, ts, replyPk, replyUser, replyText],
+          function (insertErr) {
+            if (insertErr) return;
+            const payload = {
+              threadId: tid,
+              messageId: this.lastID,
+              userId: socket.user.id,
+              user: socket.user.username,
+              text: body,
+              ts,
+              replyToId: replyPk,
+              replyToUser: replyUser || "",
+              replyToText: replyText || "",
+            };
+            io.to(`dm:${tid}`).emit("dm message", payload);
+            if (Array.isArray(thread.participants)) {
+              db.all(
+                `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
+                [tid],
+                (_e2, rows) => {
+                  for (const r of rows || []) {
+                    const sid = socketIdByUserId.get(r.user_id);
+                    const s = sid ? io.sockets.sockets.get(sid) : null;
+                    if (s && !s.rooms.has(`dm:${tid}`)) {
+                      s.emit("dm message", payload);
+                    }
                   }
                 }
-              }
-            );
+              );
+            }
           }
-        }
-      );
+        );
+      };
+
+      if (Number.isInteger(replyId)) {
+        db.get(
+          `SELECT id, username, text FROM dm_messages WHERE id = ? AND thread_id = ?`,
+          [replyId, tid],
+          (_e, row) => {
+            doInsert(row || {});
+          }
+        );
+      } else {
+        doInsert();
+      }
     });
   });
 
@@ -2423,41 +2692,65 @@ function doJoin(room, status) {
               slowmodeTracker.set(key, Date.now());
             }
 
-            db.run(
-              `INSERT INTO messages (room, user_id, username, role, avatar, text, ts, attachment_url, attachment_type, attachment_mime, attachment_size)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                room,
-                socket.user.id,
-                socket.user.username,
-                socket.user.role,
-                socket.user.avatar || "",
-                text,
-                Date.now(),
-                attachmentUrl || null,
-                attachmentType || null,
-                attachmentMime || null,
-                attachmentSize || null,
-              ],
-              function () {
-                awardMessageXp(socket.user.id);
-                awardMessageGold(socket.user.id);
-                const msg = {
-                  messageId: this.lastID,
+            const replyId = Number(payload?.replyToId);
+            const insertWithReply = (replyMeta = {}) => {
+              const replyPk = Number.isInteger(replyMeta.id) ? replyMeta.id : null;
+              const replyUser = replyMeta.username || replyMeta.user || null;
+              const replyText = replyMeta.text || null;
+              const tsNow = Date.now();
+
+              db.run(
+                `INSERT INTO messages (room, user_id, username, role, avatar, text, ts, attachment_url, attachment_type, attachment_mime, attachment_size, reply_to_id, reply_to_user, reply_to_text)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
                   room,
-                  user: socket.user.username,
-                  role: socket.user.role,
-                  avatar: socket.user.avatar || "",
+                  socket.user.id,
+                  socket.user.username,
+                  socket.user.role,
+                  socket.user.avatar || "",
                   text,
-                  ts: Date.now(),
-                  attachmentUrl: attachmentUrl || "",
-                  attachmentType: attachmentType || "",
-                  attachmentMime: attachmentMime || "",
-                  attachmentSize: attachmentSize || 0,
-                };
-                io.to(room).emit("chat message", msg);
-              }
-            );
+                  tsNow,
+                  attachmentUrl || null,
+                  attachmentType || null,
+                  attachmentMime || null,
+                  attachmentSize || null,
+                  replyPk,
+                  replyUser,
+                  replyText,
+                ],
+                function () {
+                  awardMessageXp(socket.user.id);
+                  awardMessageGold(socket.user.id);
+                  const msg = {
+                    messageId: this.lastID,
+                    room,
+                    user: socket.user.username,
+                    role: socket.user.role,
+                    avatar: socket.user.avatar || "",
+                    text,
+                    ts: tsNow,
+                    attachmentUrl: attachmentUrl || "",
+                    attachmentType: attachmentType || "",
+                    attachmentMime: attachmentMime || "",
+                    attachmentSize: attachmentSize || 0,
+                    replyToId: replyPk,
+                    replyToUser: replyUser || "",
+                    replyToText: replyText || "",
+                  };
+                  io.to(room).emit("chat message", msg);
+                }
+              );
+            };
+
+            if (Number.isInteger(replyId)) {
+              db.get(
+                `SELECT id, username, text FROM messages WHERE id=? AND room=? AND deleted=0`,
+                [replyId, room],
+                (_rErr, row) => insertWithReply(row || {})
+              );
+            } else {
+              insertWithReply();
+            }
           }
         );
       });

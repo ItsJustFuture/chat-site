@@ -74,7 +74,7 @@
     <button class="menuTab active" data-menu-tab="changelog" type="button">Changelog</button>
     <button class="menuTab" data-menu-tab="rules" type="button">Rules</button>
     <button class="menuTab" data-menu-tab="faq" type="button">FAQ</button>
-    <button class="menuTab" data-menu-tab="credits" type="button">Credits</button>
+    <button class="menuTab" data-menu-tab="leaderboards" type="button">Leaderboards</button>
   </div>
 
   <div class="menuContent">
@@ -123,11 +123,35 @@
       <div class="card muted">Coming soon.</div>
     </div>
 
-    <div class="menuSection" data-menu-section="credits">
+    <div class="menuSection" data-menu-section="leaderboards">
       <div class="menuSectionHeader">
-        <div class="title">Credits</div>
+        <div>
+          <div class="title">Leaderboards</div>
+          <div class="small muted">XP, Gold, Dice sixes, and profile likes.</div>
+        </div>
+        <div class="menuActions">
+          <button class="btn secondary" id="refreshLeaderboardsBtn" type="button">Refresh</button>
+        </div>
       </div>
-      <div class="card muted">Coming soon.</div>
+      <div class="msgline" id="leaderboardsMsg"></div>
+      <div class="leaderboardGrid">
+        <div class="card leaderboardCard">
+          <div class="sectionTitle">XP leaderboard</div>
+          <div class="leaderboardList" id="leaderboardXp"></div>
+        </div>
+        <div class="card leaderboardCard">
+          <div class="sectionTitle">Gold leaderboard</div>
+          <div class="leaderboardList" id="leaderboardGold"></div>
+        </div>
+        <div class="card leaderboardCard">
+          <div class="sectionTitle">Dice leaderboard</div>
+          <div class="leaderboardList" id="leaderboardDice"></div>
+        </div>
+        <div class="card leaderboardCard">
+          <div class="sectionTitle">Profile likes</div>
+          <div class="leaderboardList" id="leaderboardLikes"></div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -178,10 +202,11 @@
            <div class="roomTitle"><span id="roomTitle">main</span></div>
           </div>
 
-            <div class="row" style="align-items:center; gap:10px;">
+          <div class="row" style="align-items:center; gap:10px;">
             <div class="searchWrap">
               <input id="searchInput" placeholder="Search messages...">
             </div>
+            <div class="goldPill mobOnly" id="goldPill" aria-live="polite"></div>
             <button class="iconBtn withBadge" id="dmToggleBtn" type="button" title="Direct messages">💬<span class="notifDot" id="dmBadgeDot" title="New DMs"></span></button>
             <button class="iconBtn withBadge" id="groupDmToggleBtn" type="button" title="Group chats">👪<span class="notifDot right" id="groupDmBadgeDot" title="New group DMs"></span></button>
             <button class="iconBtn mobOnly" id="openMembersBtn" type="button" title="Members">👥</button>
@@ -207,6 +232,11 @@
           </div>
         </div>
 
+        <div class="replyPreview" id="replyPreview">
+          <div class="replyText" id="replyPreviewText"></div>
+          <button class="iconBtn smallIcon" id="replyPreviewClose" type="button" aria-label="Cancel reply">✕</button>
+        </div>
+
         <div class="inputBar">
          <input id="msgInput" type="text" placeholder="Message main" maxlength="800">
 
@@ -217,6 +247,7 @@
           <button class="iconBtn" id="pickFileBtn" type="button" title="Upload">📷</button>
 
           <button class="btn" id="sendBtn" type="button">Send</button>
+          <div class="mentionDropdown" id="mentionDropdown"></div>
         </div>
       </main>
 
@@ -257,7 +288,16 @@
     <div class="dmNotice" id="dmMsg"></div>
 
     <div class="dmContent">
-      <div class="dmThreads" id="dmThreadList"></div>
+      <div class="dmThreads" id="dmThreads">
+        <div class="dmTabs" id="dmTabs">
+          <button class="segBtn active" data-dm-tab="direct" type="button">DMs</button>
+          <button class="segBtn" data-dm-tab="group" type="button">Group DMs</button>
+        </div>
+        <div class="dmThreadActions" id="dmThreadActions">
+          <button class="btn full" id="dmCreateGroupBtn" type="button">➕ Create Group</button>
+        </div>
+        <div class="dmThreadList" id="dmThreadList"></div>
+      </div>
       <div class="dmConversation">
         <div class="dmMeta">
           <div class="dmMetaText">
@@ -265,6 +305,7 @@
             <div class="small" id="dmMetaPeople"></div>
           </div>
           <div class="dmMetaActions">
+            <button class="iconBtn secondary" id="dmInfoBtn" type="button" title="Group info">ℹ️</button>
             <button class="iconBtn secondary" id="dmSettingsBtn" type="button" title="DM settings">⚙️</button>
             <div class="dmSettingsMenu" id="dmSettingsMenu">
               <div class="dmSettingsRow">
@@ -278,10 +319,56 @@
           </div>
         </div>
         <div class="dmMessages" id="dmMessages"></div>
+        <div class="replyPreview" id="dmReplyPreview">
+          <div class="replyText" id="dmReplyPreviewText"></div>
+          <button class="iconBtn smallIcon" id="dmReplyClose" type="button" aria-label="Cancel reply">✕</button>
+        </div>
         <div class="dmInput">
           <input id="dmText" placeholder="Message" maxlength="800">
           <button class="btn" id="dmSendBtn" type="button">Send</button>
+          <div class="mentionDropdown" id="dmMentionDropdown"></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dmModal" id="dmPickerModal">
+    <div class="dmModalCard">
+      <div class="dmModalHeader">
+        <div>
+          <div class="title" id="dmModalTitle">Create group</div>
+          <div class="small" id="dmModalSubtitle">Pick at least two people</div>
+        </div>
+        <button class="iconBtn" id="dmModalCloseBtn" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="field">
+        <label for="dmModalSearch">Search</label>
+        <input id="dmModalSearch" type="search" placeholder="Search by username">
+      </div>
+      <div class="dmPickerList" id="dmPickerList"></div>
+      <div class="dmModalActions">
+        <button class="btn secondary" id="dmModalCancelBtn" type="button">Cancel</button>
+        <button class="btn" id="dmModalPrimaryBtn" type="button" disabled>Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="dmModal" id="dmInfoModal">
+    <div class="dmModalCard">
+      <div class="dmModalHeader">
+        <div>
+          <div class="title" id="dmInfoTitle">Group info</div>
+          <div class="small" id="dmInfoSubtitle"></div>
+        </div>
+        <button class="iconBtn" id="dmInfoCloseBtn" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="dmInfoSection">
+        <div class="small">Members</div>
+        <div class="dmInfoMembers" id="dmInfoMembers"></div>
+      </div>
+      <div class="dmModalActions stacked">
+        <button class="btn secondary" id="dmInfoAddBtn" type="button">Add members</button>
+        <button class="btn danger" id="dmLeaveBtn" type="button">Leave group</button>
       </div>
     </div>
   </div>
@@ -391,6 +478,12 @@
                   <div class="small" id="xpNote">XP is only visible to you.</div>
                 </div>
 
+                <div class="likeRow">
+                  <button class="btn secondary" id="likeProfileBtn" type="button">❤️ Like</button>
+                  <div class="badge" id="likeCount">0</div>
+                </div>
+                <div class="msgline" id="profileLikeMsg"></div>
+
                 <div class="row" style="gap:8px; margin-top:10px; flex-wrap:wrap;">
                   <button class="btn secondary" id="dmUserBtn" type="button">Message</button>
                   <button class="btn secondary" id="copyUsernameBtn" type="button">Copy username</button>
@@ -448,13 +541,35 @@
 
                 <div id="memberModTools" style="display:none; margin-top:12px;">
                   <div class="sectionTitle">Moderator tools</div>
-                  <div class="panelBox">
-                    <div class="row" style="align-items:center;">
-                      <input id="quickReason" placeholder="Reason (required)" style="flex:1; min-width:220px;">
-                      <input id="quickMuteMins" type="number" min="1" max="1440" placeholder="mute mins" style="width:120px;">
-                      <input id="quickBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:160px;">
+                  <div class="panelBox modCard">
+                    <div class="field">
+                      <label>Reason</label>
+                      <div class="pillRow" id="quickReasonPresets"></div>
+                      <textarea id="quickReason" rows="2" placeholder="Add context (required)"></textarea>
                     </div>
-                    <div class="row" style="margin-top:8px;">
+                    <div class="modGrid">
+                      <div class="field">
+                        <label>Mute length</label>
+                        <select id="quickMuteMins">
+                          <option value="10">10 minutes</option>
+                          <option value="30">30 minutes</option>
+                          <option value="60">1 hour</option>
+                          <option value="240">4 hours</option>
+                          <option value="1440">24 hours</option>
+                        </select>
+                      </div>
+                      <div class="field">
+                        <label>Ban length</label>
+                        <select id="quickBanMins">
+                          <option value="0">Permanent</option>
+                          <option value="60">1 hour</option>
+                          <option value="720">12 hours</option>
+                          <option value="1440">24 hours</option>
+                          <option value="10080">7 days</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="actionGrid" style="margin-top:8px;">
                       <button class="btn secondary" id="quickKickBtn" type="button">Kick</button>
                       <button class="btn secondary" id="quickMuteBtn" type="button">Mute</button>
                       <button class="btn danger" id="quickBanBtn" type="button">Ban</button>
@@ -478,39 +593,70 @@
           <div id="viewModeration" style="display:none;">
             <div class="sectionTitle">Moderation panel</div>
 
-            <div class="panelBox">
-              <div class="row" style="align-items:center;">
-                <input id="modUser" placeholder="Target username" style="flex:1; min-width:220px;">
-                <input id="modReason" placeholder="Reason (required)" style="flex:2; min-width:240px;">
+            <div class="panelBox modCard">
+              <div class="field">
+                <label>Target</label>
+                <select id="modUserSelect"></select>
+                <input id="modUser" placeholder="Search or type username" autocomplete="off">
+                <div class="row" style="gap:8px; flex-wrap:wrap;">
+                  <button class="btn secondary" id="modOpenProfileBtn" type="button">View profile</button>
+                  <button class="btn secondary" id="modRefreshTargetsBtn" type="button">Refresh list</button>
+                </div>
               </div>
 
-              <div class="row" style="align-items:center; margin-top:8px;">
-                <input id="modMuteMins" type="number" min="1" max="1440" placeholder="mute mins" style="width:140px;">
-                <input id="modBanMins" type="number" min="0" max="999999" placeholder="ban mins (0=perm)" style="width:190px;">
+              <div class="field">
+                <label>Reason</label>
+                <div class="pillRow" id="modReasonPresets"></div>
+                <textarea id="modReason" rows="2" placeholder="Choose a preset and add details (required)"></textarea>
+              </div>
 
+              <div class="modGrid">
+                <div class="field">
+                  <label>Mute length</label>
+                  <select id="modMuteMins">
+                    <option value="10">10 minutes</option>
+                    <option value="30">30 minutes</option>
+                    <option value="60">1 hour</option>
+                    <option value="240">4 hours</option>
+                    <option value="1440">24 hours</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Ban length</label>
+                  <select id="modBanMins">
+                    <option value="0">Permanent</option>
+                    <option value="60">1 hour</option>
+                    <option value="720">12 hours</option>
+                    <option value="1440">24 hours</option>
+                    <option value="10080">7 days</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="actionGrid" style="margin-top:8px;">
                 <button class="btn secondary" id="modKickBtn" type="button">Kick</button>
+                <button class="btn secondary" id="modWarnBtn" type="button">Warn</button>
                 <button class="btn secondary" id="modMuteBtn" type="button">Mute</button>
                 <button class="btn danger" id="modBanBtn" type="button">Ban</button>
-
                 <button class="btn secondary" id="modUnmuteBtn" type="button">Unmute</button>
                 <button class="btn secondary" id="modUnbanBtn" type="button">Unban</button>
-                <button class="btn secondary" id="modWarnBtn" type="button">Warn</button>
-
-                <button class="btn secondary" id="modOpenProfileBtn" type="button">View profile</button>
               </div>
 
-              <div class="row" style="align-items:center; margin-top:10px;">
-                <select id="modSetRole" style="width:220px;">
-                  <option value="">Set role (Owner only)</option>
-                  <option>Owner</option>
-                  <option>Co-owner</option>
-                  <option>Admin</option>
-                  <option>Moderator</option>
-                  <option>VIP</option>
-                  <option>User</option>
-                  <option>Guest</option>
-                </select>
-                <button class="btn secondary" id="modSetRoleBtn" type="button">Apply role</button>
+              <div class="field" style="margin-top:8px;">
+                <label>Role assignment</label>
+                <div class="row" style="gap:8px; flex-wrap:wrap;">
+                  <select id="modSetRole">
+                    <option value="">Set role (Owner only)</option>
+                    <option>Owner</option>
+                    <option>Co-owner</option>
+                    <option>Admin</option>
+                    <option>Moderator</option>
+                    <option>VIP</option>
+                    <option>User</option>
+                    <option>Guest</option>
+                  </select>
+                  <button class="btn secondary" id="modSetRoleBtn" type="button">Apply role</button>
+                </div>
               </div>
 
               <div class="msgline" id="modMsg"></div>
@@ -564,6 +710,12 @@
     </div>
   </div>
   <div id="levelToast">🎉 <span id="levelToastText">Level up!</span></div>
+
+  <div class="mediaLightbox" id="mediaLightbox">
+    <button class="iconBtn largeClose" id="mediaLightboxClose" type="button" aria-label="Close media">✕</button>
+    <img id="mediaLightboxImg" alt="Expanded media">
+    <video id="mediaLightboxVideo" playsinline controls></video>
+  </div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/app.js" defer></script>
