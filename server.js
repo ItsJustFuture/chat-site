@@ -388,6 +388,7 @@ app.use((req, res, next) => {
       "connect-src 'self' ws: wss:",
       "object-src 'none'",
       "base-uri 'self'",
+      "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com",
       "frame-ancestors 'none'",
     ].join("; ")
   );
