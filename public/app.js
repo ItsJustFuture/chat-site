@@ -185,7 +185,6 @@ const viewCustomize = document.getElementById("viewCustomize");
 const viewModeration = document.getElementById("viewModeration");
 
 const bioRender = document.getElementById("bioRender");
-const copyProfileLinkBtn = document.getElementById("copyProfileLinkBtn");
 const copyUsernameBtn = document.getElementById("copyUsernameBtn");
 const mediaMsg = document.getElementById("mediaMsg");
 const customizeMsg = document.getElementById("customizeMsg");
@@ -1996,12 +1995,6 @@ async function openMemberProfile(username){
 copyUsernameBtn.addEventListener("click", async ()=>{
   const u = modalTargetUsername || me?.username || "";
   try{ await navigator.clipboard.writeText(u); mediaMsg.textContent="Copied username."; }
-  catch{ mediaMsg.textContent="Copy failed (browser blocked)."; }
-});
-copyProfileLinkBtn.addEventListener("click", async ()=>{
-  const u = modalTargetUsername || me?.username || "";
-  const link = `${location.origin}/#profile:${encodeURIComponent(u)}`;
-  try{ await navigator.clipboard.writeText(link); mediaMsg.textContent="Copied profile link."; }
   catch{ mediaMsg.textContent="Copy failed (browser blocked)."; }
 });
 saveBadgePrefsBtn?.addEventListener("click", () => {
