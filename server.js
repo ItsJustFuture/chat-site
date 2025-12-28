@@ -368,6 +368,7 @@ function ensureDmSchema(cb) {
 // ---- Security + parsing
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 
 // IMPORTANT: CSP that blocks inline JS (good), but allows our external /public/app.js & /public/styles.css
 app.use((req, res, next) => {
