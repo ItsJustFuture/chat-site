@@ -1793,6 +1793,62 @@ function closeDmPanel(){
   closeDmSettingsMenu();
 }
 
+function createDmAttachmentElement(m){
+  const att = document.createElement("div");
+  const isMediaThumb = m.attachmentType === "image" || m.attachmentType === "video";
+  att.className = isMediaThumb ? "attachment dmAttachment" : "attachment";
+
+  if (!isMediaThumb) {
+    const a = document.createElement("a");
+    a.href = m.attachmentUrl;
+    a.textContent = "Download file";
+    a.target = "_blank";
+    a.rel = "noreferrer";
+    att.appendChild(a);
+    return att;
+  }
+
+  if (m.attachmentType === "image") {
+    const img = document.createElement("img");
+    img.src = m.attachmentUrl;
+    img.alt = "Image attachment";
+    img.loading = "lazy";
+    img.className = "dmMediaThumb";
+    att.appendChild(img);
+  } else if (m.attachmentType === "video") {
+    const thumb = document.createElement("div");
+    thumb.className = "dmVideoThumb";
+
+    const v = document.createElement("video");
+    v.src = m.attachmentUrl;
+    v.playsInline = true;
+    v.muted = true;
+    v.preload = "metadata";
+    v.className = "dmMediaThumb";
+    thumb.appendChild(v);
+
+    const play = document.createElement("div");
+    play.className = "dmPlayOverlay";
+    play.textContent = "▶";
+    thumb.appendChild(play);
+    att.appendChild(thumb);
+  }
+
+  const open = () => openMediaLightbox(m.attachmentUrl, m.attachmentType === "video" ? "video" : "image");
+  att.addEventListener("click", open);
+  att.tabIndex = 0;
+  att.setAttribute("role", "button");
+  att.setAttribute("aria-label", m.attachmentType === "video" ? "Open video attachment" : "Open image attachment");
+  att.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      open();
+    }
+  });
+
+  return att;
+}
+
 function renderDmMessages(threadId){
   if (!dmMessagesEl) return;
   const keepOffset = dmMessagesEl.scrollHeight - dmMessagesEl.scrollTop;
@@ -1844,6 +1900,10 @@ function renderDmMessages(threadId){
       displayText = `${rawText.slice(0, start)}${rawText.slice(end)}`.replace(/\s{2,}/g, " ").trim();
     }
 
+    if (m.attachmentUrl && displayText.trim() === m.attachmentUrl) {
+      displayText = "";
+    }
+
     if (displayText) {
       const text = document.createElement("div");
       if (youtubeInfo) {
@@ -1860,30 +1920,8 @@ function renderDmMessages(threadId){
     }
 
     if (m.attachmentUrl && m.attachmentType) {
-      const att = document.createElement("div");
-      att.className = "attachment";
-      if (m.attachmentType === "image") {
-        const img = document.createElement("img");
-        img.src = m.attachmentUrl;
-        img.alt = "image";
-        img.addEventListener("click", () => openMediaLightbox(m.attachmentUrl, "image"));
-        att.appendChild(img);
-      } else if (m.attachmentType === "video") {
-        const v = document.createElement("video");
-        v.src = m.attachmentUrl;
-        v.controls = true;
-        v.playsInline = true;
-        v.addEventListener("click", () => openMediaLightbox(m.attachmentUrl, "video"));
-        att.appendChild(v);
-      } else {
-        const a = document.createElement("a");
-        a.href = m.attachmentUrl;
-        a.textContent = "Download file";
-        a.target = "_blank";
-        a.rel = "noreferrer";
-        att.appendChild(a);
-      }
-      wrap.appendChild(att);
+      const att = createDmAttachmentElement(m);
+      if (att) wrap.appendChild(att);
     }
 
     const dmActions = document.createElement("div");
