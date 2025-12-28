@@ -984,25 +984,43 @@ function applySearch(){
 searchInput.addEventListener("input", applySearch);
 
 // drawers
+function anyDrawerOpen(){
+  return channelsPane?.classList.contains("open") || membersPane?.classList.contains("open");
+}
+
 function closeDrawers(){
   channelsPane?.classList.remove("open");
   membersPane?.classList.remove("open");
   drawerOverlay?.classList.remove("show");
   closeMemberMenu();
 }
+
 function openChannels(){
+  // toggle
+  if (channelsPane?.classList.contains("open")) { closeDrawers(); return; }
+
   membersPane?.classList.remove("open");
   channelsPane?.classList.add("open");
   drawerOverlay?.classList.add("show");
 }
+
 function openMembers(){
+  // toggle
+  if (membersPane?.classList.contains("open")) { closeDrawers(); return; }
+
   channelsPane?.classList.remove("open");
   membersPane?.classList.add("open");
   drawerOverlay?.classList.add("show");
 }
+
 openChannelsBtn?.addEventListener("click", openChannels);
 openMembersBtn?.addEventListener("click", openMembers);
-drawerOverlay?.addEventListener("click", closeDrawers);
+
+/* Outside tap close: use pointerdown (better on mobile) */
+drawerOverlay?.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  closeDrawers();
+}, { capture:true });
 document.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeDrawers(); });
 
 // dms (rebuilt)
