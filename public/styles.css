@@ -1315,6 +1315,17 @@ body.lockScroll{ overflow:hidden; }
 .dmMetaRow{ display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--muted); }
 .dmActions{ display:flex; gap:8px; margin-top:6px; }
 .smallAction{ padding:6px 10px; border-radius:12px; border:1px solid var(--line); background:transparent; color:inherit; }
+@media (pointer: coarse){
+  .dmActions{
+    opacity:0;
+    pointer-events:none;
+    transition: opacity .15s ease;
+  }
+  .dmBubble.showActions .dmActions{
+    opacity:1;
+    pointer-events:auto;
+  }
+}
 .dmInput{ padding:10px 12px; border-top:1px solid var(--line); display:flex; gap:8px; flex-shrink:0; background: var(--panel2); position:relative; }
 .dmInput input{ flex:1; }
 .dmSectionTitle{
