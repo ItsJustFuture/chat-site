@@ -1198,7 +1198,7 @@ function addMessage(m){
     const [start, end] = youtubeInfo.matchRange;
     displayText = `${rawText.slice(0, start)}${rawText.slice(end)}`.replace(/\s{2,}/g, " ").trim();
   }
-
+if (youtubeInfo && !displayText) bubble.classList.add("ytOnly");
   if (displayText) {
     const text = document.createElement("div");
     text.className = "text";
