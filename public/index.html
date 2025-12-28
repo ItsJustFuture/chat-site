@@ -272,14 +272,6 @@
                 <div class="small">Remove every message in this DM for all participants.</div>
               </div>
               <div class="dmSettingsRow">
-                <div class="small">DM background</div>
-                <div class="colorInputRow tight">
-                  <input id="dmBgColor" type="color" aria-label="DM background color">
-                  <input id="dmBgColorText" type="text" placeholder="#1e1f22 or blue" aria-label="DM background color text">
-                </div>
-                <div class="small">Change the backdrop behind your DM threads and conversation.</div>
-              </div>
-              <div class="dmSettingsRow">
                 <button class="btn secondary" id="dmReportBtn" type="button">Report DM (coming soon)</button>
               </div>
             </div>
@@ -305,13 +297,36 @@
       <div class="modalBody">
         <div class="small" id="modalMeta"></div>
 
-        <div class="tabs" id="tabs">
-          <div class="tab active" data-tab="info" id="tabInfo">Info</div>
-          <div class="tab" data-tab="about" id="tabAbout">About</div>
-          <div class="tab" data-tab="customize" id="tabCustomize">Customization</div>
-          <div class="tab" data-tab="moderation" id="tabModeration" style="display:none;">Moderation</div>
-        </div>
+     <div class="tabs" id="tabs">
+  <div class="tab active" data-tab="info" id="tabInfo">Info</div>
+  <div class="tab" data-tab="about" id="tabAbout">About</div>
+  <div class="tab" data-tab="edit" id="tabEdit">Edit</div>
+  <div class="tab" data-tab="moderation" id="tabModeration" style="display:none;">Moderation</div>
+</div>
 
+        <div id="viewEdit" style="display:none;">
+  <div class="panelBox">
+    <div class="listBtns">
+      <button class="btn secondary" id="editThemesBtn" type="button">Themes</button>
+      <button class="btn secondary" id="editDmBtn" type="button">DM Customisation</button>
+    </div>
+  </div>
+
+  <div class="panelBox" id="editThemesPanel" style="display:none;">
+    <!-- MOVE your existing theme grid / theme controls here -->
+  </div>
+
+  <div class="panelBox" id="editDmPanel" style="display:none;">
+   <div class="dmSettingsRow">
+                <div class="small">DM background</div>
+                <div class="colorInputRow tight">
+                  <input id="dmBgColor" type="color" aria-label="DM background color">
+                  <input id="dmBgColorText" type="text" placeholder="#1e1f22 or blue" aria-label="DM background color text">
+                </div>
+                <div class="small">Change the backdrop behind your DM threads and conversation.</div>
+              </div>
+  </div>
+</div>
         <div class="modalContent" id="modalContent">
           <div id="viewInfo">
             <div class="modalGrid">
