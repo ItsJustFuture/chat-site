@@ -1278,14 +1278,21 @@ textarea{ min-height:90px; resize:vertical; }
   .dmPanel{
     inset:0;
     width:100vw;
-    height:100vh;
+    height:100dvh;
     max-height:none;
     border-radius:0;
     border:0;
     box-shadow:none;
+    @supports (height: 100svh){
+  .dmPanel{ height: 100svh; }
+}
   }
   .dmHeader{ position:sticky; top:0; background:var(--panel2); z-index:2; }
-  .dmInput{ position:sticky; bottom:0; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .dmInput{
+  position: sticky;
+  bottom: 0;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom) + 16px);
+}
   .dmContent{ grid-template-columns: 1fr; grid-template-rows: minmax(180px, 32vh) 1fr; }
   .dmThreads{ border-right:0; border-bottom:1px solid var(--line); }
   .dmMessages{ padding-bottom:14px; }
@@ -1428,21 +1435,24 @@ textarea{ min-height:90px; resize:vertical; }
   }
 
   /* Tabs should fit without forcing a scroll area */
+ @media (max-width: 760px){
   .tabs{
     display: flex;
-    flex-wrap: wrap;     /* allows 2 rows if needed */
+    flex-wrap: wrap;
+    overflow-x: hidden;     /* NO sideways scroll */
     gap: 6px;
-    padding: 8px 10px;
+    margin: 10px 0 12px;
   }
 
   .tab{
-    padding: 8px 10px;
+    flex: 1 1 calc(50% - 6px); /* 2 columns */
+    text-align: center;
+    padding: 8px 6px;
     font-size: 12px;
     border-radius: 12px;
-    line-height: 1;
     white-space: nowrap;
   }
-
+}
   /* Slightly reduce heading spacing in profile panels */
   .panelBox h3{
     margin: 10px 0 8px;
