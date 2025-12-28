@@ -2407,8 +2407,8 @@ socket.on("join room", ({ room, status }) => {
           const faces = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
           const face = faces[value - 1] || value;
           const msg = won
-            ? `${socket.user.username} rolled ${face} 🎉 (+500 Gold!)`
-            : `${socket.user.username} rolled ${face} 🎲 (-50 Gold!)`;
+            ? `${socket.user.username} rolled ${face} (${value}) 🎉 (+500 Gold!)`
+            : `${socket.user.username} rolled ${face} (${value}) 🎲 (-50 Gold!)`;
           io.to(room).emit("system", msg);
 
           // Optional event for others to animate too

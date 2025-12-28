@@ -469,7 +469,35 @@ function clearMsgs(){
 function addSystem(text){
   const div=document.createElement("div");
   div.className="sys";
-  div.textContent=text;
+  const isDiceRoom = document.body.classList.contains("dice-room");
+  const diceMatch = isDiceRoom ? text.match(/^(.*?rolled\s+)([⚀⚁⚂⚃⚄⚅])(\s*\(\d\))?(.*)$/i) : null;
+
+  if (diceMatch){
+    div.classList.add("diceRoll");
+    const [, pre, face, valueText = "", suffix = ""] = diceMatch;
+
+    const preSpan = document.createElement("span");
+    preSpan.className = "diceRollText";
+    preSpan.textContent = pre.trim();
+
+    const faceSpan = document.createElement("span");
+    faceSpan.className = "diceFace";
+    faceSpan.textContent = face;
+
+    const valueSpan = document.createElement("span");
+    valueSpan.className = "diceValue";
+    valueSpan.textContent = valueText.trim();
+
+    const suffixSpan = document.createElement("span");
+    suffixSpan.className = "diceRollText";
+    suffixSpan.textContent = suffix.trim();
+
+    [preSpan, faceSpan, valueSpan, suffixSpan].forEach((node) => {
+      if(node.textContent) div.appendChild(node);
+    });
+  }else{
+    div.textContent=text;
+  }
   msgs.appendChild(div);
   msgs.scrollTop=msgs.scrollHeight;
 }
@@ -1286,7 +1314,19 @@ function renderMembers(users){
     if (roll && Date.now() - (roll.ts || 0) < 7000) {
       const rollRow = document.createElement("div");
       rollRow.className = "mRoll";
-      rollRow.textContent = `Rolled ${diceFace(roll.value)}`;
+      const rollLabel = document.createElement("span");
+      rollLabel.className = "mRollLabel";
+      rollLabel.textContent = "Rolled";
+
+      const rollFace = document.createElement("span");
+      rollFace.className = "mRollFace";
+      rollFace.textContent = diceFace(roll.value);
+
+      const rollValue = document.createElement("span");
+      rollValue.className = "mRollValue";
+      rollValue.textContent = `(${roll.value || ""})`;
+
+      [rollLabel, rollFace, rollValue].forEach((node) => rollRow.appendChild(node));
       meta.appendChild(rollRow);
     }
 
@@ -2194,6 +2234,8 @@ function setActiveRoom(room){
   nowRoom.textContent = displayRoomName(room);
   roomTitle.textContent = displayRoomName(room);
   msgInput.placeholder = `Message ${displayRoomName(room)}`;
+
+  document.body.classList.toggle("dice-room", room === "diceroom");
 
   // Dice Room: swap upload button to dice roll
   if (pickFileBtn) {
