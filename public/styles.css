@@ -891,6 +891,51 @@ textarea{ min-height:90px; resize:vertical; }
 .self .ts{ color:var(--messageSelfText); opacity:.85; }
 .text{ font-size:14px; line-height:1.35; white-space:pre-wrap; }
 .mention{ background:var(--mentionBg); color:var(--mentionText); border:1px solid var(--border); padding:0 4px; border-radius:6px; }
+.ytEmbedWrap{ display:flex; flex-direction:column; gap:6px; position:relative; }
+.ytEmbedControls{ display:flex; justify-content:flex-end; gap:6px; }
+.ytAudioToggle{
+  border:1px solid var(--border);
+  background:color-mix(in srgb, var(--panel) 75%, transparent);
+  color:var(--text);
+  border-radius:var(--radiusSm);
+  padding:4px 8px;
+  font-size:12px;
+  cursor:pointer;
+}
+.ytAudioToggle:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+.ytAudioViz{
+  display:none;
+  width:100%;
+  min-height:120px;
+  max-height:180px;
+  gap:6px;
+  align-items:flex-end;
+  padding:10px;
+  box-sizing:border-box;
+  border-radius:var(--radiusMd);
+  border:1px solid var(--border);
+  background:color-mix(in srgb, var(--panel) 85%, transparent);
+}
+.ytAudioBar{
+  flex:1;
+  min-width:6px;
+  height:24px;
+  border-radius:6px 6px 2px 2px;
+  background:linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 70%, transparent));
+  transition:height 90ms ease;
+  will-change: height;
+}
+.ytEmbed{ position:relative; width:100%; max-width:100%; border-radius:var(--radiusMd); overflow:hidden; background:#000; }
+.ytEmbed::before{ content:""; display:block; padding-top:56.25%; }
+.ytEmbed iframe{ position:absolute; inset:0; width:100%; height:100%; border:0; display:block; }
+.ytEmbedWrap.audioOnly .ytEmbed{ position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; overflow:hidden; }
+.ytEmbedWrap.audioOnly .ytEmbed::before{ padding-top:0; }
+.ytEmbedWrap.audioOnly .ytEmbed iframe{ position:absolute; width:1px; height:1px; inset:auto; }
+.ytEmbedWrap.audioOnly .ytAudioViz{ display:flex; }
+@media (max-width: 540px){
+  .ytAudioToggle{ padding:4px 6px; font-size:11px; }
+  .ytAudioViz{ min-height:110px; padding:8px; }
+}
 /* message layout: bubble + reactions + side action rail */
 .msgBody{
   display:flex;
