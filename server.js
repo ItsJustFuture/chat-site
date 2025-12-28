@@ -1752,7 +1752,7 @@ const chatUpload = multer({
       cb(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`);
     },
   }),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 25 * 1024 * 1024 },
 });
 
 app.post("/upload", requireLogin, chatUpload.single("file"), (req, res) => {
