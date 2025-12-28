@@ -1160,6 +1160,14 @@ textarea{ min-height:90px; resize:vertical; }
     z-index: 150;
   }
 .overlay.show{ display:block; }
+.drawerHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:10px 12px;
+  border-bottom:1px solid var(--line);
+}
+.drawerHeader h3{ margin:0; }
 /* DM panel */
 .dmPanel{
   position:fixed;
