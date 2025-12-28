@@ -1426,11 +1426,9 @@ function uploadChatFileWithProgress(file){
 
 // tabs
 function focusActiveTab(){
-  function focusActiveTab(){
   if (window.matchMedia("(max-width: 760px)").matches) return;
   const active=document.querySelector(".tab.active");
   active?.scrollIntoView({ behavior:"smooth", inline:"center", block:"nearest" });
-  }
 }
 function setTab(tab){
   for(const el of document.querySelectorAll(".tab")){
@@ -1438,15 +1436,19 @@ function setTab(tab){
   }
   viewInfo.style.display = tab==="info" ? "block" : "none";
   viewAbout.style.display = tab==="about" ? "block" : "none";
- viewEdit.style.display = tab==="edit" ? "block" : "none";
+  viewEdit.style.display = tab==="edit" ? "block" : "none";
   viewModeration.style.display = tab==="moderation" ? "block" : "none";
+  if(tab === "edit") showEditPanel("themes");
   focusActiveTab();
 }
 tabEdit.addEventListener("click", ()=>setTab("edit"));
 
 function showEditPanel(which){
-  editThemesPanel.style.display = which==="themes" ? "block" : "none";
+  const isThemes = which === "themes";
+  editThemesPanel.style.display = isThemes ? "block" : "none";
   editDmPanel.style.display = which==="dm" ? "block" : "none";
+  editThemesBtn?.classList.toggle("active", isThemes);
+  editDmBtn?.classList.toggle("active", which === "dm");
 }
 
 editThemesBtn?.addEventListener("click", ()=>showEditPanel("themes"));
