@@ -66,6 +66,15 @@ let replyTarget = null;
 let dmReplyTarget = null;
 let chatPinned = true;
 let dmPinned = true;
+let openMessageActionsId = null;
+
+const isCoarsePointer = (() => {
+  try {
+    return window.matchMedia && window.matchMedia("(pointer: coarse)")?.matches;
+  } catch {
+    return "ontouchstart" in window;
+  }
+})();
 
 // ---- DOM
 const authWrap = document.getElementById("authWrap");
@@ -824,6 +833,52 @@ let reactionMenuEl = null;
 let reactionMenuFor = null;
 let reactionMenuRow = null;
 
+function setOpenMessageActions(messageId) {
+  if (openMessageActionsId && openMessageActionsId !== messageId) {
+    const prev = document.querySelector(`[data-mid="${openMessageActionsId}"]`);
+    if (prev) {
+      prev.classList.remove("showActions");
+      prev.querySelector(".bubble")?.setAttribute("aria-expanded", "false");
+    }
+  }
+
+  if (openMessageActionsId === messageId) {
+    openMessageActionsId = null;
+    const row = document.querySelector(`[data-mid="${messageId}"]`);
+    if (row) {
+      row.classList.remove("showActions");
+      row.querySelector(".bubble")?.setAttribute("aria-expanded", "false");
+    }
+    return;
+  }
+
+  openMessageActionsId = messageId;
+  const row = document.querySelector(`[data-mid="${messageId}"]`);
+  if (row) {
+    row.classList.add("showActions");
+    row.querySelector(".bubble")?.setAttribute("aria-expanded", "true");
+  }
+}
+
+function closeMessageActionsIfOutside(target){
+  if(!openMessageActionsId) return;
+  const row = document.querySelector(`[data-mid="${openMessageActionsId}"]`);
+  if (!row) {
+    openMessageActionsId = null;
+    return;
+  }
+
+  if (row.contains(target)) return;
+  if (reactionMenuEl?.contains(target)) return;
+
+  row.classList.remove("showActions");
+  row.querySelector(".bubble")?.setAttribute("aria-expanded", "false");
+  openMessageActionsId = null;
+}
+
+document.addEventListener("click", (e) => closeMessageActionsIfOutside(e.target));
+document.addEventListener("touchstart", (e) => closeMessageActionsIfOutside(e.target), { passive: true });
+
 function ensureReactionMenu(){
   if(reactionMenuEl) return;
   reactionMenuEl = document.createElement("div");
@@ -882,7 +937,9 @@ function openReactionMenu(messageId, anchorEl, rowEl){
 function closeReactionMenu(){
   if(!reactionMenuEl) return;
   reactionMenuEl.classList.remove("open");
-  if(reactionMenuRow) reactionMenuRow.classList.remove("showActions");
+  if(reactionMenuRow && reactionMenuRow.dataset?.mid !== String(openMessageActionsId)) {
+    reactionMenuRow.classList.remove("showActions");
+  }
   reactionMenuFor = null;
   reactionMenuRow = null;
 }
@@ -939,6 +996,7 @@ function addMessage(m){
 
   const bubble = document.createElement("div");
   bubble.className = "bubble";
+  bubble.setAttribute("aria-expanded", "false");
 
   if (m.replyToId && (m.replyToUser || m.replyToText)) {
     const replyLink = document.createElement("button");
@@ -1043,19 +1101,18 @@ function addMessage(m){
   replyBtn.onclick = (e)=>{
     e.stopPropagation();
     setReplyTarget({ id: m.messageId, user: m.user, text: m.text });
+    if (isCoarsePointer) setOpenMessageActions(m.messageId);
     msgInput?.focus();
+    setTimeout(() => msgInput?.focus(), 80);
   };
   actions.prepend(replyBtn);
 
-  // mobile: long press bubble opens reaction menu
-  let pressTimer = null;
-  bubble.addEventListener("touchstart", ()=>{
-    pressTimer = setTimeout(()=>{
-      openReactionMenu(m.messageId, bubble, row);
-    }, 450);
-  }, {passive:true});
-  bubble.addEventListener("touchend", ()=>{ clearTimeout(pressTimer); });
-  bubble.addEventListener("touchcancel", ()=>{ clearTimeout(pressTimer); });
+  if (isCoarsePointer) {
+    bubble.addEventListener("click", (e) => {
+      if (e.target.closest(".msgActions")) return;
+      setOpenMessageActions(m.messageId);
+    });
+  }
 
   row.appendChild(av);
   row.appendChild(main);
@@ -1536,6 +1593,7 @@ function renderDmMessages(threadId){
   for (const m of msgsArr) {
     const wrap = document.createElement("div");
     wrap.className = "dmBubble" + (m.user === me.username ? " self" : "");
+    wrap.dataset.mid = `dm-${m.messageId || m.id}`;
 
     if (m.replyToId && (m.replyToUser || m.replyToText)) {
       const replyLink = document.createElement("button");
@@ -1571,11 +1629,20 @@ function renderDmMessages(threadId){
     replyBtn.onclick = (e) => {
       e.stopPropagation();
       setDmReplyTarget({ id: m.messageId || m.id, user: m.user, text: m.text });
+      if (isCoarsePointer) setOpenMessageActions(`dm-${m.messageId || m.id}`);
       dmText?.focus();
+      setTimeout(() => dmText?.focus(), 80);
     };
     dmActions.appendChild(replyBtn);
     wrap.dataset.dmMid = m.messageId || m.id;
     wrap.appendChild(dmActions);
+
+    if (isCoarsePointer) {
+      wrap.addEventListener("click", (e) => {
+        if (e.target.closest(".dmActions")) return;
+        setOpenMessageActions(`dm-${m.messageId || m.id}`);
+      });
+    }
 
     dmMessagesEl.appendChild(wrap);
   }
