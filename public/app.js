@@ -19,6 +19,12 @@ let directBadgePending = false;
 let groupBadgePending = false;
 const dmThemeDefaults = { background: "#1e1f22" };
 let dmThemePrefs = { ...dmThemeDefaults };
+let dmTab = "direct";
+const dmUnreadThreads = new Set();
+let dmPickerMode = "create";
+let dmPickerSelection = new Set();
+let dmPickerThreadId = null;
+let dmPickerExisting = [];
 let levelToastTimer = null;
 let rightPanelMode = "rooms";
 let activeMenuTab = "changelog";
@@ -27,6 +33,11 @@ let changelogLoaded = false;
 let changelogDirty = false;
 let editingChangelogId = null;
 let latestChangelogEntry = null;
+let leaderboardsLoaded = false;
+let leaderboardsLoading = false;
+const recentDiceRolls = new Map();
+const diceRollTimers = new Map();
+const DICE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
 
 const THEME_LIST = [
   { name: "Minimal Dark", mode: "Dark" },
@@ -51,6 +62,10 @@ let modalTargetUsername = null;
 let pendingFile = null;
 let uploadXhr = null;
 let memberMenuUser = null;
+let replyTarget = null;
+let dmReplyTarget = null;
+let chatPinned = true;
+let dmPinned = true;
 
 // ---- DOM
 const authWrap = document.getElementById("authWrap");
@@ -76,6 +91,15 @@ const changelogBodyInput = document.getElementById("changelogBodyInput");
 const changelogSaveBtn = document.getElementById("changelogSaveBtn");
 const changelogCancelBtn = document.getElementById("changelogCancelBtn");
 const changelogEditMsg = document.getElementById("changelogEditMsg");
+const channelsCloseBtn = document.getElementById("channelsCloseBtn");
+const membersCloseBtn  = document.getElementById("membersCloseBtn");
+const tabEdit = document.getElementById("tabEdit");
+const viewEdit = document.getElementById("viewEdit");
+
+const editThemesBtn = document.getElementById("editThemesBtn");
+const editDmBtn = document.getElementById("editDmBtn");
+const editThemesPanel = document.getElementById("editThemesPanel");
+const editDmPanel = document.getElementById("editDmPanel");
 
 const authUser = document.getElementById("authUser");
 const authPass = document.getElementById("authPass");
@@ -104,6 +128,8 @@ const msgInput = document.getElementById("msgInput");
 const sendBtn = document.getElementById("sendBtn");
 const searchInput = document.getElementById("searchInput");
 
+msgs?.addEventListener("scroll", ()=>{ chatPinned = isNearBottom(msgs, 160); });
+
 const fileInput = document.getElementById("fileInput");
 const pickFileBtn = document.getElementById("pickFileBtn");
 
@@ -113,12 +139,18 @@ const meRole = document.getElementById("meRole");
 const meStatusText = document.getElementById("meStatusText");
 const statusSelect = document.getElementById("statusSelect");
 const profileBtn = document.getElementById("profileBtn");
+const replyPreview = document.getElementById("replyPreview");
+const replyPreviewText = document.getElementById("replyPreviewText");
+const replyPreviewClose = document.getElementById("replyPreviewClose");
+const mentionDropdown = document.getElementById("mentionDropdown");
 
 // dms
 const dmPanel = document.getElementById("dmPanel");
 const dmToggleBtn = document.getElementById("dmToggleBtn");
 const groupDmToggleBtn = document.getElementById("groupDmToggleBtn");
 const dmCloseBtn = document.getElementById("dmCloseBtn");
+const dmTabs = document.getElementById("dmTabs");
+const dmCreateGroupBtn = document.getElementById("dmCreateGroupBtn");
 const dmThreadList = document.getElementById("dmThreadList");
 const dmMsg = document.getElementById("dmMsg");
 const dmMetaTitle = document.getElementById("dmMetaTitle");
@@ -126,13 +158,45 @@ const dmMetaPeople = document.getElementById("dmMetaPeople");
 const dmMessagesEl = document.getElementById("dmMessages");
 const dmText = document.getElementById("dmText");
 const dmSendBtn = document.getElementById("dmSendBtn");
+
+dmMessagesEl?.addEventListener("scroll", ()=>{ dmPinned = isNearBottom(dmMessagesEl, 160); });
 const dmUserBtn = document.getElementById("dmUserBtn");
+const dmInfoBtn = document.getElementById("dmInfoBtn");
 const dmSettingsBtn = document.getElementById("dmSettingsBtn");
+const goldPill = document.getElementById("goldPill");
+const likeProfileBtn = document.getElementById("likeProfileBtn");
+const likeCount = document.getElementById("likeCount");
+const profileLikeMsg = document.getElementById("profileLikeMsg");
+const leaderboardXp = document.getElementById("leaderboardXp");
+const leaderboardGold = document.getElementById("leaderboardGold");
+const leaderboardDice = document.getElementById("leaderboardDice");
+const leaderboardLikes = document.getElementById("leaderboardLikes");
+const leaderboardsMsg = document.getElementById("leaderboardsMsg");
+const refreshLeaderboardsBtn = document.getElementById("refreshLeaderboardsBtn");
 const dmSettingsMenu = document.getElementById("dmSettingsMenu");
 const dmDeleteHistoryBtn = document.getElementById("dmDeleteHistoryBtn");
 const dmReportBtn = document.getElementById("dmReportBtn");
+const dmReplyPreview = document.getElementById("dmReplyPreview");
+const dmReplyPreviewText = document.getElementById("dmReplyPreviewText");
+const dmReplyClose = document.getElementById("dmReplyClose");
+const dmMentionDropdown = document.getElementById("dmMentionDropdown");
 const dmBgColor = document.getElementById("dmBgColor");
 const dmBgColorText = document.getElementById("dmBgColorText");
+const dmPickerModal = document.getElementById("dmPickerModal");
+const dmModalCloseBtn = document.getElementById("dmModalCloseBtn");
+const dmModalCancelBtn = document.getElementById("dmModalCancelBtn");
+const dmModalPrimaryBtn = document.getElementById("dmModalPrimaryBtn");
+const dmModalSearch = document.getElementById("dmModalSearch");
+const dmModalTitle = document.getElementById("dmModalTitle");
+const dmModalSubtitle = document.getElementById("dmModalSubtitle");
+const dmPickerList = document.getElementById("dmPickerList");
+const dmInfoModal = document.getElementById("dmInfoModal");
+const dmInfoCloseBtn = document.getElementById("dmInfoCloseBtn");
+const dmInfoTitle = document.getElementById("dmInfoTitle");
+const dmInfoSubtitle = document.getElementById("dmInfoSubtitle");
+const dmInfoMembers = document.getElementById("dmInfoMembers");
+const dmInfoAddBtn = document.getElementById("dmInfoAddBtn");
+const dmLeaveBtn = document.getElementById("dmLeaveBtn");
 
 const customNav = document.getElementById("customNav");
 const themeGrid = document.getElementById("themeGrid");
@@ -164,6 +228,10 @@ const modalAvatar = document.getElementById("modalAvatar");
 const modalName = document.getElementById("modalName");
 const modalRole = document.getElementById("modalRole");
 const modalMood = document.getElementById("modalMood");
+const mediaLightbox = document.getElementById("mediaLightbox");
+const mediaLightboxImg = document.getElementById("mediaLightboxImg");
+const mediaLightboxVideo = document.getElementById("mediaLightboxVideo");
+const mediaLightboxClose = document.getElementById("mediaLightboxClose");
 
 // info
 const infoAge = document.getElementById("infoAge");
@@ -185,7 +253,6 @@ const viewCustomize = document.getElementById("viewCustomize");
 const viewModeration = document.getElementById("viewModeration");
 
 const bioRender = document.getElementById("bioRender");
-const copyProfileLinkBtn = document.getElementById("copyProfileLinkBtn");
 const copyUsernameBtn = document.getElementById("copyUsernameBtn");
 const mediaMsg = document.getElementById("mediaMsg");
 const customizeMsg = document.getElementById("customizeMsg");
@@ -219,6 +286,7 @@ const logoutBtn = document.getElementById("logoutBtn");
 // member quick mod
 const memberModTools = document.getElementById("memberModTools");
 const quickReason = document.getElementById("quickReason");
+const quickReasonPresets = document.getElementById("quickReasonPresets");
 const quickMuteMins = document.getElementById("quickMuteMins");
 const quickBanMins = document.getElementById("quickBanMins");
 const quickKickBtn = document.getElementById("quickKickBtn");
@@ -227,6 +295,7 @@ const quickBanBtn = document.getElementById("quickBanBtn");
 const quickModMsg = document.getElementById("quickModMsg");
 
 // moderation panel
+const modUserSelect = document.getElementById("modUserSelect");
 const modUser = document.getElementById("modUser");
 const modReason = document.getElementById("modReason");
 const modMuteMins = document.getElementById("modMuteMins");
@@ -238,8 +307,10 @@ const modUnmuteBtn = document.getElementById("modUnmuteBtn");
 const modUnbanBtn = document.getElementById("modUnbanBtn");
 const modWarnBtn = document.getElementById("modWarnBtn");
 const modOpenProfileBtn = document.getElementById("modOpenProfileBtn");
+const modRefreshTargetsBtn = document.getElementById("modRefreshTargetsBtn");
 const modSetRole = document.getElementById("modSetRole");
 const modSetRoleBtn = document.getElementById("modSetRoleBtn");
+const modReasonPresets = document.getElementById("modReasonPresets");
 const modMsg = document.getElementById("modMsg");
 
 // logs
@@ -250,6 +321,10 @@ const refreshLogsBtn = document.getElementById("refreshLogsBtn");
 const logsMsg = document.getElementById("logsMsg");
 const logsBody = document.getElementById("logsBody");
 
+populateReasonPresets(quickReasonPresets, quickReason);
+populateReasonPresets(modReasonPresets, modReason);
+refreshModTargetOptions();
+
 // ---- helpers
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, m => ({
@@ -257,6 +332,7 @@ function escapeHtml(s){
   }[m]));
 }
 function normKey(u){ return String(u||"").trim().toLowerCase(); }
+function diceFace(val){ return DICE_FACES[val - 1] || val || ""; }
 function fmtAbs(ts){
   if(!ts) return "—";
   const n = Number(ts);
@@ -331,22 +407,49 @@ function roleIcon(role){
     default: return "👤";
   }
 }
+const PRESET_REASONS = [
+  "Spam / Advertising",
+  "Harassment / Bullying",
+  "Off-topic",
+  "NSFW content",
+  "Impersonation",
+  "Cheating / Exploits",
+];
+function populateReasonPresets(container, targetInput){
+  if(!container || !targetInput) return;
+  container.innerHTML = "";
+  PRESET_REASONS.forEach(reason => {
+    const btn=document.createElement("button");
+    btn.type="button";
+    btn.className="pillBtn";
+    btn.textContent=reason;
+    btn.addEventListener("click", () => {
+      targetInput.value = reason;
+      targetInput.focus();
+    });
+    container.appendChild(btn);
+  });
+}
 function avatarNode(url, fallbackText){
+  const buildFallback = () => {
+    const wrap=document.createElement("div");
+    wrap.className = "avatarFallback";
+    wrap.textContent=(fallbackText||"?").slice(0,1).toUpperCase();
+    return wrap;
+  };
+
   if(url){
     const img=document.createElement("img");
-    img.src=url; img.alt="avatar";
+    img.className = "avatarImg";
+    img.src=url;
+    img.alt="avatar";
+    img.loading="lazy";
+    img.onerror = () => {
+      img.replaceWith(buildFallback());
+    };
     return img;
   }
-  const wrap=document.createElement("div");
-  wrap.style.width="100%";
-  wrap.style.height="100%";
-  wrap.style.display="flex";
-  wrap.style.alignItems="center";
-  wrap.style.justifyContent="center";
-  wrap.style.fontWeight="900";
-  wrap.style.background="var(--avatar-bg)";
-  wrap.textContent=(fallbackText||"?").slice(0,1).toUpperCase();
-  return wrap;
+  return buildFallback();
 }
 
 function clearMsgs(){
@@ -389,11 +492,79 @@ function handleCommandResponse(payload){
   showCommandPopup(title, msg);
 }
 
+function escapeRegex(str){
+  return String(str || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 function applyMentions(text){
-  const u = me?.username ? me.username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : null;
-  if(!u) return escapeHtml(text);
-  const re = new RegExp(`@${u}\\b`, "gi");
-  return escapeHtml(text).replace(re, (m)=>`<span class="mention">${m}</span>`);
+  const safe = escapeHtml(text);
+  const names = new Set((lastUsers || []).map((u) => u.name));
+  if (me?.username) names.add(me.username);
+  const list = Array.from(names).filter(Boolean);
+  if (!list.length) return safe;
+  const pattern = list.map(escapeRegex).join("|");
+  const re = new RegExp(`@(${pattern})(?=$|[^\\S]|[.,!?:;])`, "gi");
+  return safe.replace(re, (m)=>`<span class="mention">${m}</span>`);
+}
+function isNearBottom(el, threshold = 120){
+  if(!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+}
+function mentionCandidates(){
+  const names = new Set((lastUsers || []).map((u) => u.name));
+  if (me?.username) names.add(me.username);
+  return Array.from(names).filter(Boolean);
+}
+function findMentionTrigger(value, cursor){
+  const before = value.slice(0, cursor);
+  const at = before.lastIndexOf("@");
+  if (at === -1) return null;
+  if (at > 0 && /\S/.test(before[at - 1])) return null;
+  const query = before.slice(at + 1);
+  if (query.includes("@") || query.includes("\n")) return null;
+  return { start: at, query };
+}
+function renderMentionDropdown(dropdown, inputEl){
+  if (!dropdown || !inputEl) return;
+  const cursor = inputEl.selectionStart ?? inputEl.value.length;
+  const trigger = findMentionTrigger(inputEl.value, cursor);
+  if (!trigger) {
+    dropdown.classList.remove("show");
+    dropdown.innerHTML = "";
+    return;
+  }
+  const term = trigger.query.toLowerCase();
+  const matches = mentionCandidates()
+    .filter((n) => !term || n.toLowerCase().includes(term))
+    .slice(0, 6);
+  if (!matches.length) {
+    dropdown.classList.remove("show");
+    dropdown.innerHTML = "";
+    return;
+  }
+
+  dropdown.innerHTML = matches
+    .map((name) => `<button type="button" data-name="${escapeHtml(name)}">@${escapeHtml(name)}</button>`)
+    .join("");
+  dropdown.dataset.start = String(trigger.start);
+  dropdown.dataset.inputId = inputEl.id || "";
+  dropdown.classList.add("show");
+}
+function acceptMention(dropdown, name){
+  if (!dropdown) return;
+  const inputId = dropdown.dataset.inputId;
+  const start = Number(dropdown.dataset.start);
+  if (!inputId || Number.isNaN(start)) return;
+  const inputEl = document.getElementById(inputId);
+  if (!inputEl) return;
+  const value = inputEl.value;
+  const before = value.slice(0, start);
+  const after = value.slice(inputEl.selectionEnd ?? value.length);
+  const insertion = `@${name} `;
+  inputEl.value = before + insertion + after;
+  const pos = before.length + insertion.length;
+  inputEl.focus();
+  inputEl.setSelectionRange(pos, pos);
+  dropdown.classList.remove("show");
 }
 
 // BBCode render (escape HTML then whitelist a subset)
@@ -639,6 +810,7 @@ function isGroupThread(threadId){
 function markDmNotification(threadId, isGroupHint){
   const isGroup = typeof isGroupHint === "boolean" ? isGroupHint : isGroupThread(threadId);
   if(dmPanel?.classList.contains("open") && activeDmId === threadId) return;
+  dmUnreadThreads.add(threadId);
   setBadgeVisibility(isGroup ? "group" : "direct", true);
 }
 badgePrefs = loadBadgePrefsFromStorage();
@@ -646,7 +818,7 @@ applyBadgePrefs();
 dmThemePrefs = loadDmThemePrefsFromStorage();
 applyDmThemePrefs();
 initCustomizationUi();
-const EMOJI_CHOICES = ["😀","😁","😂","🙂","😉","😍","😘","💀","🤔","😤","😢","😡","🔥","🖕","♥️","💯","👍","👎","🎉","👀"];
+const EMOJI_CHOICES = ["😀","😁","😂","🙂","😉","😍","😘","🤔","😤","😭","😡","🥹","😈","💀","🔥","👀","🖕","♥️","💯","👍","👎","🎉","📸","🫦",];
 
 let reactionMenuEl = null;
 let reactionMenuFor = null;
@@ -714,21 +886,75 @@ function closeReactionMenu(){
   reactionMenuFor = null;
   reactionMenuRow = null;
 }
+function openMediaLightbox(src, kind){
+  if (!mediaLightbox || !mediaLightboxImg || !mediaLightboxVideo) return;
+  mediaLightbox.classList.add("show");
+  document.body.classList.add("lockScroll");
+  if (kind === "video") {
+    mediaLightboxVideo.src = src;
+    mediaLightboxVideo.style.display = "block";
+    mediaLightboxImg.style.display = "none";
+    mediaLightboxVideo.play().catch(()=>{});
+  } else {
+    mediaLightboxImg.src = src;
+    mediaLightboxImg.style.display = "block";
+    mediaLightboxVideo.pause();
+    mediaLightboxVideo.style.display = "none";
+  }
+}
+function closeMediaLightbox(){
+  if (!mediaLightbox) return;
+  mediaLightbox.classList.remove("show");
+  document.body.classList.remove("lockScroll");
+  if (mediaLightboxImg) mediaLightboxImg.src = "";
+  if (mediaLightboxVideo) {
+    mediaLightboxVideo.pause();
+    mediaLightboxVideo.src = "";
+  }
+}
+mediaLightboxClose?.addEventListener("click", closeMediaLightbox);
+mediaLightbox?.addEventListener("click", (e) => { if (e.target === mediaLightbox) closeMediaLightbox(); });
 
 function addMessage(m){
   const row = document.createElement("div");
   row.className = "msg" + (m.user === me.username ? " self" : "");
   row.dataset.mid = m.messageId;
 
+  const shouldStick = isNearBottom(msgs, 160);
+
   const av = document.createElement("div");
   av.className = "msgAvatar";
   av.appendChild(avatarNode(m.avatar, m.user));
+  av.title = `View ${m.user} profile`;
+  av.tabIndex = 0;
+  const openProfile = (e) => {
+    e.stopPropagation();
+    openMemberProfile(m.user);
+  };
+  av.addEventListener("click", openProfile);
+  av.addEventListener("keydown", (e) => { if(e.key === "Enter" || e.key === " ") openProfile(e); });
 
   const main = document.createElement("div");
   main.className = "msgMain";
 
   const bubble = document.createElement("div");
   bubble.className = "bubble";
+
+  if (m.replyToId && (m.replyToUser || m.replyToText)) {
+    const replyLink = document.createElement("button");
+    replyLink.type = "button";
+    replyLink.className = "replyContext";
+    replyLink.innerHTML = `
+      <div class="replyUser">@${escapeHtml(m.replyToUser || "")}</div>
+      <div class="replySnippet">${escapeHtml((m.replyToText || "").slice(0, 120))}</div>
+    `;
+    replyLink.onclick = (e) => {
+      e.stopPropagation();
+      const target = document.querySelector(`[data-mid="${m.replyToId}"]`);
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    bubble.appendChild(replyLink);
+  }
 
   const meta = document.createElement("div");
   meta.className = "metaLine";
@@ -752,12 +978,14 @@ function addMessage(m){
       const img=document.createElement("img");
       img.src=m.attachmentUrl;
       img.alt="image";
+      img.addEventListener("click", ()=>openMediaLightbox(m.attachmentUrl, "image"));
       att.appendChild(img);
     }else if(m.attachmentType==="video"){
       const v=document.createElement("video");
       v.src=m.attachmentUrl;
       v.controls=true;
       v.playsInline=true;
+      v.addEventListener("click", ()=>openMediaLightbox(m.attachmentUrl, "video"));
       att.appendChild(v);
     }else{
       const a=document.createElement("a");
@@ -807,6 +1035,18 @@ function addMessage(m){
     actions.appendChild(del);
   }
 
+  const replyBtn = document.createElement("button");
+  replyBtn.className = "reactBtn";
+  replyBtn.type = "button";
+  replyBtn.textContent = "↩️";
+  replyBtn.title = "Reply";
+  replyBtn.onclick = (e)=>{
+    e.stopPropagation();
+    setReplyTarget({ id: m.messageId, user: m.user, text: m.text });
+    msgInput?.focus();
+  };
+  actions.prepend(replyBtn);
+
   // mobile: long press bubble opens reaction menu
   let pressTimer = null;
   bubble.addEventListener("touchstart", ()=>{
@@ -822,7 +1062,9 @@ function addMessage(m){
   row.appendChild(actions);
 
   msgs.appendChild(row);
-  msgs.scrollTop = msgs.scrollHeight;
+  if (shouldStick || isNearBottom(msgs, 160)) {
+    msgs.scrollTop = msgs.scrollHeight;
+  }
 
   msgIndex.push({ id: m.messageId, el: row, textLower: (m.user+" "+m.text).toLowerCase() });
 }
@@ -875,8 +1117,13 @@ function updateGoldUI(){
     const g = Number(progression.gold || 0);
     memberGold.textContent = `Gold: ${g.toLocaleString()}`;
     memberGold.classList.add("show");
+    if (goldPill) {
+      goldPill.textContent = `💰 ${g.toLocaleString()}`;
+      goldPill.classList.add("show");
+    }
   } else {
     memberGold.classList.remove("show");
+    goldPill?.classList.remove("show");
   }
 }
 
@@ -919,8 +1166,36 @@ function showLevelToast(level){
   levelToastTimer = setTimeout(() => levelToast.classList.remove("show"), 3200);
 }
 
+function refreshModTargetOptions(users = lastUsers){
+  if(!modUserSelect) return;
+  const prev = modUserSelect.value;
+  modUserSelect.innerHTML = "";
+  const placeholder=document.createElement("option");
+  placeholder.value="";
+  placeholder.textContent = users && users.length ? "Select online member" : "No members online";
+  modUserSelect.appendChild(placeholder);
+  (users || []).forEach(u => {
+    const opt=document.createElement("option");
+    opt.value=u.name;
+    opt.textContent=`${u.name} (${normalizeStatusLabel(u.status, "Online")})`;
+    modUserSelect.appendChild(opt);
+  });
+  if(prev && Array.from(modUserSelect.options).some(o => o.value === prev)){
+    modUserSelect.value = prev;
+  }
+}
+function setModTarget(username){
+  if(modUser) modUser.value = username || "";
+  if(modUserSelect && username){
+    const match = Array.from(modUserSelect.options).find(o => o.value === username);
+    if(match) modUserSelect.value = username;
+  }
+}
+
 function renderMembers(users){
   lastUsers = users || [];
+  cleanupRecentDiceRolls();
+  refreshModTargetOptions(lastUsers);
   memberList.innerHTML="";
   lastUsers.forEach(u=>{
     const row=document.createElement("div");
@@ -950,6 +1225,14 @@ function renderMembers(users){
     meta.appendChild(name);
     meta.appendChild(sub);
 
+    const roll = recentDiceRolls.get(normKey(u.name));
+    if (roll && Date.now() - (roll.ts || 0) < 7000) {
+      const rollRow = document.createElement("div");
+      rollRow.className = "mRoll";
+      rollRow.textContent = `Rolled ${diceFace(roll.value)}`;
+      meta.appendChild(rollRow);
+    }
+
     row.appendChild(av);
     row.appendChild(dot);
     row.appendChild(meta);
@@ -960,6 +1243,29 @@ function renderMembers(users){
     };
     memberList.appendChild(row);
   });
+}
+
+function cleanupRecentDiceRolls(maxAge = 7000){
+  const now = Date.now();
+  for (const [key, info] of recentDiceRolls.entries()) {
+    if (!info?.ts || now - info.ts > maxAge) {
+      recentDiceRolls.delete(key);
+    }
+  }
+}
+
+function noteDiceRoll(username, value){
+  if (!username) return;
+  const key = normKey(username);
+  const payload = { value, ts: Date.now() };
+  recentDiceRolls.set(key, payload);
+  if (diceRollTimers.has(key)) clearTimeout(diceRollTimers.get(key));
+  diceRollTimers.set(key, setTimeout(() => {
+    recentDiceRolls.delete(key);
+    diceRollTimers.delete(key);
+    renderMembers(lastUsers);
+  }, 6500));
+  renderMembers(lastUsers);
 }
 
 async function loadProgression(){
@@ -985,27 +1291,46 @@ function applySearch(){
 searchInput.addEventListener("input", applySearch);
 
 // drawers
+function anyDrawerOpen(){
+  return channelsPane?.classList.contains("open") || membersPane?.classList.contains("open");
+}
+
 function closeDrawers(){
   channelsPane?.classList.remove("open");
   membersPane?.classList.remove("open");
   drawerOverlay?.classList.remove("show");
   closeMemberMenu();
 }
+
 function openChannels(){
+  // toggle
+  if (channelsPane?.classList.contains("open")) { closeDrawers(); return; }
+
   membersPane?.classList.remove("open");
   channelsPane?.classList.add("open");
   drawerOverlay?.classList.add("show");
 }
+
 function openMembers(){
+  // toggle
+  if (membersPane?.classList.contains("open")) { closeDrawers(); return; }
+
   channelsPane?.classList.remove("open");
   membersPane?.classList.add("open");
   drawerOverlay?.classList.add("show");
 }
+
 openChannelsBtn?.addEventListener("click", openChannels);
 openMembersBtn?.addEventListener("click", openMembers);
-drawerOverlay?.addEventListener("click", closeDrawers);
-document.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeDrawers(); });
 
+/* Outside tap close: use pointerdown (better on mobile) */
+drawerOverlay?.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  closeDrawers();
+}, { capture:true });
+document.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeDrawers(); });
+channelsCloseBtn?.addEventListener("click", closeDrawers);
+membersCloseBtn?.addEventListener("click", closeDrawers);
 // dms (rebuilt)
 let dmSettingsOpen = false;
 function closeDmSettingsMenu(){
@@ -1028,51 +1353,95 @@ function threadLabel(t){
   return others[0] || "Direct Message";
 }
 
+function lockBodyScroll(lock){
+  document.body.classList.toggle("bodyLocked", !!lock);
+}
+
+function formatDmTime(ts){
+  if (!ts) return "";
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function threadAvatarNode(t){
+  const wrap = document.createElement("div");
+  wrap.className = "dmAvatar";
+  wrap.appendChild(avatarNode(null, threadLabel(t)));
+  return wrap;
+}
+
+function syncDmTabUi(){
+  dmTabs?.querySelectorAll("[data-dm-tab]")?.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.dmTab === dmTab);
+  });
+  if (dmCreateGroupBtn) dmCreateGroupBtn.style.display = dmTab === "group" ? "block" : "none";
+}
+
+function setDmTab(tab){
+  dmTab = tab === "group" ? "group" : "direct";
+  syncDmTabUi();
+  renderDmThreads();
+}
+
 function renderThreadItem(t){
   const div = document.createElement("div");
   div.className = "dmItem" + (t.id === activeDmId ? " active" : "");
   const label = threadLabel(t);
   const preview = t.last_text ? String(t.last_text).slice(0, 80) : "No messages yet";
-  div.innerHTML = `
-    <div class="name">${escapeHtml(label)}</div>
-    <div class="small">${escapeHtml(preview)}</div>
-  `;
+
+  div.appendChild(threadAvatarNode(t));
+
+  const meta = document.createElement("div");
+  meta.className = "dmItemMeta";
+
+  const top = document.createElement("div");
+  top.className = "dmItemTop";
+  const title = document.createElement("div");
+  title.className = "name";
+  title.textContent = label;
+  const time = document.createElement("div");
+  time.className = "dmItemTime";
+  time.textContent = formatDmTime(t.last_ts);
+  top.appendChild(title);
+  top.appendChild(time);
+
+  const bottom = document.createElement("div");
+  bottom.className = "dmItemBottom";
+  const prev = document.createElement("div");
+  prev.className = "small preview";
+  prev.textContent = preview;
+  bottom.appendChild(prev);
+
+  if (dmUnreadThreads.has(t.id)) {
+    const unread = document.createElement("div");
+    unread.className = "dmUnread";
+    unread.textContent = "New";
+    bottom.appendChild(unread);
+  }
+
+  meta.appendChild(top);
+  meta.appendChild(bottom);
+
+  div.appendChild(meta);
   div.onclick = () => openDmThread(t.id);
   return div;
 }
 
 function renderDmThreads(){
+  if (!dmThreadList) return;
   dmThreadList.innerHTML = "";
 
-  const sections = [
-    {
-      title: "Direct messages",
-      emptyText: "No direct messages yet. Start one from Members.",
-      items: dmThreads.filter((t) => !t.is_group)
-    },
-    {
-      title: "Group chats",
-      emptyText: "No group chats yet.",
-      items: dmThreads.filter((t) => t.is_group)
-    }
-  ];
-
-  for (const section of sections) {
-    const head = document.createElement("div");
-    head.className = "dmSectionTitle";
-    head.textContent = section.title;
-    dmThreadList.appendChild(head);
-
-    if (!section.items.length) {
-      const empty = document.createElement("div");
-      empty.className = "dmEmpty";
-      empty.textContent = section.emptyText;
-      dmThreadList.appendChild(empty);
-      continue;
-    }
-
-    for (const t of section.items) dmThreadList.appendChild(renderThreadItem(t));
+  const list = dmThreads.filter((t) => dmTab === "group" ? t.is_group : !t.is_group);
+  if (!list.length) {
+    const empty = document.createElement("div");
+    empty.className = "dmEmpty";
+    empty.textContent = dmTab === "group"
+      ? "No group chats yet. Start one below."
+      : "No direct messages yet. Start one from Members.";
+    dmThreadList.appendChild(empty);
+    return;
   }
+
+  for (const t of list) dmThreadList.appendChild(renderThreadItem(t));
 }
 
 async function loadDmThreads(){
@@ -1084,6 +1453,7 @@ async function loadDmThreads(){
     }
     const raw = await res.json();
     dmThreads = (raw || []).map((t) => ({ ...t, is_group: !!t.is_group }));
+    syncDmTabUi();
     renderDmThreads();
   } catch {
     dmMsg.textContent = "Could not load threads.";
@@ -1093,6 +1463,7 @@ async function loadDmThreads(){
 async function startDirectMessage(username){
   if (!username || username === me?.username) return;
 
+  setDmTab("direct");
   openDmPanel();
   closeMemberMenu();
 
@@ -1134,6 +1505,7 @@ function openDmPanel(){
   dmPanel.classList.add("open");
   dmMsg.textContent = "";
   clearDmBadges();
+  syncDmTabUi();
 
   // load threads if we haven't yet
   if (!dmThreads.length) loadDmThreads();
@@ -1146,6 +1518,9 @@ function closeDmPanel(){
 }
 
 function renderDmMessages(threadId){
+  if (!dmMessagesEl) return;
+  const keepOffset = dmMessagesEl.scrollHeight - dmMessagesEl.scrollTop;
+  const stick = isNearBottom(dmMessagesEl, 160);
   dmMessagesEl.innerHTML = "";
   const msgsArr = dmMessages.get(threadId) || [];
 
@@ -1154,12 +1529,29 @@ function renderDmMessages(threadId){
     empty.className = "dmEmpty";
     empty.textContent = "No messages yet. Say hi to save this thread.";
     dmMessagesEl.appendChild(empty);
+    dmPinned = true;
     return;
   }
 
   for (const m of msgsArr) {
     const wrap = document.createElement("div");
     wrap.className = "dmBubble" + (m.user === me.username ? " self" : "");
+
+    if (m.replyToId && (m.replyToUser || m.replyToText)) {
+      const replyLink = document.createElement("button");
+      replyLink.type = "button";
+      replyLink.className = "dmReplyContext";
+      replyLink.innerHTML = `
+        <div class="replyUser">@${escapeHtml(m.replyToUser || "")}</div>
+        <div class="replySnippet">${escapeHtml((m.replyToText || "").slice(0, 120))}</div>
+      `;
+      replyLink.onclick = (e) => {
+        e.stopPropagation();
+        const target = dmMessagesEl.querySelector(`[data-dm-mid="${m.replyToId}"]`);
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
+      };
+      wrap.appendChild(replyLink);
+    }
 
     const meta = document.createElement("div");
     meta.className = "dmMetaRow";
@@ -1170,10 +1562,32 @@ function renderDmMessages(threadId){
     text.innerHTML = applyMentions(m.text || "");
     wrap.appendChild(text);
 
+    const dmActions = document.createElement("div");
+    dmActions.className = "dmActions";
+    const replyBtn = document.createElement("button");
+    replyBtn.type = "button";
+    replyBtn.textContent = "↩️ Reply";
+    replyBtn.className = "smallAction";
+    replyBtn.onclick = (e) => {
+      e.stopPropagation();
+      setDmReplyTarget({ id: m.messageId || m.id, user: m.user, text: m.text });
+      dmText?.focus();
+    };
+    dmActions.appendChild(replyBtn);
+    wrap.dataset.dmMid = m.messageId || m.id;
+    wrap.appendChild(dmActions);
+
     dmMessagesEl.appendChild(wrap);
   }
 
-  dmMessagesEl.scrollTop = dmMessagesEl.scrollHeight;
+  requestAnimationFrame(() => {
+    if (stick) {
+      dmMessagesEl.scrollTop = dmMessagesEl.scrollHeight;
+    } else {
+      dmMessagesEl.scrollTop = Math.max(0, dmMessagesEl.scrollHeight - keepOffset);
+    }
+    dmPinned = stick;
+  });
 }
 
 function setDmMeta(thread){
@@ -1183,16 +1597,21 @@ function setDmMeta(thread){
     return;
   }
   dmMetaTitle.textContent = threadLabel(thread);
-  dmMetaPeople.textContent = (thread.participants || []).join(", ");
+  const names = thread.participants || [];
+  dmMetaPeople.textContent = thread.is_group
+    ? `${names.length} member${names.length === 1 ? "" : "s"}`
+    : names.join(", ");
 }
 
 function openDmThread(threadId){
   activeDmId = threadId;
-  renderDmThreads();
-
   const meta = dmThreads.find(t => t.id === threadId);
+  if (meta) setDmTab(meta.is_group ? "group" : "direct");
+  dmUnreadThreads.delete(threadId);
+  renderDmThreads();
   setDmMeta(meta);
   if (meta) setBadgeVisibility(meta.is_group ? "group" : "direct", false);
+  setDmReplyTarget(null);
 
   dmMessagesEl.innerHTML = "<div class='dmEmpty'>Loading...</div>";
   socket?.emit("dm join", { threadId });
@@ -1244,15 +1663,235 @@ function sendDmMessage(){
   if (!activeDmId) return;
   const txt = dmText.value.trim();
   if (!txt) return;
-  socket?.emit("dm message", { threadId: activeDmId, text: txt });
+  socket?.emit("dm message", { threadId: activeDmId, text: txt, replyToId: dmReplyTarget?.id || null });
   dmText.value = "";
+  setDmReplyTarget(null);
 }
 
-dmToggleBtn?.addEventListener("click", openDmPanel);
-groupDmToggleBtn?.addEventListener("click", openDmPanel);
+function filteredDmCandidates(term, excludeList){
+  const termNorm = normKey(term || "");
+  const excluded = new Set((excludeList || []).map((n) => normKey(n)));
+  const base = (lastUsers || []).filter((u) => {
+    const statusLabel = normalizeStatusLabel(u.status, "Online");
+    return statusLabel !== "Offline";
+  });
 
+  return base
+    .filter((u) => !excluded.has(normKey(u.name)))
+    .filter((u) => !termNorm || normKey(u.name).includes(termNorm))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function renderDmPickerList(){
+  if (!dmPickerList) return;
+  dmPickerList.innerHTML = "";
+  const candidates = filteredDmCandidates(dmModalSearch?.value || "", dmPickerExisting);
+
+  if (!candidates.length) {
+    const empty = document.createElement("div");
+    empty.className = "dmEmpty";
+    empty.textContent = "No members match.";
+    dmPickerList.appendChild(empty);
+    return;
+  }
+
+  for (const u of candidates) {
+    const row = document.createElement("label");
+    row.className = "dmPickerRow";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = dmPickerSelection.has(u.name);
+    checkbox.onchange = () => {
+      if (checkbox.checked) dmPickerSelection.add(u.name); else dmPickerSelection.delete(u.name);
+      syncDmPickerCta();
+    };
+
+    const avatarWrap = document.createElement("div");
+    avatarWrap.className = "dmAvatar";
+    avatarWrap.appendChild(avatarNode(u.avatar, u.name));
+
+    const meta = document.createElement("div");
+    meta.className = "dmItemMeta";
+    const name = document.createElement("div");
+    name.className = "dmPickerName";
+    name.textContent = u.name;
+    const sub = document.createElement("div");
+    sub.className = "dmPickerSub";
+    const statusLabel = normalizeStatusLabel(u.status, "Online");
+    sub.textContent = `${u.role || ""} ${u.role ? "• " : ""}${statusLabel}`;
+    meta.appendChild(name);
+    meta.appendChild(sub);
+
+    row.appendChild(checkbox);
+    row.appendChild(avatarWrap);
+    row.appendChild(meta);
+
+    dmPickerList.appendChild(row);
+  }
+}
+
+function syncDmPickerCta(){
+  const count = dmPickerSelection.size;
+  const min = dmPickerMode === "create" ? 2 : 1;
+  const verb = dmPickerMode === "add" ? "Add" : "Create";
+  if (dmModalPrimaryBtn) {
+    dmModalPrimaryBtn.disabled = count < min;
+    dmModalPrimaryBtn.textContent = verb;
+  }
+  if (dmModalSubtitle) dmModalSubtitle.textContent = dmPickerMode === "add"
+    ? "Pick at least one person to invite"
+    : "Pick at least two people";
+}
+
+function openDmPicker(mode = "create", threadId = null, existing = []){
+  dmPickerMode = mode;
+  dmPickerThreadId = threadId;
+  dmPickerExisting = existing || [];
+  dmPickerSelection = new Set();
+  if (dmModalSearch) dmModalSearch.value = "";
+
+  if (dmModalTitle) dmModalTitle.textContent = mode === "add" ? "Add members" : "Create group";
+  syncDmPickerCta();
+  renderDmPickerList();
+  lockBodyScroll(true);
+  dmPickerModal?.classList.add("show");
+  dmModalSearch?.focus();
+}
+
+function closeDmPicker(){
+  dmPickerModal?.classList.remove("show");
+  lockBodyScroll(false);
+}
+
+async function submitDmPicker(){
+  const names = Array.from(dmPickerSelection);
+  if (!names.length) return;
+
+  if (dmPickerMode === "add" && dmPickerThreadId) {
+    await addMembersToGroup(dmPickerThreadId, names);
+    return;
+  }
+
+  try {
+    dmModalPrimaryBtn.disabled = true;
+    const res = await fetch("/dm/thread", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "group", participants: names }),
+    });
+    dmModalPrimaryBtn.disabled = false;
+    if (!res.ok) {
+      const txt = await res.text();
+      dmMsg.textContent = txt || "Could not create group.";
+      return;
+    }
+    const data = await res.json();
+    closeDmPicker();
+    await loadDmThreads();
+    if (data.threadId) openDmThread(data.threadId);
+  } catch {
+    dmMsg.textContent = "Could not create group.";
+  }
+}
+
+async function fetchDmInfo(threadId){
+  const res = await fetch(`/dm/thread/${threadId}`);
+  if (!res.ok) throw new Error("Failed info");
+  return res.json();
+}
+
+async function openDmInfo(threadId = activeDmId){
+  const meta = dmThreads.find((t) => t.id === threadId);
+  if (!meta || !meta.is_group) {
+    dmMsg.textContent = "Group info is only available inside a group chat.";
+    return;
+  }
+  try {
+    const data = await fetchDmInfo(threadId);
+    dmInfoTitle.textContent = data.title || threadLabel(meta);
+    const names = data.participants || [];
+    dmInfoSubtitle.textContent = `${names.length} member${names.length === 1 ? "" : "s"}`;
+    dmInfoMembers.innerHTML = "";
+    names.forEach((name) => {
+      const row = document.createElement("div");
+      row.className = "dmInfoMember";
+      const avatar = document.createElement("div");
+      avatar.className = "dmAvatar";
+      avatar.appendChild(avatarNode(null, name));
+      const label = document.createElement("div");
+      label.textContent = name;
+      row.appendChild(avatar);
+      row.appendChild(label);
+      dmInfoMembers.appendChild(row);
+    });
+    lockBodyScroll(true);
+    dmInfoModal?.classList.add("show");
+  } catch {
+    dmMsg.textContent = "Could not load group info.";
+  }
+}
+
+function closeDmInfo(){
+  dmInfoModal?.classList.remove("show");
+  lockBodyScroll(false);
+}
+
+async function addMembersToGroup(threadId, names){
+  if (!names?.length) return;
+  try {
+    dmModalPrimaryBtn.disabled = true;
+    const res = await fetch(`/dm/thread/${threadId}/participants`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ participants: names }),
+    });
+    dmModalPrimaryBtn.disabled = false;
+    if (!res.ok) {
+      dmMsg.textContent = (await res.text()) || "Could not add members.";
+      return;
+    }
+    closeDmPicker();
+    await loadDmThreads();
+    openDmInfo(threadId);
+  } catch {
+    dmMsg.textContent = "Could not add members.";
+  }
+}
+
+async function leaveGroup(threadId){
+  const ok = confirm("Leave this group?");
+  if (!ok) return;
+  try {
+    const res = await fetch(`/dm/thread/${threadId}/leave`, { method: "POST" });
+    if (!res.ok) {
+      dmMsg.textContent = (await res.text()) || "Could not leave group.";
+      return;
+    }
+    dmThreads = dmThreads.filter((t) => t.id !== threadId);
+    dmMessages.delete(threadId);
+    dmUnreadThreads.delete(threadId);
+    activeDmId = null;
+    closeDmInfo();
+    renderDmThreads();
+    dmMetaTitle.textContent = "Pick a thread";
+    dmMetaPeople.textContent = "";
+    dmMessagesEl.innerHTML = "";
+  } catch {
+    dmMsg.textContent = "Could not leave group.";
+  }
+}
+
+dmToggleBtn?.addEventListener("click", () => { setDmTab("direct"); openDmPanel(); });
+groupDmToggleBtn?.addEventListener("click", () => { setDmTab("group"); openDmPanel(); });
+dmTabs?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-dm-tab]");
+  if (!btn) return;
+  setDmTab(btn.dataset.dmTab);
+});
+dmCreateGroupBtn?.addEventListener("click", () => openDmPicker("create"));
 dmCloseBtn?.addEventListener("click", closeDmPanel);
 dmSendBtn?.addEventListener("click", sendDmMessage);
+dmInfoBtn?.addEventListener("click", () => openDmInfo());
 dmSettingsBtn?.addEventListener("click", (e) => {
   e.stopPropagation();
   toggleDmSettingsMenu();
@@ -1262,6 +1901,20 @@ dmReportBtn?.addEventListener("click", () => {
   dmMsg.textContent = "Report feature coming soon.";
   closeDmSettingsMenu();
 });
+dmModalCloseBtn?.addEventListener("click", closeDmPicker);
+dmModalCancelBtn?.addEventListener("click", closeDmPicker);
+dmPickerModal?.addEventListener("click", (e) => { if (e.target === dmPickerModal) closeDmPicker(); });
+dmModalPrimaryBtn?.addEventListener("click", submitDmPicker);
+dmModalSearch?.addEventListener("input", () => { renderDmPickerList(); syncDmPickerCta(); });
+dmInfoCloseBtn?.addEventListener("click", closeDmInfo);
+dmInfoModal?.addEventListener("click", (e) => { if (e.target === dmInfoModal) closeDmInfo(); });
+dmInfoAddBtn?.addEventListener("click", () => {
+  const meta = dmThreads.find((t) => t.id === activeDmId);
+  const existing = meta?.participants || [];
+  closeDmInfo();
+  if (activeDmId) openDmPicker("add", activeDmId, existing);
+});
+dmLeaveBtn?.addEventListener("click", () => { if (activeDmId) leaveGroup(activeDmId); });
 
 document.addEventListener("click", (e) => {
   if (!dmSettingsOpen) return;
@@ -1300,12 +1953,32 @@ document.addEventListener("click", (e) => {
 });
 membersPane?.addEventListener("scroll", closeMemberMenu);
 
+mentionDropdown?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-name]");
+  if (!btn) return;
+  acceptMention(mentionDropdown, btn.dataset.name || "");
+});
+dmMentionDropdown?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-name]");
+  if (!btn) return;
+  acceptMention(dmMentionDropdown, btn.dataset.name || "");
+});
+document.addEventListener("click", (e) => {
+  if (mentionDropdown && !mentionDropdown.contains(e.target) && e.target !== msgInput) {
+    mentionDropdown.classList.remove("show");
+  }
+  if (dmMentionDropdown && !dmMentionDropdown.contains(e.target) && e.target !== dmText) {
+    dmMentionDropdown.classList.remove("show");
+  }
+});
+
 dmText?.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     sendDmMessage();
   }
 });
+dmText?.addEventListener("input", ()=>renderMentionDropdown(dmMentionDropdown, dmText));
 
 // "Message" button on profile -> always direct DM
 dmUserBtn?.addEventListener("click", () => {
@@ -1399,6 +2072,7 @@ function uploadChatFileWithProgress(file){
 
 // tabs
 function focusActiveTab(){
+  if (window.matchMedia("(max-width: 760px)").matches) return;
   const active=document.querySelector(".tab.active");
   active?.scrollIntoView({ behavior:"smooth", inline:"center", block:"nearest" });
 }
@@ -1408,13 +2082,26 @@ function setTab(tab){
   }
   viewInfo.style.display = tab==="info" ? "block" : "none";
   viewAbout.style.display = tab==="about" ? "block" : "none";
-  viewCustomize.style.display = tab==="customize" ? "block" : "none";
+  viewEdit.style.display = tab==="edit" ? "block" : "none";
   viewModeration.style.display = tab==="moderation" ? "block" : "none";
+  if(tab === "edit") showEditPanel("themes");
   focusActiveTab();
 }
+tabEdit.addEventListener("click", ()=>setTab("edit"));
+
+function showEditPanel(which){
+  const isThemes = which === "themes";
+  editThemesPanel.style.display = isThemes ? "block" : "none";
+  editDmPanel.style.display = which==="dm" ? "block" : "none";
+  editThemesBtn?.classList.toggle("active", isThemes);
+  editDmBtn?.classList.toggle("active", which === "dm");
+}
+
+editThemesBtn?.addEventListener("click", ()=>showEditPanel("themes"));
+editDmBtn?.addEventListener("click", ()=>showEditPanel("dm"));
 tabInfo.addEventListener("click", ()=>setTab("info"));
 tabAbout.addEventListener("click", ()=>setTab("about"));
-tabCustomize.addEventListener("click", ()=>setTab("customize"));
+tabCustomize?.addEventListener("click", ()=>setTab("customize"));
 tabModeration.addEventListener("click", async ()=>{
   setTab("moderation");
   await refreshLogs();
@@ -1527,6 +2214,58 @@ function ensureChangelogLoaded(force = false){
   return loadChangelog(force);
 }
 
+function renderLeaderboard(listEl, items, mapper){
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  if (!items?.length) {
+    const empty = document.createElement("div");
+    empty.className = "small muted";
+    empty.textContent = "No entries yet.";
+    listEl.appendChild(empty);
+    return;
+  }
+
+  items.forEach((item, idx) => {
+    const row = document.createElement("div");
+    row.className = "leaderboardItem";
+    const label = document.createElement("div");
+    label.className = "label";
+    const meta = document.createElement("div");
+    meta.className = "meta";
+
+    const mapped = mapper?.(item, idx) || {};
+    label.textContent = mapped.label || `${idx + 1}. ${item.username}`;
+    meta.textContent = mapped.meta || "";
+
+    row.appendChild(label);
+    row.appendChild(meta);
+    listEl.appendChild(row);
+  });
+}
+
+async function loadLeaderboards(force = false){
+  if (leaderboardsLoading) return;
+  if (leaderboardsLoaded && !force) return;
+  leaderboardsLoading = true;
+  if (leaderboardsMsg) leaderboardsMsg.textContent = "Loading...";
+  try {
+    const res = await fetch("/api/leaderboards");
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    renderLeaderboard(leaderboardXp, data?.xp, (item, idx) => ({ label: `${idx + 1}. ${item.username}`, meta: `Level ${item.level}` }));
+    renderLeaderboard(leaderboardGold, data?.gold, (item, idx) => ({ label: `${idx + 1}. ${item.username}`, meta: `${Number(item.gold || 0).toLocaleString()} Gold` }));
+    renderLeaderboard(leaderboardDice, data?.dice, (item, idx) => ({ label: `${idx + 1}. ${item.username}`, meta: `${Number(item.sixes || 0)}× ${diceFace(6)}` }));
+    renderLeaderboard(leaderboardLikes, data?.likes, (item, idx) => ({ label: `${idx + 1}. ${item.username}`, meta: `${Number(item.likes || 0)} likes` }));
+    leaderboardsLoaded = true;
+    if (leaderboardsMsg) leaderboardsMsg.textContent = "";
+  } catch {
+    leaderboardsLoaded = false;
+    if (leaderboardsMsg) leaderboardsMsg.textContent = "Failed to load leaderboards.";
+  } finally {
+    leaderboardsLoading = false;
+  }
+}
+
 function setRightPanelMode(mode){
   rightPanelMode = mode === "menu" ? "menu" : "rooms";
   if(roomsPanel) roomsPanel.style.display = rightPanelMode === "rooms" ? "flex" : "none";
@@ -1546,6 +2285,7 @@ function setMenuTab(tab){
     section.classList.toggle("active", section.dataset.menuSection === activeMenuTab);
   });
   if(activeMenuTab === "changelog") ensureChangelogLoaded();
+  if(activeMenuTab === "leaderboards") loadLeaderboards();
 }
 
 function updateChangelogControlsVisibility(){
@@ -1742,6 +2482,7 @@ if(menuNav){
     setMenuTab(btn.dataset.menuTab);
   });
 }
+if(refreshLeaderboardsBtn) refreshLeaderboardsBtn.addEventListener("click", ()=> loadLeaderboards(true));
 if(latestUpdateViewBtn){
   latestUpdateViewBtn.addEventListener("click", ()=>{
     setMenuTab("changelog");
@@ -1754,6 +2495,33 @@ if(changelogCancelBtn) changelogCancelBtn.addEventListener("click", closeChangel
 if(changelogSaveBtn) changelogSaveBtn.addEventListener("click", saveChangelogEntry);
 closeChangelogEditor();
 
+function setReplyTarget(target){
+  replyTarget = target;
+  if (!replyPreview || !replyPreviewText) return;
+  if (target) {
+    const base = String(target.text || target.attachment || "").trim();
+    const snippet = base ? base.slice(0, 120) : "Attachment";
+    replyPreviewText.textContent = `Replying to ${target.user || ""}: ${snippet}`;
+    replyPreview.classList.add("show");
+  } else {
+    replyPreview.classList.remove("show");
+    replyPreviewText.textContent = "";
+  }
+}
+function setDmReplyTarget(target){
+  dmReplyTarget = target;
+  if (!dmReplyPreview || !dmReplyPreviewText) return;
+  if (target) {
+    const base = String(target.text || target.attachment || "").trim();
+    const snippet = base ? base.slice(0, 120) : "Attachment";
+    dmReplyPreviewText.textContent = `Replying to ${target.user || ""}: ${snippet}`;
+    dmReplyPreview.classList.add("show");
+  } else {
+    dmReplyPreview.classList.remove("show");
+    dmReplyPreviewText.textContent = "";
+  }
+}
+
 // typing/send
 let typingDebounce=null;
 function emitTyping(){
@@ -1762,11 +2530,17 @@ function emitTyping(){
   clearTimeout(typingDebounce);
   typingDebounce=setTimeout(()=>socket.emit("stop typing"), 900);
 }
-msgInput.addEventListener("input", emitTyping);
+msgInput.addEventListener("input", (e)=>{ emitTyping(); renderMentionDropdown(mentionDropdown, msgInput); });
 msgInput.addEventListener("keydown",(e)=>{
   if(e.key==="Enter"){ e.preventDefault(); sendMessage(); }
 });
 sendBtn.addEventListener("click", sendMessage);
+replyPreviewClose?.addEventListener("click", ()=>setReplyTarget(null));
+dmReplyClose?.addEventListener("click", ()=>setDmReplyTarget(null));
+msgInput?.addEventListener("click", ()=>renderMentionDropdown(mentionDropdown, msgInput));
+msgInput?.addEventListener("focus", ()=>renderMentionDropdown(mentionDropdown, msgInput));
+dmText?.addEventListener("click", ()=>renderMentionDropdown(dmMentionDropdown, dmText));
+dmText?.addEventListener("focus", ()=>renderMentionDropdown(dmMentionDropdown, dmText));
 
 async function sendMessage(){
   if(!socket) return;
@@ -1785,6 +2559,7 @@ async function sendMessage(){
 
     socket.emit("chat message", {
       text,
+      replyToId: replyTarget?.id || null,
       attachmentUrl: attachment?.url || "",
       attachmentType: attachment?.type || "",
       attachmentMime: attachment?.mime || "",
@@ -1792,6 +2567,7 @@ async function sendMessage(){
     });
 
     msgInput.value="";
+    setReplyTarget(null);
     socket.emit("stop typing");
 
     // keep focus on mobile
@@ -1908,6 +2684,18 @@ function fillProfileUI(p, isSelf){
 
   bioRender.innerHTML = p.bio ? renderBBCode(p.bio) : "(no bio)";
   renderLevelProgress(p, isSelf);
+  syncProfileLikes(p, isSelf);
+  if (profileLikeMsg) profileLikeMsg.textContent = "";
+}
+function syncProfileLikes(p = {}, isSelf = false){
+  const likesVal = Number(p.likes || 0);
+  if (likeCount) likeCount.textContent = likesVal.toLocaleString();
+  if (likeProfileBtn) {
+    likeProfileBtn.disabled = !!isSelf;
+    likeProfileBtn.classList.toggle("active", !!p.likedByMe);
+    likeProfileBtn.setAttribute("aria-pressed", p.likedByMe ? "true" : "false");
+    likeProfileBtn.textContent = isSelf ? "❤️ Likes" : (p.likedByMe ? "❤️ Liked" : "♡ Like");
+  }
 }
 function syncCustomizationUI(){
   badgePrefs = loadBadgePrefsFromStorage();
@@ -1920,6 +2708,7 @@ async function openMyProfile(){
   const res=await fetch("/profile");
   if(!res.ok) return;
   const p=await res.json();
+  modalTargetUsername = p.username;
   applyProgressionPayload(p);
 
   modalTitle.textContent="My Profile";
@@ -1985,23 +2774,44 @@ async function openMemberProfile(username){
 
   const iCanMod = (roleRank(me.role) >= roleRank("Moderator")) && (roleRank(me.role) > roleRank(p.role));
   memberModTools.style.display = iCanMod ? "block" : "none";
-  quickReason.value=""; quickMuteMins.value=""; quickBanMins.value=""; quickModMsg.textContent="";
+  quickReason.value=""; quickModMsg.textContent="";
+  if(quickMuteMins) quickMuteMins.value = quickMuteMins.querySelector("option")?.value || "10";
+  if(quickBanMins) quickBanMins.value = quickBanMins.querySelector("option")?.value || "0";
+
+  setModTarget(username);
+  if(modReason) modReason.value = "";
+  if(modMsg) modMsg.textContent = "";
 
   tabModeration.style.display = (roleRank(me.role) >= roleRank("Moderator")) ? "block" : "none";
   setTab("info");
   openModal();
 }
 
+likeProfileBtn?.addEventListener("click", async () => {
+  if (!modalTargetUsername || likeProfileBtn.disabled) return;
+  profileLikeMsg.textContent = "";
+  likeProfileBtn.disabled = true;
+  try {
+    const res = await fetch(`/profile/${encodeURIComponent(modalTargetUsername)}/like`, { method: "POST" });
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      profileLikeMsg.textContent = t || "Could not update like.";
+      return;
+    }
+    const data = await res.json();
+    syncProfileLikes({ likes: data.likes, likedByMe: data.liked }, false);
+  } catch (err) {
+    profileLikeMsg.textContent = "Could not update like.";
+  } finally {
+    const isSelf = normKey(modalTargetUsername) === normKey(me?.username);
+    likeProfileBtn.disabled = isSelf;
+  }
+});
+
 // media actions
 copyUsernameBtn.addEventListener("click", async ()=>{
   const u = modalTargetUsername || me?.username || "";
   try{ await navigator.clipboard.writeText(u); mediaMsg.textContent="Copied username."; }
-  catch{ mediaMsg.textContent="Copy failed (browser blocked)."; }
-});
-copyProfileLinkBtn.addEventListener("click", async ()=>{
-  const u = modalTargetUsername || me?.username || "";
-  const link = `${location.origin}/#profile:${encodeURIComponent(u)}`;
-  try{ await navigator.clipboard.writeText(link); mediaMsg.textContent="Copied profile link."; }
   catch{ mediaMsg.textContent="Copy failed (browser blocked)."; }
 });
 saveBadgePrefsBtn?.addEventListener("click", () => {
@@ -2036,86 +2846,144 @@ groupBadgeColorText?.addEventListener("input", () => {
 
 // moderation quick tools
 function requireReason(reason){
-  if(!reason || !reason.trim()) return "Reason is required.";
-  if(reason.trim().length < 3) return "Reason must be at least 3 characters.";
+  const cleaned = (reason || "").trim();
+  if(!cleaned) return "Reason is required.";
+  if(cleaned.length < 3) return "Reason must be at least 3 characters.";
   return null;
 }
+function selectedModTarget(){
+  const typed = (modUser?.value || "").trim();
+  const chosen = modUserSelect?.value || "";
+  return chosen || typed;
+}
+function confirmModeration(action, target){
+  const label = target ? `${action} ${target}?` : `Confirm ${action}?`;
+  return window.confirm(label);
+}
+function ensureTarget(target){
+  if(!target) return "Select or enter a username.";
+  return null;
+}
+
 quickKickBtn.addEventListener("click", ()=>{
-  const err=requireReason(quickReason.value);
+  const reason = (quickReason.value || "").trim();
+  const err=requireReason(reason);
   if(err){ quickModMsg.textContent=err; return; }
+  if(!modalTargetUsername){ quickModMsg.textContent="No target selected."; return; }
+  if(!confirmModeration("kick", modalTargetUsername)) return;
   socket?.emit("mod kick", { username: modalTargetUsername });
   quickModMsg.textContent="Kick sent.";
 });
 quickMuteBtn.addEventListener("click", ()=>{
-  const err=requireReason(quickReason.value);
+  const reason = (quickReason.value || "").trim();
+  const err=requireReason(reason);
   if(err){ quickModMsg.textContent=err; return; }
+  if(!modalTargetUsername){ quickModMsg.textContent="No target selected."; return; }
+  if(!confirmModeration("mute", modalTargetUsername)) return;
   const mins=Number(quickMuteMins.value || 10);
-  socket?.emit("mod mute", { username: modalTargetUsername, minutes: mins, reason: quickReason.value.trim() });
+  socket?.emit("mod mute", { username: modalTargetUsername, minutes: mins, reason });
   quickModMsg.textContent="Mute sent.";
 });
 quickBanBtn.addEventListener("click", ()=>{
-  const err=requireReason(quickReason.value);
+  const reason = (quickReason.value || "").trim();
+  const err=requireReason(reason);
   if(err){ quickModMsg.textContent=err; return; }
+  if(!modalTargetUsername){ quickModMsg.textContent="No target selected."; return; }
+  if(!confirmModeration("ban", modalTargetUsername)) return;
   const mins=Number(quickBanMins.value || 0);
-  socket?.emit("mod ban", { username: modalTargetUsername, minutes: mins, reason: quickReason.value.trim() });
+  socket?.emit("mod ban", { username: modalTargetUsername, minutes: mins, reason });
   quickModMsg.textContent="Ban sent.";
 });
 
 // mod panel
+modRefreshTargetsBtn?.addEventListener("click", ()=>{
+  refreshModTargetOptions(lastUsers);
+  modMsg.textContent = "Online list refreshed.";
+});
 modKickBtn.addEventListener("click", ()=>{
-  const err=requireReason(modReason.value);
+  const reason = (modReason.value || "").trim();
+  const err=requireReason(reason);
   if(err){ modMsg.textContent=err; return; }
-  if(!modUser.value.trim()){ modMsg.textContent="Enter a target username."; return; }
-  socket?.emit("mod kick", { username: modUser.value.trim() });
+  const target = selectedModTarget();
+  const targetErr = ensureTarget(target);
+  if(targetErr){ modMsg.textContent = targetErr; return; }
+  if(!confirmModeration("kick", target)) return;
+  socket?.emit("mod kick", { username: target });
   modMsg.textContent="Kick sent.";
 });
 modMuteBtn.addEventListener("click", ()=>{
-  const err=requireReason(modReason.value);
+  const reason = (modReason.value || "").trim();
+  const err=requireReason(reason);
   if(err){ modMsg.textContent=err; return; }
-  if(!modUser.value.trim()){ modMsg.textContent="Enter a target username."; return; }
+  const target = selectedModTarget();
+  const targetErr = ensureTarget(target);
+  if(targetErr){ modMsg.textContent = targetErr; return; }
+  if(!confirmModeration("mute", target)) return;
   const mins=Number(modMuteMins.value || 10);
-  socket?.emit("mod mute", { username: modUser.value.trim(), minutes: mins, reason: modReason.value.trim() });
+  socket?.emit("mod mute", { username: target, minutes: mins, reason });
   modMsg.textContent="Mute sent.";
 });
 modBanBtn.addEventListener("click", ()=>{
-  const err=requireReason(modReason.value);
+  const reason = (modReason.value || "").trim();
+  const err=requireReason(reason);
   if(err){ modMsg.textContent=err; return; }
-  if(!modUser.value.trim()){ modMsg.textContent="Enter a target username."; return; }
+  const target = selectedModTarget();
+  const targetErr = ensureTarget(target);
+  if(targetErr){ modMsg.textContent = targetErr; return; }
+  if(!confirmModeration("ban", target)) return;
   const mins=Number(modBanMins.value || 0);
-  socket?.emit("mod ban", { username: modUser.value.trim(), minutes: mins, reason: modReason.value.trim() });
+  socket?.emit("mod ban", { username: target, minutes: mins, reason });
   modMsg.textContent="Ban sent.";
 });
 modUnmuteBtn.addEventListener("click", ()=>{
-  const err=requireReason(modReason.value);
+  const reason = (modReason.value || "").trim();
+  const err=requireReason(reason);
   if(err){ modMsg.textContent=err; return; }
-  if(!modUser.value.trim()){ modMsg.textContent="Enter a target username."; return; }
-  socket?.emit("mod unmute", { username: modUser.value.trim(), reason: modReason.value.trim() });
+  const target = selectedModTarget();
+  const targetErr = ensureTarget(target);
+  if(targetErr){ modMsg.textContent = targetErr; return; }
+  if(!confirmModeration("unmute", target)) return;
+  socket?.emit("mod unmute", { username: target, reason });
   modMsg.textContent="Unmute sent.";
 });
 modUnbanBtn.addEventListener("click", ()=>{
-  const err=requireReason(modReason.value);
+  const reason = (modReason.value || "").trim();
+  const err=requireReason(reason);
   if(err){ modMsg.textContent=err; return; }
-  if(!modUser.value.trim()){ modMsg.textContent="Enter a target username."; return; }
-  socket?.emit("mod unban", { username: modUser.value.trim(), reason: modReason.value.trim() });
+  const target = selectedModTarget();
+  const targetErr = ensureTarget(target);
+  if(targetErr){ modMsg.textContent = targetErr; return; }
+  if(!confirmModeration("unban", target)) return;
+  socket?.emit("mod unban", { username: target, reason });
   modMsg.textContent="Unban sent.";
 });
 modWarnBtn.addEventListener("click", ()=>{
-  const err=requireReason(modReason.value);
+  const reason = (modReason.value || "").trim();
+  const err=requireReason(reason);
   if(err){ modMsg.textContent=err; return; }
-  if(!modUser.value.trim()){ modMsg.textContent="Enter a target username."; return; }
-  socket?.emit("mod warn", { username: modUser.value.trim(), reason: modReason.value.trim() });
+  const target = selectedModTarget();
+  const targetErr = ensureTarget(target);
+  if(targetErr){ modMsg.textContent = targetErr; return; }
+  if(!confirmModeration("warn", target)) return;
+  socket?.emit("mod warn", { username: target, reason });
   modMsg.textContent="Warn sent.";
 });
 modOpenProfileBtn.addEventListener("click", async ()=>{
-  if(!modUser.value.trim()){ modMsg.textContent="Enter a target username."; return; }
-  await openMemberProfile(modUser.value.trim());
+  const target = selectedModTarget();
+  const targetErr = ensureTarget(target);
+  if(targetErr){ modMsg.textContent = targetErr; return; }
+  await openMemberProfile(target);
 });
 modSetRoleBtn.addEventListener("click", ()=>{
-  const err=requireReason(modReason.value);
+  const reason = (modReason.value || "").trim();
+  const err=requireReason(reason);
   if(err){ modMsg.textContent=err; return; }
-  if(!modUser.value.trim()){ modMsg.textContent="Enter a target username."; return; }
+  const target = selectedModTarget();
+  const targetErr = ensureTarget(target);
+  if(targetErr){ modMsg.textContent = targetErr; return; }
   if(!modSetRole.value){ modMsg.textContent="Choose a role first."; return; }
-  socket?.emit("mod set role", { username: modUser.value.trim(), role: modSetRole.value, reason: modReason.value.trim() });
+  if(!confirmModeration("role update", target)) return;
+  socket?.emit("mod set role", { username: target, role: modSetRole.value, reason });
   modMsg.textContent="Role change sent (Owner only).";
 });
 
@@ -2278,9 +3146,10 @@ socket.on("disconnect", (reason) => {
     if (typeof refreshMe === "function") refreshMe();
   });
   socket.on("dice:error", (msg)=> addSystem(msg));
-  socket.on("dice:rolled", ({value, won}) => {
+  socket.on("dice:rolled", ({value, won, username}) => {
     // show animation for other rollers too (nice-to-have)
     showDiceAnimation(value, won);
+    if (username) noteDiceRoll(username, value);
   });
 
   socket.on("command response", handleCommandResponse);
@@ -2295,6 +3164,10 @@ socket.on("disconnect", (reason) => {
     if(level) progression.level = level;
     showLevelToast(level || "");
     loadProgression();
+    renderLevelProgress(progression, true);
+  });
+  socket.on("progression:update", (payload = {}) => {
+    applyProgressionPayload(payload);
     renderLevelProgress(progression, true);
   });
   socket.on("history", (history)=>{
