@@ -1453,7 +1453,7 @@ editThemesBtn?.addEventListener("click", ()=>showEditPanel("themes"));
 editDmBtn?.addEventListener("click", ()=>showEditPanel("dm"));
 tabInfo.addEventListener("click", ()=>setTab("info"));
 tabAbout.addEventListener("click", ()=>setTab("about"));
-tabCustomize.addEventListener("click", ()=>setTab("customize"));
+tabCustomize?.addEventListener("click", ()=>setTab("customize"));
 tabModeration.addEventListener("click", async ()=>{
   setTab("moderation");
   await refreshLogs();
