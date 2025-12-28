@@ -76,6 +76,14 @@ const isCoarsePointer = (() => {
   }
 })();
 
+const isMobileScreen = () => {
+  try {
+    return window.matchMedia("(max-width: 980px)")?.matches;
+  } catch {
+    return window.innerWidth <= 980;
+  }
+};
+
 // ---- DOM
 const authWrap = document.getElementById("authWrap");
 const app = document.getElementById("app");
@@ -167,6 +175,7 @@ const dmMetaPeople = document.getElementById("dmMetaPeople");
 const dmMessagesEl = document.getElementById("dmMessages");
 const dmText = document.getElementById("dmText");
 const dmSendBtn = document.getElementById("dmSendBtn");
+const dmUploadBtn = document.getElementById("dmUploadBtn");
 
 dmMessagesEl?.addEventListener("scroll", ()=>{ dmPinned = isNearBottom(dmMessagesEl, 160); });
 const dmUserBtn = document.getElementById("dmUserBtn");
@@ -1637,6 +1646,15 @@ function setDmTab(tab){
   renderDmThreads();
 }
 
+function dmPreviewText(msg){
+  if (!msg) return "";
+  if (msg.text) return msg.text;
+  if (msg.attachmentType === "image") return "[Image]";
+  if (msg.attachmentType === "video") return "[Video]";
+  if (msg.attachmentUrl) return "[Attachment]";
+  return "";
+}
+
 function renderThreadItem(t){
   const div = document.createElement("div");
   div.className = "dmItem" + (t.id === activeDmId ? " active" : "");
@@ -1686,7 +1704,10 @@ function renderDmThreads(){
   dmThreadList.innerHTML = "";
 
   const list = dmThreads.filter((t) => dmTab === "group" ? t.is_group : !t.is_group);
+  const hideEmpty = !list.length && isMobileScreen();
+  dmThreadList.classList.toggle("dmEmptyList", hideEmpty);
   if (!list.length) {
+    if (hideEmpty) return;
     const empty = document.createElement("div");
     empty.className = "dmEmpty";
     empty.textContent = dmTab === "group"
@@ -1838,6 +1859,33 @@ function renderDmMessages(threadId){
       wrap.appendChild(embedWrap);
     }
 
+    if (m.attachmentUrl && m.attachmentType) {
+      const att = document.createElement("div");
+      att.className = "attachment";
+      if (m.attachmentType === "image") {
+        const img = document.createElement("img");
+        img.src = m.attachmentUrl;
+        img.alt = "image";
+        img.addEventListener("click", () => openMediaLightbox(m.attachmentUrl, "image"));
+        att.appendChild(img);
+      } else if (m.attachmentType === "video") {
+        const v = document.createElement("video");
+        v.src = m.attachmentUrl;
+        v.controls = true;
+        v.playsInline = true;
+        v.addEventListener("click", () => openMediaLightbox(m.attachmentUrl, "video"));
+        att.appendChild(v);
+      } else {
+        const a = document.createElement("a");
+        a.href = m.attachmentUrl;
+        a.textContent = "Download file";
+        a.target = "_blank";
+        a.rel = "noreferrer";
+        att.appendChild(a);
+      }
+      wrap.appendChild(att);
+    }
+
     const dmActions = document.createElement("div");
     dmActions.className = "dmActions";
     const replyBtn = document.createElement("button");
@@ -1876,6 +1924,7 @@ function renderDmMessages(threadId){
 }
 
 function setDmMeta(thread){
+  if (dmInfoBtn) dmInfoBtn.style.display = "none";
   if (!thread) {
     dmMetaTitle.textContent = "Pick a thread";
     dmMetaPeople.textContent = "";
@@ -1886,6 +1935,11 @@ function setDmMeta(thread){
   dmMetaPeople.textContent = thread.is_group
     ? `${names.length} member${names.length === 1 ? "" : "s"}`
     : names.join(", ");
+
+  if (dmInfoBtn) {
+    const showInfo = thread.is_group && !isMobileScreen();
+    dmInfoBtn.style.display = showInfo ? "inline-flex" : "none";
+  }
 }
 
 function openDmThread(threadId){
@@ -1944,13 +1998,38 @@ function upsertThreadMeta(tid, updater){
   renderDmThreads();
 }
 
-function sendDmMessage(){
-  if (!activeDmId) return;
-  const txt = dmText.value.trim();
-  if (!txt) return;
-  socket?.emit("dm message", { threadId: activeDmId, text: txt, replyToId: dmReplyTarget?.id || null });
-  dmText.value = "";
-  setDmReplyTarget(null);
+async function sendDmMessage(){
+  if (!socket || !activeDmId) return;
+  const text = dmText.value || "";
+  const file = pendingFile;
+  if (!text.trim() && !file) return;
+
+  try {
+    let attachment = null;
+    if (file) {
+      dmMsg.textContent = `Uploading ${file.name}...`;
+      attachment = await uploadChatFileWithProgress(file);
+      fileInput.value = "";
+      clearUploadPreview();
+      dmMsg.textContent = "";
+    }
+
+    socket.emit("dm message", {
+      threadId: activeDmId,
+      text,
+      replyToId: dmReplyTarget?.id || null,
+      attachmentUrl: attachment?.url || "",
+      attachmentType: attachment?.type || "",
+      attachmentMime: attachment?.mime || "",
+      attachmentSize: attachment?.size || 0,
+    });
+
+    dmText.value = "";
+    setDmReplyTarget(null);
+    dmMsg.textContent = "";
+  } catch (e) {
+    dmMsg.textContent = `Upload failed: ${e.message}`;
+  }
 }
 
 function filteredDmCandidates(term, excludeList){
@@ -2176,6 +2255,7 @@ dmTabs?.addEventListener("click", (e) => {
 dmCreateGroupBtn?.addEventListener("click", () => openDmPicker("create"));
 dmCloseBtn?.addEventListener("click", closeDmPanel);
 dmSendBtn?.addEventListener("click", sendDmMessage);
+dmUploadBtn?.addEventListener("click", () => fileInput?.click());
 dmInfoBtn?.addEventListener("click", () => openDmInfo());
 dmSettingsBtn?.addEventListener("click", (e) => {
   e.stopPropagation();
@@ -3482,8 +3562,9 @@ socket.on("disconnect", (reason) => {
 
   socket.on("dm history", (payload) => {
     const { threadId, messages = [], participants = [], title = "" } = payload || {};
-    const lastText = messages.length
-      ? messages[messages.length - 1].text || ""
+    const lastMessage = messages.length ? messages[messages.length - 1] : null;
+    const lastText = lastMessage
+      ? dmPreviewText(lastMessage)
       : (dmThreads.find((t) => t.id === threadId)?.last_text || "");
 
     const lastTs = messages.length
@@ -3527,7 +3608,7 @@ socket.on("disconnect", (reason) => {
     arr.push(m);
     dmMessages.set(m.threadId, arr);
 
-    upsertThreadMeta(m.threadId, { last_text: m.text || "", last_ts: m.ts });
+    upsertThreadMeta(m.threadId, { last_text: dmPreviewText(m), last_ts: m.ts });
 
     if (!dmThreads.find((t) => t.id === m.threadId)) loadDmThreads();
 

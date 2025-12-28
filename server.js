@@ -273,6 +273,10 @@ db.serialize(() => {
     ["reply_to_id", "reply_to_id INTEGER"],
     ["reply_to_user", "reply_to_user TEXT"],
     ["reply_to_text", "reply_to_text TEXT"],
+    ["attachment_url", "attachment_url TEXT"],
+    ["attachment_type", "attachment_type TEXT"],
+    ["attachment_mime", "attachment_mime TEXT"],
+    ["attachment_size", "attachment_size INTEGER"],
   ]);
 
   ensureColumns("dm_threads", [
@@ -329,7 +333,7 @@ function ensureDmSchema(cb) {
       )
     `);
 
-    let pending = 2;
+    let pending = 3;
     let done = false;
     const finish = (err) => {
       if (done) return;
@@ -359,6 +363,20 @@ function ensureDmSchema(cb) {
       [
         ["added_by", "added_by INTEGER"],
         ["joined_at", "joined_at INTEGER NOT NULL DEFAULT 0"],
+      ],
+      finish
+    );
+
+    ensureTableColumns(
+      "dm_messages",
+      [
+        ["reply_to_id", "reply_to_id INTEGER"],
+        ["reply_to_user", "reply_to_user TEXT"],
+        ["reply_to_text", "reply_to_text TEXT"],
+        ["attachment_url", "attachment_url TEXT"],
+        ["attachment_type", "attachment_type TEXT"],
+        ["attachment_mime", "attachment_mime TEXT"],
+        ["attachment_size", "attachment_size INTEGER"],
       ],
       finish
     );
@@ -1955,7 +1973,16 @@ app.get("/dm/threads", requireLogin, (req, res) => {
 
   db.all(
     `SELECT t.id, t.title, t.is_group, t.created_at,
-            (SELECT text FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1) AS last_text,
+            (SELECT CASE
+                      WHEN COALESCE(text, '') <> '' THEN text
+                      WHEN attachment_type = 'image' THEN '[Image]'
+                      WHEN attachment_type = 'video' THEN '[Video]'
+                      WHEN attachment_url IS NOT NULL THEN '[Attachment]'
+                      ELSE ''
+                    END
+               FROM dm_messages
+               WHERE thread_id=t.id
+               ORDER BY ts DESC LIMIT 1) AS last_text,
             (SELECT ts FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1) AS last_ts
      FROM dm_threads t
      INNER JOIN dm_participants p ON p.thread_id = t.id
@@ -2531,7 +2558,7 @@ function doJoin(room, status) {
       socket.join(`dm:${tid}`);
 
       db.all(
-        `SELECT id, thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text FROM dm_messages WHERE thread_id=? ORDER BY ts DESC LIMIT 50`,
+        `SELECT id, thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_type, attachment_mime, attachment_size FROM dm_messages WHERE thread_id=? ORDER BY ts DESC LIMIT 50`,
         [tid],
         (_e, rows) => {
           const msgs = (rows || []).reverse().map((r) => ({
@@ -2545,6 +2572,10 @@ function doJoin(room, status) {
             replyToId: r.reply_to_id || null,
             replyToUser: r.reply_to_user || "",
             replyToText: r.reply_to_text || "",
+            attachmentUrl: r.attachment_url || "",
+            attachmentType: r.attachment_type || "",
+            attachmentMime: r.attachment_mime || "",
+            attachmentSize: r.attachment_size || 0,
           }));
           socket.emit("dm history", {
             threadId: tid,
@@ -2558,25 +2589,42 @@ function doJoin(room, status) {
     });
   });
 
-  socket.on("dm message", ({ threadId, text, replyToId }) => {
-    const tid = Number(threadId);
-    const body = String(text || "").trim().slice(0, 800);
-    if (!Number.isInteger(tid) || !body) return;
+  socket.on("dm message", (payload = {}) => {
+    const tid = Number(payload.threadId);
+    const body = String(payload.text || "").trim().slice(0, 800);
+    const attachmentUrl = String(payload?.attachmentUrl || "").slice(0, 400);
+    const attachmentType = String(payload?.attachmentType || "").slice(0, 20);
+    const attachmentMime = String(payload?.attachmentMime || "").slice(0, 60);
+    const attachmentSize = Number(payload?.attachmentSize || 0) || 0;
+    if (!Number.isInteger(tid) || (!body && !attachmentUrl)) return;
 
     loadThreadForUser(tid, socket.user.id, (err, thread) => {
       if (err) return;
       const ts = Date.now();
 
-      const replyId = Number(replyToId);
+      const replyId = Number(payload.replyToId);
       const doInsert = (replyMeta = {}) => {
         const replyUser = replyMeta.user || null;
         const replyText = replyMeta.text || null;
         const replyPk = Number.isInteger(replyMeta.id) ? replyMeta.id : null;
 
         db.run(
-          `INSERT INTO dm_messages (thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [tid, socket.user.id, socket.user.username, body, ts, replyPk, replyUser, replyText],
+          `INSERT INTO dm_messages (thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_type, attachment_mime, attachment_size)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            tid,
+            socket.user.id,
+            socket.user.username,
+            body,
+            ts,
+            replyPk,
+            replyUser,
+            replyText,
+            attachmentUrl || null,
+            attachmentType || null,
+            attachmentMime || null,
+            attachmentSize || null,
+          ],
           function (insertErr) {
             if (insertErr) return;
             const payload = {
@@ -2589,6 +2637,10 @@ function doJoin(room, status) {
               replyToId: replyPk,
               replyToUser: replyUser || "",
               replyToText: replyText || "",
+              attachmentUrl: attachmentUrl || "",
+              attachmentType: attachmentType || "",
+              attachmentMime: attachmentMime || "",
+              attachmentSize: attachmentSize || 0,
             };
             io.to(`dm:${tid}`).emit("dm message", payload);
             if (Array.isArray(thread.participants)) {
