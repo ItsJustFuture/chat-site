@@ -1363,6 +1363,7 @@ body.lockScroll{ overflow:hidden; }
   border-bottom:1px solid var(--line);
 }
 .dmHeader .title{ font-weight:900; letter-spacing:.01em; }
+.dmMobileTopRow{ display:none; padding:10px 14px; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid var(--line); background:var(--panel2); }
 .dmNotice{
   padding:10px 14px;
   border-bottom:1px solid var(--line);
@@ -1374,6 +1375,7 @@ body.lockScroll{ overflow:hidden; }
 .dmContent{ flex:1; display:grid; grid-template-columns: 220px 1fr; min-height:0; backdrop-filter: blur(4px); background:var(--dm-bg); }
 .dmThreads{ border-right:1px solid var(--line); overflow:auto; display:flex; flex-direction:column; min-height:0; gap:6px; padding:10px 10px 12px; }
 .dmThreadList{ border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--panel); flex:1; min-height:0; }
+.dmOpenStrip{ display:none; border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:8px 10px; gap:10px; align-items:center; min-height:62px; }
 .dmItem{ padding:12px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; gap:10px; align-items:center; transition: background .12s ease, border-color .12s ease; }
 .dmItem:hover{ background:var(--panel); }
 .dmItem.active{ background:var(--bubble); }
@@ -1387,6 +1389,11 @@ body.lockScroll{ overflow:hidden; }
 .dmItemTime{ font-size:11px; color:var(--muted); white-space:nowrap; }
 .dmUnread{ min-width:22px; height:22px; padding:0 8px; border-radius:999px; background:var(--accent); color:white; font-size:11px; display:flex; align-items:center; justify-content:center; }
 .dmAvatar{ width:42px; height:42px; border-radius:12px; overflow:hidden; background:var(--avatar-bg); flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+.dmOpenAvatar{ border:1px solid var(--line); background:var(--panel2); border-radius:50%; padding:3px; width:52px; height:52px; display:flex; align-items:center; justify-content:center; flex-shrink:0; position:relative; transition:border-color .12s ease, box-shadow .12s ease; }
+.dmOpenAvatar.active{ border-color: var(--accent); box-shadow: 0 0 0 2px rgba(0,0,0,.25); }
+.dmOpenAvatar .dmAvatar{ width:44px; height:44px; border-radius:50%; }
+.dmAvatarBadge{ position:absolute; right:6px; bottom:6px; width:12px; height:12px; border-radius:50%; background:var(--accent); border:2px solid var(--panel2); }
+.dmOpenStrip::-webkit-scrollbar{ height:6px; }
 .dmConversation{ display:flex; flex-direction:column; min-width:0; min-height:0; }
 .dmMeta{ padding:10px 12px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .dmMeta .title{ font-weight:900; }
@@ -1468,11 +1475,15 @@ body.lockScroll{ overflow:hidden; }
   .mobOnly.goldPill.show{ display:flex; }
   .members{ display:none; }
 
+  .dmMobileTopRow{ display:flex; }
+  .dmOpenStrip{ display:flex; overflow-x:auto; overflow-y:hidden; overscroll-behavior-x: contain; }
+  .dmOpenStrip .dmEmpty{ width:100%; text-align:center; }
   .dmTabs{ display:none; }
   .dmHelperText{ display:none; }
   #dmInfoBtn{ display:none !important; }
+  #dmSettingsBtn{ display:none !important; }
   .dmThreadList.dmEmptyList{ display:none; }
-  
+
   .topbar{ position: sticky; top: 0; z-index: 200; padding:0 10px; gap:8px; }
   .msgs{ padding:10px; gap:8px; }
   .msg{ gap:8px; }
@@ -1494,12 +1505,14 @@ body.lockScroll{ overflow:hidden; }
 }
   }
   .dmHeader{ position:sticky; top:0; background:var(--panel2); z-index:2; }
+  .dmMeta{ padding:4px 12px; border-bottom:0; }
+  .dmMetaText{ display:none; }
   .dmInput{
   position: sticky;
   bottom: 0;
   padding-bottom: calc(10px + env(safe-area-inset-bottom) + 16px);
 }
-  .dmContent{ grid-template-columns: 1fr; grid-template-rows: minmax(180px, 32vh) 1fr; }
+  .dmContent{ grid-template-columns: 1fr; grid-template-rows: minmax(150px, 28vh) 1fr; }
   .dmThreads{ border-right:0; border-bottom:1px solid var(--line); }
   .dmMessages{ padding-bottom:14px; }
 

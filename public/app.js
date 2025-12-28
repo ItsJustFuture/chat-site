@@ -172,15 +172,19 @@ const dmThreadList = document.getElementById("dmThreadList");
 const dmMsg = document.getElementById("dmMsg");
 const dmMetaTitle = document.getElementById("dmMetaTitle");
 const dmMetaPeople = document.getElementById("dmMetaPeople");
+const dmMobileMetaTitle = document.getElementById("dmMobileMetaTitle");
+const dmMobileMetaPeople = document.getElementById("dmMobileMetaPeople");
 const dmMessagesEl = document.getElementById("dmMessages");
 const dmText = document.getElementById("dmText");
 const dmSendBtn = document.getElementById("dmSendBtn");
 const dmUploadBtn = document.getElementById("dmUploadBtn");
+const dmOpenStrip = document.getElementById("dmOpenStrip");
 
 dmMessagesEl?.addEventListener("scroll", ()=>{ dmPinned = isNearBottom(dmMessagesEl, 160); });
 const dmUserBtn = document.getElementById("dmUserBtn");
 const dmInfoBtn = document.getElementById("dmInfoBtn");
 const dmSettingsBtn = document.getElementById("dmSettingsBtn");
+const dmSettingsBtnMobile = document.getElementById("dmSettingsBtnMobile");
 const goldPill = document.getElementById("goldPill");
 const likeProfileBtn = document.getElementById("likeProfileBtn");
 const likeCount = document.getElementById("likeCount");
@@ -997,6 +1001,7 @@ function markDmNotification(threadId, isGroupHint){
   if(dmPanel?.classList.contains("open") && activeDmId === threadId) return;
   dmUnreadThreads.add(threadId);
   setBadgeVisibility(isGroup ? "group" : "direct", true);
+  renderDmThreads();
 }
 badgePrefs = loadBadgePrefsFromStorage();
 applyBadgePrefs();
@@ -1699,11 +1704,46 @@ function renderThreadItem(t){
   return div;
 }
 
+function renderDmOpenStrip(list){
+  if (!dmOpenStrip) return;
+  const threads = list || dmThreads.filter((t) => dmTab === "group" ? t.is_group : !t.is_group);
+  dmOpenStrip.innerHTML = "";
+
+  if (!threads.length) {
+    const empty = document.createElement("div");
+    empty.className = "dmEmpty dmOpenEmpty";
+    empty.textContent = "No DMs yet.";
+    dmOpenStrip.appendChild(empty);
+    return;
+  }
+
+  for (const t of threads) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "dmOpenAvatar" + (t.id === activeDmId ? " active" : "");
+    btn.title = threadLabel(t);
+    btn.setAttribute("aria-label", threadLabel(t));
+
+    const avatar = threadAvatarNode(t);
+    btn.appendChild(avatar);
+
+    if (dmUnreadThreads.has(t.id)) {
+      const badge = document.createElement("div");
+      badge.className = "dmAvatarBadge";
+      btn.appendChild(badge);
+    }
+
+    btn.onclick = () => openDmThread(t.id);
+    dmOpenStrip.appendChild(btn);
+  }
+}
+
 function renderDmThreads(){
   if (!dmThreadList) return;
   dmThreadList.innerHTML = "";
 
   const list = dmThreads.filter((t) => dmTab === "group" ? t.is_group : !t.is_group);
+  renderDmOpenStrip(list);
   const hideEmpty = !list.length && isMobileScreen();
   dmThreadList.classList.toggle("dmEmptyList", hideEmpty);
   if (!list.length) {
@@ -1928,13 +1968,17 @@ function setDmMeta(thread){
   if (!thread) {
     dmMetaTitle.textContent = "Pick a thread";
     dmMetaPeople.textContent = "";
+    if (dmMobileMetaTitle) dmMobileMetaTitle.textContent = "Pick a thread";
+    if (dmMobileMetaPeople) dmMobileMetaPeople.textContent = "";
     return;
   }
   dmMetaTitle.textContent = threadLabel(thread);
+  if (dmMobileMetaTitle) dmMobileMetaTitle.textContent = threadLabel(thread);
   const names = thread.participants || [];
   dmMetaPeople.textContent = thread.is_group
     ? `${names.length} member${names.length === 1 ? "" : "s"}`
     : names.join(", ");
+  if (dmMobileMetaPeople) dmMobileMetaPeople.textContent = dmMetaPeople.textContent;
 
   if (dmInfoBtn) {
     const showInfo = thread.is_group && !isMobileScreen();
@@ -2237,8 +2281,7 @@ async function leaveGroup(threadId){
     activeDmId = null;
     closeDmInfo();
     renderDmThreads();
-    dmMetaTitle.textContent = "Pick a thread";
-    dmMetaPeople.textContent = "";
+    setDmMeta(null);
     dmMessagesEl.innerHTML = "";
   } catch {
     dmMsg.textContent = "Could not leave group.";
@@ -2258,6 +2301,10 @@ dmSendBtn?.addEventListener("click", sendDmMessage);
 dmUploadBtn?.addEventListener("click", () => fileInput?.click());
 dmInfoBtn?.addEventListener("click", () => openDmInfo());
 dmSettingsBtn?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleDmSettingsMenu();
+});
+dmSettingsBtnMobile?.addEventListener("click", (e) => {
   e.stopPropagation();
   toggleDmSettingsMenu();
 });
