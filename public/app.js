@@ -78,6 +78,13 @@ const changelogCancelBtn = document.getElementById("changelogCancelBtn");
 const changelogEditMsg = document.getElementById("changelogEditMsg");
 const channelsCloseBtn = document.getElementById("channelsCloseBtn");
 const membersCloseBtn  = document.getElementById("membersCloseBtn");
+const tabEdit = document.getElementById("tabEdit");
+const viewEdit = document.getElementById("viewEdit");
+
+const editThemesBtn = document.getElementById("editThemesBtn");
+const editDmBtn = document.getElementById("editDmBtn");
+const editThemesPanel = document.getElementById("editThemesPanel");
+const editDmPanel = document.getElementById("editDmPanel");
 
 const authUser = document.getElementById("authUser");
 const authPass = document.getElementById("authPass");
@@ -647,7 +654,7 @@ applyBadgePrefs();
 dmThemePrefs = loadDmThemePrefsFromStorage();
 applyDmThemePrefs();
 initCustomizationUi();
-const EMOJI_CHOICES = ["😀","😁","😂","🙂","😉","😍","😘","💀","🤔","😤","😢","😡","🔥","🖕","♥️","💯","👍","👎","🎉","👀"];
+const EMOJI_CHOICES = ["😀","😁","😂","🙂","😉","😍","😘","🤔","😤","😭","😡","🥹","😈","💀","🔥","👀","🖕","♥️","💯","👍","👎","🎉","📸","🫦",];
 
 let reactionMenuEl = null;
 let reactionMenuFor = null;
@@ -1431,10 +1438,19 @@ function setTab(tab){
   }
   viewInfo.style.display = tab==="info" ? "block" : "none";
   viewAbout.style.display = tab==="about" ? "block" : "none";
-  viewCustomize.style.display = tab==="customize" ? "block" : "none";
+ viewEdit.style.display = tab==="edit" ? "block" : "none";
   viewModeration.style.display = tab==="moderation" ? "block" : "none";
   focusActiveTab();
 }
+tabEdit.addEventListener("click", ()=>setTab("edit"));
+
+function showEditPanel(which){
+  editThemesPanel.style.display = which==="themes" ? "block" : "none";
+  editDmPanel.style.display = which==="dm" ? "block" : "none";
+}
+
+editThemesBtn?.addEventListener("click", ()=>showEditPanel("themes"));
+editDmBtn?.addEventListener("click", ()=>showEditPanel("dm"));
 tabInfo.addEventListener("click", ()=>setTab("info"));
 tabAbout.addEventListener("click", ()=>setTab("about"));
 tabCustomize.addEventListener("click", ()=>setTab("customize"));
