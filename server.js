@@ -1714,7 +1714,7 @@ const avatarUpload = multer({
       cb(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`);
     },
   }),
-  limits: { fileSize: 2 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ok = /^image\/(png|jpeg|jpg|webp|gif)$/i.test(file.mimetype || "");
     cb(ok ? null : new Error("Invalid avatar type"), ok);
