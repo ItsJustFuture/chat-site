@@ -1419,8 +1419,11 @@ function uploadChatFileWithProgress(file){
 
 // tabs
 function focusActiveTab(){
+  function focusActiveTab(){
+  if (window.matchMedia("(max-width: 760px)").matches) return;
   const active=document.querySelector(".tab.active");
   active?.scrollIntoView({ behavior:"smooth", inline:"center", block:"nearest" });
+  }
 }
 function setTab(tab){
   for(const el of document.querySelectorAll(".tab")){
