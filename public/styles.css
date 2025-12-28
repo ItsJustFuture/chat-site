@@ -1403,14 +1403,35 @@ textarea{ min-height:90px; resize:vertical; }
 #levelToast.show{ opacity:1; transform: translateY(0); }
 
 @media (max-width: 760px){
-  .tabs{ gap:6px; padding:8px; }
-  .tab{
-    padding:8px 10px;
-    font-size:12px;
-    border-radius:12px;
-    white-space:nowrap;
+
+  /* Make the profile modal body behave properly on mobile */
+  .modal .modalBody{
+    min-height: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
+  /* Tabs should fit without forcing a scroll area */
+  .tabs{
+    display: flex;
+    flex-wrap: wrap;     /* allows 2 rows if needed */
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .tab{
+    padding: 8px 10px;
+    font-size: 12px;
+    border-radius: 12px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  /* Slightly reduce heading spacing in profile panels */
+  .panelBox h3{
+    margin: 10px 0 8px;
+  }
+}
   /* If you want them NOT scrollable, allow wrapping: */
   .tabs{ flex-wrap:wrap; }
 }
