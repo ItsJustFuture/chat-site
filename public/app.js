@@ -554,12 +554,15 @@ function extractYoutubeId(url){
     const u = new URL(cleaned);
     const host = u.hostname.replace(/^www\./, "").toLowerCase();
     if (host === "youtube.com" || host === "m.youtube.com") {
-      const id = u.searchParams.get("v");
-      return id ? { id, url: cleaned } : null;
+      const searchId = u.searchParams.get("v");
+      if (searchId) return { videoId: searchId, url: cleaned };
+      const pathParts = u.pathname.split("/").filter(Boolean);
+      if (pathParts[0] === "shorts" && pathParts[1]) return { videoId: pathParts[1], url: cleaned };
+      return null;
     }
     if (host === "youtu.be") {
       const pathId = u.pathname.split("/").filter(Boolean)[0];
-      return pathId ? { id: pathId, url: cleaned } : null;
+      return pathId ? { videoId: pathId, url: cleaned } : null;
     }
   } catch {
     return null;
@@ -569,18 +572,27 @@ function extractYoutubeId(url){
 
 function findFirstYoutubeLink(text){
   if (!text) return null;
-  const parts = String(text).split(/\s+/);
-  for (const part of parts) {
-    if (!/^https?:\/\//i.test(part)) continue;
-    const info = extractYoutubeId(part);
-    if (info) return info;
+  const str = String(text);
+  const urlRegex = /https?:\/\/[^\s]+/gi;
+  let match;
+  while ((match = urlRegex.exec(str))) {
+    const rawUrl = match[0];
+    const info = extractYoutubeId(rawUrl);
+    if (info) {
+      const cleaned = stripTrailingPunctuation(rawUrl);
+      const rangeEnd = match.index + cleaned.length;
+      const videoId = info.videoId || info.id;
+      return { ...info, id: videoId, videoId, matchRange: [match.index, rangeEnd] };
+    }
   }
   return null;
 }
 
 function createYoutubeEmbed(youtubeInfo){
+  const videoId = youtubeInfo?.videoId || youtubeInfo?.id;
   const wrap = document.createElement("div");
   wrap.className = "ytEmbedWrap";
+  wrap.addEventListener("click", (e) => e.stopPropagation());
 
   const controls = document.createElement("div");
   controls.className = "ytEmbedControls";
@@ -610,7 +622,7 @@ function createYoutubeEmbed(youtubeInfo){
   const embed = document.createElement("div");
   embed.className = "ytEmbed";
   const iframe = document.createElement("iframe");
-  iframe.src = `https://www.youtube.com/embed/${encodeURIComponent(youtubeInfo.id)}`;
+  iframe.src = `https://www.youtube.com/embed/${encodeURIComponent(videoId || "")}`;
   iframe.title = "YouTube video player";
   iframe.loading = "lazy";
   iframe.allowFullscreen = true;
@@ -1178,16 +1190,25 @@ function addMessage(m){
     <span class="ts">${new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span>
   `;
 
-  const text = document.createElement("div");
-  text.className = "text";
-  if (youtubeInfo) {
-    text.dataset.youtubeId = youtubeInfo.id;
-    text.dataset.youtubeUrl = youtubeInfo.url;
-  }
-  text.innerHTML = applyMentions(m.text);
-
   bubble.appendChild(meta);
-  bubble.appendChild(text);
+
+  const rawText = String(m.text || "");
+  let displayText = rawText;
+  if (youtubeInfo?.matchRange) {
+    const [start, end] = youtubeInfo.matchRange;
+    displayText = `${rawText.slice(0, start)}${rawText.slice(end)}`.replace(/\s{2,}/g, " ").trim();
+  }
+
+  if (displayText) {
+    const text = document.createElement("div");
+    text.className = "text";
+    if (youtubeInfo) {
+      text.dataset.youtubeId = youtubeInfo.videoId || youtubeInfo.id;
+      text.dataset.youtubeUrl = youtubeInfo.url;
+    }
+    text.innerHTML = applyMentions(displayText);
+    bubble.appendChild(text);
+  }
 
   if (youtubeInfo) {
     const { wrap: embedWrap } = createYoutubeEmbed(youtubeInfo);
@@ -1795,13 +1816,22 @@ function renderDmMessages(threadId){
     meta.innerHTML = `<span>${escapeHtml(m.user)}</span><span>${new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span>`;
     wrap.appendChild(meta);
 
-    const text = document.createElement("div");
-    if (youtubeInfo) {
-      text.dataset.youtubeId = youtubeInfo.id;
-      text.dataset.youtubeUrl = youtubeInfo.url;
+    const rawText = String(m.text || "");
+    let displayText = rawText;
+    if (youtubeInfo?.matchRange) {
+      const [start, end] = youtubeInfo.matchRange;
+      displayText = `${rawText.slice(0, start)}${rawText.slice(end)}`.replace(/\s{2,}/g, " ").trim();
     }
-    text.innerHTML = applyMentions(m.text || "");
-    wrap.appendChild(text);
+
+    if (displayText) {
+      const text = document.createElement("div");
+      if (youtubeInfo) {
+        text.dataset.youtubeId = youtubeInfo.videoId || youtubeInfo.id;
+        text.dataset.youtubeUrl = youtubeInfo.url;
+      }
+      text.innerHTML = applyMentions(displayText);
+      wrap.appendChild(text);
+    }
 
     if (youtubeInfo) {
       const { wrap: embedWrap } = createYoutubeEmbed(youtubeInfo);
