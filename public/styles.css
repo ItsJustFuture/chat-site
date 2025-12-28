@@ -879,6 +879,9 @@ textarea{ min-height:90px; resize:vertical; }
   word-wrap:break-word;
   border:1px solid var(--border);
 }
+.bubble.ytOnly{
+  max-width:min(90vw, 920px);
+}
 .self .bubble{ background:var(--messageSelfBg); color:var(--messageSelfText); }
 .metaLine{ display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
 .uName{ font-weight:900; font-size:13px; }
