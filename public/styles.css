@@ -1467,6 +1467,11 @@ body.lockScroll{ overflow:hidden; }
   .mobOnly.goldPill{ display:none; }
   .mobOnly.goldPill.show{ display:flex; }
   .members{ display:none; }
+
+  .dmTabs{ display:none; }
+  .dmHelperText{ display:none; }
+  #dmInfoBtn{ display:none !important; }
+  .dmThreadList.dmEmptyList{ display:none; }
   
   .topbar{ position: sticky; top: 0; z-index: 200; padding:0 10px; gap:8px; }
   .msgs{ padding:10px; gap:8px; }
