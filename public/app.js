@@ -76,6 +76,8 @@ const changelogBodyInput = document.getElementById("changelogBodyInput");
 const changelogSaveBtn = document.getElementById("changelogSaveBtn");
 const changelogCancelBtn = document.getElementById("changelogCancelBtn");
 const changelogEditMsg = document.getElementById("changelogEditMsg");
+const channelsCloseBtn = document.getElementById("channelsCloseBtn");
+const membersCloseBtn  = document.getElementById("membersCloseBtn");
 
 const authUser = document.getElementById("authUser");
 const authPass = document.getElementById("authPass");
@@ -1022,7 +1024,8 @@ drawerOverlay?.addEventListener("pointerdown", (e) => {
   closeDrawers();
 }, { capture:true });
 document.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeDrawers(); });
-
+channelsCloseBtn?.addEventListener("click", closeDrawers);
+membersCloseBtn?.addEventListener("click", closeDrawers);
 // dms (rebuilt)
 let dmSettingsOpen = false;
 function closeDmSettingsMenu(){
