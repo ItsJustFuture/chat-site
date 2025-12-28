@@ -1397,10 +1397,12 @@ body.lockScroll{ overflow:hidden; }
   color:var(--muted);
   background: rgba(255,255,255,.03);
 }
+.dmNotice:not(.hasText){ display:none; }
 .dmContent{ flex:1; display:grid; grid-template-columns: 220px 1fr; min-height:0; backdrop-filter: blur(4px); background:var(--dm-bg); }
 .dmThreads{ border-right:1px solid var(--line); overflow:auto; display:flex; flex-direction:column; min-height:0; gap:6px; padding:10px 10px 12px; }
 .dmThreadList{ border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--panel); flex:1; min-height:0; }
-.dmOpenStrip{ display:none; border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:8px 10px; gap:10px; align-items:center; min-height:62px; }
+.dmOpenStrip{ display:none; border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:6px 8px; gap:10px; align-items:center; min-height:0; flex-wrap:nowrap; }
+.dmOpenStrip.hidden{ display:none !important; }
 .dmItem{ padding:12px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; gap:10px; align-items:center; transition: background .12s ease, border-color .12s ease; }
 .dmItem:hover{ background:var(--panel); }
 .dmItem.active{ background:var(--bubble); }
@@ -1501,7 +1503,7 @@ body.lockScroll{ overflow:hidden; }
   .members{ display:none; }
 
   .dmMobileTopRow{ display:flex; }
-  .dmOpenStrip{ display:flex; overflow-x:auto; overflow-y:hidden; overscroll-behavior-x: contain; }
+  .dmOpenStrip{ display:flex; overflow-x:auto; overflow-y:hidden; overscroll-behavior-x: contain; flex-wrap:nowrap; gap:8px; padding:6px 8px; }
   .dmOpenStrip .dmEmpty{ width:100%; text-align:center; }
   .dmTabs{ display:none; }
   .dmHelperText{ display:none; }

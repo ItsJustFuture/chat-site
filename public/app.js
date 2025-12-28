@@ -168,6 +168,7 @@ const groupDmToggleBtn = document.getElementById("groupDmToggleBtn");
 const dmCloseBtn = document.getElementById("dmCloseBtn");
 const dmTabs = document.getElementById("dmTabs");
 const dmCreateGroupBtn = document.getElementById("dmCreateGroupBtn");
+const dmThreadActions = document.getElementById("dmThreadActions");
 const dmThreadList = document.getElementById("dmThreadList");
 const dmMsg = document.getElementById("dmMsg");
 const dmMetaTitle = document.getElementById("dmMetaTitle");
@@ -1631,6 +1632,14 @@ function formatDmTime(ts){
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function setDmNotice(text, opts = {}){
+  if (!dmMsg) return;
+  const suppress = opts.suppressMobile && isMobileScreen();
+  const finalText = suppress ? "" : (text || "");
+  dmMsg.textContent = finalText;
+  dmMsg.classList.toggle("hasText", !!finalText);
+}
+
 function threadAvatarNode(t){
   const wrap = document.createElement("div");
   wrap.className = "dmAvatar";
@@ -1643,6 +1652,7 @@ function syncDmTabUi(){
     btn.classList.toggle("active", btn.dataset.dmTab === dmTab);
   });
   if (dmCreateGroupBtn) dmCreateGroupBtn.style.display = dmTab === "group" ? "block" : "none";
+  if (dmThreadActions) dmThreadActions.style.display = dmTab === "group" ? "block" : "none";
 }
 
 function setDmTab(tab){
@@ -1707,15 +1717,11 @@ function renderThreadItem(t){
 function renderDmOpenStrip(list){
   if (!dmOpenStrip) return;
   const threads = list || dmThreads.filter((t) => dmTab === "group" ? t.is_group : !t.is_group);
+  const hideStrip = (dmTab === "group" && isMobileScreen()) || !threads.length;
   dmOpenStrip.innerHTML = "";
-
-  if (!threads.length) {
-    const empty = document.createElement("div");
-    empty.className = "dmEmpty dmOpenEmpty";
-    empty.textContent = "No DMs yet.";
-    dmOpenStrip.appendChild(empty);
-    return;
-  }
+  dmOpenStrip.classList.toggle("hidden", hideStrip);
+  if (hideStrip) return;
+  dmOpenStrip.classList.remove("hidden");
 
   for (const t of threads) {
     const btn = document.createElement("button");
@@ -1764,7 +1770,7 @@ async function loadDmThreads(){
   try {
     const res = await fetch("/dm/threads");
     if (!res.ok) {
-      dmMsg.textContent = "Could not load threads.";
+      setDmNotice("Could not load threads.");
       return;
     }
     const raw = await res.json();
@@ -1772,7 +1778,7 @@ async function loadDmThreads(){
     syncDmTabUi();
     renderDmThreads();
   } catch {
-    dmMsg.textContent = "Could not load threads.";
+    setDmNotice("Could not load threads.");
   }
 }
 
@@ -1791,7 +1797,7 @@ async function startDirectMessage(username){
     return;
   }
 
-  dmMsg.textContent = "Preparing chat...";
+  setDmNotice("Preparing chat...", { suppressMobile: true });
   try {
     const res = await fetch("/dm/thread", {
       method: "POST",
@@ -1801,25 +1807,25 @@ async function startDirectMessage(username){
 
     if (!res.ok) {
       const text = await res.text();
-      dmMsg.textContent = text || "Could not start DM.";
+      setDmNotice(text || "Could not start DM.");
       return;
     }
 
     const data = await res.json();
-    dmMsg.textContent = data.reused ? "Opened existing DM." : "DM ready. Send a message to save it.";
+    setDmNotice(data.reused ? "Opened existing DM." : "DM ready. Send a message to save it.", { suppressMobile: true });
 
     if (data.threadId) {
       upsertThreadMeta(data.threadId, { participants: [username, me?.username].filter(Boolean), is_group: false });
       openDmThread(data.threadId);
     }
   } catch {
-    dmMsg.textContent = "Could not start DM.";
+    setDmNotice("Could not start DM.");
   }
 }
 
 function openDmPanel(){
   dmPanel.classList.add("open");
-  dmMsg.textContent = "";
+  setDmNotice("");
   clearDmBadges();
   syncDmTabUi();
 
@@ -2040,7 +2046,7 @@ function openDmThread(threadId){
 
 async function deleteDmHistory(){
   if (!activeDmId) {
-    dmMsg.textContent = "Pick a thread first.";
+    setDmNotice("Pick a thread first.");
     return;
   }
 
@@ -2049,12 +2055,12 @@ async function deleteDmHistory(){
   const ok = confirm(`Delete all messages in "${label}" for everyone?`);
   if (!ok) return;
 
-  dmMsg.textContent = "Deleting history...";
+  setDmNotice("Deleting history...");
   try {
     const res = await fetch(`/dm/thread/${activeDmId}/messages`, { method: "DELETE" });
     if (!res.ok) {
       const text = await res.text();
-      dmMsg.textContent = text || "Could not delete history.";
+      setDmNotice(text || "Could not delete history.");
       return;
     }
 
@@ -2066,10 +2072,10 @@ async function deleteDmHistory(){
     }
     renderDmMessages(activeDmId);
     renderDmThreads();
-    dmMsg.textContent = "History cleared.";
+    setDmNotice("History cleared.");
     closeDmSettingsMenu();
   } catch {
-    dmMsg.textContent = "Could not delete history.";
+    setDmNotice("Could not delete history.");
   }
 }
 
@@ -2089,11 +2095,11 @@ async function sendDmMessage(){
   try {
     let attachment = null;
     if (file) {
-      dmMsg.textContent = `Uploading ${file.name}...`;
+      setDmNotice(`Uploading ${file.name}...`);
       attachment = await uploadChatFileWithProgress(file);
       fileInput.value = "";
       clearUploadPreview();
-      dmMsg.textContent = "";
+      setDmNotice("");
     }
 
     socket.emit("dm message", {
@@ -2108,9 +2114,9 @@ async function sendDmMessage(){
 
     dmText.value = "";
     setDmReplyTarget(null);
-    dmMsg.textContent = "";
+    setDmNotice("");
   } catch (e) {
-    dmMsg.textContent = `Upload failed: ${e.message}`;
+    setDmNotice(`Upload failed: ${e.message}`);
   }
 }
 
@@ -2228,7 +2234,7 @@ async function submitDmPicker(){
     dmModalPrimaryBtn.disabled = false;
     if (!res.ok) {
       const txt = await res.text();
-      dmMsg.textContent = txt || "Could not create group.";
+      setDmNotice(txt || "Could not create group.");
       return;
     }
     const data = await res.json();
@@ -2236,7 +2242,7 @@ async function submitDmPicker(){
     await loadDmThreads();
     if (data.threadId) openDmThread(data.threadId);
   } catch {
-    dmMsg.textContent = "Could not create group.";
+    setDmNotice("Could not create group.");
   }
 }
 
@@ -2249,7 +2255,7 @@ async function fetchDmInfo(threadId){
 async function openDmInfo(threadId = activeDmId){
   const meta = dmThreads.find((t) => t.id === threadId);
   if (!meta || !meta.is_group) {
-    dmMsg.textContent = "Group info is only available inside a group chat.";
+    setDmNotice("Group info is only available inside a group chat.");
     return;
   }
   try {
@@ -2273,7 +2279,7 @@ async function openDmInfo(threadId = activeDmId){
     lockBodyScroll(true);
     dmInfoModal?.classList.add("show");
   } catch {
-    dmMsg.textContent = "Could not load group info.";
+    setDmNotice("Could not load group info.");
   }
 }
 
@@ -2293,14 +2299,14 @@ async function addMembersToGroup(threadId, names){
     });
     dmModalPrimaryBtn.disabled = false;
     if (!res.ok) {
-      dmMsg.textContent = (await res.text()) || "Could not add members.";
+      setDmNotice((await res.text()) || "Could not add members.");
       return;
     }
     closeDmPicker();
     await loadDmThreads();
     openDmInfo(threadId);
   } catch {
-    dmMsg.textContent = "Could not add members.";
+    setDmNotice("Could not add members.");
   }
 }
 
@@ -2310,7 +2316,7 @@ async function leaveGroup(threadId){
   try {
     const res = await fetch(`/dm/thread/${threadId}/leave`, { method: "POST" });
     if (!res.ok) {
-      dmMsg.textContent = (await res.text()) || "Could not leave group.";
+      setDmNotice((await res.text()) || "Could not leave group.");
       return;
     }
     dmThreads = dmThreads.filter((t) => t.id !== threadId);
@@ -2322,7 +2328,7 @@ async function leaveGroup(threadId){
     setDmMeta(null);
     dmMessagesEl.innerHTML = "";
   } catch {
-    dmMsg.textContent = "Could not leave group.";
+    setDmNotice("Could not leave group.");
   }
 }
 
@@ -2348,7 +2354,7 @@ dmSettingsBtnMobile?.addEventListener("click", (e) => {
 });
 dmDeleteHistoryBtn?.addEventListener("click", deleteDmHistory);
 dmReportBtn?.addEventListener("click", () => {
-  dmMsg.textContent = "Report feature coming soon.";
+  setDmNotice("Report feature coming soon.");
   closeDmSettingsMenu();
 });
 dmModalCloseBtn?.addEventListener("click", closeDmPicker);
@@ -3683,7 +3689,7 @@ socket.on("disconnect", (reason) => {
     }
     if (activeDmId === threadId) {
       renderDmMessages(threadId);
-      dmMsg.textContent = "History was cleared.";
+      setDmNotice("History was cleared.");
     }
     renderDmThreads();
   });
