@@ -514,6 +514,133 @@ function applyMentions(text){
   const re = new RegExp(`@(${pattern})(?=$|[^\\S]|[.,!?:;])`, "gi");
   return safe.replace(re, (m)=>`<span class="mention">${m}</span>`);
 }
+
+function stripTrailingPunctuation(url){
+  return String(url || "").replace(/[),.]+$/, "");
+}
+
+function extractYoutubeId(url){
+  if (!url) return null;
+  const cleaned = stripTrailingPunctuation(url);
+  try {
+    const u = new URL(cleaned);
+    const host = u.hostname.replace(/^www\./, "").toLowerCase();
+    if (host === "youtube.com" || host === "m.youtube.com") {
+      const id = u.searchParams.get("v");
+      return id ? { id, url: cleaned } : null;
+    }
+    if (host === "youtu.be") {
+      const pathId = u.pathname.split("/").filter(Boolean)[0];
+      return pathId ? { id: pathId, url: cleaned } : null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function findFirstYoutubeLink(text){
+  if (!text) return null;
+  const parts = String(text).split(/\s+/);
+  for (const part of parts) {
+    if (!/^https?:\/\//i.test(part)) continue;
+    const info = extractYoutubeId(part);
+    if (info) return info;
+  }
+  return null;
+}
+
+function createYoutubeEmbed(youtubeInfo){
+  const wrap = document.createElement("div");
+  wrap.className = "ytEmbedWrap";
+
+  const controls = document.createElement("div");
+  controls.className = "ytEmbedControls";
+
+  const audioToggle = document.createElement("button");
+  audioToggle.type = "button";
+  audioToggle.className = "ytAudioToggle";
+  audioToggle.textContent = "Audio only";
+  audioToggle.setAttribute("aria-pressed", "false");
+  controls.addEventListener("click", (e) => e.stopPropagation());
+
+  const viz = document.createElement("div");
+  viz.className = "ytAudioViz";
+  const bars = [];
+  for (let i = 0; i < 14; i += 1) {
+    const bar = document.createElement("div");
+    bar.className = "ytAudioBar";
+    viz.appendChild(bar);
+    bars.push(bar);
+  }
+  viz.addEventListener("click", (e) => e.stopPropagation());
+
+  controls.appendChild(audioToggle);
+  wrap.appendChild(controls);
+  wrap.appendChild(viz);
+
+  const embed = document.createElement("div");
+  embed.className = "ytEmbed";
+  const iframe = document.createElement("iframe");
+  iframe.src = `https://www.youtube.com/embed/${encodeURIComponent(youtubeInfo.id)}`;
+  iframe.title = "YouTube video player";
+  iframe.loading = "lazy";
+  iframe.allowFullscreen = true;
+  iframe.allow = "accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+  iframe.referrerPolicy = "strict-origin-when-cross-origin";
+  embed.appendChild(iframe);
+  wrap.appendChild(embed);
+
+  let audioOnly = false;
+  let rafId = null;
+  const phase = Math.random() * Math.PI * 2;
+
+  const updateBars = () => {
+    if (!audioOnly) {
+      rafId = null;
+      return;
+    }
+    if (document.hidden) {
+      rafId = requestAnimationFrame(updateBars);
+      return;
+    }
+
+    const now = performance.now();
+    bars.forEach((bar, idx) => {
+      const wave = Math.sin((now / 620) + phase + idx * 0.55);
+      const pulse = Math.sin((now / 420) + phase + idx * 1.2);
+      const height = 24 + Math.abs(wave) * 46 + Math.abs(pulse) * 22;
+      bar.style.height = `${Math.max(18, Math.min(96, height))}px`;
+    });
+
+    rafId = requestAnimationFrame(updateBars);
+  };
+
+  function startViz(){
+    if (rafId) return;
+    rafId = requestAnimationFrame(updateBars);
+  }
+
+  function stopViz(){
+    if (!rafId) return;
+    cancelAnimationFrame(rafId);
+    rafId = null;
+  }
+
+  function setAudioOnly(next){
+    audioOnly = !!next;
+    wrap.classList.toggle("audioOnly", audioOnly);
+    audioToggle.setAttribute("aria-pressed", audioOnly ? "true" : "false");
+    if (audioOnly) startViz();
+    else stopViz();
+  }
+
+  audioToggle.addEventListener("click", () => {
+    setAudioOnly(!audioOnly);
+  });
+
+  return { wrap, setAudioOnly };
+}
 function isNearBottom(el, threshold = 120){
   if(!el) return true;
   return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
@@ -978,6 +1105,7 @@ function addMessage(m){
   row.dataset.mid = m.messageId;
 
   const shouldStick = isNearBottom(msgs, 160);
+  const youtubeInfo = findFirstYoutubeLink(m.text);
 
   const av = document.createElement("div");
   av.className = "msgAvatar";
@@ -1024,10 +1152,19 @@ function addMessage(m){
 
   const text = document.createElement("div");
   text.className = "text";
+  if (youtubeInfo) {
+    text.dataset.youtubeId = youtubeInfo.id;
+    text.dataset.youtubeUrl = youtubeInfo.url;
+  }
   text.innerHTML = applyMentions(m.text);
 
   bubble.appendChild(meta);
   bubble.appendChild(text);
+
+  if (youtubeInfo) {
+    const { wrap: embedWrap } = createYoutubeEmbed(youtubeInfo);
+    bubble.appendChild(embedWrap);
+  }
 
   if(m.attachmentUrl && m.attachmentType){
     const att=document.createElement("div");
@@ -1595,6 +1732,8 @@ function renderDmMessages(threadId){
     wrap.className = "dmBubble" + (m.user === me.username ? " self" : "");
     wrap.dataset.mid = `dm-${m.messageId || m.id}`;
 
+    const youtubeInfo = findFirstYoutubeLink(m.text);
+
     if (m.replyToId && (m.replyToUser || m.replyToText)) {
       const replyLink = document.createElement("button");
       replyLink.type = "button";
@@ -1617,8 +1756,17 @@ function renderDmMessages(threadId){
     wrap.appendChild(meta);
 
     const text = document.createElement("div");
+    if (youtubeInfo) {
+      text.dataset.youtubeId = youtubeInfo.id;
+      text.dataset.youtubeUrl = youtubeInfo.url;
+    }
     text.innerHTML = applyMentions(m.text || "");
     wrap.appendChild(text);
+
+    if (youtubeInfo) {
+      const { wrap: embedWrap } = createYoutubeEmbed(youtubeInfo);
+      wrap.appendChild(embedWrap);
+    }
 
     const dmActions = document.createElement("div");
     dmActions.className = "dmActions";
