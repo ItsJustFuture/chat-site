@@ -8,6 +8,7 @@ const session = require("express-session");
 const SQLiteStore = require("connect-sqlite3")(session);
 const bcrypt = require("bcrypt");
 const multer = require("multer");
+const { Pool } = require("pg");
 const http = require("http");
 const { Server } = require("socket.io");
 const sqlite3 = require("sqlite3").verbose();
@@ -30,6 +31,35 @@ const io = new Server(server, {
   // Render uses HTTPS -> allow websocket upgrade
   cors: { origin: true, credentials: true },
 });
+const pgPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production"
+    ? { rejectUnauthorized: false }
+    : false
+});
+(async () => {
+  try {
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        profile JSONB DEFAULT '{}'
+      );
+
+      CREATE TABLE IF NOT EXISTS session (
+        sid TEXT PRIMARY KEY,
+        sess JSON NOT NULL,
+        expire TIMESTAMP NOT NULL
+      );
+    `);
+
+    console.log("Postgres tables ready");
+  } catch (err) {
+    console.error("Postgres init error:", err);
+  }
+})();
 // IMPORTANT for Render/any reverse proxy so secure cookies work
 app.set("trust proxy", 1);
 // ---- DB
