@@ -865,7 +865,13 @@ textarea{ min-height:90px; resize:vertical; }
 }
 .ts{ font-size:11px; color:var(--muted); }
 .self .ts{ color:var(--messageSelfText); opacity:.85; }
-.text{ font-size:14px; line-height:1.35; white-space:pre-wrap; }
+.text{
+  font-size:14px;
+  line-height:1.35;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;   /* ✅ breaks long strings */
+  word-break:break-word;    /* ✅ backup */
+}
 .mention{ background:var(--mentionBg); color:var(--mentionText); border:1px solid var(--border); padding:0 4px; border-radius:6px; }
 /* message layout: bubble + reactions + side action rail */
 .msgBody{
@@ -1372,7 +1378,11 @@ body.lockScroll{ overflow:hidden; }
   .msgs{ padding:10px; gap:8px; }
   .msg{ gap:8px; }
   .msgAvatar{ width:34px; height:34px; }
-  .bubble{ padding:9px 10px; border-radius:14px; max-width:94vw; }
+  .bubble{
+  /* ...existing... */
+  min-width:0;              /* ✅ allow flex child to shrink */
+  overflow:hidden;          /* ✅ prevents bleed */
+}
   .typing{ padding:0 10px; height:18px; font-size:11px; }
   .inputBar{ padding:10px; gap:8px; position: sticky; bottom:0; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
 
