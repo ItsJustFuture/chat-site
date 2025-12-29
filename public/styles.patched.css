@@ -854,7 +854,6 @@ textarea{ min-height:90px; resize:vertical; }
   max-width:min(70vw, 720px);
   word-wrap:break-word;
   border:1px solid var(--border);
-  overflow:hidden;
 }
 .self .bubble{ background:var(--messageSelfBg); color:var(--messageSelfText); }
 .metaLine{ display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
