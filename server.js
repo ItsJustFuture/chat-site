@@ -567,6 +567,7 @@ const sessionMiddleware = session({
   secret: process.env.SESSION_SECRET || "dev_secret_change_me",
   resave: false,
   saveUninitialized: false,
+  proxy: true,
   cookie: {
     httpOnly: true,
     sameSite: "lax",
