@@ -124,40 +124,39 @@ async function pgEnsureEpochMsBigint(tableName, columnName) {
 (async () => {
   try {
     // Base table
-    await pgPool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        username TEXT UNIQUE NOT NULL,
-        password_hash TEXT,
-        role TEXT NOT NULL DEFAULT 'User',
-        created_at BIGINT,
-        avatar TEXT,
-        bio TEXT,
-        mood TEXT,
-        age INTEGER,
-        gender TEXT,
-        last_seen BIGINT,
-        last_room TEXT,
-        last_status TEXT,
-        theme TEXT NOT NULL DEFAULT 'Minimal Dark',
-        gold INTEGER NOT NULL DEFAULT 0,
-        xp INTEGER NOT NULL DEFAULT 0,
-        lastXpMessageAt BIGINT,
-        lastDailyLoginAt BIGINT,
-        lastGoldTickAt BIGINT,
-        lastMessageGoldAt BIGINT,
-        lastDailyLoginGoldAt BIGINT,
-        lastDiceRollAt BIGINT,
-        dice_sixes INTEGER NOT NULL DEFAULT 0
-      );
+   await pgPool.query(`
+  CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT,
+    role TEXT NOT NULL DEFAULT 'User',
+    created_at BIGINT,
+    avatar TEXT,
+    bio TEXT,
+    mood TEXT,
+    age INTEGER,
+    gender TEXT,
+    last_seen BIGINT,
+    last_room TEXT,
+    last_status TEXT,
+    theme TEXT NOT NULL DEFAULT 'Minimal Dark',
+    gold INTEGER NOT NULL DEFAULT 0,
+    xp INTEGER NOT NULL DEFAULT 0,
+    lastXpMessageAt BIGINT,
+    lastDailyLoginAt BIGINT,
+    lastGoldTickAt BIGINT,
+    lastMessageGoldAt BIGINT,
+    lastDailyLoginGoldAt BIGINT,
+    lastDiceRollAt BIGINT,
+    dice_sixes INTEGER NOT NULL DEFAULT 0
+  );
 
-      CREATE TABLE IF NOT EXISTS session (
-        sid TEXT PRIMARY KEY,
-        sess JSON NOT NULL,
-        expire TIMESTAMP NOT NULL
-      );
-    `);
-
+  CREATE TABLE IF NOT EXISTS session (
+    sid TEXT PRIMARY KEY,
+    sess JSON NOT NULL,
+    expire TIMESTAMP NOT NULL
+  );
+`);
     // ---- Postgres migrations (run AFTER tables exist)
     const epochMsCols = [
       "created_at",
