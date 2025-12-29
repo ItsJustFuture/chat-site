@@ -177,56 +177,6 @@ async function pgEnsureEpochMsBigint(tableName, columnName) {
       }
     }
 
-  } catch (e) {
-    console.error("Postgres init failed:", e);
-  }
-})();
-    `);// ---- Postgres: helpers to keep legacy schemas compatible
-async function pgGetColumnType(tableName, columnName) {
-  const { rows } = await pgPool.query(
-    `SELECT udt_name, data_type
-     FROM information_schema.columns
-     WHERE table_schema = 'public'
-       AND table_name = $1
-       AND column_name = $2
-     LIMIT 1`,
-    [tableName, columnName]
-  );
-  return rows[0] || null;
-}
-
-// Some older deployments created timestamp columns; the app stores epoch-ms BIGINT.
-async function pgEnsureEpochMsBigint(tableName, columnName) {
-  const info = await pgGetColumnType(tableName, columnName);
-  if (!info) return;
-
-  const udt = String(info.udt_name || "").toLowerCase();
-  const dataType = String(info.data_type || "").toLowerCase();
-
-  // Already BIGINT (int8)
-  if (udt === "int8" || dataType === "bigint") return;
-
-  // timestamp -> bigint (epoch ms)
-  if (udt === "timestamp" || udt === "timestamptz" || dataType.includes("timestamp")) {
-    await pgPool.query(
-      `ALTER TABLE ${tableName}
-       ALTER COLUMN ${columnName}
-       TYPE BIGINT
-       USING (EXTRACT(EPOCH FROM ${columnName}) * 1000)::BIGINT`
-    );
-    return;
-  }
-
-  // int4 -> int8
-  if (udt === "int4" || dataType === "integer") {
-    await pgPool.query(
-      `ALTER TABLE ${tableName}
-       ALTER COLUMN ${columnName}
-       TYPE BIGINT
-       USING (${columnName})::BIGINT`
-    );
-  }
-}
 
     // If your table already existed (older minimal schema), ensure columns exist
     // (ADD COLUMN IF NOT EXISTS is safe to run repeatedly)
@@ -276,27 +226,6 @@ function addColumnIfMissing(table, column, definition) {
     if (!exists) db.run(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
   });
 }
-// Migrate legacy timestamp/int columns to epoch-ms BIGINT so inserts don't fail.
-const epochMsCols = [
-  "created_at",
-  "last_seen",
-  "lastXpMessageAt",
-  "lastDailyLoginAt",
-  "lastGoldTickAt",
-  "lastMessageGoldAt",
-  "lastDailyLoginGoldAt",
-  "lastDiceRollAt",
-];
-
-(async () => {
-  for (const col of epochMsCols) {
-    try {
-      await pgEnsureEpochMsBigint("users", col);
-    } catch (e) {
-      console.warn("[pg-migrate]", "users."+col, e?.message || e);
-    }
-  }
-})();
 
 function migrateLegacyPasswords() {
   db.all("PRAGMA table_info(users)", [], (err, rows) => {
