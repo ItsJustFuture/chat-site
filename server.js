@@ -1795,6 +1795,15 @@ app.get("/api/me/progression", requireLogin, async (req, res) => {
     }
   };
 
+  if (onlineState.has(uid)) {
+    awardPassiveGold(uid, () => {
+      finish();
+    });
+  } else {
+    finish();
+  }
+});
+
 app.get("/api/me/gold", requireLogin, async (req, res) => {
   const uid = req.session.user.id;
 
@@ -3357,9 +3366,3 @@ function doJoin(room, status) {
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
-
-// Manual test checklist:
-// - Gold only shows for the signed-in user and never appears in other member/profile payloads.
-// - XP gains apply at +1 per 100s online, +5 per message (max once per 30s), and +25 per daily login (once per 24h).
-// - Daily login XP does not trigger again within 24 hours.
-// - Level math (100 * level to next) matches the progress bar and level-up toast when crossing thresholds.
