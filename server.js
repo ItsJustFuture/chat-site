@@ -31,21 +31,34 @@ const io = new Server(server, {
   // Render uses HTTPS -> allow websocket upgrade
   cors: { origin: true, credentials: true },
 });
-const pgPool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === "production"
-    ? { rejectUnauthorized: false }
-    : false
-});
 (async () => {
   try {
+    // Base table
     await pgPool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW(),
-        profile JSONB DEFAULT '{}'
+        password_hash TEXT,
+        role TEXT NOT NULL DEFAULT 'User',
+        created_at BIGINT,
+        avatar TEXT,
+        bio TEXT,
+        mood TEXT,
+        age INTEGER,
+        gender TEXT,
+        last_seen BIGINT,
+        last_room TEXT,
+        last_status TEXT,
+        theme TEXT NOT NULL DEFAULT 'Minimal Dark',
+        gold INTEGER NOT NULL DEFAULT 0,
+        xp INTEGER NOT NULL DEFAULT 0,
+        lastXpMessageAt BIGINT,
+        lastDailyLoginAt BIGINT,
+        lastGoldTickAt BIGINT,
+        lastMessageGoldAt BIGINT,
+        lastDailyLoginGoldAt BIGINT,
+        lastDiceRollAt BIGINT,
+        dice_sixes INTEGER NOT NULL DEFAULT 0
       );
 
       CREATE TABLE IF NOT EXISTS session (
@@ -55,11 +68,41 @@ const pgPool = new Pool({
       );
     `);
 
+    // If your table already existed (older minimal schema), ensure columns exist
+    // (ADD COLUMN IF NOT EXISTS is safe to run repeatedly)
+    const addCols = [
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'User'`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at BIGINT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS mood TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS age INTEGER`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen BIGINT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_room TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_status TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT 'Minimal Dark'`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS gold INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS xp INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastXpMessageAt BIGINT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastDailyLoginAt BIGINT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastGoldTickAt BIGINT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastMessageGoldAt BIGINT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastDailyLoginGoldAt BIGINT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastDiceRollAt BIGINT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS dice_sixes INTEGER NOT NULL DEFAULT 0`,
+    ];
+
+    for (const q of addCols) {
+      try { await pgPool.query(q); } catch (_) {}
+    }
+
     console.log("Postgres tables ready");
   } catch (err) {
     console.error("Postgres init error:", err);
   }
 })();
+
 // IMPORTANT for Render/any reverse proxy so secure cookies work
 app.set("trust proxy", 1);
 // ---- DB
@@ -469,6 +512,134 @@ function clamp(n, a, b) {
   n = Number(n);
   if (!Number.isFinite(n)) return a;
   return Math.max(a, Math.min(b, n));
+}
+function pgRowToUser(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    role: row.role || "User",
+    theme: sanitizeThemeNameServer(row.theme),
+    avatar: row.avatar || null,
+    bio: row.bio || "",
+    mood: row.mood || "",
+    age: row.age ?? null,
+    gender: row.gender || "",
+    gold: row.gold ?? 0,
+    xp: row.xp ?? 0,
+    dice_sixes: row.dice_sixes ?? 0,
+    last_seen: row.last_seen ?? null,
+    last_room: row.last_room || null,
+    last_status: row.last_status || null,
+    lastXpMessageAt: row.lastXpMessageAt ?? null,
+    lastDailyLoginAt: row.lastDailyLoginAt ?? null,
+    lastGoldTickAt: row.lastGoldTickAt ?? null,
+    lastMessageGoldAt: row.lastMessageGoldAt ?? null,
+    lastDailyLoginGoldAt: row.lastDailyLoginGoldAt ?? null,
+    lastDiceRollAt: row.lastDiceRollAt ?? null,
+  };
+}
+function dbGet(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row)));
+  });
+}
+
+async function syncGoldXpThemeToPg(uid) {
+  // Pull from SQLite (source of truth for tick logic right now)
+  const row = await dbGet("SELECT gold, xp, theme, role, username FROM users WHERE id = ?", [uid]);
+  if (!row) return;
+
+  const theme = sanitizeThemeNameServer(row.theme);
+
+  // Push into Postgres (so /api/me/* can read from PG)
+  await pgPool.query(
+    `UPDATE users
+       SET gold = $1,
+           xp = $2,
+           theme = $3,
+           role = COALESCE(role, $4)
+     WHERE id = $5`,
+    [Number(row.gold || 0), Number(row.xp || 0), theme, row.role || "User", uid]
+  );
+}
+
+async function pgGetUserByUsername(username) {
+  const { rows } = await pgPool.query(
+    "SELECT * FROM users WHERE lower(username) = lower($1) LIMIT 1",
+    [username]
+  );
+  return pgRowToUser(rows[0]);
+}
+
+async function pgGetUserById(id) {
+  const { rows } = await pgPool.query(
+    "SELECT * FROM users WHERE id = $1 LIMIT 1",
+    [id]
+  );
+  return pgRowToUser(rows[0]);
+}
+
+async function pgUpsertFromSqliteRow(row) {
+  // row is your SQLite users table row
+  const username = row.username;
+  const createdAt = row.created_at ?? Date.now();
+
+  // Normalize role auto rules (your existing sets)
+  const norm = normKey(username);
+  let role = row.role || "User";
+  if (AUTO_OWNER.has(norm)) role = "Owner";
+  else if (AUTO_COOWNERS.has(norm)) role = "Co-owner";
+
+  const theme = sanitizeThemeNameServer(row.theme);
+
+  const passwordHash = row.password_hash || null;
+
+  const q = `
+    INSERT INTO users (
+      username, password_hash, role, created_at,
+      avatar, bio, mood, age, gender,
+      last_seen, last_room, last_status,
+      theme, gold, xp,
+      lastXpMessageAt, lastDailyLoginAt, lastGoldTickAt, lastMessageGoldAt, lastDailyLoginGoldAt,
+      lastDiceRollAt, dice_sixes
+    )
+    VALUES (
+      $1,$2,$3,$4,
+      $5,$6,$7,$8,$9,
+      $10,$11,$12,
+      $13,$14,$15,
+      $16,$17,$18,$19,$20,
+      $21,$22
+    )
+    ON CONFLICT (username) DO UPDATE SET
+      password_hash = COALESCE(EXCLUDED.password_hash, users.password_hash),
+      role = EXCLUDED.role,
+      avatar = COALESCE(EXCLUDED.avatar, users.avatar),
+      bio = COALESCE(EXCLUDED.bio, users.bio),
+      mood = COALESCE(EXCLUDED.mood, users.mood),
+      age = COALESCE(EXCLUDED.age, users.age),
+      gender = COALESCE(EXCLUDED.gender, users.gender),
+      last_seen = COALESCE(EXCLUDED.last_seen, users.last_seen),
+      last_room = COALESCE(EXCLUDED.last_room, users.last_room),
+      last_status = COALESCE(EXCLUDED.last_status, users.last_status),
+      theme = COALESCE(EXCLUDED.theme, users.theme),
+      gold = GREATEST(users.gold, EXCLUDED.gold),
+      xp = GREATEST(users.xp, EXCLUDED.xp),
+      dice_sixes = GREATEST(users.dice_sixes, EXCLUDED.dice_sixes)
+    RETURNING *;
+  `;
+
+  const { rows } = await pgPool.query(q, [
+    username, passwordHash, role, createdAt,
+    row.avatar || null, row.bio || "", row.mood || "", row.age ?? null, row.gender || "",
+    row.last_seen ?? null, row.last_room || null, row.last_status || null,
+    theme, row.gold ?? 0, row.xp ?? 0,
+    row.lastXpMessageAt ?? null, row.lastDailyLoginAt ?? null, row.lastGoldTickAt ?? null, row.lastMessageGoldAt ?? null, row.lastDailyLoginGoldAt ?? null,
+    row.lastDiceRollAt ?? null, row.dice_sixes ?? 0
+  ]);
+
+  return pgRowToUser(rows[0]);
 }
 function ensureColumns(table, cols) {
   db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
@@ -1439,6 +1610,40 @@ app.post("/register", async (req, res) => {
     if (!username || username.length < 2) return res.status(400).send("Invalid username");
     if (!password || password.length < 6) return res.status(400).send("Password must be 6+ chars");
 
+    // Check Postgres first
+    const existing = await pgGetUserByUsername(username);
+    if (existing) return res.status(409).send("Username already taken");
+
+    const hash = await bcrypt.hash(password, 10);
+    const createdAt = Date.now();
+
+    const norm = normKey(username);
+    let role = "User";
+    if (AUTO_OWNER.has(norm)) role = "Owner";
+    else if (AUTO_COOWNERS.has(norm)) role = "Co-owner";
+
+    const theme = DEFAULT_THEME;
+
+    const { rows } = await pgPool.query(
+      `INSERT INTO users (username, password_hash, role, created_at, theme)
+       VALUES ($1,$2,$3,$4,$5)
+       RETURNING id, username, role, theme`,
+      [username, hash, role, createdAt, theme]
+    );
+
+    const user = rows[0];
+
+    req.session.user = { id: user.id, username: user.username, role: user.role, theme: sanitizeThemeNameServer(user.theme) };
+
+    req.session.save((saveErr) => {
+      if (saveErr) return res.status(500).send("Session save failed");
+      return res.json({ ok: true });
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).send("Registration failed");
+  }
+});
     db.get(
       "SELECT id FROM users WHERE lower(username) = lower(?)",
       [username],
@@ -1472,6 +1677,117 @@ app.post("/login", (req, res) => {
   const username = sanitizeUsername(req.body?.username);
   const password = String(req.body?.password || "");
   if (!username || !password) return res.status(400).send("Missing credentials");
+
+  (async () => {
+    try {
+      // 1) Try Postgres first
+      let user = await pgGetUserByUsername(username);
+
+      // 2) If not in Postgres yet, fallback to SQLite then migrate
+      if (!user) {
+        db.get(
+          "SELECT * FROM users WHERE lower(username) = lower(?)",
+          [username],
+          async (err, row) => {
+            if (err || !row) return res.status(401).send("Invalid username or password");
+
+            // legacy handling stays exactly like your current login
+            let passwordHash = typeof row.password_hash === "string" ? row.password_hash : "";
+
+            if (!passwordHash) {
+              const legacyPassword = typeof row.password === "string" ? row.password : "";
+              if (!legacyPassword) return res.status(401).send("Invalid username or password");
+
+              const legacyMatches = legacyPassword.startsWith("$2")
+                ? await bcrypt.compare(password, legacyPassword)
+                : legacyPassword === password;
+
+              if (!legacyMatches) return res.status(401).send("Invalid username or password");
+
+              passwordHash = legacyPassword.startsWith("$2")
+                ? legacyPassword
+                : await bcrypt.hash(password, 10);
+
+              db.run("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [passwordHash, row.id]);
+              row.password_hash = passwordHash;
+            }
+
+            const ok = await bcrypt.compare(password, row.password_hash);
+            if (!ok) return res.status(401).send("Invalid username or password");
+
+            // Migrate into Postgres
+            const pgUser = await pgUpsertFromSqliteRow(row);
+
+            const theme = sanitizeThemeNameServer(pgUser.theme);
+            req.session.user = { id: pgUser.id, username: pgUser.username, role: pgUser.role, theme };
+
+            // Update Postgres last seen/status
+            await pgPool.query(
+              "UPDATE users SET last_seen = $1, last_status = $2 WHERE id = $3",
+              [Date.now(), "Online", pgUser.id]
+            );
+
+            // Preserve your existing gamification hooks:
+            awardDailyLoginXp({ id: pgUser.id, username: pgUser.username });
+            awardDailyLoginGold({ id: pgUser.id, username: pgUser.username });
+            initGoldTick(pgUser.id);
+
+            req.session.save((saveErr) => {
+              if (saveErr) return res.status(500).send("Session save failed");
+              return res.json({ ok: true });
+            });
+          }
+        );
+        return;
+      }
+
+      // 3) Postgres path
+      const { rows } = await pgPool.query(
+        "SELECT * FROM users WHERE lower(username) = lower($1) LIMIT 1",
+        [username]
+      );
+      const row = rows[0];
+      if (!row || !row.password_hash) return res.status(401).send("Invalid username or password");
+
+      const ok = await bcrypt.compare(password, row.password_hash);
+      if (!ok) return res.status(401).send("Invalid username or password");
+
+      // Apply your auto-role rules
+      const norm = normKey(row.username);
+      let role = row.role || "User";
+      if (AUTO_OWNER.has(norm)) role = "Owner";
+      else if (AUTO_COOWNERS.has(norm)) role = "Co-owner";
+
+      const theme = sanitizeThemeNameServer(row.theme);
+
+      if (role !== row.role) {
+        await pgPool.query("UPDATE users SET role = $1 WHERE id = $2", [role, row.id]);
+      }
+      if (!row.theme) {
+        await pgPool.query("UPDATE users SET theme = $1 WHERE id = $2", [theme, row.id]);
+      }
+
+      req.session.user = { id: row.id, username: row.username, role, theme };
+
+      await pgPool.query(
+        "UPDATE users SET last_seen = $1, last_status = $2 WHERE id = $3",
+        [Date.now(), "Online", row.id]
+      );
+
+      awardDailyLoginXp({ id: row.id, username: row.username });
+      awardDailyLoginGold({ id: row.id, username: row.username });
+      initGoldTick(row.id);
+
+      req.session.save((saveErr) => {
+        if (saveErr) return res.status(500).send("Session save failed");
+        return res.json({ ok: true });
+      });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).send("Login failed");
+    }
+  })();
+});
 
   db.get(
     "SELECT * FROM users WHERE lower(username) = lower(?)",
@@ -1529,41 +1845,83 @@ app.post("/logout", (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
 });
 
-app.get("/me", (req, res) => {
-  if (!req.session?.user?.id) return res.json(null);
-  db.get("SELECT id, username, role, theme FROM users WHERE id = ?", [req.session.user.id], (err, row) => {
-    if (err || !row) return res.json(null);
+app.get("/me", async (req, res) => {
+  try {
+    if (!req.session?.user?.id) return res.json(null);
+
+    // Prefer Postgres
+    const { rows } = await pgPool.query(
+      "SELECT id, username, role, theme FROM users WHERE id = $1 LIMIT 1",
+      [req.session.user.id]
+    );
+
+    let row = rows[0];
+
+    // If not in Postgres yet, fallback to SQLite and (optionally) sync
+    if (!row) {
+      const srow = await dbGet(
+        "SELECT id, username, role, theme FROM users WHERE id = ?",
+        [req.session.user.id]
+      );
+      if (!srow) return res.json(null);
+
+      const theme = sanitizeThemeNameServer(srow.theme);
+      if (!srow.theme) db.run("UPDATE users SET theme = ? WHERE id = ?", [theme, srow.id]);
+
+      // Try to mirror minimal fields into Postgres if the user exists there by id
+      // (If your login migration creates PG users with matching ids, this will work;
+      // otherwise we’ll handle it during login migration.)
+      try {
+        await pgPool.query(
+          "UPDATE users SET theme = $1, role = $2 WHERE id = $3",
+          [theme, srow.role, srow.id]
+        );
+      } catch (_) {}
+
+      req.session.user = { id: srow.id, username: srow.username, role: srow.role, theme };
+      return res.json(req.session.user);
+    }
+
     const theme = sanitizeThemeNameServer(row.theme);
-    if (!row.theme) db.run("UPDATE users SET theme = ? WHERE id = ?", [theme, row.id]);
+    if (!row.theme) await pgPool.query("UPDATE users SET theme = $1 WHERE id = $2", [theme, row.id]);
+
     req.session.user = { id: row.id, username: row.username, role: row.role, theme };
     return res.json(req.session.user);
-  });
-});
-
-app.get("/api/me/progression", requireLogin, (_req, res) => {
-  const uid = _req.session.user.id;
-  const finish = () => {
-    db.get("SELECT gold, xp FROM users WHERE id = ?", [uid], (err, row) => {
-      if (err || !row) return res.status(404).send("Not found");
-      return res.json(progressionFromRow(row, true));
-    });
-  };
-
-  if (onlineState.has(uid)) {
-    awardPassiveGold(uid, finish);
-  } else {
-    finish();
+  } catch (e) {
+    console.error(e);
+    return res.json(null);
   }
 });
 
-app.get("/api/me/gold", requireLogin, (req, res) => {
+app.get("/api/me/progression", requireLogin, async (req, res) => {
   const uid = req.session.user.id;
-  const finish = () => {
-    db.get("SELECT gold FROM users WHERE id = ?", [uid], (err, row) => {
-      if (err || !row) return res.status(404).send("Not found");
-      return res.json({ gold: Number(row.gold || 0) });
-    });
+
+  const finish = async () => {
+    try {
+      // Keep current tick logic (SQLite) but mirror results into Postgres
+      await syncGoldXpThemeToPg(uid);
+
+      const { rows } = await pgPool.query(
+        "SELECT gold, xp FROM users WHERE id = $1 LIMIT 1",
+        [uid]
+      );
+      const row = rows[0];
+      if (!row) return res.status(404).send("Not found");
+
+      return res.json(progressionFromRow(row, true));
+    } catch (e) {
+      console.error(e);
+      return res.status(500).send("Failed");
+    }
   };
+
+  if (onlineState.has(uid)) {
+    awardPassiveGold(uid, () => { finish(); });
+  } else {
+    finish();
+  }
+});
+
 
   if (onlineState.has(uid)) {
     awardPassiveGold(uid, finish);
@@ -1572,22 +1930,80 @@ app.get("/api/me/gold", requireLogin, (req, res) => {
   }
 });
 
-app.get("/api/me/theme", requireLogin, (req, res) => {
-  db.get("SELECT theme FROM users WHERE id = ?", [req.session.user.id], (err, row) => {
-    if (err || !row) return res.status(404).send("Not found");
-    const theme = sanitizeThemeNameServer(row.theme);
-    req.session.user.theme = theme;
-    return res.json({ theme });
-  });
+app.get("/api/me/gold", requireLogin, async (req, res) => {
+  const uid = req.session.user.id;
+
+  const finish = async () => {
+    try {
+      await syncGoldXpThemeToPg(uid);
+
+      const { rows } = await pgPool.query(
+        "SELECT gold FROM users WHERE id = $1 LIMIT 1",
+        [uid]
+      );
+      const row = rows[0];
+      if (!row) return res.status(404).send("Not found");
+
+      return res.json({ gold: Number(row.gold || 0) });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).send("Failed");
+    }
+  };
+
+  if (onlineState.has(uid)) {
+    awardPassiveGold(uid, () => { finish(); });
+  } else {
+    finish();
+  }
 });
 
-app.post("/api/me/theme", requireLogin, (req, res) => {
-  const theme = sanitizeThemeNameServer(req.body?.theme);
-  db.run("UPDATE users SET theme = ? WHERE id = ?", [theme, req.session.user.id], (err) => {
-    if (err) return res.status(500).send("Failed");
+
+  if (onlineState.has(uid)) {
+    awardPassiveGold(uid, finish);
+  } else {
+    finish();
+  }
+});
+
+app.get("/api/me/theme", requireLogin, async (req, res) => {
+  try {
+    // Prefer Postgres
+    const { rows } = await pgPool.query(
+      "SELECT theme FROM users WHERE id = $1 LIMIT 1",
+      [req.session.user.id]
+    );
+    const row = rows[0];
+    if (!row) return res.status(404).send("Not found");
+
+    const theme = sanitizeThemeNameServer(row.theme);
+    if (!row.theme) await pgPool.query("UPDATE users SET theme = $1 WHERE id = $2", [theme, req.session.user.id]);
+
     req.session.user.theme = theme;
     return res.json({ theme });
-  });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).send("Failed");
+  }
+});
+
+
+app.post("/api/me/theme", requireLogin, async (req, res) => {
+  try {
+    const theme = sanitizeThemeNameServer(req.body?.theme);
+
+    // Update Postgres (new source of truth for theme)
+    await pgPool.query("UPDATE users SET theme = $1 WHERE id = $2", [theme, req.session.user.id]);
+
+    // Keep SQLite in sync until login/user migration is fully done
+    db.run("UPDATE users SET theme = ? WHERE id = ?", [theme, req.session.user.id]);
+
+    req.session.user.theme = theme;
+    return res.json({ theme });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).send("Failed");
+  }
 });
 
 app.get("/api/leaderboards", requireLogin, async (_req, res) => {
