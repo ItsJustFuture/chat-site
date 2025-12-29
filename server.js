@@ -36,7 +36,90 @@ const pgPool = new Pool({
   ssl: process.env.NODE_ENV === "production"
     ? { rejectUnauthorized: false }
     : false
-});
+});// ---- Postgres: helpers to keep legacy schemas compatible
+async function pgGetColumnType(tableName, columnName) {
+  const { rows } = await pgPool.query(
+    `SELECT udt_name, data_type
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = $1
+       AND column_name = $2
+     LIMIT 1`,
+    [tableName, columnName]
+  );
+  return rows[0] || null;
+}
+
+async function pgEnsureEpochMsBigint(tableName, columnName) {
+  const info = await pgGetColumnType(tableName, columnName);
+  if (!info) return;
+
+  const udt = String(info.udt_name || "").toLowerCase();
+  const dataType = String(info.data_type || "").toLowerCase();
+
+  if (udt === "int8" || dataType === "bigint") return;
+
+  if (udt === "timestamp" || udt === "timestamptz" || dataType.includes("timestamp")) {
+    await pgPool.query(
+      `ALTER TABLE ${tableName}
+       ALTER COLUMN ${columnName}
+       TYPE BIGINT
+       USING (EXTRACT(EPOCH FROM ${columnName}) * 1000)::BIGINT`
+    );
+    return;
+  }
+
+  if (udt === "int4" || dataType === "integer") {
+    await pgPool.query(
+      `ALTER TABLE ${tableName}
+       ALTER COLUMN ${columnName}
+       TYPE BIGINT
+       USING (${columnName})::BIGINT`
+    );
+  }
+}
+// ---- Postgres: helpers to keep legacy schemas compatible
+async function pgGetColumnType(tableName, columnName) {
+  const { rows } = await pgPool.query(
+    `SELECT udt_name, data_type
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = $1
+       AND column_name = $2
+     LIMIT 1`,
+    [tableName, columnName]
+  );
+  return rows[0] || null;
+}
+
+async function pgEnsureEpochMsBigint(tableName, columnName) {
+  const info = await pgGetColumnType(tableName, columnName);
+  if (!info) return;
+
+  const udt = String(info.udt_name || "").toLowerCase();
+  const dataType = String(info.data_type || "").toLowerCase();
+
+  if (udt === "int8" || dataType === "bigint") return;
+
+  if (udt === "timestamp" || udt === "timestamptz" || dataType.includes("timestamp")) {
+    await pgPool.query(
+      `ALTER TABLE ${tableName}
+       ALTER COLUMN ${columnName}
+       TYPE BIGINT
+       USING (EXTRACT(EPOCH FROM ${columnName}) * 1000)::BIGINT`
+    );
+    return;
+  }
+
+  if (udt === "int4" || dataType === "integer") {
+    await pgPool.query(
+      `ALTER TABLE ${tableName}
+       ALTER COLUMN ${columnName}
+       TYPE BIGINT
+       USING (${columnName})::BIGINT`
+    );
+  }
+}
 // ---- Postgres table setup
 (async () => {
   try {
@@ -73,6 +156,32 @@ const pgPool = new Pool({
         sess JSON NOT NULL,
         expire TIMESTAMP NOT NULL
       );
+    `);
+
+    // ---- Postgres migrations (run AFTER tables exist)
+    const epochMsCols = [
+      "created_at",
+      "last_seen",
+      "lastXpMessageAt",
+      "lastDailyLoginAt",
+      "lastGoldTickAt",
+      "lastMessageGoldAt",
+      "lastDailyLoginGoldAt",
+      "lastDiceRollAt",
+    ];
+
+    for (const col of epochMsCols) {
+      try {
+        await pgEnsureEpochMsBigint("users", col);
+      } catch (e) {
+        console.warn("[pg-migrate]", "users."+col, e?.message || e);
+      }
+    }
+
+  } catch (e) {
+    console.error("Postgres init failed:", e);
+  }
+})();
     `);// ---- Postgres: helpers to keep legacy schemas compatible
 async function pgGetColumnType(tableName, columnName) {
   const { rows } = await pgPool.query(
@@ -179,9 +288,16 @@ const epochMsCols = [
   "lastDailyLoginGoldAt",
   "lastDiceRollAt",
 ];
-for (const col of epochMsCols) {
-  try { await pgEnsureEpochMsBigint("users", col); } catch (_) {}
-}
+
+(async () => {
+  for (const col of epochMsCols) {
+    try {
+      await pgEnsureEpochMsBigint("users", col);
+    } catch (e) {
+      console.warn("[pg-migrate]", "users."+col, e?.message || e);
+    }
+  }
+})();
 
 function migrateLegacyPasswords() {
   db.all("PRAGMA table_info(users)", [], (err, rows) => {
