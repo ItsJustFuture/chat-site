@@ -31,6 +31,13 @@ const io = new Server(server, {
   // Render uses HTTPS -> allow websocket upgrade
   cors: { origin: true, credentials: true },
 });
+const pgPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production"
+    ? { rejectUnauthorized: false }
+    : false
+});
+// ---- Postgres table setup
 (async () => {
   try {
     // Base table
@@ -1644,156 +1651,18 @@ app.post("/register", async (req, res) => {
     res.status(500).send("Registration failed");
   }
 });
-    db.get(
-      "SELECT id FROM users WHERE lower(username) = lower(?)",
-      [username],
-      async (checkErr, existing) => {
-        if (checkErr) return res.status(500).send("Register failed");
-        if (existing) return res.status(409).send("Username already taken");
-
-        const password_hash = await bcrypt.hash(password, 10);
-        const role = AUTO_COOWNERS.has(normKey(username)) ? "Co-owner" : "User";
-
-        db.run(
-          `INSERT INTO users (username, password_hash, role, created_at, last_seen, last_status)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [username, password_hash, role, Date.now(), Date.now(), "Online"],
-          function (err) {
-            if (err) {
-              if (String(err.message || "").includes("UNIQUE")) return res.status(409).send("Username already taken");
-              return res.status(500).send("Register failed");
-            }
-            return res.json({ ok: true });
-          }
-        );
-      }
-    );
-  } catch {
-    return res.status(500).send("Register failed");
-  }
-});
-
 app.post("/login", (req, res) => {
   const username = sanitizeUsername(req.body?.username);
   const password = String(req.body?.password || "");
   if (!username || !password) return res.status(400).send("Missing credentials");
-
-  (async () => {
-    try {
-      // 1) Try Postgres first
-      let user = await pgGetUserByUsername(username);
-
-      // 2) If not in Postgres yet, fallback to SQLite then migrate
-      if (!user) {
-        db.get(
-          "SELECT * FROM users WHERE lower(username) = lower(?)",
-          [username],
-          async (err, row) => {
-            if (err || !row) return res.status(401).send("Invalid username or password");
-
-            // legacy handling stays exactly like your current login
-            let passwordHash = typeof row.password_hash === "string" ? row.password_hash : "";
-
-            if (!passwordHash) {
-              const legacyPassword = typeof row.password === "string" ? row.password : "";
-              if (!legacyPassword) return res.status(401).send("Invalid username or password");
-
-              const legacyMatches = legacyPassword.startsWith("$2")
-                ? await bcrypt.compare(password, legacyPassword)
-                : legacyPassword === password;
-
-              if (!legacyMatches) return res.status(401).send("Invalid username or password");
-
-              passwordHash = legacyPassword.startsWith("$2")
-                ? legacyPassword
-                : await bcrypt.hash(password, 10);
-
-              db.run("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [passwordHash, row.id]);
-              row.password_hash = passwordHash;
-            }
-
-            const ok = await bcrypt.compare(password, row.password_hash);
-            if (!ok) return res.status(401).send("Invalid username or password");
-
-            // Migrate into Postgres
-            const pgUser = await pgUpsertFromSqliteRow(row);
-
-            const theme = sanitizeThemeNameServer(pgUser.theme);
-            req.session.user = { id: pgUser.id, username: pgUser.username, role: pgUser.role, theme };
-
-            // Update Postgres last seen/status
-            await pgPool.query(
-              "UPDATE users SET last_seen = $1, last_status = $2 WHERE id = $3",
-              [Date.now(), "Online", pgUser.id]
-            );
-
-            // Preserve your existing gamification hooks:
-            awardDailyLoginXp({ id: pgUser.id, username: pgUser.username });
-            awardDailyLoginGold({ id: pgUser.id, username: pgUser.username });
-            initGoldTick(pgUser.id);
-
-            req.session.save((saveErr) => {
-              if (saveErr) return res.status(500).send("Session save failed");
-              return res.json({ ok: true });
-            });
-          }
-        );
-        return;
-      }
-
-      // 3) Postgres path
-      const { rows } = await pgPool.query(
-        "SELECT * FROM users WHERE lower(username) = lower($1) LIMIT 1",
-        [username]
-      );
-      const row = rows[0];
-      if (!row || !row.password_hash) return res.status(401).send("Invalid username or password");
-
-      const ok = await bcrypt.compare(password, row.password_hash);
-      if (!ok) return res.status(401).send("Invalid username or password");
-
-      // Apply your auto-role rules
-      const norm = normKey(row.username);
-      let role = row.role || "User";
-      if (AUTO_OWNER.has(norm)) role = "Owner";
-      else if (AUTO_COOWNERS.has(norm)) role = "Co-owner";
-
-      const theme = sanitizeThemeNameServer(row.theme);
-
-      if (role !== row.role) {
-        await pgPool.query("UPDATE users SET role = $1 WHERE id = $2", [role, row.id]);
-      }
-      if (!row.theme) {
-        await pgPool.query("UPDATE users SET theme = $1 WHERE id = $2", [theme, row.id]);
-      }
-
-      req.session.user = { id: row.id, username: row.username, role, theme };
-
-      await pgPool.query(
-        "UPDATE users SET last_seen = $1, last_status = $2 WHERE id = $3",
-        [Date.now(), "Online", row.id]
-      );
-
-      awardDailyLoginXp({ id: row.id, username: row.username });
-      awardDailyLoginGold({ id: row.id, username: row.username });
-      initGoldTick(row.id);
-
-      req.session.save((saveErr) => {
-        if (saveErr) return res.status(500).send("Session save failed");
-        return res.json({ ok: true });
-      });
-    } catch (e) {
-      console.error(e);
-      return res.status(500).send("Login failed");
-    }
-  })();
-});
 
   db.get(
     "SELECT * FROM users WHERE lower(username) = lower(?)",
     [username],
     async (err, row) => {
       if (err || !row) return res.status(401).send("Invalid username or password");
+
+      // Handle legacy password column (if present)
       let passwordHash = typeof row.password_hash === "string" ? row.password_hash : "";
 
       if (!passwordHash) {
@@ -1803,17 +1672,21 @@ app.post("/login", (req, res) => {
         const legacyMatches = legacyPassword.startsWith("$2")
           ? await bcrypt.compare(password, legacyPassword)
           : legacyPassword === password;
+
         if (!legacyMatches) return res.status(401).send("Invalid username or password");
 
         passwordHash = legacyPassword.startsWith("$2")
           ? legacyPassword
           : await bcrypt.hash(password, 10);
+
         db.run("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [passwordHash, row.id]);
+        row.password_hash = passwordHash;
       }
 
-      const ok = await bcrypt.compare(password, passwordHash);
+      const ok = await bcrypt.compare(password, row.password_hash);
       if (!ok) return res.status(401).send("Invalid username or password");
 
+      // Apply your auto-role rules
       const norm = normKey(row.username);
       if (AUTO_OWNER.has(norm) && row.role !== "Owner") {
         db.run("UPDATE users SET role = 'Owner' WHERE id = ?", [row.id]);
@@ -1822,17 +1695,18 @@ app.post("/login", (req, res) => {
         db.run("UPDATE users SET role = 'Co-owner' WHERE id = ?", [row.id]);
         row.role = "Co-owner";
       }
+
       const theme = sanitizeThemeNameServer(row.theme);
       if (!row.theme) db.run("UPDATE users SET theme = ? WHERE id = ?", [theme, row.id]);
 
       req.session.user = { id: row.id, username: row.username, role: row.role, theme };
 
       db.run("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]);
+
       awardDailyLoginXp(row);
       awardDailyLoginGold(row);
       initGoldTick(row.id);
 
-      // Ensure session is actually persisted before replying
       req.session.save((saveErr) => {
         if (saveErr) return res.status(500).send("Session save failed");
         return res.json({ ok: true });
@@ -1928,8 +1802,6 @@ app.get("/api/me/progression", requireLogin, async (req, res) => {
   } else {
     finish();
   }
-});
-
 app.get("/api/me/gold", requireLogin, async (req, res) => {
   const uid = req.session.user.id;
 
@@ -1964,8 +1836,6 @@ app.get("/api/me/gold", requireLogin, async (req, res) => {
   } else {
     finish();
   }
-});
-
 app.get("/api/me/theme", requireLogin, async (req, res) => {
   try {
     // Prefer Postgres
