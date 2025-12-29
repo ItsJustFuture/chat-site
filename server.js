@@ -121,65 +121,45 @@ async function pgEnsureEpochMsBigint(tableName, columnName) {
   }
 }
 // ---- Postgres table setup
-(async () => {
+// Run once on boot, and start the server only after this finishes (so schema/type fixes apply before /register).
+const pgInitPromise = (async () => {
   try {
-    // Base table
-   await pgPool.query(`
-  CREATE TABLE IF NOT EXISTS users (
-    id SERIAL PRIMARY KEY,
-    username TEXT UNIQUE NOT NULL,
-    password_hash TEXT,
-    role TEXT NOT NULL DEFAULT 'User',
-    created_at BIGINT,
-    avatar TEXT,
-    bio TEXT,
-    mood TEXT,
-    age INTEGER,
-    gender TEXT,
-    last_seen BIGINT,
-    last_room TEXT,
-    last_status TEXT,
-    theme TEXT NOT NULL DEFAULT 'Minimal Dark',
-    gold INTEGER NOT NULL DEFAULT 0,
-    xp INTEGER NOT NULL DEFAULT 0,
-    lastXpMessageAt BIGINT,
-    lastDailyLoginAt BIGINT,
-    lastGoldTickAt BIGINT,
-    lastMessageGoldAt BIGINT,
-    lastDailyLoginGoldAt BIGINT,
-    lastDiceRollAt BIGINT,
-    dice_sixes INTEGER NOT NULL DEFAULT 0
-  );
+    // Base tables (SQL only)
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT,
+        role TEXT NOT NULL DEFAULT 'User',
+        created_at BIGINT,
+        avatar TEXT,
+        bio TEXT,
+        mood TEXT,
+        age INTEGER,
+        gender TEXT,
+        last_seen BIGINT,
+        last_room TEXT,
+        last_status TEXT,
+        theme TEXT NOT NULL DEFAULT 'Minimal Dark',
+        gold INTEGER NOT NULL DEFAULT 0,
+        xp INTEGER NOT NULL DEFAULT 0,
+        lastXpMessageAt BIGINT,
+        lastDailyLoginAt BIGINT,
+        lastGoldTickAt BIGINT,
+        lastMessageGoldAt BIGINT,
+        lastDailyLoginGoldAt BIGINT,
+        lastDiceRollAt BIGINT,
+        dice_sixes INTEGER NOT NULL DEFAULT 0
+      );
 
-  CREATE TABLE IF NOT EXISTS session (
-    sid TEXT PRIMARY KEY,
-    sess JSON NOT NULL,
-    expire TIMESTAMP NOT NULL
-  );
-`);
-    // ---- Postgres migrations (run AFTER tables exist)
-    const epochMsCols = [
-      "created_at",
-      "last_seen",
-      "lastXpMessageAt",
-      "lastDailyLoginAt",
-      "lastGoldTickAt",
-      "lastMessageGoldAt",
-      "lastDailyLoginGoldAt",
-      "lastDiceRollAt",
-    ];
-
-    for (const col of epochMsCols) {
-      try {
-        await pgEnsureEpochMsBigint("users", col);
-      } catch (e) {
-        console.warn("[pg-migrate]", "users."+col, e?.message || e);
-      }
-    }
-
+      CREATE TABLE IF NOT EXISTS session (
+        sid TEXT PRIMARY KEY,
+        sess JSON NOT NULL,
+        expire TIMESTAMP NOT NULL
+      );
+    `);
 
     // If your table already existed (older minimal schema), ensure columns exist
-    // (ADD COLUMN IF NOT EXISTS is safe to run repeatedly)
     const addCols = [
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'User'`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at BIGINT`,
@@ -202,9 +182,27 @@ async function pgEnsureEpochMsBigint(tableName, columnName) {
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastDiceRollAt BIGINT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS dice_sixes INTEGER NOT NULL DEFAULT 0`,
     ];
-
     for (const q of addCols) {
       try { await pgPool.query(q); } catch (_) {}
+    }
+
+    // Migrate legacy timestamp/int columns to epoch-ms BIGINT so inserts don't fail.
+    const epochMsCols = [
+      "created_at",
+      "last_seen",
+      "lastXpMessageAt",
+      "lastDailyLoginAt",
+      "lastGoldTickAt",
+      "lastMessageGoldAt",
+      "lastDailyLoginGoldAt",
+      "lastDiceRollAt",
+    ];
+    for (const col of epochMsCols) {
+      try {
+        await pgEnsureEpochMsBigint("users", col);
+      } catch (e) {
+        console.warn("[pg-migrate]", "users."+col, e?.message || e);
+      }
     }
 
     console.log("Postgres tables ready");
@@ -212,7 +210,6 @@ async function pgEnsureEpochMsBigint(tableName, columnName) {
     console.error("Postgres init error:", err);
   }
 })();
-
 // IMPORTANT for Render/any reverse proxy so secure cookies work
 app.set("trust proxy", 1);
 // ---- DB
@@ -3460,6 +3457,8 @@ function doJoin(room, status) {
 });
 
 // ---- Start
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+pgInitPromise.finally(() => {
+  server.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 });
