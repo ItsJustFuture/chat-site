@@ -5,7 +5,6 @@ const path = require("path");
 const fs = require("fs");
 const express = require("express");
 const session = require("express-session");
-const SQLiteStore = require("connect-sqlite3")(session);
 const PgSession = require("connect-pg-simple")(session);
 const bcrypt = require("bcrypt");
 const multer = require("multer");
@@ -425,9 +424,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// ---- Sessions (works locally + Render)
+// ---- Sessions (Postgres-backed; survives redeploys)
 const sessionMiddleware = session({
-  store: new SQLiteStore({ db: "sessions.sqlite", dir: __dirname }),
+  store: new PgSession({
+    pool: pgPool,
+    tableName: "session",
+  }),
   secret: process.env.SESSION_SECRET || "dev_secret_change_me",
   resave: false,
   saveUninitialized: false,
@@ -435,7 +437,7 @@ const sessionMiddleware = session({
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
-    maxAge: 1000 * 60 * 60 * 24 * 7,
+    maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
   },
 });
 
