@@ -6,6 +6,7 @@ const fs = require("fs");
 const express = require("express");
 const session = require("express-session");
 const SQLiteStore = require("connect-sqlite3")(session);
+const PgSession = require("connect-pg-simple")(session);
 const bcrypt = require("bcrypt");
 const multer = require("multer");
 const { Pool } = require("pg");
