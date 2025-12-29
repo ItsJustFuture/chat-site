@@ -1795,19 +1795,6 @@ app.get("/api/me/progression", requireLogin, async (req, res) => {
     }
   };
 
-  if (onlineState.has(uid)) {
-    awardPassiveGold(uid, () => { finish(); });
-  } else {
-    finish();
-  }
-});
-
-
-  if (onlineState.has(uid)) {
-    awardPassiveGold(uid, finish);
-  } else {
-    finish();
-  }
 app.get("/api/me/gold", requireLogin, async (req, res) => {
   const uid = req.session.user.id;
 
