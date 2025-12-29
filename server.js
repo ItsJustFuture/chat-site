@@ -78,48 +78,10 @@ async function pgEnsureEpochMsBigint(tableName, columnName) {
     );
   }
 }
-// ---- Postgres: helpers to keep legacy schemas compatible
-async function pgGetColumnType(tableName, columnName) {
-  const { rows } = await pgPool.query(
-    `SELECT udt_name, data_type
-     FROM information_schema.columns
-     WHERE table_schema = 'public'
-       AND table_name = $1
-       AND column_name = $2
-     LIMIT 1`,
-    [tableName, columnName]
-  );
-  return rows[0] || null;
-}
 
-async function pgEnsureEpochMsBigint(tableName, columnName) {
-  const info = await pgGetColumnType(tableName, columnName);
-  if (!info) return;
+// ---- Postgres schema flags
+let PG_USERS_CREATED_AT_IS_TIMESTAMP = false;
 
-  const udt = String(info.udt_name || "").toLowerCase();
-  const dataType = String(info.data_type || "").toLowerCase();
-
-  if (udt === "int8" || dataType === "bigint") return;
-
-  if (udt === "timestamp" || udt === "timestamptz" || dataType.includes("timestamp")) {
-    await pgPool.query(
-      `ALTER TABLE ${tableName}
-       ALTER COLUMN ${columnName}
-       TYPE BIGINT
-       USING (EXTRACT(EPOCH FROM ${columnName}) * 1000)::BIGINT`
-    );
-    return;
-  }
-
-  if (udt === "int4" || dataType === "integer") {
-    await pgPool.query(
-      `ALTER TABLE ${tableName}
-       ALTER COLUMN ${columnName}
-       TYPE BIGINT
-       USING (${columnName})::BIGINT`
-    );
-  }
-}
 // ---- Postgres table setup
 // Run once on boot, and start the server only after this finishes (so schema/type fixes apply before /register).
 const pgInitPromise = (async () => {
@@ -203,6 +165,17 @@ const pgInitPromise = (async () => {
       } catch (e) {
         console.warn("[pg-migrate]", "users."+col, e?.message || e);
       }
+    }
+
+    // Detect actual column types (useful on legacy DBs)
+    try {
+      const t = await pgGetColumnType("users", "created_at");
+      const udt = String(t?.udt_name || "").toLowerCase();
+      const dt = String(t?.data_type || "").toLowerCase();
+      PG_USERS_CREATED_AT_IS_TIMESTAMP = udt.includes("timestamp") || dt.includes("timestamp");
+      console.log("[pg-schema] users.created_at =", t?.data_type || t?.udt_name);
+    } catch (e) {
+      console.warn("[pg-schema] failed to read users.created_at type", e?.message || e);
     }
 
     console.log("Postgres tables ready");
@@ -1737,11 +1710,13 @@ app.post("/register", async (req, res) => {
 
     const theme = DEFAULT_THEME;
 
+    const createdAtValue = PG_USERS_CREATED_AT_IS_TIMESTAMP ? new Date(createdAt) : createdAt;
+
     const { rows } = await pgPool.query(
       `INSERT INTO users (username, password_hash, role, created_at, theme)
        VALUES ($1,$2,$3,$4,$5)
        RETURNING id, username, role, theme`,
-      [username, hash, role, createdAt, theme]
+      [username, hash, role, createdAtValue, theme]
     );
 
     const user = rows[0];
