@@ -196,7 +196,10 @@ function addColumnIfMissing(table, column, definition) {
     if (!exists) db.run(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
   });
 }
-
+async function pgUserExists(userId) {
+  const { rows } = await pgPool.query("SELECT 1 FROM users WHERE id=$1 LIMIT 1", [userId]);
+  return !!rows[0];
+}
 function migrateLegacyPasswords() {
   db.all("PRAGMA table_info(users)", [], (err, rows) => {
     if (err) return;
