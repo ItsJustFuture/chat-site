@@ -756,6 +756,12 @@ const ALLOWED_THEMES = [
 const GOLD_TICK_MS = 5_000;
 const MESSAGE_GOLD_COOLDOWN_MS = 5 * 60 * 1000;
 const DAILY_GOLD_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+// ---- Real-time presence tracking
+const onlineState = new Map(); // userId -> { room, status }
+const socketIdByUserId = new Map(); // userId -> socket.id
+const typingByRoom = new Map(); // room -> Set(username)
+const msgRate = new Map(); // socket.id -> { lastTs, count }
+const onlineXpTrack = new Map(); // userId -> { lastTs, carryMs }
 
 db.get(`SELECT value FROM config WHERE key='maintenance'`, [], (_e, row) => {
   maintenanceState.enabled = row?.value === "on";
@@ -2528,13 +2534,6 @@ app.delete("/dm/thread/:id/messages", requireLogin, (req, res) => {
     });
   });
 });
-
-// ---- Real-time presence tracking
-const onlineState = new Map(); // userId -> { room, status }
-const socketIdByUserId = new Map(); // userId -> socket.id
-const typingByRoom = new Map(); // room -> Set(username)
-const msgRate = new Map(); // socket.id -> { lastTs, count }
-const onlineXpTrack = new Map(); // userId -> { lastTs, carryMs }
 
 setInterval(() => {
   const now = Date.now();
