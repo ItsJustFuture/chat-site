@@ -1462,53 +1462,120 @@ function awardDailyLoginXp(user) {
 }
 
 function initGoldTick(userId, now = Date.now()) {
-  db.run("UPDATE users SET lastGoldTickAt = ? WHERE id = ?", [now, userId]);
+  (async () => {
+    try {
+      if (await pgUserExists(userId)) {
+        await pgPool.query("UPDATE users SET lastGoldTickAt = $1 WHERE id = $2", [now, userId]);
+        return;
+      }
+    } catch (e) {
+      console.warn("[initGoldTick][pg] failed, falling back to sqlite:", e?.message || e);
+    }
+    db.run("UPDATE users SET lastGoldTickAt = ? WHERE id = ?", [now, userId]);
+  })();
 }
+
 
 function awardPassiveGold(userId, cb) {
   const now = Date.now();
-  db.get("SELECT lastGoldTickAt FROM users WHERE id = ?", [userId], (err, row) => {
-    if (err || !row) return cb?.(err || new Error("missing"));
 
-    const last = Number(row.lastGoldTickAt || 0);
-    if (!last) {
-      db.run("UPDATE users SET lastGoldTickAt = ? WHERE id = ?", [now, userId], () => cb?.(null, 0));
-      return;
+  (async () => {
+    try {
+      if (await pgUserExists(userId)) {
+        const row = await pgGetUserRowById(userId, ["lastGoldTickAt"]);
+        if (!row) return cb?.(new Error("missing"));
+
+        const last = Number(row.lastGoldTickAt || 0);
+        if (!last) {
+          await pgPool.query("UPDATE users SET lastGoldTickAt = $1 WHERE id = $2", [now, userId]);
+          return cb?.(null, 0);
+        }
+
+        const elapsed = now - last;
+        const ticks = Math.floor(elapsed / GOLD_TICK_MS);
+        if (ticks <= 0) return cb?.(null, 0);
+
+        const newTickTs = last + ticks * GOLD_TICK_MS;
+        await pgPool.query(
+          "UPDATE users SET gold = gold + $1, lastGoldTickAt = $2 WHERE id = $3",
+          [ticks, newTickTs, userId]
+        );
+        if (ticks > 0) emitProgressionUpdate(userId);
+        return cb?.(null, ticks);
+      }
+    } catch (e) {
+      console.warn("[passiveGold][pg] failed, falling back to sqlite:", e?.message || e);
     }
 
-    const elapsed = now - last;
-    const ticks = Math.floor(elapsed / GOLD_TICK_MS);
-    if (ticks <= 0) return cb?.(null, 0);
+    // SQLite fallback (original behavior)
+    db.get("SELECT lastGoldTickAt FROM users WHERE id = ?", [userId], (err, row) => {
+      if (err || !row) return cb?.(err || new Error("missing"));
 
-    const newTickTs = last + ticks * GOLD_TICK_MS;
-    db.run(
-      "UPDATE users SET gold = gold + ?, lastGoldTickAt = ? WHERE id = ?",
-      [ticks, newTickTs, userId],
-      (updateErr) => {
-        if (!updateErr && ticks > 0) emitProgressionUpdate(userId);
-        cb?.(updateErr, ticks);
+      const last = Number(row.lastGoldTickAt || 0);
+      if (!last) {
+        db.run("UPDATE users SET lastGoldTickAt = ? WHERE id = ?", [now, userId], () => cb?.(null, 0));
+        return;
       }
-    );
-  });
+
+      const elapsed = now - last;
+      const ticks = Math.floor(elapsed / GOLD_TICK_MS);
+      if (ticks <= 0) return cb?.(null, 0);
+
+      const newTickTs = last + ticks * GOLD_TICK_MS;
+      db.run(
+        "UPDATE users SET gold = gold + ?, lastGoldTickAt = ? WHERE id = ?",
+        [ticks, newTickTs, userId],
+        (updateErr) => {
+          if (!updateErr && ticks > 0) emitProgressionUpdate(userId);
+          cb?.(updateErr, ticks);
+        }
+      );
+    });
+  })();
 }
+
 
 function awardMessageGold(userId, cb) {
   const now = Date.now();
-  db.get("SELECT lastMessageGoldAt FROM users WHERE id = ?", [userId], (err, row) => {
-    if (err || !row) return cb?.(err || new Error("missing"));
-    const last = Number(row.lastMessageGoldAt || 0);
-    if (last && now - last < MESSAGE_GOLD_COOLDOWN_MS) return cb?.(null, 0);
 
-    db.run(
-      "UPDATE users SET gold = gold + 5, lastMessageGoldAt = ? WHERE id = ?",
-      [now, userId],
-      (updateErr) => {
-        if (!updateErr) emitProgressionUpdate(userId);
-        cb?.(updateErr, updateErr ? 0 : 5);
+  (async () => {
+    try {
+      if (await pgUserExists(userId)) {
+        const row = await pgGetUserRowById(userId, ["lastMessageGoldAt"]);
+        if (!row) return cb?.(new Error("missing"));
+
+        const last = Number(row.lastMessageGoldAt || 0);
+        if (last && now - last < MESSAGE_GOLD_COOLDOWN_MS) return cb?.(null, 0);
+
+        await pgPool.query(
+          "UPDATE users SET gold = gold + 5, lastMessageGoldAt = $1 WHERE id = $2",
+          [now, userId]
+        );
+        emitProgressionUpdate(userId);
+        return cb?.(null, 5);
       }
-    );
-  });
+    } catch (e) {
+      console.warn("[messageGold][pg] failed, falling back to sqlite:", e?.message || e);
+    }
+
+    // SQLite fallback (original behavior)
+    db.get("SELECT lastMessageGoldAt FROM users WHERE id = ?", [userId], (err, row) => {
+      if (err || !row) return cb?.(err || new Error("missing"));
+      const last = Number(row.lastMessageGoldAt || 0);
+      if (last && now - last < MESSAGE_GOLD_COOLDOWN_MS) return cb?.(null, 0);
+
+      db.run(
+        "UPDATE users SET gold = gold + 5, lastMessageGoldAt = ? WHERE id = ?",
+        [now, userId],
+        (updateErr) => {
+          if (!updateErr) emitProgressionUpdate(userId);
+          cb?.(updateErr, updateErr ? 0 : 5);
+        }
+      );
+    });
+  })();
 }
+
 
 function awardDailyLoginGold(user) {
   const now = Date.now();
@@ -1537,11 +1604,26 @@ function progressionFromRow(row, includePrivate) {
 function emitProgressionUpdate(userId) {
   const sid = socketIdByUserId.get(userId);
   if (!sid) return;
-  db.get("SELECT gold, xp FROM users WHERE id = ?", [userId], (err, row) => {
-    if (err || !row) return;
-    io.to(sid).emit("progression:update", progressionFromRow(row, true));
-  });
+
+  (async () => {
+    try {
+      if (await pgUserExists(userId)) {
+        const row = await pgGetUserRowById(userId, ["gold", "xp"]);
+        if (!row) return;
+        io.to(sid).emit("progression:update", progressionFromRow(row, true));
+        return;
+      }
+    } catch (e) {
+      console.warn("[progression][pg] failed, falling back to sqlite:", e?.message || e);
+    }
+
+    db.get("SELECT gold, xp FROM users WHERE id = ?", [userId], (err, row) => {
+      if (err || !row) return;
+      io.to(sid).emit("progression:update", progressionFromRow(row, true));
+    });
+  })();
 }
+
 
 function fetchUsersByNames(usernames, cb) {
   const cleaned = Array.from(
@@ -1851,6 +1933,9 @@ app.get("/me", async (req, res) => {
   }
 });
 
+// Back-compat alias used by some clients
+app.get("/api/me", (req, res) => res.redirect(307, "/me"));
+
 app.get("/api/me/progression", requireLogin, async (req, res) => {
   const uid = req.session.user.id;
 
@@ -2103,11 +2188,73 @@ app.delete("/api/changelog/:id", requireOwner, async (req, res) => {
   }
 });
 // ---- Profile routes
-app.get("/profile", requireLogin, (req, res) => {
+app.get("/profile", requireLogin, async (req, res) => {
+  const userId = req.session.user.id;
+
+  try {
+    // Prefer Postgres if this user exists there (Render prod path)
+    if (await pgUserExists(userId)) {
+      const row = await pgGetUserRowById(userId, [
+        "id",
+        "username",
+        "role",
+        "avatar",
+        "bio",
+        "mood",
+        "age",
+        "gender",
+        "created_at",
+        "last_seen",
+        "last_room",
+        "last_status",
+        "gold",
+        "xp",
+      ]);
+      if (!row) return res.status(404).send("Not found");
+
+      const live = onlineState.get(row.id);
+      const lastStatus = normalizeStatus(live?.status || row.last_status, "");
+
+      // Likes are stored in sqlite in this codebase; keep using it
+      db.get(
+        `SELECT
+          (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
+          EXISTS(SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?) AS liked
+        `,
+        [row.id, userId, row.id],
+        (_likeErr, likesRow) => {
+          const payload = {
+            id: row.id,
+            username: row.username,
+            role: row.role,
+            avatar: row.avatar,
+            bio: row.bio,
+            mood: row.mood,
+            age: row.age,
+            gender: row.gender,
+            created_at: row.created_at,
+            last_seen: row.last_seen,
+            last_room: row.last_room,
+            last_status: lastStatus || null,
+            current_room: live?.room || null,
+            likes: Number(likesRow?.likes || 0),
+            likedByMe: !!Number(likesRow?.liked || 0),
+            ...progressionFromRow(row, true),
+          };
+          return res.json(payload);
+        }
+      );
+      return;
+    }
+  } catch (e) {
+    console.warn("[/profile][pg] failed, falling back to sqlite:", e?.message || e);
+  }
+
+  // SQLite fallback (original behavior)
   db.get(
     `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp
      FROM users WHERE id = ?`,
-    [req.session.user.id],
+    [userId],
     (err, row) => {
       if (err || !row) return res.status(404).send("Not found");
       const live = onlineState.get(row.id);
@@ -2117,7 +2264,7 @@ app.get("/profile", requireLogin, (req, res) => {
           (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
           EXISTS(SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?) AS liked
         `,
-        [row.id, req.session.user.id, row.id],
+        [row.id, userId, row.id],
         (_likeErr, likesRow) => {
           const payload = {
             id: row.id,
@@ -2753,43 +2900,46 @@ socket.on("join room", ({ room, status }) => {
     }
 
     const now = Date.now();
-    db.get(`SELECT gold, lastDiceRollAt FROM users WHERE id=?`, [socket.user.id], (err, row) => {
-      if (err || !row) {
-        socket.emit("dice:error", "Could not roll dice right now.");
-        return;
-      }
+    const uid = socket.user.id;
 
-      const last = Number(row.lastDiceRollAt || 0);
-      if (now - last < 2000) {
-        socket.emit("dice:error", `Slow down! Try again in ${Math.ceil((2000 - (now - last)) / 100) / 10}s.`);
-        return;
-      }
-
-      const gold = Number(row.gold || 0);
-      if (gold < 50) {
-        socket.emit("dice:error", "You need at least 50 Gold to roll.");
-        return;
-      }
-
-      const value = Math.floor(Math.random() * 6) + 1; // 1..6
-      const won = value === 6;
-      const deltaGold = won ? 500 : -50;
-      const sixGain = won ? 1 : 0;
-
-      db.run(
-        `UPDATE users SET gold = MAX(0, gold + ?), lastDiceRollAt=?, dice_sixes = dice_sixes + ? WHERE id=?`,
-        [deltaGold, now, sixGain, socket.user.id],
-        (uerr) => {
-          if (uerr) {
-            socket.emit("dice:error", "Could not apply dice result.");
+    (async () => {
+      try {
+        if (await pgUserExists(uid)) {
+          const row = await pgGetUserRowById(uid, ["gold", "lastDiceRollAt"]);
+          if (!row) {
+            socket.emit("dice:error", "Could not roll dice right now.");
             return;
           }
 
-          // Inform roller (for animation + optional UI refresh)
-          socket.emit("dice:result", { value, won, deltaGold });
-          emitProgressionUpdate(socket.user.id);
+          const last = Number(row.lastDiceRollAt || 0);
+          if (now - last < 2000) {
+            socket.emit("dice:error", `Slow down! Try again in ${Math.ceil((2000 - (now - last)) / 100) / 10}s.`);
+            return;
+          }
 
-          // Broadcast a centered non-bubble system message to the room
+          const gold = Number(row.gold || 0);
+          if (gold < 50) {
+            socket.emit("dice:error", "You need at least 50 Gold to roll.");
+            return;
+          }
+
+          const value = Math.floor(Math.random() * 6) + 1; // 1..6
+          const won = value === 6;
+          const deltaGold = won ? 500 : -50;
+          const sixGain = won ? 1 : 0;
+
+          await pgPool.query(
+            `UPDATE users
+               SET gold = GREATEST(0, gold + $1),
+                   lastDiceRollAt = $2,
+                   dice_sixes = dice_sixes + $3
+             WHERE id = $4`,
+            [deltaGold, now, sixGain, uid]
+          );
+
+          socket.emit("dice:result", { value, won, deltaGold });
+          emitProgressionUpdate(uid);
+
           const faces = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
           const face = faces[value - 1] || value;
           const msg = won
@@ -2797,11 +2947,61 @@ socket.on("join room", ({ room, status }) => {
             : `${socket.user.username} rolled ${face} 🎲 (-50 Gold!)`;
           io.to(room).emit("system", msg);
 
-          // Optional event for others to animate too
-          io.to(room).emit("dice:rolled", { userId: socket.user.id, username: socket.user.username, value, won });
+          io.to(room).emit("dice:rolled", { userId: uid, username: socket.user.username, value, won });
+          return;
         }
-      );
-    });
+      } catch (e) {
+        console.warn("[dice][pg] failed, falling back to sqlite:", e?.message || e);
+      }
+
+      // SQLite fallback (original behavior)
+      db.get(`SELECT gold, lastDiceRollAt FROM users WHERE id=?`, [uid], (err, row) => {
+        if (err || !row) {
+          socket.emit("dice:error", "Could not roll dice right now.");
+          return;
+        }
+
+        const last = Number(row.lastDiceRollAt || 0);
+        if (now - last < 2000) {
+          socket.emit("dice:error", `Slow down! Try again in ${Math.ceil((2000 - (now - last)) / 100) / 10}s.`);
+          return;
+        }
+
+        const gold = Number(row.gold || 0);
+        if (gold < 50) {
+          socket.emit("dice:error", "You need at least 50 Gold to roll.");
+          return;
+        }
+
+        const value = Math.floor(Math.random() * 6) + 1; // 1..6
+        const won = value === 6;
+        const deltaGold = won ? 500 : -50;
+        const sixGain = won ? 1 : 0;
+
+        db.run(
+          `UPDATE users SET gold = MAX(0, gold + ?), lastDiceRollAt=?, dice_sixes = dice_sixes + ? WHERE id=?`,
+          [deltaGold, now, sixGain, uid],
+          (uerr) => {
+            if (uerr) {
+              socket.emit("dice:error", "Could not apply dice result.");
+              return;
+            }
+
+            socket.emit("dice:result", { value, won, deltaGold });
+            emitProgressionUpdate(uid);
+
+            const faces = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+            const face = faces[value - 1] || value;
+            const msg = won
+              ? `${socket.user.username} rolled ${face} 🎉 (+500 Gold!)`
+              : `${socket.user.username} rolled ${face} 🎲 (-50 Gold!)`;
+            io.to(room).emit("system", msg);
+
+            io.to(room).emit("dice:rolled", { userId: uid, username: socket.user.username, value, won });
+          }
+        );
+      });
+    })();
   });
 
 function doJoin(room, status) {
