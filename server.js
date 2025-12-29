@@ -1832,12 +1832,6 @@ app.get("/api/me/gold", requireLogin, async (req, res) => {
   }
 });
 
-
-  if (onlineState.has(uid)) {
-    awardPassiveGold(uid, finish);
-  } else {
-    finish();
-  }
 app.get("/api/me/theme", requireLogin, async (req, res) => {
   try {
     // Prefer Postgres
