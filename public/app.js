@@ -1652,7 +1652,7 @@ function renderDmThreads(){
 
 async function loadDmThreads(){
   try {
-    const res = await fetch("/dm/threads");
+    const res = await dmFetch("/dm/threads");
     if (!res.ok) {
       setDmNotice("Could not load threads.");
       return;
@@ -1683,7 +1683,7 @@ async function startDirectMessage(username){
 
   setDmNotice("Preparing chat...");
   try {
-    const res = await fetch("/dm/thread", {
+    const res = await dmFetch("/dm/thread", {
       method: "POST",
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify({ participants: [username], kind: "direct" })
@@ -1837,7 +1837,7 @@ async function deleteDmHistory(){
 
   setDmNotice("Deleting history...");
   try {
-    const res = await fetch(`/dm/thread/${activeDmId}/messages`, { method: "DELETE" });
+    const res = await dmFetch(`/dm/thread/${activeDmId}/messages`, { method: "DELETE" });
     if (!res.ok) {
       const text = await res.text();
       setDmNotice(text || "Could not delete history.");
@@ -1981,7 +1981,7 @@ async function submitDmPicker(){
 
   try {
     dmModalPrimaryBtn.disabled = true;
-    const res = await fetch("/dm/thread", {
+    const res = await dmFetch("/dm/thread", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind: "group", participants: names }),
@@ -2002,7 +2002,7 @@ async function submitDmPicker(){
 }
 
 async function fetchDmInfo(threadId){
-  const res = await fetch(`/dm/thread/${threadId}`);
+  const res = await dmFetch(`/dm/thread/${threadId}`);
   if (!res.ok) throw new Error("Failed info");
   return res.json();
 }
@@ -2047,7 +2047,7 @@ async function addMembersToGroup(threadId, names){
   if (!names?.length) return;
   try {
     dmModalPrimaryBtn.disabled = true;
-    const res = await fetch(`/dm/thread/${threadId}/participants`, {
+    const res = await dmFetch(`/dm/thread/${threadId}/participants`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ participants: names }),
@@ -2069,7 +2069,7 @@ async function leaveGroup(threadId){
   const ok = confirm("Leave this group?");
   if (!ok) return;
   try {
-    const res = await fetch(`/dm/thread/${threadId}/leave`, { method: "POST" });
+    const res = await dmFetch(`/dm/thread/${threadId}/leave`, { method: "POST" });
     if (!res.ok) {
       setDmNotice((await res.text()) || "Could not leave group.");
       return;
@@ -2826,6 +2826,17 @@ async function api(path, options){
   }catch{
     return {res:{ok:false,status:0}, text:"Network error"};
   }
+}
+
+// ---- DM fetch helper
+// Some server builds expose DM endpoints under /dm/*, others under /api/dm/*.
+// To avoid "Cannot POST /dm/thread" 404s, retry with /api prefix when needed.
+async function dmFetch(path, options){
+  const res = await fetch(path, { credentials: "include", ...options });
+  if(res.status===404 && typeof path === "string" && path.startsWith("/dm/")){
+    return fetch("/api" + path, { credentials: "include", ...options });
+  }
+  return res;
 }
 async function doLogin(){
   authMsg.textContent="Logging in...";
