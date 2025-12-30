@@ -1540,6 +1540,39 @@ function setDmTab(tab){
   renderDmThreads();
 }
 
+// Some deployments mount DM routes under /api (e.g. /api/dm/thread) while others use
+// /dm directly. Try the likely variant first and fall back on 404.
+async function dmFetch(url, options){
+  const u = String(url || "");
+  const tries = [];
+
+  if (u.startsWith("/dm/")) {
+    tries.push("/api" + u);
+    tries.push(u);
+  } else if (u.startsWith("/api/dm/")) {
+    tries.push(u);
+    tries.push(u.replace(/^\/api/, ""));
+  } else {
+    // Not a DM endpoint
+    tries.push(u);
+  }
+
+  let lastRes;
+  for (const candidate of tries) {
+    try {
+      const res = await fetch(candidate, options);
+      lastRes = res;
+      // Only fall back on 404 (route missing). Any other status should be surfaced.
+      if (res && res.status !== 404) return res;
+    } catch (e) {
+      // Network errors: try next candidate, then rethrow at end.
+      lastRes = null;
+    }
+  }
+  if (!lastRes) throw new Error("Network error");
+  return lastRes;
+}
+
 function renderThreadItem(t){
   const div = document.createElement("div");
   div.className = "dmItem" + (t.id === activeDmId ? " active" : "");
@@ -1667,7 +1700,19 @@ async function loadDmThreads(){
 }
 
 async function startDirectMessage(username){
-  if (!username || username === me?.username) return;
+  if (!username) return;
+  const target = String(username).trim();
+  const meName = String(me?.username || "").trim();
+  // Prevent starting a DM with yourself (case-insensitive, to survive server normalization).
+  if (meName && target.toLowerCase() === meName.toLowerCase()) {
+    setDmNotice("You can't start a DM with yourself.");
+    return;
+  }
+  // If 'me' is not ready yet, don't attempt creation.
+  if (!meName) {
+    setDmNotice("Please wait a moment and try again.");
+    return;
+  }
 
   setDmTab("direct");
   openDmPanel();
@@ -1675,7 +1720,11 @@ async function startDirectMessage(username){
 
   if (!dmThreads.length) await loadDmThreads();
 
-  const existing = dmThreads.find((t) => !t.is_group && (t.participants || []).includes(username));
+  const existing = dmThreads.find((t) => {
+    if (t.is_group) return false;
+    const parts = (t.participants || []).map((p)=>String(p||"").toLowerCase());
+    return parts.includes(target.toLowerCase());
+  });
   if (existing) {
     openDmThread(existing.id);
     return;
@@ -1683,10 +1732,18 @@ async function startDirectMessage(username){
 
   setDmNotice("Preparing chat...");
   try {
-    const res = await dmFetch("/dm/thread", {
+    const res = await dmFetch("/api/dm/thread", {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ participants: [username], kind: "direct" })
+      // Send multiple keys for backwards/forwards compatibility across server builds.
+      body: JSON.stringify({
+        kind: "direct",
+        participants: [target],
+        participant: target,
+        user: target,
+        to: target,
+        username: target,
+      })
     });
 
     if (!res.ok) {
@@ -1700,7 +1757,7 @@ async function startDirectMessage(username){
     setDmNotice(data.reused ? "Opened existing DM." : "");
 
     if (data.threadId) {
-      upsertThreadMeta(data.threadId, { participants: [username, me?.username].filter(Boolean), is_group: false });
+      upsertThreadMeta(data.threadId, { participants: [target, meName].filter(Boolean), is_group: false });
       openDmThread(data.threadId);
     }
   } catch {
@@ -1981,10 +2038,15 @@ async function submitDmPicker(){
 
   try {
     dmModalPrimaryBtn.disabled = true;
-    const res = await dmFetch("/dm/thread", {
+    const res = await dmFetch("/api/dm/thread", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "group", participants: names }),
+      body: JSON.stringify({
+        kind: "group",
+        participants: names,
+        // Compatibility keys
+        users: names.join(","),
+      }),
     });
     dmModalPrimaryBtn.disabled = false;
     if (!res.ok) {
@@ -2828,16 +2890,6 @@ async function api(path, options){
   }
 }
 
-// ---- DM fetch helper
-// Some server builds expose DM endpoints under /dm/*, others under /api/dm/*.
-// To avoid "Cannot POST /dm/thread" 404s, retry with /api prefix when needed.
-async function dmFetch(path, options){
-  const res = await fetch(path, { credentials: "include", ...options });
-  if(res.status===404 && typeof path === "string" && path.startsWith("/dm/")){
-    return fetch("/api" + path, { credentials: "include", ...options });
-  }
-  return res;
-}
 async function doLogin(){
   authMsg.textContent="Logging in...";
   const {res,text}=await api("/login",{
