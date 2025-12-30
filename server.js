@@ -3135,7 +3135,6 @@ io.on("connection", async (socket) => {
     console.warn("[dm auto-join] failed:", e?.message || e);
     }
   }
-});
 socket.on("join room", ({ room, status }) => {
   const desired = sanitizeRoomName(room) || "main";
 
@@ -3904,6 +3903,7 @@ if (!room) {
   });
 });
 
+});
 // ---- Start
 pgInitPromise.finally(() => {
   server.listen(PORT, () => {
