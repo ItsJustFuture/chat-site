@@ -2202,3 +2202,30 @@ main.chat{ position: relative; }
     min-height: 0;
   }
 }
+:root{
+  --leftDrawerW: 0px;
+  --rightDrawerW: 0px;
+  --safeB: env(safe-area-inset-bottom, 0px);
+}
+
+body.drawer-left-open  { --leftDrawerW: min(86vw, 340px); }
+body.drawer-right-open { --rightDrawerW: min(86vw, 340px); }
+
+/* Your composer wrapper – adjust selector to match your actual element */
+.composer,
+.dmComposer,
+#composerBar {
+  position: fixed;
+  left: var(--leftDrawerW);
+  right: var(--rightDrawerW);
+  bottom: 0;
+  z-index: 50; /* below drawers if drawers are 60+ */
+  padding-bottom: calc(8px + var(--safeB));
+}
+
+/* Make sure the message list doesn't go under the composer */
+.msgs,
+#messages,
+.dmMsgs {
+  padding-bottom: calc(72px + var(--safeB)); /* tweak 72px to your bar height */
+}
