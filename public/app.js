@@ -107,6 +107,10 @@ const THEME_LIST = [
   { name: "Pastel Light", mode: "Light" },
   { name: "Paper / Parchment", mode: "Light" },
   { name: "Sky Light", mode: "Light" },
+  { name: "Cherry Blossom (Dark)", mode: "Dark" },
+  { name: "Cherry Blossom (Light)", mode: "Light" },
+  { name: "Aurora Night", mode: "Dark" },
+  { name: "Mint Soda", mode: "Light" },
 ];
 const DEFAULT_THEME = "Minimal Dark";
 let currentTheme = document.body?.getAttribute("data-theme") || DEFAULT_THEME;
