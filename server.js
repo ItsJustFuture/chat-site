@@ -2634,7 +2634,10 @@ app.get("/mod/logs", requireLogin, (req, res) => {
 });
 
 // ---- Direct messages API
-app.get("/dm/threads", requireLogin, (req, res) => {
+// NOTE: This handler is used for BOTH /dm/threads and /api/dm/threads.
+// Older builds mounted everything under /api; newer builds use /dm.
+// Keeping both paths avoids breaking clients and prevents 404s.
+function handleListDmThreads(req, res) {
   const userId = req.session.user.id;
 
   db.all(
@@ -2648,14 +2651,20 @@ app.get("/dm/threads", requireLogin, (req, res) => {
      ORDER BY COALESCE(last_ts, t.created_at) DESC`,
     [userId],
     (err, threads) => {
-      if (err) return res.status(500).send("Failed to load threads");
+      if (err) {
+        console.error("[dm/threads]", err);
+        return res.status(500).send("Failed to load threads");
+      }
       if (!threads?.length) return res.json([]);
 
       const ids = threads.map((t) => t.id);
       const placeholders = ids.map(() => "?").join(",");
 
       db.all(
-        `SELECT dp.thread_id, u.username FROM dm_participants dp JOIN users u ON u.id = dp.user_id WHERE dp.thread_id IN (${placeholders})`,
+        `SELECT dp.thread_id, u.username
+         FROM dm_participants dp
+         JOIN users u ON u.id = dp.user_id
+         WHERE dp.thread_id IN (${placeholders})`,
         ids,
         (_e, parts) => {
           const grouped = new Map();
@@ -2673,43 +2682,10 @@ app.get("/dm/threads", requireLogin, (req, res) => {
       );
     }
   );
-});
+}
 
-// --- Compatibility aliases (older clients call /api/dm/*)
-// Some deployments historically mounted API routes under /api.
-// Keep both paths working so DM creation/listing never 404s.
-app.get("/api/dm/threads", requireLogin, (req, res) => {
-  // call the same implementation by running the original handler
-  // (Express doesn't expose route handlers easily here, so we duplicate minimal glue)
-  const uid = req.session.user.id;
-  dbAll(
-    `SELECT t.id, t.kind, t.title, t.created_at
-     FROM dm_threads t
-     JOIN dm_participants p ON p.thread_id = t.id
-     WHERE p.user_id = ?
-     ORDER BY t.updated_at DESC, t.id DESC`,
-    [uid],
-    (err, threads) => {
-      if (err) return res.status(500).send("DB error");
-      if (!threads?.length) return res.json([]);
-      const ids = threads.map((t) => t.id);
-      const q = `SELECT p.thread_id, u.username
-                 FROM dm_participants p
-                 JOIN users u ON u.id = p.user_id
-                 WHERE p.thread_id IN (${ids.map(() => "?").join(",")})
-                 ORDER BY p.thread_id, u.username`;
-      dbAll(q, ids, (_e, parts) => {
-        const grouped = new Map();
-        for (const p of parts || []) {
-          if (!grouped.has(p.thread_id)) grouped.set(p.thread_id, []);
-          grouped.get(p.thread_id).push(p.username);
-        }
-        const result = threads.map((t) => ({ ...t, participants: grouped.get(t.id) || [] }));
-        res.json(result);
-      });
-    }
-  );
-});
+app.get("/dm/threads", requireLogin, handleListDmThreads);
+app.get("/api/dm/threads", requireLogin, handleListDmThreads);
 
 app.get("/dm/thread/:id", requireLogin, (req, res) => {
   const tid = Number(req.params.id);
