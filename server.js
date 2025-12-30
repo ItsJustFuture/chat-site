@@ -3426,8 +3426,16 @@ if (!room) {
   });
 
   socket.on("chat message", (payload) => {
-    const room = socket.currentRoom;
-    if (!room) return;
+    // If a client sends before it has joined a room (mobile reconnect/race),
+    // auto-join main so the message doesn't silently disappear.
+    let room = socket.currentRoom;
+    if (!room) {
+      try {
+        doJoin("main", socket.user.status || "Online");
+      } catch (_) {}
+      room = socket.currentRoom;
+      if (!room) return;
+    }
 
     // basic spam rate limiting
     const now = Date.now();
