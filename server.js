@@ -127,6 +127,7 @@ const pgInitPromise = (async () => {
         last_room TEXT,
         last_status TEXT,
         theme TEXT NOT NULL DEFAULT 'Minimal Dark',
+        prefs_json JSONB NOT NULL DEFAULT '{}'::jsonb,
         gold INTEGER NOT NULL DEFAULT 0,
         xp INTEGER NOT NULL DEFAULT 0,
         lastXpMessageAt BIGINT,
@@ -183,6 +184,7 @@ try {
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_room TEXT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_status TEXT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT 'Minimal Dark'`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS prefs_json JSONB NOT NULL DEFAULT '{}'::jsonb`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS gold INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS xp INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastXpMessageAt BIGINT`,
@@ -2259,6 +2261,75 @@ app.post("/api/me/theme", requireLogin, async (req, res) => {
     console.error(e);
     return res.status(500).send("Failed");
   }
+});
+
+// ---- User prefs (badge colors, DM theme, etc)
+function safeJsonParse(raw, fallback) {
+  try {
+    if (raw == null || raw === "") return fallback;
+    if (typeof raw === "object") return raw; // pg may already return json
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+function sanitizePrefsInput(p) {
+  const out = {};
+  if (p && typeof p === "object") {
+    if (p.dmBadgePrefs && typeof p.dmBadgePrefs === "object") out.dmBadgePrefs = p.dmBadgePrefs;
+    if (p.dmThemePrefs && typeof p.dmThemePrefs === "object") out.dmThemePrefs = p.dmThemePrefs;
+  }
+  return out;
+}
+
+app.get("/api/me/prefs", requireLogin, async (req, res) => {
+  const userId = req.session.user.id;
+  try {
+    // Prefer Postgres if the user exists there
+    if (await pgUserExists(userId)) {
+      const { rows } = await pgPool.query("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
+      const prefs = safeJsonParse(rows?.[0]?.prefs_json, {});
+      return res.json({ prefs });
+    }
+  } catch (e) {
+    console.warn("[prefs][pg] read failed, falling back to sqlite:", e?.message || e);
+  }
+
+  db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (err, row) => {
+    if (err) return res.status(500).send("Failed");
+    const prefs = safeJsonParse(row?.prefs_json, {});
+    return res.json({ prefs });
+  });
+});
+
+app.post("/api/me/prefs", requireLogin, async (req, res) => {
+  const userId = req.session.user.id;
+  const incoming = sanitizePrefsInput(req.body?.prefs ?? req.body);
+
+  try {
+    if (await pgUserExists(userId)) {
+      const { rows } = await pgPool.query("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
+      const current = safeJsonParse(rows?.[0]?.prefs_json, {});
+      const merged = { ...(current || {}), ...(incoming || {}) };
+      await pgPool.query("UPDATE users SET prefs_json = $1 WHERE id = $2", [merged, userId]);
+
+      // Keep SQLite in sync
+      db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId]);
+      return res.json({ ok: true, prefs: merged });
+    }
+  } catch (e) {
+    console.warn("[prefs][pg] update failed, falling back to sqlite:", e?.message || e);
+  }
+
+  // SQLite fallback
+  db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
+    const current = safeJsonParse(row?.prefs_json, {});
+    const merged = { ...(current || {}), ...(incoming || {}) };
+    db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId], (err2) => {
+      if (err2) return res.status(500).send("Failed");
+      return res.json({ ok: true, prefs: merged });
+    });
+  });
 });
 
 app.get("/api/leaderboards", requireLogin, async (_req, res) => {
