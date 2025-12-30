@@ -1438,14 +1438,18 @@ searchInput.addEventListener("input", applySearch);
 function anyDrawerOpen(){
   return channelsPane?.classList.contains("open") || membersPane?.classList.contains("open");
 }
-
+function setLeftDrawerOpen(isOpen){
+  document.body.classList.toggle("drawer-left-open", !!isOpen);
+}
+function setRightDrawerOpen(isOpen){
+  document.body.classList.toggle("drawer-right-open", !!isOpen);
+}
 function closeDrawers(){
   channelsPane?.classList.remove("open");
   membersPane?.classList.remove("open");
   drawerOverlay?.classList.remove("show");
   closeMemberMenu();
 }
-
 function openChannels(){
   // toggle
   if (channelsPane?.classList.contains("open")) { closeDrawers(); return; }
