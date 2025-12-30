@@ -1746,3 +1746,80 @@ main.chat{ position: relative; }
 @media (max-width: 700px){
   .dmStrip{ max-width: 50vw; }
 }
+/* -----------------------------
+   DM: make chat fill available area
+------------------------------ */
+
+/* The DM panel/modal content should be a full-height column */
+#dmModal .modalCard,
+.dmModal .modalCard,
+#dmPanel,
+.dmPanel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* The scrollable messages area should take all remaining space */
+#dmModal .dmMessages,
+#dmModal .dmMsgs,
+#dmModal .messages,
+.dmPanel .dmMessages,
+.dmPanel .dmMsgs,
+.dmPanel .messages {
+  flex: 1 1 auto;
+  min-height: 0;          /* critical so flex children can scroll */
+  overflow-y: auto;
+  width: 100%;
+}
+
+/* The composer/input row stays pinned at the bottom of the DM panel */
+#dmModal .dmComposer,
+#dmModal .composer,
+#dmModal .dmInputRow,
+.dmPanel .dmComposer,
+.dmPanel .composer,
+.dmPanel .dmInputRow {
+  flex: 0 0 auto;
+  width: 100%;
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+}
+/* Ensure DM message list is not centered; make it stretch full width */
+#dmModal .dmMessages,
+#dmModal .dmMsgs,
+.dmPanel .dmMessages,
+.dmPanel .dmMsgs {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;     /* this is the big one */
+}
+
+/* Each DM message row should be full width */
+#dmModal .dmMsg,
+#dmModal .dmRow,
+#dmModal .msg,
+.dmPanel .dmMsg,
+.dmPanel .dmRow,
+.dmPanel .msg {
+  width: 100%;
+}
+
+/* Bubbles can use most/all of the width */
+#dmModal .bubble,
+.dmPanel .bubble {
+  max-width: 100%;
+}
+
+/* If you have a DM-specific bubble class, include it too */
+#dmModal .dmBubble,
+.dmPanel .dmBubble {
+  max-width: 100%;
+}
+/* Right-align self messages without shrinking the message column */
+#dmModal .self,
+.dmPanel .self {
+  display: flex;
+  justify-content: flex-end;
+}
