@@ -28,15 +28,13 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
+  // Render uses HTTPS -> allow websocket upgrade
   cors: { origin: true, credentials: true },
 
   // More tolerant of mobile/background + Render sleep
-  pingInterval: 30_000,  // send pings every 30s (default ~25s)
-  pingTimeout: 120_000,  // wait 120s for pong before disconnect (default 20s)
+  pingInterval: 30_000,  // send pings every 30s
+  pingTimeout: 120_000,  // wait 120s for pong before disconnect
   upgradeTimeout: 30_000,
-});
-  // Render uses HTTPS -> allow websocket upgrade
-  cors: { origin: true, credentials: true },
 });
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
@@ -105,26 +103,6 @@ async function pgEnsureEpochMsBigint(tableName, columnName) {
 
 // ---- Postgres schema flags
 let PG_USERS_CREATED_AT_IS_TIMESTAMP = false;
-async function pgEnsureCamelColumn(table, name, typeSql) {
-  // exact camelCase
-  const exact = await pgGetColumnType(table, name);
-  if (exact) return;
-
-  // lowercased version (Postgres default)
-  const lower = name.toLowerCase();
-  const lowerInfo = await pgGetColumnType(table, lower);
-  if (lowerInfo) {
-    await pgPool.query(
-      `ALTER TABLE ${table} RENAME COLUMN ${lower} TO "${name}"`
-    );
-    return;
-  }
-
-  // otherwise add it
-  await pgPool.query(
-    `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS "${name}" ${typeSql}`
-  );
-}
 // ---- Postgres table setup
 // Run once on boot, and start the server only after this finishes (so schema/type fixes apply before /register).
 const pgInitPromise = (async () => {
@@ -174,14 +152,6 @@ try {
   await pgEnsureCamelColumn("users", "lastDiceRollAt", "BIGINT");
 } catch (e) {
   console.warn("[pg camelCase migrate]", e?.message || e);
-}
-
-for (const c of camelCols) {
-  try {
-    await pgEnsureCamelColumn("users", c, c === "dice_sixes" ? "INTEGER NOT NULL DEFAULT 0" : "BIGINT");
-  } catch (e) {
-    console.warn("[pg-migrate camel]", c, e?.message || e);
-  }
 }
     // If your table already existed (older minimal schema), ensure columns exist
     const addCols = [
@@ -513,75 +483,6 @@ db.serialize(() => {
   // Ensure Iri is always Owner
   db.run("UPDATE users SET role='Owner' WHERE lower(username)='iri'");
 });
-
-function ensureDmSchema(cb) {
-  db.serialize(() => {
-    db.run(`
-      CREATE TABLE IF NOT EXISTS dm_threads (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT,
-        is_group INTEGER NOT NULL DEFAULT 0,
-        created_by INTEGER NOT NULL,
-        created_at INTEGER NOT NULL
-      )
-    `);
-
-    db.run(`
-      CREATE TABLE IF NOT EXISTS dm_participants (
-        thread_id INTEGER NOT NULL,
-        user_id INTEGER NOT NULL,
-        added_by INTEGER,
-        joined_at INTEGER NOT NULL,
-        UNIQUE(thread_id, user_id)
-      )
-    `);
-
-    db.run(`
-      CREATE TABLE IF NOT EXISTS dm_messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        thread_id INTEGER NOT NULL,
-        user_id INTEGER NOT NULL,
-        username TEXT NOT NULL,
-        text TEXT,
-        ts INTEGER NOT NULL
-      )
-    `);
-
-    let pending = 2;
-    let done = false;
-    const finish = (err) => {
-      if (done) return;
-      if (err) {
-        done = true;
-        return cb(err);
-      }
-      if (--pending === 0) {
-        done = true;
-        cb();
-      }
-    };
-
-    ensureTableColumns(
-      "dm_threads",
-      [
-        ["title", "title TEXT"],
-        ["is_group", "is_group INTEGER NOT NULL DEFAULT 0"],
-        ["created_by", "created_by INTEGER NOT NULL DEFAULT 0"],
-        ["created_at", "created_at INTEGER NOT NULL DEFAULT 0"],
-      ],
-      finish
-    );
-
-    ensureTableColumns(
-      "dm_participants",
-      [
-        ["added_by", "added_by INTEGER"],
-        ["joined_at", "joined_at INTEGER NOT NULL DEFAULT 0"],
-      ],
-      finish
-    );
-  });
-}
 
 // ---- Security + parsing
 app.disable("x-powered-by");
