@@ -15,8 +15,6 @@ const sqlite3 = require("sqlite3").verbose();
 
 const PORT = Number(process.env.PORT || 3000);
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, "chat.db");
-const DATABASE_URL = process.env.DATABASE_URL || "";
-const PG_ENABLED = !!DATABASE_URL;
 const PUBLIC_DIR = path.join(__dirname, "public");
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 const AVATARS_DIR = path.join(__dirname, "avatars");
@@ -40,22 +38,12 @@ const io = new Server(server, {
 });
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
-let pgPool = {
-  query: async () => {
-    throw new Error("Postgres disabled (DATABASE_URL not set)");
-  },
-};
-
-if (PG_ENABLED) {
-  pgPool = new Pool({
-    connectionString: DATABASE_URL,
-    ssl: process.env.PGSSL === "true" || process.env.NODE_ENV === "production"
-      ? { rejectUnauthorized: false }
-      : false,
-  });
-}
-const USE_PG = !!process.env.DATABASE_URL;
-// ---- Postgres: helpers to keep legacy schemas compatible
+const pgPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production"
+    ? { rejectUnauthorized: false }
+    : false
+});// ---- Postgres: helpers to keep legacy schemas compatible
 async function pgGetColumnType(tableName, columnName) {
   const { rows } = await pgPool.query(
     `SELECT udt_name, data_type
@@ -67,37 +55,6 @@ async function pgGetColumnType(tableName, columnName) {
     [tableName, columnName]
   );
   return rows[0] || null;
-}
-async function ensurePgDmSchema() {
-  await pgPool.query(`
-    CREATE TABLE IF NOT EXISTS dm_threads (
-      id BIGSERIAL PRIMARY KEY,
-      title TEXT,
-      is_group BOOLEAN NOT NULL DEFAULT FALSE,
-      created_by TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS dm_participants (
-      thread_id BIGINT NOT NULL,
-      user_id TEXT NOT NULL,
-      added_by TEXT,
-      joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      PRIMARY KEY (thread_id, user_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS dm_messages (
-      id BIGSERIAL PRIMARY KEY,
-      thread_id BIGINT NOT NULL,
-      sender_id TEXT NOT NULL,
-      text TEXT NOT NULL,
-      ts BIGINT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_dm_participants_user ON dm_participants (user_id);
-    CREATE INDEX IF NOT EXISTS idx_dm_messages_thread_ts ON dm_messages (thread_id, ts DESC);
-  `);
 }
 async function pgEnsureCamelColumn(tableName, camelName, typeSql = "BIGINT") {
   // If exact camelCase column already exists, we're good
@@ -149,10 +106,6 @@ let PG_USERS_CREATED_AT_IS_TIMESTAMP = false;
 // ---- Postgres table setup
 // Run once on boot, and start the server only after this finishes (so schema/type fixes apply before /register).
 const pgInitPromise = (async () => {
-  if (!PG_ENABLED) {
-    console.log("[pg] DATABASE_URL not set; running in SQLite-only mode");
-    return;
-  }
   try {
     // Base tables (SQL only)
     await pgPool.query(`
@@ -181,14 +134,12 @@ const pgInitPromise = (async () => {
         lastDiceRollAt BIGINT,
         dice_sixes INTEGER NOT NULL DEFAULT 0
       );
+
       CREATE TABLE IF NOT EXISTS session (
         sid TEXT PRIMARY KEY,
         sess JSON NOT NULL,
         expire TIMESTAMP NOT NULL
       );
-      if (USE_PG) {
-  await ensurePgDmSchema();
-}
     `);
 // Fix camelCase columns that Postgres lowercased previously
 // ---- Fix camelCase timestamp columns Postgres lowercased
@@ -535,7 +486,10 @@ db.serialize(() => {
 
 // ---- Security + parsing
 app.disable("x-powered-by");
-// IMPORTANT: CSP for the app (allows our /public assets; includes 'unsafe-inline' for legacy client scripts)
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: false, limit: "1mb" }));
+
+// IMPORTANT: CSP that blocks inline JS (good), but allows our external /public/app.js & /public/styles.css
 app.use((req, res, next) => {
   res.setHeader(
     "Content-Security-Policy",
@@ -560,27 +514,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// ---- Sessions (single source of truth)
-// If DATABASE_URL is set: store sessions in Postgres.
-// Otherwise: store sessions in SQLite (sessions.sqlite) so local/dev works without PG.
-let sessionStore;
-if (PG_ENABLED) {
-  sessionStore = new PgSession({
+// ---- Sessions (Postgres-backed; survives redeploys)
+const sessionMiddleware = session({
+  store: new PgSession({
     pool: pgPool,
     tableName: "session",
     createTableIfMissing: true,
-  });
-} else {
-  const SQLiteStore = require("connect-sqlite3")(session);
-  sessionStore = new SQLiteStore({
-    dir: __dirname,
-    db: "sessions.sqlite",
-    table: "sessions",
-  });
-}
-
-const sessionMiddleware = session({
-  store: sessionStore,
+  }),
   secret: process.env.SESSION_SECRET || "dev_secret_change_me",
   resave: false,
   saveUninitialized: false,
@@ -588,11 +528,10 @@ const sessionMiddleware = session({
   cookie: {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: "auto",
     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
   },
 });
-
 
 app.use(sessionMiddleware);
 app.get("/__recover_owner__", async (req, res) => {
@@ -2646,6 +2585,20 @@ app.post("/profile", requireLogin, avatarUpload.single("avatar"), (req, res) => 
 
   const avatar = req.file ? `/avatars/${req.file.filename}` : null;
 
+  db.get("SELECT avatar FROM users WHERE id = ?", [req.session.user.id], (e, old) => {
+    const newAvatar = avatar || old?.avatar || null;
+
+    db.run(
+      `UPDATE users SET mood=?, bio=?, age=?, gender=?, avatar=? WHERE id=?`,
+      [mood, bio, age, gender, newAvatar, req.session.user.id],
+      (err2) => {
+        if (err2) return res.status(500).send("Save failed");
+        return res.json({ ok: true });
+      }
+    );
+  });
+});
+
 // ---- Uploads (10MB max). VIP can upload mp4/mov, everyone can upload images.
 const chatUpload = multer({
   storage: multer.diskStorage({
@@ -3021,7 +2974,7 @@ io.use((socket, next) => {
   };
   sessionMiddleware(socket.request, fakeRes, () => {
     if (!socket.request.session?.user?.id) {
-      return next(new Error("Not authenticated"));
+      return next(new Error("Not authenticated (no session). Please refresh and log in again."));
     }
     next();
   });
@@ -3067,7 +3020,7 @@ function emitUserList(room) {
 }
 
 // ---- Socket handlers
-io.on("connection", async (socket) => {
+io.on("connection", (socket) => {
   const sessUser = socket.request.session?.user;
   if (!sessUser?.id) {
     socket.disconnect(true);
@@ -3113,28 +3066,19 @@ io.on("connection", async (socket) => {
   }, 500);
   socket.dmThreads = new Set();
 
- if (USE_PG) {
-  try {
-    const uid = String(socket.user.id);
-
-    const rows = await pgPool.query(
-      `
-      SELECT id
-      FROM dm_threads
-      WHERE user1 = $1 OR user2 = $1
-      `,
-      [uid]
-    );
-
-    for (const r of rows.rows) {
-      const tid = String(r.id);
-      socket.dmThreads.add(tid);
-      socket.join(`dm:${tid}`);
+  db.all(
+    `SELECT thread_id FROM dm_participants WHERE user_id = ?`,
+    [socket.user.id],
+    (_e, rows) => {
+      for (const r of rows || []) {
+        const tid = Number(r.thread_id);
+        if (!Number.isFinite(tid)) continue;
+        socket.dmThreads.add(tid);
+        socket.join(`dm:${tid}`);
+      }
     }
-  } catch (e) {
-    console.warn("[dm auto-join] failed:", e?.message || e);
-    }
-  }
+  );
+
 socket.on("join room", ({ room, status }) => {
   const desired = sanitizeRoomName(room) || "main";
 
@@ -3903,7 +3847,6 @@ if (!room) {
   });
 });
 
-});
 // ---- Start
 pgInitPromise.finally(() => {
   server.listen(PORT, () => {
