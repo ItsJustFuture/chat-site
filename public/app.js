@@ -5,7 +5,6 @@ let socket = null;
 let me = null;
 let progression = { gold: 0, xp: 0, level: 1, xpIntoLevel: 0, xpForNextLevel: 100 };
 let currentRoom = "main";
-let dmThreadsCache = [];
 function displayRoomName(room){ return room==="diceroom" ? "Dice Room" : room; }
 
 let lastUsers = [];
@@ -22,6 +21,7 @@ const dmThemeDefaults = { background: "#1e1f22" };
 let dmThemePrefs = { ...dmThemeDefaults };
 let dmTab = "direct";
 const dmUnreadThreads = new Set();
+
 // --- DM avatar strip (direct DMs only): last-read + lightweight avatar cache
 const DM_LAST_READ_KEY = "dm:lastRead:v1";
 const AVATAR_CACHE_KEY = "dm:avatarCache:v1";
@@ -393,6 +393,19 @@ function escapeHtml(s){
     "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;"
   }[m]));
 }
+
+// Linkify plain-text URLs into safe anchors.
+// Always pass ESCAPED text into linkify (e.g. linkify(escapeHtml(text))).
+function linkify(escapedText){
+  const s = String(escapedText ?? "");
+  // Match http(s) URLs and www.* URLs (escapedText should not contain raw HTML)
+  const re = /(\bhttps?:\/\/[^\s<]+|\bwww\.[^\s<]+)/gi;
+  return s.replace(re, (url) => {
+    const href = url.startsWith("http") ? url : `https://${url}`;
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+  });
+}
+
 function normKey(u){ return String(u||"").trim().toLowerCase(); }
 function extractYouTubeId(text){
   const s = String(text||"");
@@ -966,13 +979,7 @@ function openReactionMenu(messageId, anchorEl, rowEl){
   // on mobile, force show actions while menu is open
   if(rowEl) rowEl.classList.add("showActions");
 }
-// Simple linkify helper (prevents UI crashes)
-function linkify(text = "") {
-  return String(text).replace(
-    /(https?:\/\/[^\s]+)/g,
-    (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`
-  );
-}
+
 function closeReactionMenu(){
   if(!reactionMenuEl) return;
   reactionMenuEl.classList.remove("open");
@@ -1058,36 +1065,29 @@ function addMessage(m){
     <span class="ts">${new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span>
   `;
 
-const rawText = String(m.text || "");
-
-let ytId = null;
-let displayText = rawText;
-
-try {
-  ytId = extractYouTubeId(rawText);
-  if (ytId) {
-    displayText = stripYouTubeUrls(rawText);
-  }
-} catch (err) {
-  console.warn("YouTube parsing failed, falling back to plain text:", err);
-  displayText = rawText;
-}
-if (displayText) {
-  const text = document.createElement("div");
-  text.className = "text";
-
+  const rawText = String(m.text || "");
+  let ytId = null;
+  let displayText = rawText;
   try {
-    // Keep your existing behavior: escape first, then linkify
-    text.innerHTML = linkify(escapeHtml(displayText));
+    ytId = extractYouTubeId(rawText);
+    displayText = ytId ? stripYouTubeUrls(rawText) : rawText;
   } catch (err) {
-    console.error("addMessage render failed:", err, m);
-    // Fallback: always show message as plain text
-    text.textContent = displayText;
+    console.warn("[addMessage] YouTube parse failed:", err);
+    ytId = null;
+    displayText = rawText;
   }
 
-  bubble.appendChild(text);
-}
-
+  if(displayText){
+    const text = document.createElement("div");
+    text.className = "text";
+    try {
+      text.innerHTML = linkify(escapeHtml(displayText));
+    } catch (err) {
+      console.error("[addMessage] render failed:", err);
+      text.textContent = displayText;
+    }
+    bubble.appendChild(text);
+  }
 
   if(ytId){
     bubble.appendChild(buildYouTubeIframe(ytId));
@@ -1498,21 +1498,12 @@ function syncDmTabUi(){
   if (dmCreateGroupBtn) dmCreateGroupBtn.style.display = dmTab === "group" ? "block" : "none";
 }
 
-async function setDmTab(tab){
+function setDmTab(tab){
   dmTab = tab === "group" ? "group" : "direct";
   syncDmTabUi();
   renderDmThreads();
-   try {
-    const threads = await fetch("/dm/threads").then(r => r.json());
-    dmThreadsCache = Array.isArray(threads) ? threads : [];
-    renderDmThreads();
-  await loadDmThreadsAndRender();
-  } catch (e) {
-    console.warn("Failed to load DM threads", e);
-    dmThreadsCache = [];
-    renderDmThreads();
-  }
 }
+
 function renderThreadItem(t){
   const div = document.createElement("div");
   div.className = "dmItem" + (t.id === activeDmId ? " active" : "");
@@ -1555,11 +1546,11 @@ function renderThreadItem(t){
   div.appendChild(meta);
   div.onclick = () => openDmThread(t.id);
   return div;
-  }
-function renderDmThreads() {
-  // In the new UI, the DM panel is *not* a hub.
-  // We only show direct DM threads as a horizontal avatar strip.
-  const list = (Array.isArray(dmThreadsCache) ? dmThreadsCache : []).filter(isDirectThread);
+}
+
+function renderDmThreads(){
+  // In the new UI, the DM panel is *not* a hub. We only show direct DM threads as a horizontal avatar strip.
+  const list = (dmThreads || []).filter(isDirectThread);
 
   // Fallback if strip element missing (older HTML)
   if (!dmStrip) {
@@ -1636,26 +1627,6 @@ async function loadDmThreads(){
     renderDmThreads();
   } catch {
     setDmNotice("Could not load threads.");
-  }
-}
-
-async function loadDmThreadsAndRender() {
-  try {
-    const res = await fetch("/dm/threads");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const threads = await res.json();
-
-    dmThreadsCache = Array.isArray(threads) ? threads : [];
-  } catch (e) {
-    console.warn("Failed to load DM threads:", e);
-    dmThreadsCache = [];
-  }
-
-  // Always render even if empty, so UI updates and doesn’t look stuck
-  try {
-    renderDmThreads();
-  } catch (e) {
-    console.error("renderDmThreads crashed:", e);
   }
 }
 
@@ -3469,7 +3440,7 @@ socket.on("disconnect", (reason) => {
   });
 
   socket.on("dm thread invited", () => {
-   loadDmThreadsAndRender();
+    loadDmThreads();
   });
 
   joinRoom("main"); // main will exist from seeded rooms

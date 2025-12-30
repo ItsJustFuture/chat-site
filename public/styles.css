@@ -605,7 +605,6 @@ body{
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
-}
 a{ color:inherit; }
 button{ font-family:inherit; }
 
