@@ -1620,7 +1620,17 @@ body.lockScroll{ overflow:hidden; }
 }
 .dmNoticeText{ display:none; }
 .dmNotice.hasNotice .dmNoticeText{ display:block; }
-.dmContent{ flex:1; display:grid; grid-template-columns: 220px 1fr; min-height:0; backdrop-filter: blur(4px); background:var(--dm-bg); }
+.dmContent{
+  /* Single-pane DM layout.
+     A previous 2-column grid left an unused/black column on desktop.
+     Keep this as a flex column so the conversation fills the whole panel. */
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+  backdrop-filter: blur(4px);
+  background:var(--dm-bg);
+}
 .dmThreads{ border-right:1px solid var(--line); overflow:auto; display:flex; flex-direction:column; min-height:0; gap:8px; padding:8px 10px 10px; }
 /* Remove the large "boxed" panel look so the left list doesn't waste vertical space (mobile) */
 .dmThreadList{ border:0; border-radius:0; overflow:auto; background:transparent; flex:1; min-height:0; }
@@ -1637,7 +1647,13 @@ body.lockScroll{ overflow:hidden; }
 .dmItemTime{ font-size:11px; color:var(--muted); white-space:nowrap; }
 .dmUnread{ min-width:22px; height:22px; padding:0 8px; border-radius:999px; background:var(--accent); color:white; font-size:11px; display:flex; align-items:center; justify-content:center; }
 .dmAvatar{ width:42px; height:42px; border-radius:12px; overflow:hidden; background:var(--avatar-bg); flex-shrink:0; display:flex; align-items:center; justify-content:center; }
-.dmConversation{ display:flex; flex-direction:column; min-width:0; min-height:0; }
+.dmConversation{
+  display:flex;
+  flex-direction:column;
+  flex:1 1 auto;
+  min-width:0;
+  min-height:0;
+}
 
 .dmStrip{
   display:flex;
@@ -1783,9 +1799,9 @@ body.lockScroll{ overflow:hidden; }
   bottom: 0;
   padding-bottom: calc(10px + env(safe-area-inset-bottom) + 16px);
 }
-  /* Give more space to the messages pane by shrinking the thread list area */
-  .dmContent{ grid-template-columns: 1fr; grid-template-rows: minmax(120px, 22vh) 1fr; }
-  .dmThreads{ border-right:0; border-bottom:1px solid var(--line); }
+  /* DM is single-pane on mobile as well; keep full-height conversation */
+  .dmContent{ display:flex; flex-direction:column; }
+  .dmThreads{ display:none; }
   .dmMessages{ padding-bottom:14px; }
 
  .channels{
