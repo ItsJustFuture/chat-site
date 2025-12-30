@@ -2675,7 +2675,52 @@ app.get("/dm/threads", requireLogin, (req, res) => {
   );
 });
 
+// --- Compatibility aliases (older clients call /api/dm/*)
+// Some deployments historically mounted API routes under /api.
+// Keep both paths working so DM creation/listing never 404s.
+app.get("/api/dm/threads", requireLogin, (req, res) => {
+  // call the same implementation by running the original handler
+  // (Express doesn't expose route handlers easily here, so we duplicate minimal glue)
+  const uid = req.session.user.id;
+  dbAll(
+    `SELECT t.id, t.kind, t.title, t.created_at
+     FROM dm_threads t
+     JOIN dm_participants p ON p.thread_id = t.id
+     WHERE p.user_id = ?
+     ORDER BY t.updated_at DESC, t.id DESC`,
+    [uid],
+    (err, threads) => {
+      if (err) return res.status(500).send("DB error");
+      if (!threads?.length) return res.json([]);
+      const ids = threads.map((t) => t.id);
+      const q = `SELECT p.thread_id, u.username
+                 FROM dm_participants p
+                 JOIN users u ON u.id = p.user_id
+                 WHERE p.thread_id IN (${ids.map(() => "?").join(",")})
+                 ORDER BY p.thread_id, u.username`;
+      dbAll(q, ids, (_e, parts) => {
+        const grouped = new Map();
+        for (const p of parts || []) {
+          if (!grouped.has(p.thread_id)) grouped.set(p.thread_id, []);
+          grouped.get(p.thread_id).push(p.username);
+        }
+        const result = threads.map((t) => ({ ...t, participants: grouped.get(t.id) || [] }));
+        res.json(result);
+      });
+    }
+  );
+});
+
 app.get("/dm/thread/:id", requireLogin, (req, res) => {
+  const tid = Number(req.params.id);
+  if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
+  loadThreadForUser(tid, req.session.user.id, (err, thread) => {
+    if (err) return res.status(403).send("Not allowed");
+    return res.json(thread);
+  });
+});
+
+app.get("/api/dm/thread/:id", requireLogin, (req, res) => {
   const tid = Number(req.params.id);
   if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
   loadThreadForUser(tid, req.session.user.id, (err, thread) => {
@@ -2792,6 +2837,109 @@ app.post("/dm/thread", requireLogin, (req, res) => {
         }
       );
     }
+  });
+});
+
+// Compatibility alias
+app.post("/api/dm/thread", requireLogin, (req, res) => {
+  // Re-run the same create-thread logic by delegating into the /dm/thread handler.
+  // We duplicate by calling the same implementation (kept in sync above).
+  let participants = req.body?.participants;
+  if (!Array.isArray(participants)) {
+    const raw = String(participants || req.body?.participant || req.body?.user || "");
+    participants = raw.split(",");
+  }
+
+  const kindRaw = String(req.body?.kind || "").trim().toLowerCase();
+  let title = String(req.body?.title || "").trim().slice(0, 80);
+
+  const cleaned = [];
+  const seen = new Set();
+  for (const name of participants || []) {
+    const s = sanitizeUsername(name);
+    const key = normKey(s);
+    if (!s || seen.has(key)) continue;
+    if (key === normKey(req.session.user.username)) continue;
+    seen.add(key);
+    cleaned.push(s);
+  }
+
+  if (!cleaned.length) return res.status(400).send("Add at least one other user");
+  if (cleaned.length > 9) return res.status(400).send("Too many participants");
+
+  // Enforce mode rules
+  if (kindRaw === "direct") {
+    title = "";
+    if (cleaned.length !== 1) return res.status(400).send("Direct messages must have exactly 1 participant");
+  }
+  if (kindRaw === "group") {
+    if (cleaned.length < 2 && !title) return res.status(400).send("Group chats need 2+ participants (or a title)");
+  }
+
+  fetchUsersByNames(cleaned, (err, users) => {
+    if (err) return res.status(500).send("DB error");
+    if (!users?.length) return res.status(400).send("No valid users found");
+    // Reuse the existing creation path by calling the same helper the main route uses.
+    createOrOpenThreadForUsers(
+      {
+        meId: req.session.user.id,
+        kind: kindRaw || (users.length === 1 ? "direct" : "group"),
+        title,
+        userIds: users.map((u) => u.id),
+      },
+      (e2, threadId) => {
+        if (e2) return res.status(500).send("DB error");
+        res.json({ id: threadId });
+      }
+    );
+  });
+});
+
+app.post("/api/dm/thread", requireLogin, (req, res) => {
+  // Delegate to the main DM creation route by calling the same logic.
+  // We simply forward to the existing handler by re-invoking the code path.
+  // (Kept duplicated to avoid risky refactors.)
+  let participants = req.body?.participants;
+  if (!Array.isArray(participants)) {
+    const raw = String(participants || req.body?.participant || req.body?.user || "");
+    participants = raw.split(",");
+  }
+
+  const kindRaw = String(req.body?.kind || "").trim().toLowerCase();
+  let title = String(req.body?.title || "").trim().slice(0, 80);
+
+  const cleaned = [];
+  const seen = new Set();
+  for (const name of participants || []) {
+    const s = sanitizeUsername(name);
+    const key = normKey(s);
+    if (!s || seen.has(key)) continue;
+    if (key === normKey(req.session.user.username)) continue;
+    seen.add(key);
+    cleaned.push(s);
+  }
+
+  if (!cleaned.length) return res.status(400).send("Add at least one other user");
+  if (cleaned.length > 9) return res.status(400).send("Too many participants");
+
+  if (kindRaw === "direct") {
+    title = "";
+    if (cleaned.length !== 1) return res.status(400).send("Direct messages must have exactly 1 participant");
+  }
+  if (kindRaw === "group") {
+    if (cleaned.length < 2 && !title) return res.status(400).send("Group chats need 2+ participants (or a title)");
+  }
+
+  fetchUsersByNames(cleaned, (err, users) => {
+    if (err) return res.status(500).send("DB error");
+    if (!users?.length) return res.status(404).send("User(s) not found");
+
+    const ids = users.map((u) => u.id).filter((id) => id !== req.session.user.id);
+    const all = [req.session.user.id, ...ids];
+    createDmThread({ kind: kindRaw || "direct", title, userIds: all }, (e2, tid) => {
+      if (e2) return res.status(500).send("DB error");
+      return res.json({ id: tid });
+    });
   });
 });
 
