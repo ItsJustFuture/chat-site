@@ -5,6 +5,7 @@ let socket = null;
 let me = null;
 let progression = { gold: 0, xp: 0, level: 1, xpIntoLevel: 0, xpForNextLevel: 100 };
 let currentRoom = "main";
+let dmThreadsCache = [];
 function displayRoomName(room){ return room==="diceroom" ? "Dice Room" : room; }
 
 let lastUsers = [];
@@ -21,7 +22,8 @@ const dmThemeDefaults = { background: "#1e1f22" };
 let dmThemePrefs = { ...dmThemeDefaults };
 let dmTab = "direct";
 const dmUnreadThreads = new Set();
-
+// Cache of DM threads keyed by threadId (used by renderDmThreads)
+let dmThreadsCache = new Map();
 // --- DM avatar strip (direct DMs only): last-read + lightweight avatar cache
 const DM_LAST_READ_KEY = "dm:lastRead:v1";
 const AVATAR_CACHE_KEY = "dm:avatarCache:v1";
@@ -1472,12 +1474,21 @@ function syncDmTabUi(){
   if (dmCreateGroupBtn) dmCreateGroupBtn.style.display = dmTab === "group" ? "block" : "none";
 }
 
-function setDmTab(tab){
+async function setDmTab(tab){
   dmTab = tab === "group" ? "group" : "direct";
   syncDmTabUi();
   renderDmThreads();
+   try {
+    const threads = await fetch("/dm/threads").then(r => r.json());
+    dmThreadsCache = Array.isArray(threads) ? threads : [];
+    renderDmThreads();
+  await loadDmThreadsAndRender();
+  } catch (e) {
+    console.warn("Failed to load DM threads", e);
+    dmThreadsCache = [];
+    renderDmThreads();
+  }
 }
-
 function renderThreadItem(t){
   const div = document.createElement("div");
   div.className = "dmItem" + (t.id === activeDmId ? " active" : "");
@@ -1520,11 +1531,11 @@ function renderThreadItem(t){
   div.appendChild(meta);
   div.onclick = () => openDmThread(t.id);
   return div;
-}
-
-function renderDmThreads(){
-  // In the new UI, the DM panel is *not* a hub. We only show direct DM threads as a horizontal avatar strip.
-  const list = (dmThreadsCache || []).filter(isDirectThread);
+  }
+function renderDmThreads() {
+  // In the new UI, the DM panel is *not* a hub.
+  // We only show direct DM threads as a horizontal avatar strip.
+  const list = (Array.isArray(dmThreadsCache) ? dmThreadsCache : []).filter(isDirectThread);
 
   // Fallback if strip element missing (older HTML)
   if (!dmStrip) {
@@ -1601,6 +1612,26 @@ async function loadDmThreads(){
     renderDmThreads();
   } catch {
     setDmNotice("Could not load threads.");
+  }
+}
+
+async function loadDmThreadsAndRender() {
+  try {
+    const res = await fetch("/dm/threads");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const threads = await res.json();
+
+    dmThreadsCache = Array.isArray(threads) ? threads : [];
+  } catch (e) {
+    console.warn("Failed to load DM threads:", e);
+    dmThreadsCache = [];
+  }
+
+  // Always render even if empty, so UI updates and doesn’t look stuck
+  try {
+    renderDmThreads();
+  } catch (e) {
+    console.error("renderDmThreads crashed:", e);
   }
 }
 
@@ -3414,7 +3445,7 @@ socket.on("disconnect", (reason) => {
   });
 
   socket.on("dm thread invited", () => {
-    loadDmThreads();
+   loadDmThreadsAndRender();
   });
 
   joinRoom("main"); // main will exist from seeded rooms
