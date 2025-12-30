@@ -54,7 +54,7 @@ if (PG_ENABLED) {
       : false,
   });
 }
-
+const USE_PG = !!process.env.DATABASE_URL;
 // ---- Postgres: helpers to keep legacy schemas compatible
 async function pgGetColumnType(tableName, columnName) {
   const { rows } = await pgPool.query(
@@ -67,6 +67,37 @@ async function pgGetColumnType(tableName, columnName) {
     [tableName, columnName]
   );
   return rows[0] || null;
+}
+async function ensurePgDmSchema() {
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS dm_threads (
+      id BIGSERIAL PRIMARY KEY,
+      title TEXT,
+      is_group BOOLEAN NOT NULL DEFAULT FALSE,
+      created_by TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS dm_participants (
+      thread_id BIGINT NOT NULL,
+      user_id TEXT NOT NULL,
+      added_by TEXT,
+      joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (thread_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS dm_messages (
+      id BIGSERIAL PRIMARY KEY,
+      thread_id BIGINT NOT NULL,
+      sender_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      ts BIGINT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_dm_participants_user ON dm_participants (user_id);
+    CREATE INDEX IF NOT EXISTS idx_dm_messages_thread_ts ON dm_messages (thread_id, ts DESC);
+  `);
 }
 async function pgEnsureCamelColumn(tableName, camelName, typeSql = "BIGINT") {
   // If exact camelCase column already exists, we're good
@@ -150,12 +181,14 @@ const pgInitPromise = (async () => {
         lastDiceRollAt BIGINT,
         dice_sixes INTEGER NOT NULL DEFAULT 0
       );
-
       CREATE TABLE IF NOT EXISTS session (
         sid TEXT PRIMARY KEY,
         sess JSON NOT NULL,
         expire TIMESTAMP NOT NULL
       );
+      if (USE_PG) {
+  await ensurePgDmSchema();
+}
     `);
 // Fix camelCase columns that Postgres lowercased previously
 // ---- Fix camelCase timestamp columns Postgres lowercased
@@ -2613,17 +2646,78 @@ app.post("/profile", requireLogin, avatarUpload.single("avatar"), (req, res) => 
 
   const avatar = req.file ? `/avatars/${req.file.filename}` : null;
 
-  db.get("SELECT avatar FROM users WHERE id = ?", [req.session.user.id], (e, old) => {
-    const newAvatar = avatar || old?.avatar || null;
+io.on("connection", async (socket) => {
+  const sessUser = socket.request.session?.user;
+  if (!sessUser?.id) {
+    socket.disconnect(true);
+    return;
+  }
 
-    db.run(
-      `UPDATE users SET mood=?, bio=?, age=?, gender=?, avatar=? WHERE id=?`,
-      [mood, bio, age, gender, newAvatar, req.session.user.id],
-      (err2) => {
-        if (err2) return res.status(500).send("Save failed");
-        return res.json({ ok: true });
+  socket.user = {
+    id: sessUser.id,
+    username: sessUser.username,
+    role: sessUser.role,
+    status: "Online",
+    mood: "",
+    avatar: "",
+  };
+
+  socketIdByUserId.set(socket.user.id, socket.id);
+  onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
+  initGoldTick(socket.user.id);
+
+  // Load profile bits for presence (SQLite)
+  db.get(
+    "SELECT avatar, mood FROM users WHERE id = ?",
+    [socket.user.id],
+    (_e, row) => {
+      if (row) {
+        socket.user.avatar = row.avatar || "";
+        socket.user.mood = row.mood || "";
       }
-    );
+    }
+  );
+
+  socket.currentRoom = null;
+
+  // SAFETY: auto-join main
+  setTimeout(() => {
+    if (!socket.currentRoom) {
+      try {
+        doJoin("main", socket.user.status || "Online");
+      } catch (e) {
+        console.warn("[auto-join main] failed:", e?.message || e);
+      }
+    }
+  }, 500);
+
+  socket.dmThreads = new Set();
+
+  if (USE_PG) {
+    try {
+      const uid = String(socket.user.id);
+      const rows = await pgPool.query(
+        `SELECT id FROM dm_threads WHERE user1 = $1 OR user2 = $1`,
+        [uid]
+      );
+
+      for (const r of rows.rows) {
+        const tid = String(r.id);
+        socket.dmThreads.add(tid);
+        socket.join(`dm:${tid}`);
+      }
+    } catch (e) {
+      console.warn("[dm auto-join] failed:", e?.message || e);
+    }
+  }
+
+  socket.on("join room", ({ room, status }) => {
+    const desired = sanitizeRoomName(room) || "main";
+
+    db.get(`SELECT name FROM rooms WHERE name=?`, [desired], (_err, row) => {
+      const finalRoom = row ? desired : "main";
+      doJoin(finalRoom, status);
+    });
   });
 });
 
@@ -3048,7 +3142,7 @@ function emitUserList(room) {
 }
 
 // ---- Socket handlers
-io.on("connection", (socket) => {
+io.on("connection", async (socket) => {
   const sessUser = socket.request.session?.user;
   if (!sessUser?.id) {
     socket.disconnect(true);
@@ -3094,19 +3188,29 @@ io.on("connection", (socket) => {
   }, 500);
   socket.dmThreads = new Set();
 
-  db.all(
-    `SELECT thread_id FROM dm_participants WHERE user_id = ?`,
-    [socket.user.id],
-    (_e, rows) => {
-      for (const r of rows || []) {
-        const tid = Number(r.thread_id);
-        if (!Number.isFinite(tid)) continue;
-        socket.dmThreads.add(tid);
-        socket.join(`dm:${tid}`);
-      }
-    }
-  );
+ if (USE_PG) {
+  try {
+    const uid = String(socket.user.id);
 
+    const rows = await pgPool.query(
+      `
+      SELECT id
+      FROM dm_threads
+      WHERE user1 = $1 OR user2 = $1
+      `,
+      [uid]
+    );
+
+    for (const r of rows.rows) {
+      const tid = String(r.id);
+      socket.dmThreads.add(tid);
+      socket.join(`dm:${tid}`);
+    }
+  } catch (e) {
+    console.warn("[dm auto-join] failed:", e?.message || e);
+    }
+  }
+});
 socket.on("join room", ({ room, status }) => {
   const desired = sanitizeRoomName(room) || "main";
 
