@@ -65,19 +65,8 @@ async function pgEnsureCamelColumn(tableName, camelName, typeSql = "BIGINT") {
   const lower = camelName.toLowerCase();
   const lowerInfo = await pgGetColumnType(tableName, lower);
   if (lowerInfo) {
-    await pgPool.query(`ALTER TABLE ${tableName} RENAME COLUMN ${lower} TO "${camelName}"
-      CREATE SEQUENCE IF NOT EXISTS changelog_seq;
-
-      CREATE TABLE IF NOT EXISTS changelog_entries (
-        id SERIAL PRIMARY KEY,
-        seq BIGINT UNIQUE NOT NULL DEFAULT nextval('changelog_seq'),
-        title TEXT NOT NULL,
-        body TEXT,
-        created_at BIGINT,
-        updated_at BIGINT,
-        author_id INTEGER REFERENCES users(id) ON DELETE SET NULL
-      );
-`);
+    // Postgres lowercases unquoted identifiers; rename the legacy column to a quoted camelCase name.
+    await pgPool.query(`ALTER TABLE ${tableName} RENAME COLUMN ${lower} TO "${camelName}"`);
     return;
   }
 
@@ -115,6 +104,8 @@ async function pgEnsureEpochMsBigint(tableName, columnName) {
 
 // ---- Postgres schema flags
 let PG_USERS_CREATED_AT_IS_TIMESTAMP = false;
+let PG_READY = false;
+let PG_INIT_ERROR = null;
 // ---- Postgres table setup
 // Run once on boot, and start the server only after this finishes (so schema/type fixes apply before /register).
 const pgInitPromise = (async () => {
@@ -151,6 +142,20 @@ const pgInitPromise = (async () => {
         sid TEXT PRIMARY KEY,
         sess JSON NOT NULL,
         expire TIMESTAMP NOT NULL
+      );
+    `);
+
+    // Changelog tables (Postgres) — ensures changelog persists across restarts
+    await pgPool.query(`
+      CREATE SEQUENCE IF NOT EXISTS changelog_seq;
+      CREATE TABLE IF NOT EXISTS changelog_entries (
+        id SERIAL PRIMARY KEY,
+        seq BIGINT UNIQUE NOT NULL DEFAULT nextval('changelog_seq'),
+        title TEXT NOT NULL,
+        body TEXT,
+        created_at BIGINT,
+        updated_at BIGINT,
+        author_id INTEGER REFERENCES users(id) ON DELETE SET NULL
       );
     `);
 // Fix camelCase columns that Postgres lowercased previously
@@ -222,9 +227,14 @@ try {
       console.warn("[pg-schema] failed to read users.created_at type", e?.message || e);
     }
 
+    PG_READY = true;
+    PG_INIT_ERROR = null;
     console.log("Postgres tables ready");
   } catch (err) {
+    PG_READY = false;
+    PG_INIT_ERROR = err;
     console.error("Postgres init error:", err);
+    throw err;
   }
 })();
 // IMPORTANT for Render/any reverse proxy so secure cookies work
@@ -1807,12 +1817,15 @@ function cleanChangelogInput(title, body) {
 
 
 async function pgChangelogEnabled(){
-  // If DATABASE_URL is missing or pgPool can't connect, we fall back to sqlite changelog.
-  if(!process.env.DATABASE_URL) return false;
-  try{
+  // If DATABASE_URL is missing or Postgres init/connect failed, fall back to sqlite.
+  if (!process.env.DATABASE_URL) return false;
+  try {
     await pgInitPromise;
+    if (!PG_READY) return false;
+    // simple connectivity check
+    await pgPool.query('SELECT 1');
     return true;
-  }catch{
+  } catch (e) {
     return false;
   }
 }
@@ -2328,22 +2341,26 @@ app.post("/rooms", requireLogin, (req, res) => {
 
 // ---- Changelog API
 app.get("/api/changelog", requireLogin, async (req, res) => {
-  try {
-    const limit = clamp(req.query?.limit || 0, 0, 200);
+  const limit = clamp(req.query?.limit || 0, 0, 200);
 
-    // Prefer Postgres for persistence on Render (sqlite FS may reset on restarts)
-    if (await pgChangelogEnabled()) {
+  // Prefer Postgres for persistence on Render; fall back to sqlite on any PG error.
+  if (await pgChangelogEnabled()) {
+    try {
       const rows = await pgAllChangelog(limit);
       return res.json((rows || []).map((r) => toChangelogPayload(r)));
+    } catch (e) {
+      console.warn("[changelog] PG GET failed, falling back to sqlite:", e?.message || e);
     }
+  }
 
-    // Fallback: sqlite
+  try {
     const sql =
       "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries ORDER BY seq DESC" +
       (limit ? " LIMIT ?" : "");
     const rows = await dbAllAsync(sql, limit ? [limit] : []);
     return res.json((rows || []).map((r) => toChangelogPayload(r)));
-  } catch (err) {
+  } catch (e) {
+    console.error("[changelog] sqlite GET failed:", e?.message || e);
     return res.status(500).send("Failed to load changelog");
   }
 });
@@ -2353,15 +2370,33 @@ app.post("/api/changelog", requireOwner, async (req, res) => {
   if (cleaned.error) return res.status(400).send(cleaned.error);
 
   try {
-    const entry = await ((await pgChangelogEnabled()) ? pgCreateChangelogEntry : createChangelogEntrySqlite)({
-      title: cleaned.title,
-      body: cleaned.body,
-      authorId: req.session.user.id,
-    });
+    let entry = null;
+
+    if (await pgChangelogEnabled()) {
+      try {
+        entry = await pgCreateChangelogEntry({
+          title: cleaned.title,
+          body: cleaned.body,
+          authorId: req.session.user.id,
+        });
+      } catch (e) {
+        console.warn("[changelog] PG POST failed, falling back to sqlite:", e?.message || e);
+      }
+    }
+
+    if (!entry) {
+      entry = await createChangelogEntrySqlite({
+        title: cleaned.title,
+        body: cleaned.body,
+        authorId: req.session.user.id,
+      });
+    }
+
     const payload = toChangelogPayload(entry);
     io.emit("changelog updated");
     return res.json(payload);
   } catch (err) {
+    console.error("[changelog] create failed:", err?.message || err);
     return res.status(500).send("Failed to create changelog entry");
   }
 });
@@ -2375,13 +2410,18 @@ app.put("/api/changelog/:id", requireOwner, async (req, res) => {
 
   try {
     if (await pgChangelogEnabled()) {
-      const row = await pgUpdateChangelogEntry({ id, title: cleaned.title, body: cleaned.body });
-      if (!row) return res.status(404).send("Entry not found");
-      io.emit("changelog updated");
-      return res.json(toChangelogPayload(row));
+      try {
+        const row = await pgUpdateChangelogEntry({ id, title: cleaned.title, body: cleaned.body });
+        if (row) {
+          io.emit("changelog updated");
+          return res.json(toChangelogPayload(row));
+        }
+      } catch (e) {
+        console.warn("[changelog] PG PUT failed, falling back to sqlite:", e?.message || e);
+      }
     }
 
-    // Fallback: sqlite
+    // sqlite fallback
     const now = Date.now();
     const result = await dbRunAsync(
       `UPDATE changelog_entries SET title=?, body=?, updated_at=? WHERE id=?`,
@@ -2396,6 +2436,7 @@ app.put("/api/changelog/:id", requireOwner, async (req, res) => {
     io.emit("changelog updated");
     return res.json(toChangelogPayload(row));
   } catch (err) {
+    console.error("[changelog] update failed:", err?.message || err);
     return res.status(500).send("Failed to update changelog entry");
   }
 });
@@ -2409,18 +2450,24 @@ app.delete("/api/changelog/:id", requireOwner, async (req, res) => {
 
   try {
     if (await pgChangelogEnabled()) {
-      const ok = await pgDeleteChangelogEntry(id);
-      if (!ok) return res.status(404).send("Entry not found");
-      io.emit("changelog updated");
-      return res.json({ ok: true });
+      try {
+        const ok = await pgDeleteChangelogEntry(id);
+        if (ok) {
+          io.emit("changelog updated");
+          return res.json({ ok: true });
+        }
+      } catch (e) {
+        console.warn("[changelog] PG DELETE failed, falling back to sqlite:", e?.message || e);
+      }
     }
 
-    // Fallback: sqlite
+    // sqlite fallback
     const result = await dbRunAsync(`DELETE FROM changelog_entries WHERE id=?`, [id]);
     if (!result?.changes) return res.status(404).send("Entry not found");
     io.emit("changelog updated");
     return res.json({ ok: true });
   } catch (err) {
+    console.error("[changelog] delete failed:", err?.message || err);
     return res.status(500).send("Failed to delete changelog entry");
   }
 });
