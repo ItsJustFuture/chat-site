@@ -519,7 +519,6 @@ const sessionMiddleware = session({
   store: new PgSession({
     pool: pgPool,
     tableName: "session",
-    createTableIfMissing: true,
   }),
   secret: process.env.SESSION_SECRET || "dev_secret_change_me",
   resave: false,
@@ -528,7 +527,7 @@ const sessionMiddleware = session({
   cookie: {
     httpOnly: true,
     sameSite: "lax",
-    secure: "auto",
+    secure: process.env.NODE_ENV === "production",
     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
   },
 });
@@ -2974,7 +2973,7 @@ io.use((socket, next) => {
   };
   sessionMiddleware(socket.request, fakeRes, () => {
     if (!socket.request.session?.user?.id) {
-      return next(new Error("Not authenticated (no session). Please refresh and log in again."));
+      return next(new Error("Not authenticated"));
     }
     next();
   });
