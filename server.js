@@ -105,7 +105,26 @@ async function pgEnsureEpochMsBigint(tableName, columnName) {
 
 // ---- Postgres schema flags
 let PG_USERS_CREATED_AT_IS_TIMESTAMP = false;
+async function pgEnsureCamelColumn(table, name, typeSql) {
+  // exact camelCase
+  const exact = await pgGetColumnType(table, name);
+  if (exact) return;
 
+  // lowercased version (Postgres default)
+  const lower = name.toLowerCase();
+  const lowerInfo = await pgGetColumnType(table, lower);
+  if (lowerInfo) {
+    await pgPool.query(
+      `ALTER TABLE ${table} RENAME COLUMN ${lower} TO "${name}"`
+    );
+    return;
+  }
+
+  // otherwise add it
+  await pgPool.query(
+    `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS "${name}" ${typeSql}`
+  );
+}
 // ---- Postgres table setup
 // Run once on boot, and start the server only after this finishes (so schema/type fixes apply before /register).
 const pgInitPromise = (async () => {
@@ -145,15 +164,17 @@ const pgInitPromise = (async () => {
       );
     `);
 // Fix camelCase columns that Postgres lowercased previously
-const camelCols = [
-  "lastGoldTickAt",
-  "lastMessageGoldAt",
-  "lastDailyLoginGoldAt",
-  "lastXpMessageAt",
-  "lastDailyLoginAt",
-  "lastDiceRollAt",
-  "dice_sixes",
-];
+// ---- Fix camelCase timestamp columns Postgres lowercased
+try {
+  await pgEnsureCamelColumn("users", "lastGoldTickAt", "BIGINT");
+  await pgEnsureCamelColumn("users", "lastMessageGoldAt", "BIGINT");
+  await pgEnsureCamelColumn("users", "lastDailyLoginGoldAt", "BIGINT");
+  await pgEnsureCamelColumn("users", "lastXpMessageAt", "BIGINT");
+  await pgEnsureCamelColumn("users", "lastDailyLoginAt", "BIGINT");
+  await pgEnsureCamelColumn("users", "lastDiceRollAt", "BIGINT");
+} catch (e) {
+  console.warn("[pg camelCase migrate]", e?.message || e);
+}
 
 for (const c of camelCols) {
   try {
