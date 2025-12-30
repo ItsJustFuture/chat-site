@@ -702,6 +702,25 @@ async function pgGetUserById(id) {
   return pgRowToUser(rows[0]);
 }
 
+
+
+// Fetch a raw Postgres user row by id, selecting only requested columns.
+// NOTE: This returns the raw row object (snake_case keys), not the mapped pgRowToUser().
+async function pgGetUserRowById(id, columns) {
+  const allow = new Set([
+    "id","username","password_hash","role","created_at","avatar","bio","mood","age","gender",
+    "last_seen","last_room","last_status","theme","gold","xp",
+    "lastXpMessageAt","lastDailyLoginAt","lastGoldTickAt","lastMessageGoldAt","lastDailyLoginGoldAt",
+    "lastDiceRollAt","dice_sixes"
+  ]);
+  const cols = (Array.isArray(columns) && columns.length)
+    ? columns.filter((c) => allow.has(String(c)))
+    : ["*"];
+
+  const selectSql = cols[0] === "*" ? "*" : cols.map((c) => `"${c}"`).join(", ");
+  const { rows } = await pgPool.query(`SELECT ${selectSql} FROM users WHERE id = $1 LIMIT 1`, [id]);
+  return rows[0] || null;
+}
 async function pgUpsertFromSqliteRow(row) {
   // row is your SQLite users table row
   const username = row.username;
@@ -1866,22 +1885,6 @@ app.post("/register", async (req, res) => {
     }
 
     // 3) Create session
-    req.session.user = {
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      theme: sanitizeThemeNameServer(user.theme),
-    };
-
-    req.session.save((saveErr) => {
-      if (saveErr) return res.status(500).send("Session save failed");
-      return res.json({ ok: true });
-    });
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("Registration failed");
-  }
-});
     req.session.user = {
       id: user.id,
       username: user.username,
