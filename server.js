@@ -176,7 +176,7 @@ let PG_USERS_CREATED_AT_IS_TIMESTAMP = false;
 // ---- Postgres table setup
 // Run once on boot, and start the server only after this finishes (so schema/type fixes apply before /register).
 const pgInitPromise = (async () => {
-  if (!PG_ENABLED) {
+  if (!USE_PG) {
     console.log("[pg] DATABASE_URL not set; running in SQLite-only mode");
     return;
   }
@@ -2740,7 +2740,7 @@ io.on("connection", async (socket) => {
   
 
 socket.on("dm:join", async (threadId) => {
-  if (!PG_ENABLED) return;
+  if (!USE_PG) return;
   const tid = String(threadId);
   const uid = String(socket.user.id);
   if (!/^\d+$/.test(tid)) return;
@@ -2895,7 +2895,7 @@ async function pgLoadThreadForUser(threadId, userId) {
 }
 
 app.get("/dm/threads", requireLogin, async (req, res) => {
-  if (!PG_ENABLED) return res.json([]);
+  if (!USE_PG) return res.json([]);
 
   const userId = String(req.session.user.id);
 
@@ -2959,7 +2959,7 @@ app.get("/dm/threads", requireLogin, async (req, res) => {
 });
 
 app.get("/dm/thread/:id", requireLogin, async (req, res) => {
-  if (!PG_ENABLED) return res.status(400).send("DMs unavailable");
+  if (!USE_PG) return res.status(400).send("DMs unavailable");
 
   const tid = String(req.params.id);
   if (!/^\d+$/.test(tid)) return res.status(400).send("Invalid thread");
@@ -2973,7 +2973,7 @@ app.get("/dm/thread/:id", requireLogin, async (req, res) => {
 });
 
 app.post("/dm/thread", requireLogin, async (req, res) => {
-  if (!PG_ENABLED) return res.status(400).send("DMs unavailable");
+ if (!USE_PG) return res.status(400).send("DMs unavailable");
 
   let participants = req.body?.participants;
   if (!Array.isArray(participants)) {
@@ -3087,7 +3087,7 @@ app.post("/dm/thread", requireLogin, async (req, res) => {
 });
 
 app.post("/dm/thread/:id/participants", requireLogin, async (req, res) => {
-  if (!PG_ENABLED) return res.status(400).send("DMs unavailable");
+  if (!USE_PG) return res.status(400).send("DMs unavailable");
 
   const tid = String(req.params.id);
   if (!/^\d+$/.test(tid)) return res.status(400).send("Invalid thread");
@@ -3163,7 +3163,7 @@ app.post("/dm/thread/:id/participants", requireLogin, async (req, res) => {
 });
 
 app.post("/dm/thread/:id/leave", requireLogin, async (req, res) => {
-  if (!PG_ENABLED) return res.status(400).send("DMs unavailable");
+  if (!USE_PG) return res.status(400).send("DMs unavailable");
 
   const tid = String(req.params.id);
   if (!/^\d+$/.test(tid)) return res.status(400).send("Invalid thread");
@@ -3184,7 +3184,7 @@ app.post("/dm/thread/:id/leave", requireLogin, async (req, res) => {
 });
 
 app.delete("/dm/thread/:id/messages", requireLogin, async (req, res) => {
-  if (!PG_ENABLED) return res.status(400).send("DMs unavailable");
+  if (!USE_PG) return res.status(400).send("DMs unavailable");
 
   const tid = String(req.params.id);
   if (!/^\d+$/.test(tid)) return res.status(400).send("Invalid thread");
@@ -3595,7 +3595,7 @@ if (!room) {
   
 
 socket.on("dm join", async ({ threadId }) => {
-  if (!PG_ENABLED) return;
+  if (!USE_PG) return;
   const tid = String(threadId);
   if (!/^\d+$/.test(tid)) return;
 
@@ -3662,7 +3662,7 @@ socket.on("dm join", async ({ threadId }) => {
 
   
 socket.on("dm message", async ({ threadId, text, replyToId }) => {
-  if (!PG_ENABLED) return;
+ if (!USE_PG) return;
 
   const tid = String(threadId);
   const body = String(text || "").trim().slice(0, 800);
@@ -3736,7 +3736,6 @@ socket.on("dm message", async ({ threadId, text, replyToId }) => {
     console.warn("[dm message] failed:", e?.message || e);
   }
 });
-  });
 
   socket.on("status change", ({ status }) => {
     status = normalizeStatus(status, "Online");
