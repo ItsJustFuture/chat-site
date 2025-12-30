@@ -3018,6 +3018,17 @@ io.on("connection", (socket) => {
   );
 
   socket.currentRoom = null;
+    // --- SAFETY: ensure user is always in a room so messages can appear
+  // If client fails to emit "join room" (mobile / reconnect / race), auto-join main.
+  setTimeout(() => {
+    if (!socket.currentRoom) {
+      try {
+        doJoin("main", socket.user.status || "Online");
+      } catch (e) {
+        console.warn("[auto-join main] failed:", e?.message || e);
+      }
+    }
+  }, 500);
   socket.dmThreads = new Set();
 
   db.all(
@@ -3237,9 +3248,13 @@ function doJoin(room, status) {
 }
 
   socket.on("typing", () => {
-    const room = socket.currentRoom;
-    if (!room) return;
-
+    let room = socket.currentRoom;
+if (!room) {
+  // fallback: join main so the message shows up instead of disappearing
+  try { doJoin("main", socket.user.status || "Online"); } catch {}
+  room = socket.currentRoom;
+  if (!room) return;
+}
     let set = typingByRoom.get(room);
     if (!set) typingByRoom.set(room, (set = new Set()));
     set.add(socket.user.username);
