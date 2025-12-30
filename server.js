@@ -533,41 +533,6 @@ const sessionMiddleware = session({
 });
 
 app.use(sessionMiddleware);
-app.get("/__recover_owner__", async (req, res) => {
-  try {
-    const username = sanitizeUsername(req.query.username);
-    const newPassword = String(req.query.newPassword || "");
-    const secret = String(req.query.secret || "");
-
-    if (!process.env.OWNER_RECOVERY_SECRET) {
-      return res.status(500).send("OWNER_RECOVERY_SECRET is not set");
-    }
-    if (secret !== process.env.OWNER_RECOVERY_SECRET) {
-      return res.status(403).send("Forbidden");
-    }
-    if (!username || newPassword.length < 6) {
-      return res.status(400).send("Missing username or newPassword (6+ chars)");
-    }
-
-    const hash = await bcrypt.hash(newPassword, 10);
-
-    // Update Postgres (your real schema uses password_hash)
-    await pgPool.query(
-      "UPDATE users SET password_hash=$1 WHERE lower(username)=lower($2)",
-      [hash, username]
-    );
-
-    // Update SQLite too (keeps legacy features consistent)
-    await dbRunAsync(
-      "UPDATE users SET password_hash=? WHERE lower(username)=lower(?)",
-      [hash, username]
-    ).catch(() => {});
-
-    return res.send("Password reset OK");
-  } catch (e) {
-    return res.status(500).send(String(e && e.stack ? e.stack : e));
-  }
-});
 
 // ---- Static
 app.use("/uploads", express.static(UPLOADS_DIR));
