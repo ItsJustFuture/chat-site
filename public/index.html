@@ -285,21 +285,10 @@
       <button class="iconBtn" id="dmCloseBtn" type="button" title="Close">✕</button>
     </div>
 
-    <div class="dmNotice" id="dmMsg"></div>
-
     <div class="dmContent">
-      <div class="dmThreads" id="dmThreads">
-        <div class="dmTabs" id="dmTabs">
-          <button class="segBtn active" data-dm-tab="direct" type="button">DMs</button>
-          <button class="segBtn" data-dm-tab="group" type="button">Group DMs</button>
-        </div>
-        <div class="dmThreadActions" id="dmThreadActions">
-          <button class="btn full" id="dmCreateGroupBtn" type="button">➕ Create Group</button>
-        </div>
-        <div class="dmThreadList" id="dmThreadList"></div>
-      </div>
       <div class="dmConversation">
         <div class="dmMeta">
+          <div id="dmStrip" class="dmStrip" aria-label="Your direct messages"></div>
           <div class="dmMetaText">
             <div class="title" id="dmMetaTitle">Pick a thread</div>
             <div class="small" id="dmMetaPeople"></div>

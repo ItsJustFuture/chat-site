@@ -21,6 +21,60 @@ const dmThemeDefaults = { background: "#1e1f22" };
 let dmThemePrefs = { ...dmThemeDefaults };
 let dmTab = "direct";
 const dmUnreadThreads = new Set();
+
+// --- DM avatar strip (direct DMs only): last-read + lightweight avatar cache
+const DM_LAST_READ_KEY = "dm:lastRead:v1";
+const AVATAR_CACHE_KEY = "dm:avatarCache:v1";
+
+function loadJson(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const val = JSON.parse(raw);
+    return val ?? fallback;
+  } catch { return fallback; }
+}
+function saveJson(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
+let dmLastRead = loadJson(DM_LAST_READ_KEY, {}); // { [threadId]: lastReadTs }
+let avatarCache = loadJson(AVATAR_CACHE_KEY, {}); // { [username]: avatarUrl }
+
+function markDmRead(threadId, ts) {
+  const cur = Number(dmLastRead[threadId] || 0);
+  const next = Number(ts || 0);
+  if (next > cur) {
+    dmLastRead[threadId] = next;
+    saveJson(DM_LAST_READ_KEY, dmLastRead);
+  }
+}
+
+async function getAvatarUrl(username) {
+  if (!username) return "";
+  if (avatarCache[username]) return avatarCache[username];
+  try {
+    const { res, json } = await api(`/api/profile/${encodeURIComponent(username)}`);
+    if (res.ok && json && json.avatar_url) {
+      avatarCache[username] = json.avatar_url;
+      saveJson(AVATAR_CACHE_KEY, avatarCache);
+      return json.avatar_url;
+    }
+  } catch {}
+  return "";
+}
+
+function otherParty(thread) {
+  const parts = Array.isArray(thread.participants) ? thread.participants : [];
+  const meName = (me && me.username) ? me.username : "";
+  const other = parts.find(p => p && p !== meName) || parts[0] || "";
+  return other;
+}
+
+function isDirectThread(thread) {
+  return !thread.is_group && (thread.participants || []).length <= 2;
+}
+
 let dmPickerMode = "create";
 let dmPickerSelection = new Set();
 let dmPickerThreadId = null;
@@ -152,7 +206,16 @@ const dmCloseBtn = document.getElementById("dmCloseBtn");
 const dmTabs = document.getElementById("dmTabs");
 const dmCreateGroupBtn = document.getElementById("dmCreateGroupBtn");
 const dmThreadList = document.getElementById("dmThreadList");
+const dmStrip = document.getElementById("dmStrip");
 const dmMsg = document.getElementById("dmMsg");
+const dmNotice = document.getElementById("dmNotice");
+
+function setDmNotice(text){
+  if(!dmMsg) return;
+  dmMsg.textContent = text || "";
+  // Only show the notice text when it has content.
+  if(dmNotice) dmNotice.classList.toggle("hasNotice", !!dmMsg.textContent);
+}
 const dmMetaTitle = document.getElementById("dmMetaTitle");
 const dmMetaPeople = document.getElementById("dmMetaPeople");
 const dmMessagesEl = document.getElementById("dmMessages");
@@ -1460,28 +1523,76 @@ function renderThreadItem(t){
 }
 
 function renderDmThreads(){
-  if (!dmThreadList) return;
-  dmThreadList.innerHTML = "";
+  // In the new UI, the DM panel is *not* a hub. We only show direct DM threads as a horizontal avatar strip.
+  const list = (dmThreadsCache || []).filter(isDirectThread);
 
-  const list = dmThreads.filter((t) => dmTab === "group" ? t.is_group : !t.is_group);
-  if (!list.length) {
-    const empty = document.createElement("div");
-    empty.className = "dmEmpty";
-    empty.textContent = dmTab === "group"
-      ? "No group chats yet. Start one below."
-      : "No direct messages yet. Start one from Members.";
-    dmThreadList.appendChild(empty);
+  // Fallback if strip element missing (older HTML)
+  if (!dmStrip) {
+    if (!dmThreadList) return;
+    dmThreadList.innerHTML = "";
+    for (const t of list) dmThreadList.appendChild(renderThreadItem(t));
     return;
   }
 
-  for (const t of list) dmThreadList.appendChild(renderThreadItem(t));
+  dmStrip.innerHTML = "";
+  if (list.length === 0) {
+    dmStrip.style.display = "none";
+    return;
+  }
+  dmStrip.style.display = "flex";
+
+  // newest-first
+  list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
+
+  for (const t of list) {
+    const other = otherParty(t);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "dmAvatarBtn" + (String(activeThreadId)===String(t.id) ? " active" : "");
+    btn.title = other ? `DM with ${other}` : "DM";
+
+    const wrap = document.createElement("div");
+    wrap.className = "dmAvatarWrap";
+
+    const av = avatarNode(other || "?");
+    // try to upgrade to real avatar image
+    getAvatarUrl(other).then(url=>{
+      if (url && av && av.tagName && av.tagName.toLowerCase()==='div') {
+        av.style.backgroundImage = `url('${url}')`;
+        av.style.backgroundSize = "cover";
+        av.style.backgroundPosition = "center";
+        av.textContent = "";
+      }
+    });
+
+    const badge = document.createElement("span");
+    badge.className = "dmUnreadBadge";
+
+    const lastRead = Number(dmLastRead[t.id] || 0);
+    const lastTs = Number(t.last_ts || 0);
+    const unread = dmUnreadThreads.has(t.id) || (lastTs > lastRead);
+    badge.style.display = unread ? "block" : "none";
+
+    wrap.appendChild(av);
+    wrap.appendChild(badge);
+    btn.appendChild(wrap);
+
+    btn.addEventListener("click", ()=> openDmThread(t.id));
+    dmStrip.appendChild(btn);
+  }
+
+  // Auto-open the newest thread if none selected
+  if (!activeThreadId && list[0]) {
+    openDmThread(list[0].id);
+  }
 }
+
 
 async function loadDmThreads(){
   try {
     const res = await fetch("/dm/threads");
     if (!res.ok) {
-      dmMsg.textContent = "Could not load threads.";
+      setDmNotice("Could not load threads.");
       return;
     }
     const raw = await res.json();
@@ -1489,7 +1600,7 @@ async function loadDmThreads(){
     syncDmTabUi();
     renderDmThreads();
   } catch {
-    dmMsg.textContent = "Could not load threads.";
+    setDmNotice("Could not load threads.");
   }
 }
 
@@ -1508,7 +1619,7 @@ async function startDirectMessage(username){
     return;
   }
 
-  dmMsg.textContent = "Preparing chat...";
+  setDmNotice("Preparing chat...");
   try {
     const res = await fetch("/dm/thread", {
       method: "POST",
@@ -1518,25 +1629,26 @@ async function startDirectMessage(username){
 
     if (!res.ok) {
       const text = await res.text();
-      dmMsg.textContent = text || "Could not start DM.";
+      setDmNotice(text || "Could not start DM.");
       return;
     }
 
     const data = await res.json();
-    dmMsg.textContent = data.reused ? "Opened existing DM." : "DM ready. Send a message to save it.";
+    // Don't waste vertical space with a persistent "DM ready" banner.
+    setDmNotice(data.reused ? "Opened existing DM." : "");
 
     if (data.threadId) {
       upsertThreadMeta(data.threadId, { participants: [username, me?.username].filter(Boolean), is_group: false });
       openDmThread(data.threadId);
     }
   } catch {
-    dmMsg.textContent = "Could not start DM.";
+    setDmNotice("Could not start DM.");
   }
 }
 
 function openDmPanel(){
   dmPanel.classList.add("open");
-  dmMsg.textContent = "";
+  setDmNotice("");
   clearDmBadges();
   syncDmTabUi();
 
@@ -1652,7 +1764,7 @@ function openDmThread(threadId){
 
 async function deleteDmHistory(){
   if (!activeDmId) {
-    dmMsg.textContent = "Pick a thread first.";
+    setDmNotice("Pick a thread first.");
     return;
   }
 
@@ -1661,12 +1773,12 @@ async function deleteDmHistory(){
   const ok = confirm(`Delete all messages in "${label}" for everyone?`);
   if (!ok) return;
 
-  dmMsg.textContent = "Deleting history...";
+  setDmNotice("Deleting history...");
   try {
     const res = await fetch(`/dm/thread/${activeDmId}/messages`, { method: "DELETE" });
     if (!res.ok) {
       const text = await res.text();
-      dmMsg.textContent = text || "Could not delete history.";
+      setDmNotice(text || "Could not delete history.");
       return;
     }
 
@@ -1678,10 +1790,10 @@ async function deleteDmHistory(){
     }
     renderDmMessages(activeDmId);
     renderDmThreads();
-    dmMsg.textContent = "History cleared.";
+    setDmNotice("History cleared.");
     closeDmSettingsMenu();
   } catch {
-    dmMsg.textContent = "Could not delete history.";
+    setDmNotice("Could not delete history.");
   }
 }
 
@@ -1815,7 +1927,7 @@ async function submitDmPicker(){
     dmModalPrimaryBtn.disabled = false;
     if (!res.ok) {
       const txt = await res.text();
-      dmMsg.textContent = txt || "Could not create group.";
+      setDmNotice(txt || "Could not create group.");
       return;
     }
     const data = await res.json();
@@ -1823,7 +1935,7 @@ async function submitDmPicker(){
     await loadDmThreads();
     if (data.threadId) openDmThread(data.threadId);
   } catch {
-    dmMsg.textContent = "Could not create group.";
+    setDmNotice("Could not create group.");
   }
 }
 
@@ -1836,7 +1948,7 @@ async function fetchDmInfo(threadId){
 async function openDmInfo(threadId = activeDmId){
   const meta = dmThreads.find((t) => t.id === threadId);
   if (!meta || !meta.is_group) {
-    dmMsg.textContent = "Group info is only available inside a group chat.";
+    setDmNotice("Group info is only available inside a group chat.");
     return;
   }
   try {
@@ -1860,7 +1972,7 @@ async function openDmInfo(threadId = activeDmId){
     lockBodyScroll(true);
     dmInfoModal?.classList.add("show");
   } catch {
-    dmMsg.textContent = "Could not load group info.";
+    setDmNotice("Could not load group info.");
   }
 }
 
@@ -1880,14 +1992,14 @@ async function addMembersToGroup(threadId, names){
     });
     dmModalPrimaryBtn.disabled = false;
     if (!res.ok) {
-      dmMsg.textContent = (await res.text()) || "Could not add members.";
+      setDmNotice((await res.text()) || "Could not add members.");
       return;
     }
     closeDmPicker();
     await loadDmThreads();
     openDmInfo(threadId);
   } catch {
-    dmMsg.textContent = "Could not add members.";
+    setDmNotice("Could not add members.");
   }
 }
 
@@ -1897,7 +2009,7 @@ async function leaveGroup(threadId){
   try {
     const res = await fetch(`/dm/thread/${threadId}/leave`, { method: "POST" });
     if (!res.ok) {
-      dmMsg.textContent = (await res.text()) || "Could not leave group.";
+      setDmNotice((await res.text()) || "Could not leave group.");
       return;
     }
     dmThreads = dmThreads.filter((t) => t.id !== threadId);
@@ -1910,7 +2022,7 @@ async function leaveGroup(threadId){
     dmMetaPeople.textContent = "";
     dmMessagesEl.innerHTML = "";
   } catch {
-    dmMsg.textContent = "Could not leave group.";
+    setDmNotice("Could not leave group.");
   }
 }
 
@@ -1931,7 +2043,7 @@ dmSettingsBtn?.addEventListener("click", (e) => {
 });
 dmDeleteHistoryBtn?.addEventListener("click", deleteDmHistory);
 dmReportBtn?.addEventListener("click", () => {
-  dmMsg.textContent = "Report feature coming soon.";
+  setDmNotice("Report feature coming soon.");
   closeDmSettingsMenu();
 });
 dmModalCloseBtn?.addEventListener("click", closeDmPicker);
@@ -3251,6 +3363,13 @@ socket.on("disconnect", (reason) => {
     if (activeDmId === threadId) {
       setDmMeta(dmThreads.find((t) => t.id === threadId));
       renderDmMessages(threadId);
+      // Consider the thread read once we've rendered its history.
+      const latest = (Array.isArray(dmMessagesCache) && dmMessagesCache.length)
+        ? dmMessagesCache[dmMessagesCache.length - 1].ts
+        : Date.now();
+      markDmRead(threadId, latest);
+      dmUnreadThreads.delete(threadId);
+      renderDmThreads();
     }
   });
 
@@ -3264,7 +3383,7 @@ socket.on("disconnect", (reason) => {
     }
     if (activeDmId === threadId) {
       renderDmMessages(threadId);
-      dmMsg.textContent = "History was cleared.";
+      setDmNotice("History was cleared.");
     }
     renderDmThreads();
   });
@@ -3284,6 +3403,9 @@ socket.on("disconnect", (reason) => {
 
     if (activeDmId === m.threadId) {
       renderDmMessages(m.threadId);
+      markDmRead(m.threadId, m.ts || Date.now());
+      dmUnreadThreads.delete(m.threadId);
+      renderDmThreads();
     }
   });
 
