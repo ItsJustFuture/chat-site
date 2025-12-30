@@ -28,6 +28,13 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
+  cors: { origin: true, credentials: true },
+
+  // More tolerant of mobile/background + Render sleep
+  pingInterval: 30_000,  // send pings every 30s (default ~25s)
+  pingTimeout: 120_000,  // wait 120s for pong before disconnect (default 20s)
+  upgradeTimeout: 30_000,
+});
   // Render uses HTTPS -> allow websocket upgrade
   cors: { origin: true, credentials: true },
 });
