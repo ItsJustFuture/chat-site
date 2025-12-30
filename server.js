@@ -65,7 +65,19 @@ async function pgEnsureCamelColumn(tableName, camelName, typeSql = "BIGINT") {
   const lower = camelName.toLowerCase();
   const lowerInfo = await pgGetColumnType(tableName, lower);
   if (lowerInfo) {
-    await pgPool.query(`ALTER TABLE ${tableName} RENAME COLUMN ${lower} TO "${camelName}"`);
+    await pgPool.query(`ALTER TABLE ${tableName} RENAME COLUMN ${lower} TO "${camelName}"
+      CREATE SEQUENCE IF NOT EXISTS changelog_seq;
+
+      CREATE TABLE IF NOT EXISTS changelog_entries (
+        id SERIAL PRIMARY KEY,
+        seq BIGINT UNIQUE NOT NULL DEFAULT nextval('changelog_seq'),
+        title TEXT NOT NULL,
+        body TEXT,
+        created_at BIGINT,
+        updated_at BIGINT,
+        author_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+      );
+`);
     return;
   }
 
@@ -1793,7 +1805,65 @@ function cleanChangelogInput(title, body) {
   return { title: cleanTitle, body: cleanBody };
 }
 
-function createChangelogEntry({ title, body, authorId }) {
+
+async function pgChangelogEnabled(){
+  // If DATABASE_URL is missing or pgPool can't connect, we fall back to sqlite changelog.
+  if(!process.env.DATABASE_URL) return false;
+  try{
+    await pgInitPromise;
+    return true;
+  }catch{
+    return false;
+  }
+}
+
+async function pgAllChangelog(limit = 0){
+  await pgInitPromise;
+  if(limit){
+    const { rows } = await pgPool.query(
+      "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries ORDER BY seq DESC LIMIT $1",
+      [limit]
+    );
+    return rows;
+  }
+  const { rows } = await pgPool.query(
+    "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries ORDER BY seq DESC"
+  );
+  return rows;
+}
+
+async function pgCreateChangelogEntry({ title, body, authorId }){
+  await pgInitPromise;
+  const now = Date.now();
+  const { rows } = await pgPool.query(
+    "INSERT INTO changelog_entries (title, body, created_at, updated_at, author_id) VALUES ($1,$2,$3,$4,$5) RETURNING id, seq, title, body, created_at, updated_at, author_id",
+    [title, body, now, now, authorId]
+  );
+  return rows[0];
+}
+
+async function pgUpdateChangelogEntry({ id, title, body }){
+  await pgInitPromise;
+  const now = Date.now();
+  const { rowCount } = await pgPool.query(
+    "UPDATE changelog_entries SET title=$1, body=$2, updated_at=$3 WHERE id=$4",
+    [title, body, now, id]
+  );
+  if(!rowCount) return null;
+  const { rows } = await pgPool.query(
+    "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries WHERE id=$1",
+    [id]
+  );
+  return rows[0] || null;
+}
+
+async function pgDeleteChangelogEntry(id){
+  await pgInitPromise;
+  const { rowCount } = await pgPool.query("DELETE FROM changelog_entries WHERE id=$1", [id]);
+  return rowCount > 0;
+}
+
+function createChangelogEntrySqlite({ title, body, authorId }) {
   return new Promise((resolve, reject) => {
     db.serialize(() => {
       db.run("BEGIN IMMEDIATE TRANSACTION", (beginErr) => {
@@ -2260,11 +2330,19 @@ app.post("/rooms", requireLogin, (req, res) => {
 app.get("/api/changelog", requireLogin, async (req, res) => {
   try {
     const limit = clamp(req.query?.limit || 0, 0, 200);
+
+    // Prefer Postgres for persistence on Render (sqlite FS may reset on restarts)
+    if (await pgChangelogEnabled()) {
+      const rows = await pgAllChangelog(limit);
+      return res.json((rows || []).map((r) => toChangelogPayload(r)));
+    }
+
+    // Fallback: sqlite
     const sql =
       "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries ORDER BY seq DESC" +
       (limit ? " LIMIT ?" : "");
     const rows = await dbAllAsync(sql, limit ? [limit] : []);
-    return res.json(rows.map((r) => toChangelogPayload(r)));
+    return res.json((rows || []).map((r) => toChangelogPayload(r)));
   } catch (err) {
     return res.status(500).send("Failed to load changelog");
   }
@@ -2275,7 +2353,7 @@ app.post("/api/changelog", requireOwner, async (req, res) => {
   if (cleaned.error) return res.status(400).send(cleaned.error);
 
   try {
-    const entry = await createChangelogEntry({
+    const entry = await ((await pgChangelogEnabled()) ? pgCreateChangelogEntry : createChangelogEntrySqlite)({
       title: cleaned.title,
       body: cleaned.body,
       authorId: req.session.user.id,
@@ -2296,6 +2374,14 @@ app.put("/api/changelog/:id", requireOwner, async (req, res) => {
   if (cleaned.error) return res.status(400).send(cleaned.error);
 
   try {
+    if (await pgChangelogEnabled()) {
+      const row = await pgUpdateChangelogEntry({ id, title: cleaned.title, body: cleaned.body });
+      if (!row) return res.status(404).send("Entry not found");
+      io.emit("changelog updated");
+      return res.json(toChangelogPayload(row));
+    }
+
+    // Fallback: sqlite
     const now = Date.now();
     const result = await dbRunAsync(
       `UPDATE changelog_entries SET title=?, body=?, updated_at=? WHERE id=?`,
@@ -2322,6 +2408,14 @@ app.delete("/api/changelog/:id", requireOwner, async (req, res) => {
   if (!confirmed) return res.status(400).send("Confirmation required");
 
   try {
+    if (await pgChangelogEnabled()) {
+      const ok = await pgDeleteChangelogEntry(id);
+      if (!ok) return res.status(404).send("Entry not found");
+      io.emit("changelog updated");
+      return res.json({ ok: true });
+    }
+
+    // Fallback: sqlite
     const result = await dbRunAsync(`DELETE FROM changelog_entries WHERE id=?`, [id]);
     if (!result?.changes) return res.status(404).send("Entry not found");
     io.emit("changelog updated");
