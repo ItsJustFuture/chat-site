@@ -1065,6 +1065,8 @@ function addMessage(m){
     <span class="ts">${new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span>
   `;
 
+  bubble.appendChild(meta);
+
   const rawText = String(m.text || "");
   let ytId = null;
   let displayText = rawText;
