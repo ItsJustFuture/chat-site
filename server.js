@@ -1812,6 +1812,7 @@ function createChangelogEntry({ title, body, authorId }) {
 }
 
 // ---- Auth routes
+// ---- Auth routes
 app.post("/register", async (req, res) => {
   try {
     const username = sanitizeUsername(req.body?.username);
@@ -1820,7 +1821,7 @@ app.post("/register", async (req, res) => {
     if (!username || username.length < 2) return res.status(400).send("Invalid username");
     if (!password || password.length < 6) return res.status(400).send("Password must be 6+ chars");
 
-    // Prevent duplicates (check PG first; it's our canonical uniqueness constraint)
+    // Prevent duplicates (PG is canonical)
     const existingPg = await pgGetUserByUsername(username);
     if (existingPg) return res.status(409).send("Username already taken");
 
@@ -1834,7 +1835,7 @@ app.post("/register", async (req, res) => {
 
     const theme = DEFAULT_THEME;
 
-    // 1) Create user in Postgres (source of truth for sessions + new persistent systems)
+    // 1) Create user in Postgres
     const createdAtValue = PG_USERS_CREATED_AT_IS_TIMESTAMP ? new Date(createdAt) : createdAt;
     const { rows } = await pgPool.query(
       `INSERT INTO users (username, password_hash, role, created_at, theme)
@@ -1842,11 +1843,11 @@ app.post("/register", async (req, res) => {
        RETURNING id, username, role, theme`,
       [username, hash, role, createdAtValue, theme]
     );
+
     const user = rows[0];
     if (!user) return res.status(500).send("Registration failed");
 
-    // 2) Mirror into SQLite (older features still read from SQLite in this build)
-    // Insert with the Postgres id to keep ids consistent across both stores.
+    // 2) Mirror into SQLite
     try {
       await dbRunAsync(
         `INSERT INTO users (id, username, password_hash, role, created_at, gold, xp, theme)
@@ -1854,28 +1855,33 @@ app.post("/register", async (req, res) => {
         [user.id, username, hash, role, createdAt, 0, 0, sanitizeThemeNameServer(theme)]
       );
     } catch (_e) {
-      // If it already exists (e.g. partial previous attempt), update it.
       await dbRunAsync(
         `UPDATE users
-            SET username = ?, password_hash = ?, role = ?, created_at = COALESCE(created_at, ?), theme = COALESCE(theme, ?)
+            SET username = ?, password_hash = ?, role = ?,
+                created_at = COALESCE(created_at, ?),
+                theme = COALESCE(theme, ?)
           WHERE id = ?`,
         [username, hash, role, createdAt, sanitizeThemeNameServer(theme), user.id]
       );
-
-      await pool.query(
-        "UPDATE users SET passhash=$1 WHERE lower(username)=lower($2)",
-        [hash, username]
-      );
-
-      await pool.end();
     }
 
-    return res.send("Owner password reset (PG updated if configured)");
+    // 3) Create session
+    req.session.user = {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      theme: sanitizeThemeNameServer(user.theme),
+    };
+
+    req.session.save((saveErr) => {
+      if (saveErr) return res.status(500).send("Session save failed");
+      return res.json({ ok: true });
+    });
   } catch (e) {
-    return res.status(500).send(String(e && e.stack ? e.stack : e));
+    console.error(e);
+    res.status(500).send("Registration failed");
   }
 });
-//owner pw recovery above
     req.session.user = {
       id: user.id,
       username: user.username,
