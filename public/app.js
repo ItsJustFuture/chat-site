@@ -22,8 +22,6 @@ const dmThemeDefaults = { background: "#1e1f22" };
 let dmThemePrefs = { ...dmThemeDefaults };
 let dmTab = "direct";
 const dmUnreadThreads = new Set();
-// Cache of DM threads keyed by threadId (used by renderDmThreads)
-let dmThreadsCache = new Map();
 // --- DM avatar strip (direct DMs only): last-read + lightweight avatar cache
 const DM_LAST_READ_KEY = "dm:lastRead:v1";
 const AVATAR_CACHE_KEY = "dm:avatarCache:v1";
