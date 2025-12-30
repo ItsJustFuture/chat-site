@@ -18,8 +18,7 @@ const DB_FILE = process.env.DB_FILE || path.join(__dirname, "chat.db");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 const AVATARS_DIR = path.join(__dirname, "avatars");
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true }));
+
 // ---- Ensure folders exist
 for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -32,6 +31,8 @@ const io = new Server(server, {
   // Render uses HTTPS -> allow websocket upgrade
   cors: { origin: true, credentials: true },
 });
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true })
 const pgPool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === "production"
