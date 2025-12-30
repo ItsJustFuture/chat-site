@@ -15,6 +15,8 @@ const sqlite3 = require("sqlite3").verbose();
 
 const PORT = Number(process.env.PORT || 3000);
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, "chat.db");
+const DATABASE_URL = process.env.DATABASE_URL || "";
+const PG_ENABLED = !!DATABASE_URL;
 const PUBLIC_DIR = path.join(__dirname, "public");
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 const AVATARS_DIR = path.join(__dirname, "avatars");
@@ -38,12 +40,22 @@ const io = new Server(server, {
 });
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
-const pgPool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === "production"
-    ? { rejectUnauthorized: false }
-    : false
-});// ---- Postgres: helpers to keep legacy schemas compatible
+let pgPool = {
+  query: async () => {
+    throw new Error("Postgres disabled (DATABASE_URL not set)");
+  },
+};
+
+if (PG_ENABLED) {
+  pgPool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: process.env.PGSSL === "true" || process.env.NODE_ENV === "production"
+      ? { rejectUnauthorized: false }
+      : false,
+  });
+}
+
+// ---- Postgres: helpers to keep legacy schemas compatible
 async function pgGetColumnType(tableName, columnName) {
   const { rows } = await pgPool.query(
     `SELECT udt_name, data_type
@@ -106,6 +118,10 @@ let PG_USERS_CREATED_AT_IS_TIMESTAMP = false;
 // ---- Postgres table setup
 // Run once on boot, and start the server only after this finishes (so schema/type fixes apply before /register).
 const pgInitPromise = (async () => {
+  if (!PG_ENABLED) {
+    console.log("[pg] DATABASE_URL not set; running in SQLite-only mode");
+    return;
+  }
   try {
     // Base tables (SQL only)
     await pgPool.query(`
@@ -486,10 +502,7 @@ db.serialize(() => {
 
 // ---- Security + parsing
 app.disable("x-powered-by");
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: false, limit: "1mb" }));
-
-// IMPORTANT: CSP that blocks inline JS (good), but allows our external /public/app.js & /public/styles.css
+// IMPORTANT: CSP for the app (allows our /public assets; includes 'unsafe-inline' for legacy client scripts)
 app.use((req, res, next) => {
   res.setHeader(
     "Content-Security-Policy",
@@ -514,12 +527,27 @@ app.use((req, res, next) => {
   next();
 });
 
-// ---- Sessions (Postgres-backed; survives redeploys)
-const sessionMiddleware = session({
-  store: new PgSession({
+// ---- Sessions (single source of truth)
+// If DATABASE_URL is set: store sessions in Postgres.
+// Otherwise: store sessions in SQLite (sessions.sqlite) so local/dev works without PG.
+let sessionStore;
+if (PG_ENABLED) {
+  sessionStore = new PgSession({
     pool: pgPool,
     tableName: "session",
-  }),
+    createTableIfMissing: true,
+  });
+} else {
+  const SQLiteStore = require("connect-sqlite3")(session);
+  sessionStore = new SQLiteStore({
+    dir: __dirname,
+    db: "sessions.sqlite",
+    table: "sessions",
+  });
+}
+
+const sessionMiddleware = session({
+  store: sessionStore,
   secret: process.env.SESSION_SECRET || "dev_secret_change_me",
   resave: false,
   saveUninitialized: false,
@@ -531,6 +559,7 @@ const sessionMiddleware = session({
     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
   },
 });
+
 
 app.use(sessionMiddleware);
 app.get("/__recover_owner__", async (req, res) => {
