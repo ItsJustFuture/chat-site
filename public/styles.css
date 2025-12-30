@@ -693,6 +693,211 @@
 }
 
 
+/* Cherry Blossom floral overlay */
+body[data-theme="Cherry Blossom (Light)"] {
+  --sakuraPattern: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22120%22%20height%3D%22120%22%20viewBox%3D%220%200%20120%20120%22%3E%0A%20%20%3Cg%20fill%3D%22%23ff8fc1%22%20fill-opacity%3D%220.18%22%3E%0A%20%20%20%20%3Cpath%20d%3D%22M60%2046c6-14%2022-10%2018%204-2%208-10%2012-18%2014-8-2-16-6-18-14-4-14%2012-18%2018-4z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M46%2060c-14-6-10-22%204-18%208%202%2012%2010%2014%2018-2%208-6%2016-14%2018-14%204-18-12-4-18z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M60%2074c-6%2014-22%2010-18-4%202-8%2010-12%2018-14%208%202%2016%206%2018%2014%204%2014-12%2018-18%204z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M74%2060c14%206%2010%2022-4%2018-8-2-12-10-14-18%202-8%206-16%2014-18%2014-4%2018%2012%204%2018z%22%2F%3E%0A%20%20%20%20%3Ccircle%20cx%3D%2260%22%20cy%3D%2260%22%20r%3D%226%22%20fill%3D%22%23ffd9e8%22%20fill-opacity%3D%220.32999999999999996%22%2F%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E");
+  --sakuraPatternBubble: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22120%22%20height%3D%22120%22%20viewBox%3D%220%200%20120%20120%22%3E%0A%20%20%3Cg%20fill%3D%22%23ff8fc1%22%20fill-opacity%3D%220.1%22%3E%0A%20%20%20%20%3Cpath%20d%3D%22M60%2046c6-14%2022-10%2018%204-2%208-10%2012-18%2014-8-2-16-6-18-14-4-14%2012-18%2018-4z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M46%2060c-14-6-10-22%204-18%208%202%2012%2010%2014%2018-2%208-6%2016-14%2018-14%204-18-12-4-18z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M60%2074c-6%2014-22%2010-18-4%202-8%2010-12%2018-14%208%202%2016%206%2018%2014%204%2014-12%2018-18%204z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M74%2060c14%206%2010%2022-4%2018-8-2-12-10-14-18%202-8%206-16%2014-18%2014-4%2018%2012%204%2018z%22%2F%3E%0A%20%20%20%20%3Ccircle%20cx%3D%2260%22%20cy%3D%2260%22%20r%3D%226%22%20fill%3D%22%23ffd9e8%22%20fill-opacity%3D%220.25%22%2F%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E");
+}
+body[data-theme="Cherry Blossom (Dark)"] {
+  --sakuraPattern: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22120%22%20height%3D%22120%22%20viewBox%3D%220%200%20120%20120%22%3E%0A%20%20%3Cg%20fill%3D%22%23ff7fb8%22%20fill-opacity%3D%220.16%22%3E%0A%20%20%20%20%3Cpath%20d%3D%22M60%2046c6-14%2022-10%2018%204-2%208-10%2012-18%2014-8-2-16-6-18-14-4-14%2012-18%2018-4z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M46%2060c-14-6-10-22%204-18%208%202%2012%2010%2014%2018-2%208-6%2016-14%2018-14%204-18-12-4-18z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M60%2074c-6%2014-22%2010-18-4%202-8%2010-12%2018-14%208%202%2016%206%2018%2014%204%2014-12%2018-18%204z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M74%2060c14%206%2010%2022-4%2018-8-2-12-10-14-18%202-8%206-16%2014-18%2014-4%2018%2012%204%2018z%22%2F%3E%0A%20%20%20%20%3Ccircle%20cx%3D%2260%22%20cy%3D%2260%22%20r%3D%226%22%20fill%3D%22%23ffd9e8%22%20fill-opacity%3D%220.31%22%2F%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E");
+  --sakuraPatternBubble: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22120%22%20height%3D%22120%22%20viewBox%3D%220%200%20120%20120%22%3E%0A%20%20%3Cg%20fill%3D%22%23ff7fb8%22%20fill-opacity%3D%220.1%22%3E%0A%20%20%20%20%3Cpath%20d%3D%22M60%2046c6-14%2022-10%2018%204-2%208-10%2012-18%2014-8-2-16-6-18-14-4-14%2012-18%2018-4z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M46%2060c-14-6-10-22%204-18%208%202%2012%2010%2014%2018-2%208-6%2016-14%2018-14%204-18-12-4-18z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M60%2074c-6%2014-22%2010-18-4%202-8%2010-12%2018-14%208%202%2016%206%2018%2014%204%2014-12%2018-18%204z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M74%2060c14%206%2010%2022-4%2018-8-2-12-10-14-18%202-8%206-16%2014-18%2014-4%2018%2012%204%2018z%22%2F%3E%0A%20%20%20%20%3Ccircle%20cx%3D%2260%22%20cy%3D%2260%22%20r%3D%226%22%20fill%3D%22%23ffd9e8%22%20fill-opacity%3D%220.25%22%2F%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E");
+}
+
+/* Apply petals subtly across UI (10–40% opacity baked into SVG) */
+body[data-theme="Cherry Blossom (Light)"],
+body[data-theme="Cherry Blossom (Dark)"] {
+  background-image: var(--sakuraPattern);
+  background-size: 260px 260px;
+  background-repeat: repeat;
+}
+
+body[data-theme="Cherry Blossom (Light)"] .panel,
+body[data-theme="Cherry Blossom (Light)"] .sidebar,
+body[data-theme="Cherry Blossom (Light)"] .modalCard,
+body[data-theme="Cherry Blossom (Light)"] .card,
+body[data-theme="Cherry Blossom (Light)"] .listPanel,
+body[data-theme="Cherry Blossom (Dark)"] .panel,
+body[data-theme="Cherry Blossom (Dark)"] .sidebar,
+body[data-theme="Cherry Blossom (Dark)"] .modalCard,
+body[data-theme="Cherry Blossom (Dark)"] .card,
+body[data-theme="Cherry Blossom (Dark)"] .listPanel {
+  background-image: var(--sakuraPattern);
+  background-size: 320px 320px;
+  background-repeat: repeat;
+  background-position: 10px 6px;
+}
+
+body[data-theme="Cherry Blossom (Light)"] .bubble,
+body[data-theme="Cherry Blossom (Dark)"] .bubble {
+  background-image: var(--sakuraPatternBubble);
+  background-size: 420px 420px;
+  background-repeat: repeat;
+  background-position: 0 0;
+}
+
+
+/* Lavender Fog */
+[data-theme="Lavender Fog"],
+[data-theme="Lavender Fog"] {
+  --bg: #faf7ff;
+  --bg2: #efe6ff;
+  --panel: #ffffff;
+  --panel2: #f4eeff;
+  --text: #241a33;
+  --muted: #5b4a73;
+  --border: #0000001f;
+  --shadowColor: rgba(0,0,0,0.14);
+  --accent: #8a5cff;
+  --accent2: #c09bff;
+  --danger: #d7373a;
+  --success: #1f8a4c;
+  --warning: #b87410;
+  --link: #6b3fe6;
+  --messageSelfBg: #8a5cff;
+  --messageSelfText: #ffffff;
+  --messageOtherBg: #ffffff;
+  --messageOtherText: #241a33;
+  --messageSystemBg: rgba(138,92,255,0.10);
+  --messageSystemText: #241a33;
+  --mentionBg: rgba(138,92,255,0.12);
+  --mentionText: #241a33;
+}
+
+/* Crimson Noir */
+[data-theme="Crimson Noir"],
+[data-theme="Crimson Noir"] {
+  --bg: #0f0a0c;
+  --bg2: #1b1015;
+  --panel: #151014;
+  --panel2: #1f141a;
+  --text: #f6e9ee;
+  --muted: #c9a6b2;
+  --border: #ffffff1a;
+  --shadowColor: rgba(0,0,0,0.55);
+  --accent: #ff3b6a;
+  --accent2: #ff7aa0;
+  --danger: #ff4d4f;
+  --success: #2ddf87;
+  --warning: #ffb020;
+  --link: #ff7aa0;
+  --messageSelfBg: #ff3b6a;
+  --messageSelfText: #0f0a0c;
+  --messageOtherBg: #1f141a;
+  --messageOtherText: #f6e9ee;
+  --messageSystemBg: rgba(255,59,106,0.12);
+  --messageSystemText: #f6e9ee;
+  --mentionBg: rgba(255,59,106,0.14);
+  --mentionText: #f6e9ee;
+}
+
+/* Ocean Mist */
+[data-theme="Ocean Mist"],
+[data-theme="Ocean Mist"] {
+  --bg: #f4fbff;
+  --bg2: #e4f5ff;
+  --panel: #ffffff;
+  --panel2: #eaf8ff;
+  --text: #0f2a33;
+  --muted: #3f6673;
+  --border: #0000001f;
+  --shadowColor: rgba(0,0,0,0.14);
+  --accent: #1c9bd6;
+  --accent2: #68c8f0;
+  --danger: #d7373a;
+  --success: #1f8a4c;
+  --warning: #b87410;
+  --link: #0d7fb3;
+  --messageSelfBg: #1c9bd6;
+  --messageSelfText: #ffffff;
+  --messageOtherBg: #ffffff;
+  --messageOtherText: #0f2a33;
+  --messageSystemBg: rgba(28,155,214,0.10);
+  --messageSystemText: #0f2a33;
+  --mentionBg: rgba(28,155,214,0.12);
+  --mentionText: #0f2a33;
+}
+
+/* Deep Ocean */
+[data-theme="Deep Ocean"],
+[data-theme="Deep Ocean"] {
+  --bg: #06121a;
+  --bg2: #0b1b26;
+  --panel: #081923;
+  --panel2: #0f2331;
+  --text: #e6f6ff;
+  --muted: #a7c6d6;
+  --border: #ffffff1a;
+  --shadowColor: rgba(0,0,0,0.55);
+  --accent: #19c2ff;
+  --accent2: #70dcff;
+  --danger: #ff4d4f;
+  --success: #2ddf87;
+  --warning: #ffb020;
+  --link: #70dcff;
+  --messageSelfBg: #19c2ff;
+  --messageSelfText: #06121a;
+  --messageOtherBg: #0f2331;
+  --messageOtherText: #e6f6ff;
+  --messageSystemBg: rgba(25,194,255,0.10);
+  --messageSystemText: #e6f6ff;
+  --mentionBg: rgba(25,194,255,0.14);
+  --mentionText: #e6f6ff;
+}
+
+/* Sunlit Sand */
+[data-theme="Sunlit Sand"],
+[data-theme="Sunlit Sand"] {
+  --bg: #fff9ef;
+  --bg2: #ffeecf;
+  --panel: #ffffff;
+  --panel2: #fff4df;
+  --text: #2f2415;
+  --muted: #6b5638;
+  --border: #0000001f;
+  --shadowColor: rgba(0,0,0,0.14);
+  --accent: #ff9f1c;
+  --accent2: #ffd166;
+  --danger: #d7373a;
+  --success: #1f8a4c;
+  --warning: #b87410;
+  --link: #d97a00;
+  --messageSelfBg: #ff9f1c;
+  --messageSelfText: #2f2415;
+  --messageOtherBg: #ffffff;
+  --messageOtherText: #2f2415;
+  --messageSystemBg: rgba(255,159,28,0.10);
+  --messageSystemText: #2f2415;
+  --mentionBg: rgba(255,159,28,0.12);
+  --mentionText: #2f2415;
+}
+
+/* Graphite */
+[data-theme="Graphite"],
+[data-theme="Graphite"] {
+  --bg: #0c0f13;
+  --bg2: #141a22;
+  --panel: #11161d;
+  --panel2: #171e28;
+  --text: #eef2f7;
+  --muted: #b7c1ce;
+  --border: #ffffff1a;
+  --shadowColor: rgba(0,0,0,0.55);
+  --accent: #a1b2c3;
+  --accent2: #d6dee8;
+  --danger: #ff4d4f;
+  --success: #2ddf87;
+  --warning: #ffb020;
+  --link: #d6dee8;
+  --messageSelfBg: #a1b2c3;
+  --messageSelfText: #0c0f13;
+  --messageOtherBg: #171e28;
+  --messageOtherText: #eef2f7;
+  --messageSystemBg: rgba(161,178,195,0.12);
+  --messageSystemText: #eef2f7;
+  --mentionBg: rgba(161,178,195,0.14);
+  --mentionText: #eef2f7;
+}
+
 [data-theme] {
   color-scheme: dark;
 }

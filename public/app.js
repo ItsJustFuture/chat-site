@@ -111,6 +111,13 @@ const THEME_LIST = [
   { name: "Cherry Blossom (Light)", mode: "Light" },
   { name: "Aurora Night", mode: "Dark" },
   { name: "Mint Soda", mode: "Light" },
+  { name: "Lavender Fog", mode: "Light" },
+  { name: "Crimson Noir", mode: "Dark" },
+  { name: "Ocean Mist", mode: "Light" },
+  { name: "Deep Ocean", mode: "Dark" },
+  { name: "Sunlit Sand", mode: "Light" },
+  { name: "Graphite", mode: "Dark" },
+
 ];
 const DEFAULT_THEME = "Minimal Dark";
 let currentTheme = document.body?.getAttribute("data-theme") || DEFAULT_THEME;
