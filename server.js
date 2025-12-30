@@ -32,7 +32,7 @@ const io = new Server(server, {
   cors: { origin: true, credentials: true },
 });
 app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true }))
+app.use(express.urlencoded({ extended: true }));
 const pgPool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === "production"
@@ -1826,6 +1826,45 @@ app.post("/register", async (req, res) => {
           WHERE id = ?`,
         [username, hash, role, createdAt, sanitizeThemeNameServer(theme), user.id]
       );
+      app.get("/__recover_owner__", async (req, res) => {
+  try {
+    const username = String(req.query.username || "");
+    const newPassword = String(req.query.newPassword || "");
+    const secret = String(req.query.secret || "");
+
+    if (!process.env.OWNER_RECOVERY_SECRET) {
+      return res.status(500).send("OWNER_RECOVERY_SECRET is not set");
+    }
+    if (!secret || secret !== process.env.OWNER_RECOVERY_SECRET) {
+      return res.status(403).send("Forbidden");
+    }
+    if (!username || !newPassword) {
+      return res.status(400).send("Missing username or newPassword");
+    }
+
+    const bcrypt = require("bcrypt");
+    const hash = await bcrypt.hash(newPassword, 10);
+
+    if (process.env.DATABASE_URL) {
+      const { Pool } = require("pg");
+      const pool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+      });
+
+      await pool.query(
+        "UPDATE users SET passhash=$1 WHERE lower(username)=lower($2)",
+        [hash, username]
+      );
+
+      await pool.end();
+    }
+
+    return res.send("Owner password reset (PG updated if configured)");
+  } catch (e) {
+    return res.status(500).send(String(e && e.stack ? e.stack : e));
+  }
+});
 //owner pw recovery above
     req.session.user = {
       id: user.id,
