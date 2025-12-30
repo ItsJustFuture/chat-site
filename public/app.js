@@ -760,6 +760,7 @@ function loadDmThemePrefsFromStorage(){
 function saveDmThemePrefsToStorage(){
   try { localStorage.setItem("dmThemePrefs", JSON.stringify(dmThemePrefs)); }
   catch{}
+  queuePersistPrefs({ dmThemePrefs });
 }
 function applyDmThemePrefs(){
   const bg = sanitizeColor(dmThemePrefs.background, dmThemeDefaults.background, dmThemeDefaults.background);
@@ -803,6 +804,58 @@ async function persistThemePreference(theme){
     if(res.ok){
       const data = await res.json();
       if(data?.theme) me.theme = data.theme;
+    }
+  }catch{}
+}
+
+
+// ---- Server-persisted user prefs (badge colors, DM theme, etc.)
+async function persistUserPrefs(prefs){
+  if(!me) return null;
+  try{
+    const res = await fetch("/api/me/prefs", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ prefs })
+    });
+    if(!res.ok) return null;
+    const data = await res.json().catch(()=>null);
+    return data?.prefs || null;
+  }catch{
+    return null;
+  }
+}
+
+let prefsSaveTimer = null;
+let prefsPending = {};
+function queuePersistPrefs(partial){
+  if(!partial || typeof partial !== "object") return;
+  prefsPending = { ...prefsPending, ...partial };
+  if(prefsSaveTimer) clearTimeout(prefsSaveTimer);
+  prefsSaveTimer = setTimeout(async () => {
+    const payload = prefsPending;
+    prefsPending = {};
+    prefsSaveTimer = null;
+    await persistUserPrefs(payload);
+  }, 800);
+}
+
+async function loadUserPrefs(){
+  try{
+    const res = await fetch("/api/me/prefs");
+    if(!res.ok) return;
+    const data = await res.json();
+    const prefs = data?.prefs || {};
+    if(prefs.dmBadgePrefs && typeof prefs.dmBadgePrefs === "object"){
+      badgePrefs = { ...badgeDefaults, ...prefs.dmBadgePrefs };
+      applyBadgePrefs();
+      saveBadgePrefsToStorage();
+  queuePersistPrefs({ dmBadgePrefs: badgePrefs });
+    }
+    if(prefs.dmThemePrefs && typeof prefs.dmThemePrefs === "object"){
+      dmThemePrefs = { ...dmThemeDefaults, ...prefs.dmThemePrefs };
+      applyDmThemePrefs();
+      saveDmThemePrefsToStorage();
     }
   }catch{}
 }
@@ -2624,22 +2677,8 @@ function renderChangelogList(){
     empty.className = "small muted";
     empty.textContent = "No changelog entries yet.";
     changelogList.appendChild(empty);
-    const when = formatLocal(entry.created_at_iso || entry.created_at);
-timestampEl.textContent = when;
     return;
   }
-  function formatLocal(dt) {
-  if (!dt) return "";
-  const d = new Date(dt);          // dt should be ISO string or ms
-  if (Number.isNaN(d.getTime())) return ""; // avoids “Invalid Date”
-  return d.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-}
 
   const isOwner = me && roleRank(me.role) >= roleRank("Owner");
   for(const entry of changelogEntries){
@@ -3119,6 +3158,7 @@ saveBadgePrefsBtn?.addEventListener("click", () => {
   };
   applyBadgePrefs();
   saveBadgePrefsToStorage();
+  queuePersistPrefs({ dmBadgePrefs: badgePrefs });
   if (customizeMsg) customizeMsg.textContent = "Saved badge colors.";
 });
 directBadgeColor?.addEventListener("input", () => {
@@ -3357,6 +3397,7 @@ async function startApp(){
   app.style.display="block";
 
   await loadMyProfile();
+  await loadUserPrefs();
   await loadProgression();
   renderLevelProgress(progression, true);
 
