@@ -87,15 +87,42 @@ async function ensurePgDmSchema() {
     );
 
     CREATE TABLE IF NOT EXISTS dm_messages (
-      id BIGSERIAL PRIMARY KEY,
-      thread_id BIGINT NOT NULL,
-      sender_id TEXT NOT NULL,
-      text TEXT NOT NULL,
-      ts BIGINT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
+  id BIGSERIAL PRIMARY KEY,
+  thread_id BIGINT NOT NULL,
+  sender_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  ts BIGINT NOT NULL,
+  reply_to_id BIGINT,
+  reply_to_user TEXT,
+  reply_to_text TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
-    CREATE INDEX IF NOT EXISTS idx_dm_participants_user ON dm_participants (user_id);
+
+    -- Backfill/upgrade columns for existing installs
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='dm_messages' AND column_name='reply_to_id'
+  ) THEN
+    ALTER TABLE dm_messages ADD COLUMN reply_to_id BIGINT;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='dm_messages' AND column_name='reply_to_user'
+  ) THEN
+    ALTER TABLE dm_messages ADD COLUMN reply_to_user TEXT;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='dm_messages' AND column_name='reply_to_text'
+  ) THEN
+    ALTER TABLE dm_messages ADD COLUMN reply_to_text TEXT;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_dm_participants_user ON dm_participants (user_id);
     CREATE INDEX IF NOT EXISTS idx_dm_messages_thread_ts ON dm_messages (thread_id, ts DESC);
   `);
 }
@@ -186,10 +213,11 @@ const pgInitPromise = (async () => {
         sess JSON NOT NULL,
         expire TIMESTAMP NOT NULL
       );
-      if (USE_PG) {
-  await ensurePgDmSchema();
-}
     `);
+
+    // DM schema
+    await ensurePgDmSchema();
+
 // Fix camelCase columns that Postgres lowercased previously
 // ---- Fix camelCase timestamp columns Postgres lowercased
 try {
@@ -2697,19 +2725,39 @@ io.on("connection", async (socket) => {
     try {
       const uid = String(socket.user.id);
       const rows = await pgPool.query(
-        `SELECT id FROM dm_threads WHERE user1 = $1 OR user2 = $1`,
-        [uid]
-      );
+      `SELECT thread_id FROM dm_participants WHERE user_id = $1`,
+      [uid]
+    );
 
       for (const r of rows.rows) {
-        const tid = String(r.id);
+        const tid = String(r.thread_id);
         socket.dmThreads.add(tid);
         socket.join(`dm:${tid}`);
       }
     } catch (e) {
       console.warn("[dm auto-join] failed:", e?.message || e);
     }
+  
+
+socket.on("dm:join", async (threadId) => {
+  if (!PG_ENABLED) return;
+  const tid = String(threadId);
+  const uid = String(socket.user.id);
+  if (!/^\d+$/.test(tid)) return;
+  try {
+    const ok = await pgPool.query(
+      `SELECT 1 FROM dm_participants WHERE thread_id = $1 AND user_id = $2`,
+      [tid, uid]
+    );
+    if (!ok.rows.length) return;
+    socket.dmThreads.add(tid);
+    socket.join(`dm:${tid}`);
+  } catch (e) {
+    // ignore
   }
+});
+
+}
 
   socket.on("join room", ({ room, status }) => {
     const desired = sanitizeRoomName(room) || "main";
@@ -2792,60 +2840,144 @@ app.get("/mod/logs", requireLogin, (req, res) => {
 });
 
 // ---- Direct messages API
-app.get("/dm/threads", requireLogin, (req, res) => {
-  const userId = req.session.user.id;
 
-  db.all(
-    `SELECT t.id, t.title, t.is_group, t.created_at,
-            (SELECT text FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1) AS last_text,
-            (SELECT ts FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1) AS last_ts
-     FROM dm_threads t
-     INNER JOIN dm_participants p ON p.thread_id = t.id
-     WHERE p.user_id = ?
-       AND (t.is_group = 1 OR EXISTS (SELECT 1 FROM dm_messages WHERE thread_id = t.id))
-     ORDER BY COALESCE(last_ts, t.created_at) DESC`,
-    [userId],
-    (err, threads) => {
-      if (err) return res.status(500).send("Failed to load threads");
-      if (!threads?.length) return res.json([]);
-
-      const ids = threads.map((t) => t.id);
-      const placeholders = ids.map(() => "?").join(",");
-
-      db.all(
-        `SELECT dp.thread_id, u.username FROM dm_participants dp JOIN users u ON u.id = dp.user_id WHERE dp.thread_id IN (${placeholders})`,
-        ids,
-        (_e, parts) => {
-          const grouped = new Map();
-          for (const p of parts || []) {
-            if (!grouped.has(p.thread_id)) grouped.set(p.thread_id, []);
-            grouped.get(p.thread_id).push(p.username);
-          }
-
-          const result = threads.map((t) => ({
-            ...t,
-            participants: grouped.get(t.id) || [],
-          }));
-          res.json(result);
-        }
-      );
-    }
-  );
-});
-
-app.get("/dm/thread/:id", requireLogin, (req, res) => {
-  const tid = Number(req.params.id);
-  if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
-  loadThreadForUser(tid, req.session.user.id, (err, thread) => {
-    if (err) return res.status(403).send("Not allowed");
-    return res.json(thread);
+// -------------------- DMs (Postgres-backed) --------------------
+function sqliteUsernamesForIds(ids) {
+  return new Promise((resolve) => {
+    const nums = (ids || [])
+      .map((x) => Number(x))
+      .filter((n) => Number.isFinite(n));
+    if (!nums.length) return resolve(new Map());
+    const placeholders = nums.map(() => "?").join(",");
+    db.all(
+      `SELECT id, username FROM users WHERE id IN (${placeholders})`,
+      nums,
+      (_e, rows) => {
+        const m = new Map();
+        for (const r of rows || []) m.set(String(r.id), r.username);
+        resolve(m);
+      }
+    );
   });
+}
+
+async function pgLoadThreadForUser(threadId, userId) {
+  const tid = String(threadId);
+  const uid = String(userId);
+
+  const allowed = await pgPool.query(
+    `SELECT 1 FROM dm_participants WHERE thread_id = $1 AND user_id = $2`,
+    [tid, uid]
+  );
+  if (!allowed.rows.length) throw new Error("not allowed");
+
+  const t = await pgPool.query(
+    `SELECT id, title, is_group, created_at, created_by
+     FROM dm_threads
+     WHERE id = $1`,
+    [tid]
+  );
+  if (!t.rows.length) throw new Error("not found");
+
+  const parts = await pgPool.query(
+    `SELECT user_id FROM dm_participants WHERE thread_id = $1`,
+    [tid]
+  );
+
+  const ids = parts.rows.map((r) => String(r.user_id));
+  const nameMap = await sqliteUsernamesForIds(ids);
+  const participants = ids.map((id) => nameMap.get(id) || id);
+
+  return {
+    ...t.rows[0],
+    participants,
+  };
+}
+
+app.get("/dm/threads", requireLogin, async (req, res) => {
+  if (!PG_ENABLED) return res.json([]);
+
+  const userId = String(req.session.user.id);
+
+  try {
+    const threads = await pgPool.query(
+      `
+      SELECT
+        t.id, t.title, t.is_group, t.created_at,
+        lm.text AS last_text,
+        lm.ts   AS last_ts
+      FROM dm_threads t
+      JOIN dm_participants p ON p.thread_id = t.id
+      LEFT JOIN LATERAL (
+        SELECT text, ts
+        FROM dm_messages
+        WHERE thread_id = t.id
+        ORDER BY ts DESC
+        LIMIT 1
+      ) lm ON TRUE
+      WHERE p.user_id = $1
+        AND (t.is_group = TRUE OR lm.ts IS NOT NULL)
+      ORDER BY COALESCE(lm.ts, EXTRACT(EPOCH FROM t.created_at)*1000) DESC
+      `,
+      [userId]
+    );
+
+    if (!threads.rows.length) return res.json([]);
+
+    const ids = threads.rows.map((t) => String(t.id));
+    const parts = await pgPool.query(
+      `SELECT thread_id, user_id FROM dm_participants WHERE thread_id = ANY($1::bigint[])`,
+      [ids]
+    );
+
+    const grouped = new Map();
+    for (const p of parts.rows) {
+      const tid = String(p.thread_id);
+      if (!grouped.has(tid)) grouped.set(tid, []);
+      grouped.get(tid).push(String(p.user_id));
+    }
+
+    // Map user IDs -> usernames via SQLite (fallback to ID string)
+    const allUserIds = Array.from(
+      new Set(parts.rows.map((p) => String(p.user_id)))
+    );
+    const nameMap = await sqliteUsernamesForIds(allUserIds);
+
+    const result = threads.rows.map((t) => {
+      const pids = grouped.get(String(t.id)) || [];
+      return {
+        ...t,
+        participants: pids.map((id) => nameMap.get(id) || id),
+      };
+    });
+
+    res.json(result);
+  } catch (e) {
+    console.error("Failed to load threads:", e);
+    res.status(500).send("Failed to load threads");
+  }
 });
 
-app.post("/dm/thread", requireLogin, (req, res) => {
+app.get("/dm/thread/:id", requireLogin, async (req, res) => {
+  if (!PG_ENABLED) return res.status(400).send("DMs unavailable");
+
+  const tid = String(req.params.id);
+  if (!/^\d+$/.test(tid)) return res.status(400).send("Invalid thread");
+
+  try {
+    const thread = await pgLoadThreadForUser(tid, req.session.user.id);
+    return res.json(thread);
+  } catch (_e) {
+    return res.status(403).send("Not allowed");
+  }
+});
+
+app.post("/dm/thread", requireLogin, async (req, res) => {
+  if (!PG_ENABLED) return res.status(400).send("DMs unavailable");
+
   let participants = req.body?.participants;
   if (!Array.isArray(participants)) {
-    const raw = String(participants || req.body?.participant || req.body?.user || "");
+    const raw = String(req.body?.participants || req.body?.participant || req.body?.user || "");
     participants = raw.split(",");
   }
 
@@ -2875,90 +3007,93 @@ app.post("/dm/thread", requireLogin, (req, res) => {
     if (cleaned.length < 2 && !title) return res.status(400).send("Group chats need 2+ participants (or a title)");
   }
 
-  fetchUsersByNames(cleaned, (err, users) => {
+  fetchUsersByNames(cleaned, async (err, users) => {
     if (err) return res.status(500).send("Failed to create thread");
     if (users.length !== cleaned.length) return res.status(404).send("User not found");
 
-    const now = Date.now();
+    const myId = String(req.session.user.id);
     const isGroup = kindRaw === "group"
       ? true
       : (kindRaw === "direct" ? false : (users.length + 1 > 2 || !!title));
 
-    // If it's a direct DM, reuse existing 1:1 thread (prevents duplicates)
-    const myId = req.session.user.id;
-    if (!isGroup && users.length === 1) {
-      const otherId = users[0].id;
-      db.get(
-        `
-        SELECT t.id AS id
-        FROM dm_threads t
-        WHERE t.is_group = 0
-          AND (SELECT COUNT(*) FROM dm_participants dp WHERE dp.thread_id = t.id) = 2
-          AND EXISTS (SELECT 1 FROM dm_participants dp WHERE dp.thread_id = t.id AND dp.user_id = ?)
-          AND EXISTS (SELECT 1 FROM dm_participants dp WHERE dp.thread_id = t.id AND dp.user_id = ?)
-        LIMIT 1
-        `,
-        [myId, otherId],
-        (reuseErr, row) => {
-          if (reuseErr) return res.status(500).send("Failed to create thread");
-          if (row?.id) return res.json({ ok: true, threadId: row.id, reused: true });
-          return createNewThread();
+    try {
+      // If it's a direct DM, reuse existing 1:1 thread (prevents duplicates)
+      if (!isGroup && users.length === 1) {
+        const otherId = String(users[0].id);
+
+        const reuse = await pgPool.query(
+          `
+          SELECT t.id
+          FROM dm_threads t
+          JOIN dm_participants p1 ON p1.thread_id = t.id AND p1.user_id = $1
+          JOIN dm_participants p2 ON p2.thread_id = t.id AND p2.user_id = $2
+          WHERE t.is_group = FALSE
+            AND (SELECT COUNT(*) FROM dm_participants dp WHERE dp.thread_id = t.id) = 2
+          LIMIT 1
+          `,
+          [myId, otherId]
+        );
+
+        if (reuse.rows.length) {
+          return res.json({ ok: true, threadId: reuse.rows[0].id, reused: true });
         }
+      }
+
+      const created = await pgPool.query(
+        `INSERT INTO dm_threads (title, is_group, created_by, created_at)
+         VALUES ($1, $2, $3, NOW())
+         RETURNING id`,
+        [title || null, isGroup, myId]
       );
-      return;
-    }
 
-    return createNewThread();
+      const threadId = String(created.rows[0].id);
 
-    function createNewThread() {
-      db.run(
-        `INSERT INTO dm_threads (title, is_group, created_by, created_at) VALUES (?, ?, ?, ?)`,
-        [title || null, isGroup ? 1 : 0, myId, now],
-        function (insertErr) {
-          if (insertErr) return res.status(500).send("Failed to create thread");
-          const threadId = this.lastID;
+      const participantIds = users.map((u) => String(u.id));
+      participantIds.push(myId);
 
-          const participantIds = users.map((u) => u.id);
-          participantIds.push(myId);
+      for (const uid of participantIds) {
+        await pgPool.query(
+          `INSERT INTO dm_participants (thread_id, user_id, added_by, joined_at)
+           VALUES ($1, $2, $3, NOW())
+           ON CONFLICT DO NOTHING`,
+          [threadId, uid, myId]
+        );
+      }
 
-          for (const uid of participantIds) {
-            db.run(
-              `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
-              [threadId, uid, myId, now]
-            );
-          }
+      const allNames = users.map((u) => u.username);
+      allNames.push(req.session.user.username);
 
-          const allNames = users.map((u) => u.username);
-          allNames.push(req.session.user.username);
-
-          // join sockets + notify invited users
-          for (const uid of participantIds) {
-            const sid = socketIdByUserId.get(uid);
-            if (sid) {
-              const sock = io.sockets.sockets.get(sid);
-              if (sock) sock.join(`dm:${threadId}`);
-              io.to(sid).emit("dm thread invited", {
-                threadId,
-                title,
-                isGroup,
-                participants: allNames,
-              });
-            }
-          }
-
-          res.json({ ok: true, threadId });
+      // join sockets + notify invited users
+      for (const uid of participantIds) {
+        const sid = socketIdByUserId.get(uid);
+        if (sid) {
+          const sock = io.sockets.sockets.get(sid);
+          if (sock) sock.join(`dm:${threadId}`);
+          io.to(sid).emit("dm thread invited", {
+            threadId,
+            title,
+            isGroup,
+            participants: allNames,
+          });
         }
-      );
+      }
+
+      return res.json({ ok: true, threadId });
+    } catch (e) {
+      console.error("Failed to create thread:", e);
+      return res.status(500).send("Failed to create thread");
     }
   });
 });
 
-app.post("/dm/thread/:id/participants", requireLogin, (req, res) => {
-  const tid = Number(req.params.id);
-  if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
+app.post("/dm/thread/:id/participants", requireLogin, async (req, res) => {
+  if (!PG_ENABLED) return res.status(400).send("DMs unavailable");
 
-  loadThreadForUser(tid, req.session.user.id, (err, thread) => {
-    if (err) return res.status(403).send("Not allowed");
+  const tid = String(req.params.id);
+  if (!/^\d+$/.test(tid)) return res.status(400).send("Invalid thread");
+
+  try {
+    const thread = await pgLoadThreadForUser(tid, req.session.user.id);
     if (!thread.is_group) return res.status(400).send("Only group DMs can add members");
 
     let participants = req.body?.participants;
@@ -2977,81 +3112,95 @@ app.post("/dm/thread/:id/participants", requireLogin, (req, res) => {
 
     if (!cleaned.length) return res.status(400).send("Pick at least one new member");
 
-    fetchUsersByNames(cleaned, (fetchErr, users) => {
+    fetchUsersByNames(cleaned, async (fetchErr, users) => {
       if (fetchErr) return res.status(500).send("Failed to add members");
       if (users.length !== cleaned.length) return res.status(404).send("User not found");
 
-      db.all(
-        `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
-        [tid],
-        (listErr, rows) => {
-          if (listErr) return res.status(500).send("Failed to add members");
-          const existingIds = new Set((rows || []).map((r) => r.user_id));
-          const newUsers = users.filter((u) => !existingIds.has(u.id));
-          if (!newUsers.length) return res.status(400).send("Everyone is already in the group");
+      try {
+        const existing = await pgPool.query(
+          `SELECT user_id FROM dm_participants WHERE thread_id = $1`,
+          [tid]
+        );
+        const existingIds = new Set(existing.rows.map((r) => String(r.user_id)));
 
-          const now = Date.now();
-          for (const u of newUsers) {
-            db.run(
-              `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
-              [tid, u.id, req.session.user.id, now]
-            );
-            const sid = socketIdByUserId.get(u.id);
-            if (sid) {
-              const sock = io.sockets.sockets.get(sid);
-              if (sock) sock.join(`dm:${tid}`);
-              io.to(sid).emit("dm thread invited", {
-                threadId: tid,
-                title: thread.title || null,
-                isGroup: true,
-                participants: thread.participants,
-              });
-            }
+        const newUsers = users.filter((u) => !existingIds.has(String(u.id)));
+        if (!newUsers.length) return res.status(400).send("Everyone is already in the group");
+
+        const myId = String(req.session.user.id);
+
+        for (const u of newUsers) {
+          const uid = String(u.id);
+          await pgPool.query(
+            `INSERT INTO dm_participants (thread_id, user_id, added_by, joined_at)
+             VALUES ($1, $2, $3, NOW())
+             ON CONFLICT DO NOTHING`,
+            [tid, uid, myId]
+          );
+
+          const sid = socketIdByUserId.get(uid);
+          if (sid) {
+            const sock = io.sockets.sockets.get(sid);
+            if (sock) sock.join(`dm:${tid}`);
+            io.to(sid).emit("dm thread invited", {
+              threadId: tid,
+              title: thread.title || null,
+              isGroup: true,
+              participants: thread.participants,
+            });
           }
-
-          loadThreadForUser(tid, req.session.user.id, (infoErr, fresh) => {
-            if (infoErr) return res.status(500).send("Added but could not refresh");
-            return res.json({ ok: true, participants: fresh.participants });
-          });
         }
-      );
+
+        const fresh = await pgLoadThreadForUser(tid, req.session.user.id);
+        return res.json({ ok: true, participants: fresh.participants });
+      } catch (e) {
+        console.error("Failed to add members:", e);
+        return res.status(500).send("Failed to add members");
+      }
     });
-  });
+  } catch (_e) {
+    return res.status(403).send("Not allowed");
+  }
 });
 
-app.post("/dm/thread/:id/leave", requireLogin, (req, res) => {
-  const tid = Number(req.params.id);
-  if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
-  loadThreadForUser(tid, req.session.user.id, (err, thread) => {
-    if (err) return res.status(403).send("Not allowed");
+app.post("/dm/thread/:id/leave", requireLogin, async (req, res) => {
+  if (!PG_ENABLED) return res.status(400).send("DMs unavailable");
+
+  const tid = String(req.params.id);
+  if (!/^\d+$/.test(tid)) return res.status(400).send("Invalid thread");
+
+  try {
+    const thread = await pgLoadThreadForUser(tid, req.session.user.id);
     if (!thread.is_group) return res.status(400).send("Leaving only available in group chats");
 
-    db.run(
-      `DELETE FROM dm_participants WHERE thread_id = ? AND user_id = ?`,
-      [tid, req.session.user.id],
-      (delErr) => {
-        if (delErr) return res.status(500).send("Could not leave group");
-        return res.json({ ok: true });
-      }
+    await pgPool.query(
+      `DELETE FROM dm_participants WHERE thread_id = $1 AND user_id = $2`,
+      [tid, String(req.session.user.id)]
     );
-  });
+
+    return res.json({ ok: true });
+  } catch (_e) {
+    return res.status(403).send("Not allowed");
+  }
 });
 
-app.delete("/dm/thread/:id/messages", requireLogin, (req, res) => {
-  const tid = Number(req.params.id);
-  if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
+app.delete("/dm/thread/:id/messages", requireLogin, async (req, res) => {
+  if (!PG_ENABLED) return res.status(400).send("DMs unavailable");
 
-  loadThreadForUser(tid, req.session.user.id, (err) => {
-    if (err) return res.status(403).send("Not allowed");
+  const tid = String(req.params.id);
+  if (!/^\d+$/.test(tid)) return res.status(400).send("Invalid thread");
 
-    db.run("DELETE FROM dm_messages WHERE thread_id = ?", [tid], (delErr) => {
-      if (delErr) return res.status(500).send("Failed to delete history");
+  try {
+    await pgLoadThreadForUser(tid, req.session.user.id);
 
-      io.to(`dm:${tid}`).emit("dm history cleared", { threadId: tid });
-      res.json({ ok: true });
-    });
-  });
+    await pgPool.query(`DELETE FROM dm_messages WHERE thread_id = $1`, [tid]);
+
+    io.to(`dm:${tid}`).emit("dm history cleared", { threadId: tid });
+    return res.json({ ok: true });
+  } catch (_e) {
+    return res.status(403).send("Not allowed");
+  }
 });
+// ------------------ end DMs (Postgres-backed) ------------------
 
 setInterval(() => {
   const now = Date.now();
@@ -3443,107 +3592,150 @@ if (!room) {
     }
   });
 
-  socket.on("dm join", ({ threadId }) => {
-    const tid = Number(threadId);
-    if (!Number.isInteger(tid)) return;
+  
 
-    loadThreadForUser(tid, socket.user.id, (err, thread) => {
-      if (err) return;
-      socket.dmThreads.add(tid);
-      socket.join(`dm:${tid}`);
+socket.on("dm join", async ({ threadId }) => {
+  if (!PG_ENABLED) return;
+  const tid = String(threadId);
+  if (!/^\d+$/.test(tid)) return;
 
-      db.all(
-        `SELECT id, thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text FROM dm_messages WHERE thread_id=? ORDER BY ts DESC LIMIT 50`,
-        [tid],
-        (_e, rows) => {
-          const msgs = (rows || []).reverse().map((r) => ({
-            messageId: r.id,
-            id: r.id,
-            threadId: r.thread_id,
-            userId: r.user_id,
-            user: r.username,
-            text: r.text,
-            ts: r.ts,
-            replyToId: r.reply_to_id || null,
-            replyToUser: r.reply_to_user || "",
-            replyToText: r.reply_to_text || "",
-          }));
-          socket.emit("dm history", {
-            threadId: tid,
-            title: thread.title || "",
-            isGroup: !!thread.is_group,
-            participants: thread.participants || [],
-            messages: msgs,
-          });
-        }
+  const uid = String(socket.user.id);
+
+  try {
+    const ok = await pgPool.query(
+      `SELECT 1 FROM dm_participants WHERE thread_id = $1 AND user_id = $2`,
+      [tid, uid]
+    );
+    if (!ok.rows.length) return;
+
+    socket.dmThreads.add(tid);
+    socket.join(`dm:${tid}`);
+
+    const threadQ = await pgPool.query(
+      `SELECT id, title, is_group, created_at, created_by FROM dm_threads WHERE id = $1`,
+      [tid]
+    );
+    if (!threadQ.rows.length) return;
+
+    const partsQ = await pgPool.query(
+      `SELECT user_id FROM dm_participants WHERE thread_id = $1`,
+      [tid]
+    );
+    const pids = partsQ.rows.map((r) => String(r.user_id));
+    const nameMap = await sqliteUsernamesForIds(pids);
+    const participants = pids.map((id) => nameMap.get(id) || id);
+
+    const msgsQ = await pgPool.query(
+      `SELECT id, thread_id, sender_id, text, ts, reply_to_id, reply_to_user, reply_to_text
+       FROM dm_messages
+       WHERE thread_id = $1
+       ORDER BY ts DESC
+       LIMIT 50`,
+      [tid]
+    );
+
+    const msgs = (msgsQ.rows || []).reverse().map((r) => ({
+      messageId: Number(r.id),
+      id: Number(r.id),
+      threadId: String(r.thread_id),
+      userId: String(r.sender_id),
+      user: nameMap.get(String(r.sender_id)) || String(r.sender_id),
+      text: r.text,
+      ts: Number(r.ts),
+      replyToId: r.reply_to_id ? Number(r.reply_to_id) : null,
+      replyToUser: r.reply_to_user || "",
+      replyToText: r.reply_to_text || "",
+    }));
+
+    socket.emit("dm history", {
+      threadId: tid,
+      title: threadQ.rows[0].title || "",
+      isGroup: !!threadQ.rows[0].is_group,
+      participants,
+      messages: msgs,
+    });
+  } catch (e) {
+    console.warn("[dm join] failed:", e?.message || e);
+  }
+});
+
+
+  
+socket.on("dm message", async ({ threadId, text, replyToId }) => {
+  if (!PG_ENABLED) return;
+
+  const tid = String(threadId);
+  const body = String(text || "").trim().slice(0, 800);
+  if (!/^\d+$/.test(tid) || !body) return;
+
+  const uid = String(socket.user.id);
+
+  try {
+    const ok = await pgPool.query(
+      `SELECT 1 FROM dm_participants WHERE thread_id = $1 AND user_id = $2`,
+      [tid, uid]
+    );
+    if (!ok.rows.length) return;
+
+    // Reply metadata (optional)
+    let replyMeta = { reply_to_id: null, reply_to_user: "", reply_to_text: "" };
+    const rid = Number(replyToId);
+    if (Number.isFinite(rid)) {
+      const rq = await pgPool.query(
+        `SELECT id, sender_id, text
+         FROM dm_messages
+         WHERE id = $1 AND thread_id = $2
+         LIMIT 1`,
+        [String(rid), tid]
       );
-    });
-  });
-
-  socket.on("dm message", ({ threadId, text, replyToId }) => {
-    const tid = Number(threadId);
-    const body = String(text || "").trim().slice(0, 800);
-    if (!Number.isInteger(tid) || !body) return;
-
-    loadThreadForUser(tid, socket.user.id, (err, thread) => {
-      if (err) return;
-      const ts = Date.now();
-
-      const replyId = Number(replyToId);
-      const doInsert = (replyMeta = {}) => {
-        const replyUser = replyMeta.user || null;
-        const replyText = replyMeta.text || null;
-        const replyPk = Number.isInteger(replyMeta.id) ? replyMeta.id : null;
-
-        db.run(
-          `INSERT INTO dm_messages (thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [tid, socket.user.id, socket.user.username, body, ts, replyPk, replyUser, replyText],
-          function (insertErr) {
-            if (insertErr) return;
-            const payload = {
-              threadId: tid,
-              messageId: this.lastID,
-              userId: socket.user.id,
-              user: socket.user.username,
-              text: body,
-              ts,
-              replyToId: replyPk,
-              replyToUser: replyUser || "",
-              replyToText: replyText || "",
-            };
-            io.to(`dm:${tid}`).emit("dm message", payload);
-            if (Array.isArray(thread.participants)) {
-              db.all(
-                `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
-                [tid],
-                (_e2, rows) => {
-                  for (const r of rows || []) {
-                    const sid = socketIdByUserId.get(r.user_id);
-                    const s = sid ? io.sockets.sockets.get(sid) : null;
-                    if (s && !s.rooms.has(`dm:${tid}`)) {
-                      s.emit("dm message", payload);
-                    }
-                  }
-                }
-              );
-            }
-          }
-        );
-      };
-
-      if (Number.isInteger(replyId)) {
-        db.get(
-          `SELECT id, username, text FROM dm_messages WHERE id = ? AND thread_id = ?`,
-          [replyId, tid],
-          (_e, row) => {
-            doInsert(row || {});
-          }
-        );
-      } else {
-        doInsert();
+      if (rq.rows.length) {
+        const r = rq.rows[0];
+        const nameMap = await sqliteUsernamesForIds([String(r.sender_id)]);
+        replyMeta = {
+          reply_to_id: Number(r.id),
+          reply_to_user: nameMap.get(String(r.sender_id)) || String(r.sender_id),
+          reply_to_text: String(r.text || "").slice(0, 200),
+        };
       }
-    });
+    }
+
+    const ts = Date.now();
+    const ins = await pgPool.query(
+      `INSERT INTO dm_messages (thread_id, sender_id, text, ts, reply_to_id, reply_to_user, reply_to_text, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       RETURNING id, thread_id, sender_id, text, ts, reply_to_id, reply_to_user, reply_to_text`,
+      [
+        tid,
+        uid,
+        body,
+        ts,
+        replyMeta.reply_to_id ? String(replyMeta.reply_to_id) : null,
+        replyMeta.reply_to_user || "",
+        replyMeta.reply_to_text || "",
+      ]
+    );
+
+    const row = ins.rows[0];
+    const senderNameMap = await sqliteUsernamesForIds([uid]);
+
+    const payload = {
+      messageId: Number(row.id),
+      id: Number(row.id),
+      threadId: String(row.thread_id),
+      userId: String(row.sender_id),
+      user: senderNameMap.get(uid) || uid,
+      text: row.text,
+      ts: Number(row.ts),
+      replyToId: row.reply_to_id ? Number(row.reply_to_id) : null,
+      replyToUser: row.reply_to_user || "",
+      replyToText: row.reply_to_text || "",
+    };
+
+    io.to(`dm:${tid}`).emit("dm message", payload);
+  } catch (e) {
+    console.warn("[dm message] failed:", e?.message || e);
+  }
+});
   });
 
   socket.on("status change", ({ status }) => {
@@ -3977,7 +4169,6 @@ if (!room) {
       emitUserList(room);
     }
   });
-});
 
 // ---- Start
 pgInitPromise.finally(() => {
