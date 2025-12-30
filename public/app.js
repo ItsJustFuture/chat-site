@@ -1204,6 +1204,15 @@ function addMessage(m){
   msgIndex.push({ id: m.messageId, el: row, textLower: (m.user+" "+m.text).toLowerCase() });
 }
 
+function safeAddMessage(m){
+  try{
+    addMessage(m);
+  }catch(err){
+    console.error("addMessage failed", err, m);
+  }
+}
+
+
 function renderReactions(messageId, reactionsMap){
   reactionsCache[messageId] = reactionsMap || {};
   const counts = {};
@@ -1643,25 +1652,20 @@ async function loadDmThreads(){
   }
 }
 
-async function startDirectDm(username) {
-  try {
-    const res = await fetch("/dm/thread", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        kind: "direct",
-        participants: [username]
-      })
-    });
+async function startDirectMessage(username){
+  if (!username || username === me?.username) return;
 
-    if (!res.ok) throw new Error("Failed to create DM");
+  setDmTab("direct");
+  openDmPanel();
+  closeMemberMenu();
 
-    const data = await res.json();
-    openDmThread(data.threadId); // this already exists in your app
-  } catch (e) {
-    console.error("Start DM failed:", e);
+  if (!dmThreads.length) await loadDmThreads();
+
+  const existing = dmThreads.find((t) => !t.is_group && (t.participants || []).includes(username));
+  if (existing) {
+    openDmThread(existing.id);
+    return;
   }
-}
 
   setDmNotice("Preparing chat...");
   try {
@@ -3161,11 +3165,6 @@ modWarnBtn.addEventListener("click", ()=>{
 modOpenProfileBtn.addEventListener("click", async ()=>{
   const target = selectedModTarget();
   const targetErr = ensureTarget(target);
-  const dmBtn = document.createElement("button");
-dmBtn.className = "btn primary";
-dmBtn.textContent = "Message";
-dmBtn.onclick = () => startDirectDm(username);
-profileActions.appendChild(dmBtn);
   if(targetErr){ modMsg.textContent = targetErr; return; }
   await openMemberProfile(target);
 });
@@ -3371,11 +3370,11 @@ socket.on("disconnect", (reason) => {
   });
   socket.on("history", (history)=>{
     clearMsgs();
-    (history||[]).forEach(m=>addMessage(m));
+    (history||[]).forEach(m=>safeAddMessage(m));
     applySearch();
   });
   socket.on("chat message", (m)=>{
-    addMessage(m);
+    safeAddMessage(m);
     applySearch();
   });
     socket.on("reaction update", ({ messageId, reactions }) => {
@@ -3442,6 +3441,7 @@ socket.on("disconnect", (reason) => {
   });
 
   socket.on("dm message", (m) => {
+  try {
     const arr = dmMessages.get(m.threadId) || [];
     arr.push(m);
     dmMessages.set(m.threadId, arr);
@@ -3460,7 +3460,10 @@ socket.on("disconnect", (reason) => {
       dmUnreadThreads.delete(m.threadId);
       renderDmThreads();
     }
-  });
+  } catch (err) {
+    console.error("dm message handler failed", err, m);
+  }
+});
 
   socket.on("dm thread invited", () => {
     loadDmThreads();
