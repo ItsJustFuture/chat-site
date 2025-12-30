@@ -2403,7 +2403,7 @@ modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
 // rooms
 function setActiveRoom(room){
   currentRoom = room;
-  document.body.classList.toggle(\"dice-room\", room === \"diceroom\");
+  document.body.classList.toggle("dice-room", room === "diceroom");
   nowRoom.textContent = displayRoomName(room);
   roomTitle.textContent = displayRoomName(room);
   msgInput.placeholder = `Message ${displayRoomName(room)}`;
