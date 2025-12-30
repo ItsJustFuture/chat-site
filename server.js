@@ -2358,7 +2358,6 @@ app.get("/api/changelog", requireLogin, async (req, res) => {
       "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries ORDER BY seq DESC" +
       (limit ? " LIMIT ?" : "");
     const rows = await dbAllAsync(sql, limit ? [limit] : []);
-    created_at_iso: new Date(row.created_at).toISOString()
     return res.json((rows || []).map((r) => toChangelogPayload(r)));
   } catch (e) {
     console.error("[changelog] sqlite GET failed:", e?.message || e);
@@ -2667,11 +2666,12 @@ app.post("/profile/:username/like", requireLogin, (req, res) => {
   });
 });
 
-// Avatar upload for profile edits (2MB)
+// Avatar upload for profile edits (5MB max)
 const avatarUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, AVATARS_DIR),
     filename: (_req, file, cb) => {
+      // keep extension short + safe (prevents weird names like ".png.exe")
       const ext = path.extname(file.originalname || "").slice(0, 10) || ".png";
       cb(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`);
     },
@@ -2683,27 +2683,62 @@ const avatarUpload = multer({
   },
 });
 
-app.post("/profile", requireLogin, avatarUpload.single("avatar"), (req, res) => {
-  const mood = String(req.body?.mood || "").slice(0, 40);
-  const bio = String(req.body?.bio || "").slice(0, 2000);
-  const age = req.body?.age === "" || req.body?.age == null ? null : clamp(req.body.age, 18, 120);
-  const gender = String(req.body?.gender || "").slice(0, 40);
+// IMPORTANT: Most of your app now reads profiles from Postgres (when the user exists there).
+// The old version of this route only updated SQLite, so uploads "worked" but never showed up.
+app.post("/profile", requireLogin, (req, res) => {
+  avatarUpload.single("avatar")(req, res, async (err) => {
+    if (err) {
+      const msg =
+        err.code === "LIMIT_FILE_SIZE"
+          ? "Avatar too large (max 5MB)."
+          : (err.message || "Avatar upload failed.");
+      return res.status(400).send(msg);
+    }
 
-  const avatar = req.file ? `/avatars/${req.file.filename}` : null;
+    const userId = req.session.user.id;
+    const mood = String(req.body?.mood || "").slice(0, 40);
+    const bio = String(req.body?.bio || "").slice(0, 2000);
+    const age = req.body?.age === "" || req.body?.age == null ? null : clamp(req.body.age, 18, 120);
+    const gender = String(req.body?.gender || "").slice(0, 40);
+    const avatar = req.file ? `/avatars/${req.file.filename}` : null;
 
-  db.get("SELECT avatar FROM users WHERE id = ?", [req.session.user.id], (e, old) => {
-    const newAvatar = avatar || old?.avatar || null;
-
-    db.run(
-      `UPDATE users SET mood=?, bio=?, age=?, gender=?, avatar=? WHERE id=?`,
-      [mood, bio, age, gender, newAvatar, req.session.user.id],
-      (err2) => {
-        if (err2) return res.status(500).send("Save failed");
+    try {
+      // Prefer Postgres if this user exists there (Render prod path)
+      if (await pgUserExists(userId)) {
+        await pgPool.query(
+          `UPDATE users
+             SET mood = $1,
+                 bio = $2,
+                 age = $3,
+                 gender = $4,
+                 avatar = COALESCE($5, avatar)
+           WHERE id = $6`,
+          [mood, bio, age, gender, avatar, userId]
+        );
+        if (avatar) req.session.user.avatar = avatar;
         return res.json({ ok: true });
       }
-    );
+    } catch (e) {
+      console.warn("[/profile][pg] update failed, falling back to sqlite:", e?.message || e);
+    }
+
+    // SQLite fallback (original behavior)
+    db.get("SELECT avatar FROM users WHERE id = ?", [userId], (_e, old) => {
+      const newAvatar = avatar || old?.avatar || null;
+
+      db.run(
+        `UPDATE users SET mood=?, bio=?, age=?, gender=?, avatar=? WHERE id=?`,
+        [mood, bio, age, gender, newAvatar, userId],
+        (err2) => {
+          if (err2) return res.status(500).send("Save failed");
+          if (avatar) req.session.user.avatar = avatar;
+          return res.json({ ok: true });
+        }
+      );
+    });
   });
 });
+
 
 // ---- Uploads (10MB max). VIP can upload mp4/mov, everyone can upload images.
 const chatUpload = multer({
