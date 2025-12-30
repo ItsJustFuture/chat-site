@@ -1448,6 +1448,8 @@ function closeDrawers(){
   channelsPane?.classList.remove("open");
   membersPane?.classList.remove("open");
   drawerOverlay?.classList.remove("show");
+  // When drawers close, let the mobile composer span full width again.
+  document.body.classList.remove("drawer-left-open", "drawer-right-open");
   closeMemberMenu();
 }
 function openChannels(){
@@ -1457,6 +1459,9 @@ function openChannels(){
   membersPane?.classList.remove("open");
   channelsPane?.classList.add("open");
   drawerOverlay?.classList.add("show");
+  // Mobile: shift the fixed composer so it doesn't overlap the left drawer.
+  document.body.classList.add("drawer-left-open");
+  document.body.classList.remove("drawer-right-open");
 }
 
 function openMembers(){
@@ -1466,6 +1471,9 @@ function openMembers(){
   channelsPane?.classList.remove("open");
   membersPane?.classList.add("open");
   drawerOverlay?.classList.add("show");
+  // Mobile: shift the fixed composer so it doesn't overlap the right drawer.
+  document.body.classList.add("drawer-right-open");
+  document.body.classList.remove("drawer-left-open");
 }
 
 openChannelsBtn?.addEventListener("click", openChannels);
@@ -1519,7 +1527,9 @@ function threadAvatarNode(t){
 
 function syncDmTabUi(){
   dmTabs?.querySelectorAll("[data-dm-tab]")?.forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.dmTab === dmTab);
+    const on = btn.dataset.dmTab === dmTab;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-selected", on ? "true" : "false");
   });
   if (dmCreateGroupBtn) dmCreateGroupBtn.style.display = dmTab === "group" ? "block" : "none";
 }
