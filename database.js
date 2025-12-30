@@ -70,6 +70,12 @@ db.serialize(() => {
     ["xp", "xp INTEGER NOT NULL DEFAULT 0"],
     ["lastXpMessageAt", "lastXpMessageAt INTEGER"],
     ["lastDailyLoginAt", "lastDailyLoginAt INTEGER"],
+    ["theme", "theme TEXT NOT NULL DEFAULT 'Minimal Dark'"],
+    ["lastGoldTickAt", "lastGoldTickAt INTEGER"],
+    ["lastMessageGoldAt", "lastMessageGoldAt INTEGER"],
+    ["lastDailyLoginGoldAt", "lastDailyLoginGoldAt INTEGER"],
+    ["lastDiceRollAt", "lastDiceRollAt INTEGER"],
+    ["dice_sixes", "dice_sixes INTEGER NOT NULL DEFAULT 0"],
   ];
   for (const [col, ddl] of userColumns) addColumnIfMissing("users", col, ddl);
 

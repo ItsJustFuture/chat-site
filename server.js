@@ -1783,9 +1783,9 @@ app.post("/register", async (req, res) => {
     if (!username || username.length < 2) return res.status(400).send("Invalid username");
     if (!password || password.length < 6) return res.status(400).send("Password must be 6+ chars");
 
-    // Check Postgres first
-    const existing = await pgGetUserByUsername(username);
-    if (existing) return res.status(409).send("Username already taken");
+    // Prevent duplicates (check PG first; it's our canonical uniqueness constraint)
+    const existingPg = await pgGetUserByUsername(username);
+    if (existingPg) return res.status(409).send("Username already taken");
 
     const hash = await bcrypt.hash(password, 10);
     const createdAt = Date.now();
@@ -1797,18 +1797,41 @@ app.post("/register", async (req, res) => {
 
     const theme = DEFAULT_THEME;
 
+    // 1) Create user in Postgres (source of truth for sessions + new persistent systems)
     const createdAtValue = PG_USERS_CREATED_AT_IS_TIMESTAMP ? new Date(createdAt) : createdAt;
-
     const { rows } = await pgPool.query(
       `INSERT INTO users (username, password_hash, role, created_at, theme)
        VALUES ($1,$2,$3,$4,$5)
        RETURNING id, username, role, theme`,
       [username, hash, role, createdAtValue, theme]
     );
-
     const user = rows[0];
+    if (!user) return res.status(500).send("Registration failed");
 
-    req.session.user = { id: user.id, username: user.username, role: user.role, theme: sanitizeThemeNameServer(user.theme) };
+    // 2) Mirror into SQLite (older features still read from SQLite in this build)
+    // Insert with the Postgres id to keep ids consistent across both stores.
+    try {
+      await dbRunAsync(
+        `INSERT INTO users (id, username, password_hash, role, created_at, gold, xp, theme)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        [user.id, username, hash, role, createdAt, 0, 0, sanitizeThemeNameServer(theme)]
+      );
+    } catch (_e) {
+      // If it already exists (e.g. partial previous attempt), update it.
+      await dbRunAsync(
+        `UPDATE users
+            SET username = ?, password_hash = ?, role = ?, created_at = COALESCE(created_at, ?), theme = COALESCE(theme, ?)
+          WHERE id = ?`,
+        [username, hash, role, createdAt, sanitizeThemeNameServer(theme), user.id]
+      );
+    }
+
+    req.session.user = {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      theme: sanitizeThemeNameServer(user.theme),
+    };
 
     req.session.save((saveErr) => {
       if (saveErr) return res.status(500).send("Session save failed");
@@ -1819,68 +1842,126 @@ app.post("/register", async (req, res) => {
     res.status(500).send("Registration failed");
   }
 });
-app.post("/login", (req, res) => {
-  const username = sanitizeUsername(req.body?.username);
-  const password = String(req.body?.password || "");
-  if (!username || !password) return res.status(400).send("Missing credentials");
+app.post("/login", async (req, res) => {
+  try {
+    const username = sanitizeUsername(req.body?.username);
+    const password = String(req.body?.password || "");
+    if (!username || !password) return res.status(400).send("Missing credentials");
 
-  db.get(
-    "SELECT * FROM users WHERE lower(username) = lower(?)",
-    [username],
-    async (err, row) => {
-      if (err || !row) return res.status(401).send("Invalid username or password");
-
-      // Handle legacy password column (if present)
-      let passwordHash = typeof row.password_hash === "string" ? row.password_hash : "";
-
-      if (!passwordHash) {
-        const legacyPassword = typeof row.password === "string" ? row.password : "";
-        if (!legacyPassword) return res.status(401).send("Invalid username or password");
-
-        const legacyMatches = legacyPassword.startsWith("$2")
-          ? await bcrypt.compare(password, legacyPassword)
-          : legacyPassword === password;
-
-        if (!legacyMatches) return res.status(401).send("Invalid username or password");
-
-        passwordHash = legacyPassword.startsWith("$2")
-          ? legacyPassword
-          : await bcrypt.hash(password, 10);
-
-        db.run("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [passwordHash, row.id]);
-        row.password_hash = passwordHash;
-      }
-
-      const ok = await bcrypt.compare(password, row.password_hash);
+    // 1) Prefer Postgres users (new registrations land here)
+    const pgUser = await pgGetUserByUsername(username);
+    if (pgUser && pgUser.password_hash) {
+      const ok = await bcrypt.compare(password, String(pgUser.password_hash || ""));
       if (!ok) return res.status(401).send("Invalid username or password");
 
-      // Apply your auto-role rules
-      const norm = normKey(row.username);
-      if (AUTO_OWNER.has(norm) && row.role !== "Owner") {
-        db.run("UPDATE users SET role = 'Owner' WHERE id = ?", [row.id]);
-        row.role = "Owner";
-      } else if (AUTO_COOWNERS.has(norm) && row.role !== "Co-owner") {
-        db.run("UPDATE users SET role = 'Co-owner' WHERE id = ?", [row.id]);
-        row.role = "Co-owner";
+      const theme = sanitizeThemeNameServer(pgUser.theme || DEFAULT_THEME);
+
+      // Mirror into SQLite if missing (some UI/profile/dice logic still reads SQLite)
+      const srow = await dbGetAsync("SELECT id FROM users WHERE id = ?", [pgUser.id]).catch(() => null);
+      if (!srow) {
+        await dbRunAsync(
+          `INSERT INTO users (id, username, password_hash, role, created_at, gold, xp, theme)
+           VALUES (?,?,?,?,?,?,?,?)`,
+          [
+            pgUser.id,
+            pgUser.username,
+            pgUser.password_hash,
+            pgUser.role || "User",
+            Number(pgUser.created_at || Date.now()),
+            Number(pgUser.gold || 0),
+            Number(pgUser.xp || 0),
+            theme,
+          ]
+        );
       }
 
-      const theme = sanitizeThemeNameServer(row.theme);
-      if (!row.theme) db.run("UPDATE users SET theme = ? WHERE id = ?", [theme, row.id]);
+      req.session.user = { id: pgUser.id, username: pgUser.username, role: pgUser.role, theme };
+      await dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", pgUser.id]).catch(() => {});
 
-      req.session.user = { id: row.id, username: row.username, role: row.role, theme };
+      initGoldTick(pgUser.id);
 
-      db.run("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]);
-
-      awardDailyLoginXp(row);
-      awardDailyLoginGold(row);
-      initGoldTick(row.id);
-
-      req.session.save((saveErr) => {
+      return req.session.save((saveErr) => {
         if (saveErr) return res.status(500).send("Session save failed");
         return res.json({ ok: true });
       });
     }
-  );
+
+    // 2) Fallback to SQLite (legacy accounts)
+    const row = await dbGetAsync("SELECT * FROM users WHERE lower(username) = lower(?)", [username]);
+    if (!row) return res.status(401).send("Invalid username or password");
+
+    // Handle legacy password column (if present)
+    let passwordHash = typeof row.password_hash === "string" ? row.password_hash : "";
+
+    if (!passwordHash) {
+      const legacyPassword = typeof row.password === "string" ? row.password : "";
+      if (!legacyPassword) return res.status(401).send("Invalid username or password");
+
+      const legacyMatches = legacyPassword.startsWith("$2")
+        ? await bcrypt.compare(password, legacyPassword)
+        : legacyPassword === password;
+
+      if (!legacyMatches) return res.status(401).send("Invalid username or password");
+
+      passwordHash = legacyPassword.startsWith("$2") ? legacyPassword : await bcrypt.hash(password, 10);
+
+      await dbRunAsync("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [passwordHash, row.id]);
+      row.password_hash = passwordHash;
+    }
+
+    const ok = await bcrypt.compare(password, String(row.password_hash || ""));
+    if (!ok) return res.status(401).send("Invalid username or password");
+
+    // Apply your auto-role rules (keep both stores aligned)
+    const norm = normKey(row.username);
+    if (AUTO_OWNER.has(norm) && row.role !== "Owner") {
+      await dbRunAsync("UPDATE users SET role = 'Owner' WHERE id = ?", [row.id]);
+      row.role = "Owner";
+    } else if (AUTO_COOWNERS.has(norm) && row.role !== "Co-owner") {
+      await dbRunAsync("UPDATE users SET role = 'Co-owner' WHERE id = ?", [row.id]);
+      row.role = "Co-owner";
+    }
+
+    const theme = sanitizeThemeNameServer(row.theme || DEFAULT_THEME);
+    if (!row.theme) await dbRunAsync("UPDATE users SET theme = ? WHERE id = ?", [theme, row.id]).catch(() => {});
+
+    // Mirror into Postgres (so /me + progression + persistent systems work)
+    await pgPool.query(
+      `INSERT INTO users (id, username, password_hash, role, created_at, theme, gold, xp)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (username) DO UPDATE
+         SET password_hash = EXCLUDED.password_hash,
+             role = EXCLUDED.role,
+             theme = COALESCE(users.theme, EXCLUDED.theme),
+             gold = COALESCE(users.gold, EXCLUDED.gold),
+             xp = COALESCE(users.xp, EXCLUDED.xp)`,
+      [
+        row.id,
+        row.username,
+        passwordHash,
+        row.role || "User",
+        Number(row.created_at || Date.now()),
+        theme,
+        Number(row.gold || 0),
+        Number(row.xp || 0),
+      ]
+    ).catch((e) => console.error("PG mirror on login failed:", e));
+
+    req.session.user = { id: row.id, username: row.username, role: row.role, theme };
+
+    await dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]).catch(() => {});
+    awardDailyLoginXp(row);
+    awardDailyLoginGold(row);
+    initGoldTick(row.id);
+
+    return req.session.save((saveErr) => {
+      if (saveErr) return res.status(500).send("Session save failed");
+      return res.json({ ok: true });
+    });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).send("Login failed");
+  }
 });
 
 app.post("/logout", (req, res) => {
