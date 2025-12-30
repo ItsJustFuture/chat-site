@@ -640,6 +640,8 @@ function pgRowToUser(row) {
   return {
     id: row.id,
     username: row.username,
+    // Needed for login() bcrypt.compare. Keep server-side only.
+    password_hash: row.password_hash || null,
     role: row.role || "User",
     theme: sanitizeThemeNameServer(row.theme),
     avatar: row.avatar || null,
