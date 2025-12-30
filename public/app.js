@@ -1643,20 +1643,25 @@ async function loadDmThreads(){
   }
 }
 
-async function startDirectMessage(username){
-  if (!username || username === me?.username) return;
+async function startDirectDm(username) {
+  try {
+    const res = await fetch("/dm/thread", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "direct",
+        participants: [username]
+      })
+    });
 
-  setDmTab("direct");
-  openDmPanel();
-  closeMemberMenu();
+    if (!res.ok) throw new Error("Failed to create DM");
 
-  if (!dmThreads.length) await loadDmThreads();
-
-  const existing = dmThreads.find((t) => !t.is_group && (t.participants || []).includes(username));
-  if (existing) {
-    openDmThread(existing.id);
-    return;
+    const data = await res.json();
+    openDmThread(data.threadId); // this already exists in your app
+  } catch (e) {
+    console.error("Start DM failed:", e);
   }
+}
 
   setDmNotice("Preparing chat...");
   try {
@@ -3156,6 +3161,11 @@ modWarnBtn.addEventListener("click", ()=>{
 modOpenProfileBtn.addEventListener("click", async ()=>{
   const target = selectedModTarget();
   const targetErr = ensureTarget(target);
+  const dmBtn = document.createElement("button");
+dmBtn.className = "btn primary";
+dmBtn.textContent = "Message";
+dmBtn.onclick = () => startDirectDm(username);
+profileActions.appendChild(dmBtn);
   if(targetErr){ modMsg.textContent = targetErr; return; }
   await openMemberProfile(target);
 });
