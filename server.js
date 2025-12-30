@@ -32,7 +32,7 @@ const io = new Server(server, {
   cors: { origin: true, credentials: true },
 });
 app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true })
+app.use(express.urlencoded({ extended: true }))
 const pgPool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === "production"
