@@ -1693,6 +1693,18 @@ body.lockScroll{ overflow:hidden; }
   box-shadow: 0 0 0 2px rgba(0,0,0,0.5);
   display:none;
 }
+.dmAvatarStrip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px;
+}
+
+@media (min-width: 769px) {
+  .dmAvatarStrip {
+    display: flex;
+  }
+}
 .dmAvatarBtn.unread .unreadDot{ display:block; }
 .dmAvatarBtn.active .avatar{
   outline:2px solid rgba(255,255,255,0.6);
