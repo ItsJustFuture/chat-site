@@ -58,7 +58,22 @@ async function pgGetColumnType(tableName, columnName) {
   );
   return rows[0] || null;
 }
+async function pgEnsureCamelColumn(tableName, camelName, typeSql = "BIGINT") {
+  // If exact camelCase column already exists, we're good
+  const exact = await pgGetColumnType(tableName, camelName);
+  if (exact) return;
 
+  // If a lowercased version exists (created without quotes), rename it to the camelCase quoted form
+  const lower = camelName.toLowerCase();
+  const lowerInfo = await pgGetColumnType(tableName, lower);
+  if (lowerInfo) {
+    await pgPool.query(`ALTER TABLE ${tableName} RENAME COLUMN ${lower} TO "${camelName}"`);
+    return;
+  }
+
+  // Otherwise just add the camelCase column
+  await pgPool.query(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS "${camelName}" ${typeSql}`);
+}
 async function pgEnsureEpochMsBigint(tableName, columnName) {
   const info = await pgGetColumnType(tableName, columnName);
   if (!info) return;
@@ -129,7 +144,24 @@ const pgInitPromise = (async () => {
         expire TIMESTAMP NOT NULL
       );
     `);
+// Fix camelCase columns that Postgres lowercased previously
+const camelCols = [
+  "lastGoldTickAt",
+  "lastMessageGoldAt",
+  "lastDailyLoginGoldAt",
+  "lastXpMessageAt",
+  "lastDailyLoginAt",
+  "lastDiceRollAt",
+  "dice_sixes",
+];
 
+for (const c of camelCols) {
+  try {
+    await pgEnsureCamelColumn("users", c, c === "dice_sixes" ? "INTEGER NOT NULL DEFAULT 0" : "BIGINT");
+  } catch (e) {
+    console.warn("[pg-migrate camel]", c, e?.message || e);
+  }
+}
     // If your table already existed (older minimal schema), ensure columns exist
     const addCols = [
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'User'`,
