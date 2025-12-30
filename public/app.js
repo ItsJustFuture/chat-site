@@ -966,7 +966,13 @@ function openReactionMenu(messageId, anchorEl, rowEl){
   // on mobile, force show actions while menu is open
   if(rowEl) rowEl.classList.add("showActions");
 }
-
+// Simple linkify helper (prevents UI crashes)
+function linkify(text = "") {
+  return String(text).replace(
+    /(https?:\/\/[^\s]+)/g,
+    (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`
+  );
+}
 function closeReactionMenu(){
   if(!reactionMenuEl) return;
   reactionMenuEl.classList.remove("open");
@@ -1052,16 +1058,36 @@ function addMessage(m){
     <span class="ts">${new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span>
   `;
 
-  const rawText = String(m.text || "");
-  const ytId = extractYouTubeId(rawText);
-  const displayText = ytId ? stripYouTubeUrls(rawText) : rawText;
+const rawText = String(m.text || "");
 
-  if(displayText){
-    const text = document.createElement("div");
-    text.className = "text";
-    text.innerHTML = linkify(escapeHtml(displayText));
-    bubble.appendChild(text);
+let ytId = null;
+let displayText = rawText;
+
+try {
+  ytId = extractYouTubeId(rawText);
+  if (ytId) {
+    displayText = stripYouTubeUrls(rawText);
   }
+} catch (err) {
+  console.warn("YouTube parsing failed, falling back to plain text:", err);
+  displayText = rawText;
+}
+if (displayText) {
+  const text = document.createElement("div");
+  text.className = "text";
+
+  try {
+    // Keep your existing behavior: escape first, then linkify
+    text.innerHTML = linkify(escapeHtml(displayText));
+  } catch (err) {
+    console.error("addMessage render failed:", err, m);
+    // Fallback: always show message as plain text
+    text.textContent = displayText;
+  }
+
+  bubble.appendChild(text);
+}
+
 
   if(ytId){
     bubble.appendChild(buildYouTubeIframe(ytId));
