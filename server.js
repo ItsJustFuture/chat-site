@@ -850,7 +850,12 @@ const ALLOWED_THEMES = [
   "Sky Light",
 ];
 
-const GOLD_TICK_MS = 5_000;
+// Passive gold accrues slowly over time. 5s ticks were far too fast.
+// 1 gold per minute = 60 gold/hour.
+const GOLD_TICK_MS = 60_000;
+
+// Prevent double-awarding gold due to overlapping async timers/events for the same user.
+const goldInFlight = new Set();
 const MESSAGE_GOLD_COOLDOWN_MS = 5 * 60 * 1000;
 const DAILY_GOLD_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 // ---- Real-time presence tracking
@@ -1500,6 +1505,14 @@ function initGoldTick(userId, now = Date.now()) {
 function awardPassiveGold(userId, cb) {
   const now = Date.now();
 
+  // Avoid double-awards when multiple async triggers fire at once for the same user.
+  if (goldInFlight.has(userId)) return cb?.(null, 0);
+  goldInFlight.add(userId);
+  const done = (err, gained) => {
+    goldInFlight.delete(userId);
+    cb?.(err, gained);
+  };
+
   (async () => {
     try {
       if (await pgUserExists(userId)) {
@@ -1514,7 +1527,7 @@ function awardPassiveGold(userId, cb) {
 
         const elapsed = now - last;
         const ticks = Math.floor(elapsed / GOLD_TICK_MS);
-        if (ticks <= 0) return cb?.(null, 0);
+        if (ticks <= 0) return done(null, 0);
 
         const newTickTs = last + ticks * GOLD_TICK_MS;
         await pgPool.query(
@@ -1522,7 +1535,7 @@ function awardPassiveGold(userId, cb) {
           [ticks, newTickTs, userId]
         );
         if (ticks > 0) emitProgressionUpdate(userId);
-        return cb?.(null, ticks);
+        return done(null, ticks);
       }
     } catch (e) {
       console.warn("[passiveGold][pg] failed, falling back to sqlite:", e?.message || e);
@@ -1530,17 +1543,17 @@ function awardPassiveGold(userId, cb) {
 
     // SQLite fallback (original behavior)
     db.get("SELECT lastGoldTickAt FROM users WHERE id = ?", [userId], (err, row) => {
-      if (err || !row) return cb?.(err || new Error("missing"));
+      if (err || !row) return done(err || new Error("missing"), 0);
 
       const last = Number(row.lastGoldTickAt || 0);
       if (!last) {
-        db.run("UPDATE users SET lastGoldTickAt = ? WHERE id = ?", [now, userId], () => cb?.(null, 0));
+        db.run("UPDATE users SET lastGoldTickAt = ? WHERE id = ?", [now, userId], () => done(null, 0));
         return;
       }
 
       const elapsed = now - last;
       const ticks = Math.floor(elapsed / GOLD_TICK_MS);
-      if (ticks <= 0) return cb?.(null, 0);
+      if (ticks <= 0) return done(null, 0);
 
       const newTickTs = last + ticks * GOLD_TICK_MS;
       db.run(
@@ -1548,7 +1561,7 @@ function awardPassiveGold(userId, cb) {
         [ticks, newTickTs, userId],
         (updateErr) => {
           if (!updateErr && ticks > 0) emitProgressionUpdate(userId);
-          cb?.(updateErr, ticks);
+          done(updateErr, ticks);
         }
       );
     });
@@ -1559,21 +1572,28 @@ function awardPassiveGold(userId, cb) {
 function awardMessageGold(userId, cb) {
   const now = Date.now();
 
+  if (goldInFlight.has(userId)) return cb?.(null, 0);
+  goldInFlight.add(userId);
+  const done = (err, gained) => {
+    goldInFlight.delete(userId);
+    cb?.(err, gained);
+  };
+
   (async () => {
     try {
       if (await pgUserExists(userId)) {
         const row = await pgGetUserRowById(userId, ["lastMessageGoldAt"]);
-        if (!row) return cb?.(new Error("missing"));
+        if (!row) return done(new Error("missing"));
 
         const last = Number(row.lastMessageGoldAt || 0);
-        if (last && now - last < MESSAGE_GOLD_COOLDOWN_MS) return cb?.(null, 0);
+        if (last && now - last < MESSAGE_GOLD_COOLDOWN_MS) return done(null, 0);
 
         await pgPool.query(
           "UPDATE users SET gold = gold + 5, lastMessageGoldAt = $1 WHERE id = $2",
           [now, userId]
         );
         emitProgressionUpdate(userId);
-        return cb?.(null, 5);
+        return done(null, 5);
       }
     } catch (e) {
       console.warn("[messageGold][pg] failed, falling back to sqlite:", e?.message || e);
@@ -1581,16 +1601,16 @@ function awardMessageGold(userId, cb) {
 
     // SQLite fallback (original behavior)
     db.get("SELECT lastMessageGoldAt FROM users WHERE id = ?", [userId], (err, row) => {
-      if (err || !row) return cb?.(err || new Error("missing"));
+      if (err || !row) return done(err || new Error("missing"));
       const last = Number(row.lastMessageGoldAt || 0);
-      if (last && now - last < MESSAGE_GOLD_COOLDOWN_MS) return cb?.(null, 0);
+      if (last && now - last < MESSAGE_GOLD_COOLDOWN_MS) return done(null, 0);
 
       db.run(
         "UPDATE users SET gold = gold + 5, lastMessageGoldAt = ? WHERE id = ?",
         [now, userId],
         (updateErr) => {
           if (!updateErr) emitProgressionUpdate(userId);
-          cb?.(updateErr, updateErr ? 0 : 5);
+          done(updateErr, updateErr ? 0 : 5);
         }
       );
     });
@@ -2876,7 +2896,7 @@ setInterval(() => {
   for (const uid of onlineState.keys()) {
     awardPassiveGold(uid);
   }
-}, 20_000);
+}, 60_000);
 
 // ---- Helpers for punishments
 function isPunished(userId, type, cb) {
@@ -3159,11 +3179,15 @@ function doJoin(room, status) {
   ]);
 
   // Send history (exclude deleted messages entirely)
+  // Backward-compatible room history: older builds stored rooms with a leading '#'.
+  const legacyRoom = `#${room}`;
   db.all(
     `SELECT id, room, username, role, avatar, text, ts, attachment_url, attachment_type, attachment_mime, attachment_size,
             reply_to_id, reply_to_user, reply_to_text
-     FROM messages WHERE room=? AND deleted=0 ORDER BY ts ASC LIMIT 200`,
-    [room],
+     FROM messages
+     WHERE (room=? OR room=?) AND deleted=0
+     ORDER BY ts ASC LIMIT 200`,
+    [room, legacyRoom],
     (_e, rows) => {
       const history = (rows || []).map((r) => ({
         messageId: r.id,
