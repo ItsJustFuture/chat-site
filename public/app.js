@@ -572,7 +572,17 @@ function clearMsgs(){
 function addSystem(text){
   const div=document.createElement("div");
   div.className="sys";
-  div.textContent=text;
+
+  // Dice Room: make system messages larger, and make dice faces much more visible
+  if(currentRoom === "diceroom"){
+    const safe = escapeHtml(String(text ?? ""));
+    // Wrap dice unicode faces so CSS can scale them independently
+    const withFaces = safe.replace(/[⚀⚁⚂⚃⚄⚅]/g, (m)=>`<span class="diceFace">${m}</span>`);
+    div.innerHTML = withFaces;
+  }else{
+    div.textContent = text;
+  }
+
   msgs.appendChild(div);
   msgs.scrollTop=msgs.scrollHeight;
 }
@@ -2393,6 +2403,7 @@ modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
 // rooms
 function setActiveRoom(room){
   currentRoom = room;
+  document.body.classList.toggle(\"dice-room\", room === \"diceroom\");
   nowRoom.textContent = displayRoomName(room);
   roomTitle.textContent = displayRoomName(room);
   msgInput.placeholder = `Message ${displayRoomName(room)}`;
