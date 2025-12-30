@@ -1522,7 +1522,9 @@ function awardPassiveGold(userId, cb) {
         const last = Number(row.lastGoldTickAt || 0);
         if (!last) {
           await pgPool.query("UPDATE users SET lastGoldTickAt = $1 WHERE id = $2", [now, userId]);
-          return cb?.(null, 0);
+          // Best-effort mirror to SQLite to prevent double-award if we fall back later.
+          db.run("UPDATE users SET lastGoldTickAt = ? WHERE id = ?", [now, userId], () => {});
+          return done(null, 0);
         }
 
         const elapsed = now - last;
@@ -1533,6 +1535,12 @@ function awardPassiveGold(userId, cb) {
         await pgPool.query(
           "UPDATE users SET gold = gold + $1, lastGoldTickAt = $2 WHERE id = $3",
           [ticks, newTickTs, userId]
+        );
+        // Best-effort mirror to SQLite so a transient PG/SQLite flip doesn't double-award.
+        db.run(
+          "UPDATE users SET gold = gold + ?, lastGoldTickAt = ? WHERE id = ?",
+          [ticks, newTickTs, userId],
+          () => {}
         );
         if (ticks > 0) emitProgressionUpdate(userId);
         return done(null, ticks);
@@ -1547,7 +1555,19 @@ function awardPassiveGold(userId, cb) {
 
       const last = Number(row.lastGoldTickAt || 0);
       if (!last) {
-        db.run("UPDATE users SET lastGoldTickAt = ? WHERE id = ?", [now, userId], () => done(null, 0));
+        db.run(
+          "UPDATE users SET lastGoldTickAt = ? WHERE id = ?",
+          [now, userId],
+          async () => {
+            // Best-effort mirror to Postgres to prevent double-award if PG becomes available again.
+            try {
+              if (await pgUserExists(userId)) {
+                await pgPool.query("UPDATE users SET lastGoldTickAt = $1 WHERE id = $2", [now, userId]);
+              }
+            } catch {}
+            done(null, 0);
+          }
+        );
         return;
       }
 
@@ -1559,9 +1579,21 @@ function awardPassiveGold(userId, cb) {
       db.run(
         "UPDATE users SET gold = gold + ?, lastGoldTickAt = ? WHERE id = ?",
         [ticks, newTickTs, userId],
-        (updateErr) => {
-          if (!updateErr && ticks > 0) emitProgressionUpdate(userId);
-          done(updateErr, ticks);
+        async (updateErr) => {
+          if (updateErr) return done(updateErr, 0);
+
+          // Best-effort mirror to Postgres to prevent double-award if PG becomes available again.
+          try {
+            if (await pgUserExists(userId)) {
+              await pgPool.query(
+                "UPDATE users SET gold = gold + $1, lastGoldTickAt = $2 WHERE id = $3",
+                [ticks, newTickTs, userId]
+              );
+            }
+          } catch {}
+
+          if (ticks > 0) emitProgressionUpdate(userId);
+          done(null, ticks);
         }
       );
     });
@@ -1588,10 +1620,19 @@ function awardMessageGold(userId, cb) {
         const last = Number(row.lastMessageGoldAt || 0);
         if (last && now - last < MESSAGE_GOLD_COOLDOWN_MS) return done(null, 0);
 
+        // Award message gold in Postgres
         await pgPool.query(
           "UPDATE users SET gold = gold + 5, lastMessageGoldAt = $1 WHERE id = $2",
           [now, userId]
         );
+
+        // Best-effort mirror to SQLite so a transient PG/SQLite flip doesn't double-award
+        db.run(
+          "UPDATE users SET gold = gold + 5, lastMessageGoldAt = ? WHERE id = ?",
+          [now, userId],
+          () => {}
+        );
+
         emitProgressionUpdate(userId);
         return done(null, 5);
       }
@@ -1599,7 +1640,7 @@ function awardMessageGold(userId, cb) {
       console.warn("[messageGold][pg] failed, falling back to sqlite:", e?.message || e);
     }
 
-    // SQLite fallback (original behavior)
+    // SQLite fallback
     db.get("SELECT lastMessageGoldAt FROM users WHERE id = ?", [userId], (err, row) => {
       if (err || !row) return done(err || new Error("missing"));
       const last = Number(row.lastMessageGoldAt || 0);
@@ -1608,15 +1649,26 @@ function awardMessageGold(userId, cb) {
       db.run(
         "UPDATE users SET gold = gold + 5, lastMessageGoldAt = ? WHERE id = ?",
         [now, userId],
-        (updateErr) => {
-          if (!updateErr) emitProgressionUpdate(userId);
-          done(updateErr, updateErr ? 0 : 5);
+        async (err2) => {
+          if (err2) return done(err2);
+
+          // Best-effort mirror to Postgres to prevent double-awarding if PG becomes available again
+          try {
+            if (await pgUserExists(userId)) {
+              await pgPool.query(
+                "UPDATE users SET gold = gold + 5, lastMessageGoldAt = $1 WHERE id = $2",
+                [now, userId]
+              );
+            }
+          } catch {}
+
+          emitProgressionUpdate(userId);
+          return done(null, 5);
         }
       );
     });
   })();
 }
-
 
 function awardDailyLoginGold(user) {
   const now = Date.now();
