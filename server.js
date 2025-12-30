@@ -705,8 +705,8 @@ async function pgUpsertFromSqliteRow(row) {
       avatar, bio, mood, age, gender,
       last_seen, last_room, last_status,
       theme, gold, xp,
-      lastXpMessageAt, lastDailyLoginAt, lastGoldTickAt, lastMessageGoldAt, lastDailyLoginGoldAt,
-      lastDiceRollAt, dice_sixes
+      "lastXpMessageAt", "lastDailyLoginAt", "lastGoldTickAt", "lastMessageGoldAt", "lastDailyLoginGoldAt",
+      "lastDiceRollAt", dice_sixes
     )
     VALUES (
       $1,$2,$3,$4,
@@ -1491,7 +1491,8 @@ function initGoldTick(userId, now = Date.now()) {
   (async () => {
     try {
       if (await pgUserExists(userId)) {
-        await pgPool.query("UPDATE users SET lastGoldTickAt = $1 WHERE id = $2", [now, userId]);
+        // IMPORTANT: camelCase columns must be quoted in Postgres.
+        await pgPool.query('UPDATE users SET "lastGoldTickAt" = $1 WHERE id = $2', [now, userId]);
         return;
       }
     } catch (e) {
@@ -1521,7 +1522,7 @@ function awardPassiveGold(userId, cb) {
 
         const last = Number(row.lastGoldTickAt || 0);
         if (!last) {
-          await pgPool.query("UPDATE users SET lastGoldTickAt = $1 WHERE id = $2", [now, userId]);
+              await pgPool.query('UPDATE users SET "lastGoldTickAt" = $1 WHERE id = $2', [now, userId]);
           // Best-effort mirror to SQLite to prevent double-award if we fall back later.
           db.run("UPDATE users SET lastGoldTickAt = ? WHERE id = ?", [now, userId], () => {});
           return done(null, 0);
@@ -1532,10 +1533,10 @@ function awardPassiveGold(userId, cb) {
         if (ticks <= 0) return done(null, 0);
 
         const newTickTs = last + ticks * GOLD_TICK_MS;
-        await pgPool.query(
-          "UPDATE users SET gold = gold + $1, lastGoldTickAt = $2 WHERE id = $3",
-          [ticks, newTickTs, userId]
-        );
+          await pgPool.query(
+            'UPDATE users SET gold = gold + $1, "lastGoldTickAt" = $2 WHERE id = $3',
+            [ticks, newTickTs, userId]
+          );
         // Best-effort mirror to SQLite so a transient PG/SQLite flip doesn't double-award.
         db.run(
           "UPDATE users SET gold = gold + ?, lastGoldTickAt = ? WHERE id = ?",
@@ -1562,7 +1563,7 @@ function awardPassiveGold(userId, cb) {
             // Best-effort mirror to Postgres to prevent double-award if PG becomes available again.
             try {
               if (await pgUserExists(userId)) {
-                await pgPool.query("UPDATE users SET lastGoldTickAt = $1 WHERE id = $2", [now, userId]);
+                await pgPool.query('UPDATE users SET "lastGoldTickAt" = $1 WHERE id = $2', [now, userId]);
               }
             } catch {}
             done(null, 0);
@@ -1586,7 +1587,7 @@ function awardPassiveGold(userId, cb) {
           try {
             if (await pgUserExists(userId)) {
               await pgPool.query(
-                "UPDATE users SET gold = gold + $1, lastGoldTickAt = $2 WHERE id = $3",
+                'UPDATE users SET gold = gold + $1, "lastGoldTickAt" = $2 WHERE id = $3',
                 [ticks, newTickTs, userId]
               );
             }
@@ -1622,7 +1623,7 @@ function awardMessageGold(userId, cb) {
 
         // Award message gold in Postgres
         await pgPool.query(
-          "UPDATE users SET gold = gold + 5, lastMessageGoldAt = $1 WHERE id = $2",
+          'UPDATE users SET gold = gold + 5, "lastMessageGoldAt" = $1 WHERE id = $2',
           [now, userId]
         );
 
@@ -1656,7 +1657,7 @@ function awardMessageGold(userId, cb) {
           try {
             if (await pgUserExists(userId)) {
               await pgPool.query(
-                "UPDATE users SET gold = gold + 5, lastMessageGoldAt = $1 WHERE id = $2",
+                'UPDATE users SET gold = gold + 5, "lastMessageGoldAt" = $1 WHERE id = $2',
                 [now, userId]
               );
             }
