@@ -2624,8 +2624,22 @@ function renderChangelogList(){
     empty.className = "small muted";
     empty.textContent = "No changelog entries yet.";
     changelogList.appendChild(empty);
+    const when = formatLocal(entry.created_at_iso || entry.created_at);
+timestampEl.textContent = when;
     return;
   }
+  function formatLocal(dt) {
+  if (!dt) return "";
+  const d = new Date(dt);          // dt should be ISO string or ms
+  if (Number.isNaN(d.getTime())) return ""; // avoids “Invalid Date”
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
 
   const isOwner = me && roleRank(me.role) >= roleRank("Owner");
   for(const entry of changelogEntries){
