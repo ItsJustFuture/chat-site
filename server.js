@@ -2358,6 +2358,7 @@ app.get("/api/changelog", requireLogin, async (req, res) => {
       "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries ORDER BY seq DESC" +
       (limit ? " LIMIT ?" : "");
     const rows = await dbAllAsync(sql, limit ? [limit] : []);
+    created_at_iso: new Date(row.created_at).toISOString()
     return res.json((rows || []).map((r) => toChangelogPayload(r)));
   } catch (e) {
     console.error("[changelog] sqlite GET failed:", e?.message || e);
