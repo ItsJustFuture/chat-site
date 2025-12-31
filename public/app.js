@@ -212,6 +212,8 @@ const THEME_LIST = [
   { name: "Sky Light", mode: "Light" },
   { name: "Cherry Blossom (Dark)", mode: "Dark" },
   { name: "Cherry Blossom (Light)", mode: "Light" },
+  { name: "420 Friendly (Light)", mode: "Light" },
+  { name: "420 Friendly (Dark)", mode: "Dark" },
   { name: "Aurora Night", mode: "Dark" },
   { name: "Mint Soda", mode: "Light" },
   { name: "Lavender Fog", mode: "Light" },
