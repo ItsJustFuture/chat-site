@@ -978,6 +978,23 @@ textarea{ min-height:90px; resize:vertical; }
   gap:10px;
   min-width: 220px;
 }
+/* Brand neon glow in the room panel */
+.neonBrand{
+  color: #eafff2; /* readable “near-white” */
+  font-weight: 800;
+  letter-spacing: 0.4px;
+
+  /* neon green glow */
+  text-shadow:
+    0 0 4px rgba(0, 255, 150, 0.55),
+    0 0 10px rgba(0, 255, 150, 0.35),
+    0 0 20px rgba(0, 255, 150, 0.15);
+}
+
+.neonBrand .amp{
+  opacity: 0.65;
+  margin: 0 2px;
+}
 .brand{
   display:flex; align-items:center; justify-content:space-between;
   padding:10px; background:var(--panel);
