@@ -902,6 +902,23 @@ body[data-theme="Cherry Blossom (Dark)"] .bubble {
   color-scheme: dark;
 }
 
+
+:root{
+  /* Mobile viewport height fix (JS updates --vh) */
+  --vh: 1vh;
+
+  /* UI scaling (auto for very small screens; user override via JS sets --uiScale) */
+  --uiScaleAuto: 1;
+  --uiScale: var(--uiScaleAuto);
+}
+@media (max-width: 360px){
+  :root{ --uiScaleAuto: 0.92; }
+}
+@media (max-width: 320px){
+  :root{ --uiScaleAuto: 0.88; }
+}
+
+
 html, body { height: 100%; }
 
 body{
@@ -909,7 +926,7 @@ body{
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   background:var(--bg);
   color:var(--text);
-  height: 100dvh;   /* changed from 100vh */
+  height: calc(var(--vh) * 100);
   overflow:hidden;
 }
 .msgs,
@@ -923,7 +940,15 @@ a{ color:inherit; }
 button{ font-family:inherit; }
 
 /* AUTH */
-#authWrap{ height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+#authWrap{ height: calc(var(--vh) * 100); display:flex; align-items:center; justify-content:center; padding:20px; }
+/* Scale UI for small screens / user preference */
+#authWrap, #app{
+  transform: scale(var(--uiScale));
+  transform-origin: top left;
+  width: calc(100% / var(--uiScale));
+  height: calc((var(--vh) * 100) / var(--uiScale));
+}
+
 .authCard{
   width:min(420px, 94vw);
   background:var(--panel);
@@ -964,7 +989,7 @@ textarea{ min-height:90px; resize:vertical; }
 .msgline{ margin-top:10px; font-size:12px; color:var(--muted); min-height:16px; white-space:pre-wrap; }
 
 /* APP LAYOUT */
-#app{ height:100vh; display:none; }
+#app{ height: calc(var(--vh) * 100); display:none; }
 .layout{ height:100%; display:flex; min-height:0; }
 
 /* Channels */
@@ -1065,6 +1090,23 @@ textarea{ min-height:90px; resize:vertical; }
 .latestUpdateTop{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
 .latestUpdateTitle{ font-weight:800; font-size:14px; }
 .latestUpdateBody{ margin-top:6px; color:var(--text); white-space:pre-line; }
+
+/* Rooms panel "Latest update" — compact until expanded */
+.latestUpdate.compact .latestUpdateBody,
+.latestUpdate.compact #latestUpdateDate,
+.latestUpdate.compact .latestUpdateTop .muted{
+  display:none;
+}
+.latestUpdate.compact .latestUpdateTop{
+  align-items:center;
+}
+.latestUpdate.compact .latestUpdateTitle{
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 .changelogList{ display:flex; flex-direction:column; gap:10px; min-height:0; }
 .changelogEntry{ padding:10px; border-radius:var(--radiusLg); border:1px solid var(--border); background:var(--panel); box-shadow:var(--shadowSm); }
 .changelogEntryHeader{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
@@ -1132,6 +1174,7 @@ textarea{ min-height:90px; resize:vertical; }
 /* Chat */
 .chat{ flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; }
 .topbar{
+  position:relative;
   height:54px;
   background:var(--panel2);
   border-bottom:1px solid var(--line);
@@ -1141,6 +1184,25 @@ textarea{ min-height:90px; resize:vertical; }
   padding:0 14px;
   gap:10px;
 }
+
+/* UI scale popover (topbar) */
+.uiScalePanel{
+  position:absolute;
+  top: 56px;
+  right: 10px;
+  z-index: 50;
+  width: min(260px, 92vw);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadowLg);
+  padding: 12px;
+}
+.uiScaleHeader{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+.uiScaleRow{ display:flex; align-items:center; gap:10px; }
+.uiScaleRow input[type="range"]{ flex:1; }
+.uiScaleActions{ display:flex; justify-content:flex-end; margin-top:10px; }
+
 .roomTitle{ font-weight:900; display:flex; align-items:center; gap:8px; }
 .roomTitle span{ color:var(--muted); }
 .searchWrap{ display:flex; gap:8px; align-items:center; }
@@ -1408,7 +1470,7 @@ body.dice-room .sys .diceFace{
 .modalCard{
   display: flex;
   flex-direction: column;
-  max-height: calc(100dvh - 20px);
+  max-height: calc((var(--vh) * 100) - 20px);
   overflow: hidden;
   background: var(--panel);
   border-radius: 14px;
@@ -1846,7 +1908,7 @@ body.lockScroll{ overflow:hidden; }
   .dmPanel{
     inset:0;
     width:100vw;
-    height:100dvh;
+    height: calc(var(--vh) * 100);
     max-height:none;
     border-radius:0;
     border:0;
@@ -1864,7 +1926,7 @@ body.lockScroll{ overflow:hidden; }
   .dmMessages{ padding-bottom:14px; }
 
  .channels{
-  position:fixed; top: var(--topbarH); left:0; height: calc(100dvh - var(--topbarH));
+  position:fixed; top: var(--topbarH); left:0; height: calc((var(--vh) * 100) - var(--topbarH));
   width:min(86vw, 320px);
   transform:translateX(-105%);
   transition:transform .18s ease;
@@ -1880,7 +1942,7 @@ body.lockScroll{ overflow:hidden; }
 
   .members.drawer{
   display:block;
-  position:fixed; top: var(--topbarH); right:0; height: calc(100dvh - var(--topbarH));
+  position:fixed; top: var(--topbarH); right:0; height: calc((var(--vh) * 100) - var(--topbarH));
   width:min(86vw, 320px);
   transform:translateX(105%);
   transition:transform .18s ease;
@@ -1999,7 +2061,7 @@ body.lockScroll{ overflow:hidden; }
   .modalCard{
     width: 100vw;
     max-width: 100vw;
-    max-height: calc(100dvh - 20px);
+    max-height: calc((var(--vh) * 100) - 20px);
     border-radius: 16px;
   }
   @supports (height: 100svh){
@@ -2326,7 +2388,7 @@ body.drawer-right-open { --rightDrawerW: min(86vw, 340px); }
   min-height: 0;
 }
 .modalCard{
-  max-height: calc(100dvh - 20px);
+  max-height: calc((var(--vh) * 100) - 20px);
 }
 .bottomBar{
   padding-bottom: calc(10px + env(safe-area-inset-bottom));

@@ -1,6 +1,22 @@
 // public/app.js
 "use strict";
 
+/* ---- Mobile viewport height fix (prevents input bars being hidden by browser UI) */
+(function initViewportHeightVar(){
+  function setVh(){
+    const h = (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
+    document.documentElement.style.setProperty("--vh", (h * 0.01) + "px");
+  }
+  window.addEventListener("resize", setVh, { passive:true });
+  window.addEventListener("orientationchange", setVh, { passive:true });
+  if(window.visualViewport){
+    window.visualViewport.addEventListener("resize", setVh, { passive:true });
+    window.visualViewport.addEventListener("scroll", setVh, { passive:true });
+  }
+  setVh();
+})();
+
+
 let socket = null;
 let me = null;
 let progression = { gold: 0, xp: 0, level: 1, xpIntoLevel: 0, xpForNextLevel: 100 };
@@ -36,6 +52,32 @@ function loadJson(key, fallback) {
 }
 function saveJson(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+/* ---- UI scale (small screens + user override) */
+const UI_SCALE_KEY = "ui:scale:v1";
+
+function applyUiScale(scale){
+  // If scale is null/undefined, revert to auto (CSS media queries).
+  if(scale === null || scale === undefined || scale === ""){
+    document.documentElement.style.removeProperty("--uiScale");
+    try{ localStorage.removeItem(UI_SCALE_KEY); }catch{}
+    return;
+  }
+  const n = Number(scale);
+  if(!Number.isFinite(n)) return;
+  const clamped = Math.max(0.80, Math.min(1.05, n));
+  document.documentElement.style.setProperty("--uiScale", String(clamped));
+  try{ localStorage.setItem(UI_SCALE_KEY, String(clamped)); }catch{}
+}
+
+function loadUiScale(){
+  try{
+    const raw = localStorage.getItem(UI_SCALE_KEY);
+    if(!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }catch{ return null; }
+}
+
 }
 
 let dmLastRead = loadJson(DM_LAST_READ_KEY, {}); // { [threadId]: lastReadTs }
@@ -147,6 +189,7 @@ const latestUpdateTitle = document.getElementById("latestUpdateTitle");
 const latestUpdateDate = document.getElementById("latestUpdateDate");
 const latestUpdateBody = document.getElementById("latestUpdateBody");
 const latestUpdateViewBtn = document.getElementById("latestUpdateViewBtn");
+let latestUpdateExpanded = false;
 const changelogList = document.getElementById("changelogList");
 const changelogMsg = document.getElementById("changelogMsg");
 const changelogActions = document.getElementById("changelogActions");
@@ -360,6 +403,12 @@ const refreshProfileBtn = document.getElementById("refreshProfileBtn");
 const profileMsg = document.getElementById("profileMsg");
 const logoutBtn = document.getElementById("logoutBtn");
 const logoutTopBtn = document.getElementById("logoutTopBtn");
+const uiScaleBtn = document.getElementById("uiScaleBtn");
+const uiScalePanel = document.getElementById("uiScalePanel");
+const uiScaleCloseBtn = document.getElementById("uiScaleCloseBtn");
+const uiScaleRange = document.getElementById("uiScaleRange");
+const uiScaleValue = document.getElementById("uiScaleValue");
+const uiScaleResetBtn = document.getElementById("uiScaleResetBtn");
 
 // member quick mod
 const memberModTools = document.getElementById("memberModTools");
@@ -2846,6 +2895,7 @@ async function loadLatestUpdateSnippet(){
   }catch{
     latestChangelogEntry = null;
   }
+  latestUpdateExpanded = false;
   renderLatestUpdateSnippet();
 }
 
@@ -2856,10 +2906,26 @@ function renderLatestUpdateSnippet(){
     return;
   }
   latestUpdate.style.display = "block";
+
+  // Compact by default to save UI space; expand only when user taps View.
+  latestUpdate.classList.toggle("compact", !latestUpdateExpanded);
+
   if(latestUpdateTitle) latestUpdateTitle.textContent = latestChangelogEntry.title || "(untitled)";
-  if(latestUpdateDate) latestUpdateDate.textContent = latestChangelogEntry.createdAt ? new Date(latestChangelogEntry.createdAt).toLocaleString() : "";
-  if(latestUpdateBody) latestUpdateBody.textContent = previewText(latestChangelogEntry.body || "", 200);
+  if(latestUpdateDate) latestUpdateDate.textContent = latestChangelogEntry.createdAt
+    ? new Date(latestChangelogEntry.createdAt).toLocaleString()
+    : "";
+
+  if(latestUpdateBody){
+    latestUpdateBody.textContent = latestUpdateExpanded
+      ? (latestChangelogEntry.body || "")
+      : ""; // keep empty while compact
+  }
+
+  if(latestUpdateViewBtn){
+    latestUpdateViewBtn.textContent = latestUpdateExpanded ? "Hide" : "View";
+  }
 }
+
 
 if(menuToggleBtn){
   menuToggleBtn.addEventListener("click", ()=>{
@@ -2878,13 +2944,14 @@ if(menuNav){
 }
 if(refreshLeaderboardsBtn) refreshLeaderboardsBtn.addEventListener("click", ()=> loadLeaderboards(true));
 if(latestUpdateViewBtn){
-  latestUpdateViewBtn.addEventListener("click", ()=>{
-    setMenuTab("changelog");
-    setRightPanelMode("menu");
-    menuPanel?.scrollTo({ top:0, behavior:"smooth" });
+  latestUpdateViewBtn.addEventListener("click", (e)=>{
+    e.preventDefault();
+    latestUpdateExpanded = !latestUpdateExpanded;
+    renderLatestUpdateSnippet();
   });
 }
 if(changelogNewBtn) changelogNewBtn.addEventListener("click", ()=>openChangelogEditor());
+ changelogNewBtn.addEventListener("click", ()=>openChangelogEditor());
 if(changelogCancelBtn) changelogCancelBtn.addEventListener("click", closeChangelogEditor);
 if(changelogSaveBtn) changelogSaveBtn.addEventListener("click", saveChangelogEntry);
 closeChangelogEditor();
@@ -3042,6 +3109,63 @@ async function doLogout(){
   location.reload();
 }
 logoutBtn.addEventListener("click", doLogout);
+
+/* ---- UI scale panel (topbar) */
+(function initUiScaleControls(){
+  const saved = loadUiScale();
+  if(saved !== null) applyUiScale(saved);
+
+  function effectiveScale(){
+    const inline = getComputedStyle(document.documentElement).getPropertyValue("--uiScale").trim();
+    const n = Number(inline);
+    return (Number.isFinite(n) && n > 0) ? n : 1;
+  }
+
+  function syncUiScaleUi(){
+    if(!uiScaleRange || !uiScaleValue) return;
+    const eff = effectiveScale();
+    uiScaleRange.value = String(eff);
+    uiScaleValue.textContent = Math.round(eff * 100) + "%";
+  }
+
+  function openPanel(){
+    if(!uiScalePanel) return;
+    uiScalePanel.hidden = false;
+    syncUiScaleUi();
+  }
+  function closePanel(){
+    if(!uiScalePanel) return;
+    uiScalePanel.hidden = true;
+  }
+  function togglePanel(){
+    if(!uiScalePanel) return;
+    if(uiScalePanel.hidden) openPanel();
+    else closePanel();
+  }
+
+  uiScaleBtn?.addEventListener("click", (e)=>{ e.stopPropagation(); togglePanel(); });
+  uiScaleCloseBtn?.addEventListener("click", (e)=>{ e.stopPropagation(); closePanel(); });
+
+  document.addEventListener("click", (e)=>{
+    if(!uiScalePanel || uiScalePanel.hidden) return;
+    if(e.target && (uiScalePanel.contains(e.target) || uiScaleBtn?.contains(e.target))) return;
+    closePanel();
+  });
+
+  uiScaleRange?.addEventListener("input", ()=>{
+    const v = Number(uiScaleRange.value);
+    applyUiScale(v);
+    uiScaleValue.textContent = Math.round(v * 100) + "%";
+  });
+
+  uiScaleResetBtn?.addEventListener("click", ()=>{
+    applyUiScale(null);
+    syncUiScaleUi();
+  });
+
+  window.addEventListener("resize", ()=>{ if(!uiScalePanel?.hidden) syncUiScaleUi(); }, { passive:true });
+})();
+
 logoutTopBtn?.addEventListener("click", doLogout);
 
 // ---- profiles
