@@ -1100,6 +1100,141 @@
 }
 
 
+/* Iris & Lola Neon (Dark, VIP-only, animated) */
+[data-theme="Iris & Lola Neon"] {
+  color-scheme: dark;
+  --bg: radial-gradient(circle at 50% 45%,
+        rgba(0, 255, 119, 0.55) 0%,
+        rgba(0, 255, 119, 0.22) 18%,
+        rgba(54, 0, 86, 0.92) 48%,
+        #120018 100%);
+  --bg2: rgba(18, 0, 24, 0.65);
+  --panel: rgba(24, 0, 40, 0.78);
+  --panel2: rgba(28, 0, 48, 0.70);
+  --text: #f5eaff;
+  --muted: rgba(245, 234, 255, 0.70);
+  --border: rgba(0, 255, 119, 0.18);
+
+  /* Bubbles */
+  --bubble: linear-gradient(135deg, rgba(0, 255, 119, 0.22) 0%, rgba(167, 82, 255, 0.22) 100%);
+  --bubbleSelf: linear-gradient(135deg, rgba(0, 255, 119, 0.40) 0%, rgba(167, 82, 255, 0.40) 100%);
+
+  /* Accent/links */
+  --accent: #b55dff;
+  --accent2: #00ff77;
+  --link: #c98cff;
+
+  --danger: #ff4b7a;
+  --success: #00ff77;
+  --warning: #ffd166;
+  --shadow: 0 20px 70px rgba(0,0,0,0.45);
+}
+
+/* Animated glow layer */
+body[data-theme="Iris & Lola Neon"] {
+  position: relative;
+  overflow-x: hidden;
+}
+body[data-theme="Iris & Lola Neon"]::before {
+  content: "";
+  position: fixed;
+  inset: -20vh -20vw;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 50% 45%,
+      rgba(0, 255, 119, 0.35) 0%,
+      rgba(0, 255, 119, 0.10) 22%,
+      rgba(181, 93, 255, 0.08) 42%,
+      rgba(18, 0, 24, 0.0) 68%);
+  filter: blur(10px);
+  animation: irisLolaGlow 5.5s ease-in-out infinite;
+}
+
+/* Center neon text */
+body[data-theme="Iris & Lola Neon"]::after {
+  content: "I Love You";
+  position: fixed;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 1;
+  font-family: ui-rounded, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  font-size: clamp(34px, 6vw, 64px);
+  color: rgba(194, 110, 255, 0.95);
+  text-shadow:
+    0 0 8px rgba(194, 110, 255, 0.65),
+    0 0 18px rgba(194, 110, 255, 0.45),
+    0 0 34px rgba(0, 255, 119, 0.22);
+  animation: irisLolaNeon 2.4s ease-in-out infinite;
+  opacity: 0.95;
+}
+
+/* Ensure app UI stays above glow */
+body[data-theme="Iris & Lola Neon"] #app,
+body[data-theme="Iris & Lola Neon"] #authWrap {
+  position: relative;
+  z-index: 2;
+}
+
+/* Diagonal heart watermark in side panels */
+body[data-theme="Iris & Lola Neon"] #roomsPanel,
+body[data-theme="Iris & Lola Neon"] #membersPane {
+  position: relative;
+  overflow: hidden;
+}
+
+body[data-theme="Iris & Lola Neon"] #roomsPanel::before,
+body[data-theme="Iris & Lola Neon"] #membersPane::before {
+  content: "";
+  position: absolute;
+  inset: 10% -40% auto -40%;
+  height: 60%;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http:%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox=%220%200%20600%20340%22%3E%20%20%3Cdefs%3E%20%20%20%20%3Cfilter%20id=%22g%22%20x=%22-20%%22%20y=%22-20%%22%20width=%22140%%22%20height=%22140%%22%3E%20%20%20%20%20%20%3CfeGaussianBlur%20stdDeviation=%226%22%20result=%22b%22%2F%3E%20%20%20%20%20%20%3CfeMerge%3E%20%20%20%20%20%20%20%20%3CfeMergeNode%20in=%22b%22%2F%3E%20%20%20%20%20%20%20%20%3CfeMergeNode%20in=%22SourceGraphic%22%2F%3E%20%20%20%20%20%20%3C%2FfeMerge%3E%20%20%20%20%3C%2Ffilter%3E%20%20%3C%2Fdefs%3E%20%20%3Cg%20filter=%22url(#g)%22%3E%20%20%20%20%3Cpath%20d=%22M300%20310%20C120%20210%2060%20140%2090%2085%20C125%2030%20200%2035%20245%2075%20C275%20100%20290%20125%20300%20145%20C310%20125%20325%20100%20355%2075%20C400%2035%20475%2030%20510%2085%20C540%20140%20480%20210%20300%20310%20Z%22%20%20%20%20%20%20fill=%22#00ff77%22%20fill-opacity=%220.32%22%2F%3E%20%20%20%20%3Ctext%20x=%22300%22%20y=%22170%22%20text-anchor=%22middle%22%20dominant-baseline=%22middle%22%20%20%20%20%20%20font-family=%22Verdana,%20Arial,%20sans-serif%22%20font-size=%2252%22%20font-weight=%22700%22%20%20%20%20%20%20fill=%22#00ff77%22%20fill-opacity=%220.85%22%3EIris%20&amp%3B%20Lola%3C%2Ftext%3E%20%20%3C%2Fg%3E%3C%2Fsvg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  opacity: 0.70;
+  transform: rotate(-18deg);
+  pointer-events: none;
+  filter: drop-shadow(0 0 18px rgba(0, 255, 119, 0.18));
+}
+
+@keyframes irisLolaGlow {
+  0%   { transform: scale(1.00); opacity: 0.85; }
+  50%  { transform: scale(1.06); opacity: 1.00; }
+  100% { transform: scale(1.00); opacity: 0.85; }
+}
+
+@keyframes irisLolaNeon {
+  0%, 100% {
+    opacity: 0.92;
+    text-shadow:
+      0 0 8px rgba(194, 110, 255, 0.60),
+      0 0 18px rgba(194, 110, 255, 0.42),
+      0 0 34px rgba(0, 255, 119, 0.20);
+  }
+  50% {
+    opacity: 1;
+    text-shadow:
+      0 0 10px rgba(194, 110, 255, 0.78),
+      0 0 26px rgba(194, 110, 255, 0.55),
+      0 0 46px rgba(0, 255, 119, 0.28);
+  }
+}
+
+/* Reduce motion support */
+@media (prefers-reduced-motion: reduce) {
+  body[data-theme="Iris & Lola Neon"]::before,
+  body[data-theme="Iris & Lola Neon"]::after {
+    animation: none !important;
+  }
+}
+
+
 /* Cherry Blossom floral overlay */
 body[data-theme="Cherry Blossom (Light)"] {
   --sakuraPattern: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22120%22%20height%3D%22120%22%20viewBox%3D%220%200%20120%20120%22%3E%0A%20%20%3Cg%20fill%3D%22%23ff8fc1%22%20fill-opacity%3D%220.18%22%3E%0A%20%20%20%20%3Cpath%20d%3D%22M60%2046c6-14%2022-10%2018%204-2%208-10%2012-18%2014-8-2-16-6-18-14-4-14%2012-18%2018-4z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M46%2060c-14-6-10-22%204-18%208%202%2012%2010%2014%2018-2%208-6%2016-14%2018-14%204-18-12-4-18z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M60%2074c-6%2014-22%2010-18-4%202-8%2010-12%2018-14%208%202%2016%206%2018%2014%204%2014-12%2018-18%204z%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M74%2060c14%206%2010%2022-4%2018-8-2-12-10-14-18%202-8%206-16%2014-18%2014-4%2018%2012%204%2018z%22%2F%3E%0A%20%20%20%20%3Ccircle%20cx%3D%2260%22%20cy%3D%2260%22%20r%3D%226%22%20fill%3D%22%23ffd9e8%22%20fill-opacity%3D%220.32999999999999996%22%2F%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E");

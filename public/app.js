@@ -259,6 +259,7 @@ const THEME_LIST = [
   { name: "Neon Abyss", mode: "Dark" },
   { name: "Velvet Galaxy", mode: "Dark" },
   { name: "Obsidian Aurora", mode: "Dark" },
+  { name: "Iris & Lola Neon", mode: "Dark" },
 
 ];
 const DEFAULT_THEME = "Minimal Dark";
