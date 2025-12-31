@@ -2598,18 +2598,9 @@ app.get("/profile", requireLogin, async (req, res) => {
             likedByMe: !!Number(likesRow?.liked || 0),
             ...progressionFromRow(row, true),
           };
-          // update live socket presence so member list + chat avatars refresh immediately
-const sid = socketIdByUserId.get(userId);
-if (sid) {
-  const s = io.sockets.sockets.get(sid);
-  if (s?.user) {
-    if (avatar) s.user.avatar = avatar;
-    s.user.mood = mood;
-    if (s.currentRoom) emitUserList(s.currentRoom);
-  }
-          return res.json(payload);
-        }
-      );
+	          return res.json(payload);
+	        }
+	      );
       return;
     }
   } catch (e) {
@@ -2782,6 +2773,16 @@ app.post("/profile", requireLogin, (req, res) => {
     const gender = String(req.body?.gender || "").slice(0, 40);
     const avatar = req.file ? `/avatars/${req.file.filename}` : null;
 
+    // Best-effort: push updated profile bits into the currently-connected socket (so members list/chat updates immediately)
+    const refreshLivePresence = () => {
+      const sid = socketIdByUserId.get(userId);
+      const s = sid ? io.sockets.sockets.get(sid) : null;
+      if (!s?.user) return;
+      if (avatar) s.user.avatar = avatar;
+      s.user.mood = mood;
+      if (s.currentRoom) emitUserList(s.currentRoom);
+    };
+
     try {
       // Prefer Postgres if this user exists there (Render prod path)
       if (await pgUserExists(userId)) {
@@ -2796,6 +2797,7 @@ app.post("/profile", requireLogin, (req, res) => {
           [mood, bio, age, gender, avatar, userId]
         );
         if (avatar) req.session.user.avatar = avatar;
+        refreshLivePresence();
         return res.json({ ok: true });
       }
     } catch (e) {
@@ -2812,6 +2814,7 @@ app.post("/profile", requireLogin, (req, res) => {
         (err2) => {
           if (err2) return res.status(500).send("Save failed");
           if (avatar) req.session.user.avatar = avatar;
+          refreshLivePresence();
           return res.json({ ok: true });
         }
       );
@@ -4114,13 +4117,14 @@ if (s?.user) {
   socket.on("disconnect", () => {
     const room = socket.currentRoom;
 
-// Only clear if this socket is still the active one for that user
-if (socketIdByUserId.get(socket.user.id) === socket.id) {
-  socketIdByUserId.delete(socket.user.id);
-  onlineState.delete(socket.user.id);
-  onlineXpTrack.delete(socket.user.id);
+    // Always clear per-socket rate tracking
     msgRate.delete(socket.id);
-    initGoldTick(socket.user.id);
+
+    // Only clear per-user mappings if THIS socket is still the active one
+    if (socketIdByUserId.get(socket.user.id) === socket.id) {
+      socketIdByUserId.delete(socket.user.id);
+      onlineState.delete(socket.user.id);
+      onlineXpTrack.delete(socket.user.id);
     }
     db.run("UPDATE users SET last_seen=? WHERE id=?", [Date.now(), socket.user.id]);
 
