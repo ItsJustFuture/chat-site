@@ -3,18 +3,79 @@
 
 /* ---- Mobile viewport height fix (prevents input bars being hidden by browser UI) */
 (function initViewportHeightVar(){
-  function setVh(){
-    const h = (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
+  let raf = 0;
+
+  function setVhNow(){
+    const vv = window.visualViewport;
+    // visualViewport.height is the most accurate on iOS when the keyboard opens,
+    // but it can briefly report 0 during transitions. Guard + fallback.
+    let h = (vv && typeof vv.height === "number" && vv.height > 100) ? vv.height : window.innerHeight;
+    // Clamp to avoid negative/near-zero layouts during keyboard transitions.
+    h = Math.max(200, Math.min(h, window.screen?.height ? window.screen.height : h));
     document.documentElement.style.setProperty("--vh", (h * 0.01) + "px");
+
+    // Helpful extra vars for iOS keyboard-safe layouts (optional use in CSS)
+    if(vv){
+      const offsetTop = Number(vv.offsetTop || 0);
+      const inset = Math.max(0, (window.innerHeight - vv.height - offsetTop));
+      document.documentElement.style.setProperty("--vv-offset-top", offsetTop + "px");
+      document.documentElement.style.setProperty("--kb-inset", inset + "px");
+    }else{
+      document.documentElement.style.setProperty("--vv-offset-top", "0px");
+      document.documentElement.style.setProperty("--kb-inset", "0px");
+    }
   }
-  window.addEventListener("resize", setVh, { passive:true });
-  window.addEventListener("orientationchange", setVh, { passive:true });
+
+  function scheduleSetVh(){
+    if(raf) cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(()=>{ raf = 0; setVhNow(); });
+  }
+
+  window.addEventListener("resize", scheduleSetVh, { passive:true });
+  window.addEventListener("orientationchange", scheduleSetVh, { passive:true });
   if(window.visualViewport){
-    window.visualViewport.addEventListener("resize", setVh, { passive:true });
-    window.visualViewport.addEventListener("scroll", setVh, { passive:true });
+    window.visualViewport.addEventListener("resize", scheduleSetVh, { passive:true });
+    window.visualViewport.addEventListener("scroll", scheduleSetVh, { passive:true });
   }
-  setVh();
+
+  // When the page becomes visible again (Safari sometimes restores wrong values)
+  document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) scheduleSetVh(); });
+
+  scheduleSetVh();
 })();
+
+/* ---- iOS Safari: prevent input-focus zoom (font-size must be >= 16px) */
+(function preventIosInputZoom(){
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if(!isIOS) return;
+
+  function needsFix(el){
+    if(!el || !(el instanceof HTMLElement)) return false;
+    const tag = el.tagName?.toLowerCase();
+    if(tag !== "input" && tag !== "textarea" && tag !== "select") return false;
+    // Don't interfere with range sliders (they're fine)
+    if(tag === "input" && el.type === "range") return false;
+    const fs = parseFloat(getComputedStyle(el).fontSize || "16");
+    return Number.isFinite(fs) && fs > 0 && fs < 16;
+  }
+
+  document.addEventListener("focusin", (e)=>{
+    const el = e.target;
+    if(!needsFix(el)) return;
+    if(!el.dataset.__prevFontSize) el.dataset.__prevFontSize = el.style.fontSize || "";
+    el.style.fontSize = "16px";
+  });
+
+  document.addEventListener("focusout", (e)=>{
+    const el = e.target;
+    if(!el || !(el instanceof HTMLElement)) return;
+    if(el.dataset.__prevFontSize !== undefined){
+      el.style.fontSize = el.dataset.__prevFontSize;
+      delete el.dataset.__prevFontSize;
+    }
+  });
+})();
+
 
 
 let socket = null;
@@ -3843,9 +3904,25 @@ profileBtn.addEventListener("click", () => { closeDrawers(); });
 // close drawers when opening modal
 modal.addEventListener("show", closeDrawers);
 
-// focus behavior on mobile keyboard
-msgInput.addEventListener("focus", () => {
-  setTimeout(() => msgInput.scrollIntoView({ block: "center", behavior: "smooth" }), 150);
+// focus behavior on mobile keyboard (avoid aggressive scroll jumps on iOS)
+msgInput?.addEventListener("focus", () => {
+  // Let the keyboard animate first, then gently keep the composer visible.
+  setTimeout(() => {
+    try{
+      const vv = window.visualViewport;
+      if(vv){
+        // If the focused input is below the visible viewport, nudge it into view.
+        const rect = msgInput.getBoundingClientRect();
+        const visibleBottom = vv.height - 12;
+        if(rect.bottom > visibleBottom){
+          window.scrollBy({ top: rect.bottom - visibleBottom, left: 0, behavior: "smooth" });
+        }
+      }else{
+        msgInput.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+    }catch{}
+  }, 120);
+});
 });
 
 /* === Unified profile opener === */
