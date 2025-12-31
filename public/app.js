@@ -1173,6 +1173,13 @@ function closeReactionMenu(){
   if(reactionMenuRow) reactionMenuRow.classList.remove("showActions");
   reactionMenuFor = null;
   reactionMenuRow = null;
+
+
+// Close message action rails when tapping outside a message (mobile-friendly)
+document.addEventListener("click", (e) => {
+  if (e?.target?.closest(".msg")) return;
+  document.querySelectorAll(".msg.showActions").forEach((el) => el.classList.remove("showActions"));
+});
 }
 function openMediaLightbox(src, kind){
   if (!mediaLightbox || !mediaLightboxImg || !mediaLightboxVideo) return;
@@ -1354,19 +1361,25 @@ function addMessage(m){
   replyBtn.onclick = (e)=>{
     e.stopPropagation();
     setReplyTarget({ id: m.messageId, user: m.user, text: m.text });
-    msgInput?.focus();
+    focusMainComposer();
   };
   actions.prepend(replyBtn);
 
-  // mobile: long press bubble opens reaction menu
-  let pressTimer = null;
-  bubble.addEventListener("touchstart", ()=>{
-    pressTimer = setTimeout(()=>{
-      openReactionMenu(m.messageId, bubble, row);
-    }, 450);
-  }, {passive:true});
-  bubble.addEventListener("touchend", ()=>{ clearTimeout(pressTimer); });
-  bubble.addEventListener("touchcancel", ()=>{ clearTimeout(pressTimer); });
+  // mobile: tap message to toggle actions (reply/react/delete)
+const toggleActions = (e) => {
+  // Ignore taps on interactive elements inside the message
+  if (e?.target?.closest("button, a, input, textarea, select, label")) return;
+
+  // Close any other open action rails
+  document.querySelectorAll(".msg.showActions").forEach((el) => {
+    if (el !== row) el.classList.remove("showActions");
+  });
+
+  const on = row.classList.toggle("showActions");
+  if (!on) closeReactionMenu();
+};
+
+bubble.addEventListener("click", toggleActions);
 
   row.appendChild(av);
   row.appendChild(main);
@@ -2028,7 +2041,7 @@ function renderDmMessages(threadId){
     replyBtn.onclick = (e) => {
       e.stopPropagation();
       setDmReplyTarget({ id: m.messageId || m.id, user: m.user, text: m.text });
-      dmText?.focus();
+      focusDmComposer();
     };
     dmActions.appendChild(replyBtn);
     wrap.dataset.dmMid = m.messageId || m.id;
@@ -3903,6 +3916,34 @@ profileBtn.addEventListener("click", () => { closeDrawers(); });
 
 // close drawers when opening modal
 modal.addEventListener("show", closeDrawers);
+
+
+
+function focusDmComposer(){
+  if(!dmText) return;
+  try{ dmText.focus({ preventScroll:true }); }catch{ dmText.focus(); }
+  requestAnimationFrame(() => {
+    const vv = window.visualViewport;
+    const viewportBottom = (vv ? (vv.height + (vv.offsetTop || 0)) : window.innerHeight) - 8;
+    const rect = dmText.getBoundingClientRect();
+    if(rect.bottom > viewportBottom){
+      window.scrollBy({ top: (rect.bottom - viewportBottom) + 16, behavior: "smooth" });
+    }
+  });
+}
+
+function focusMainComposer(){
+  if(!msgInput) return;
+  try{ msgInput.focus({ preventScroll:true }); }catch{ msgInput.focus(); }
+  requestAnimationFrame(() => {
+    const vv = window.visualViewport;
+    const viewportBottom = (vv ? (vv.height + (vv.offsetTop || 0)) : window.innerHeight) - 8;
+    const rect = msgInput.getBoundingClientRect();
+    if(rect.bottom > viewportBottom){
+      window.scrollBy({ top: (rect.bottom - viewportBottom) + 16, behavior: "smooth" });
+    }
+  });
+}
 
 // focus behavior on mobile keyboard (avoid aggressive scroll jumps on iOS)
 msgInput?.addEventListener("focus", () => {
