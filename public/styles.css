@@ -2774,3 +2774,17 @@ html {
 .messageComposer {
   flex: 0 0 auto;
 }
+
+/* Theme tier lock styling (VIP) */
+.themeCard.locked {
+  cursor: not-allowed;
+  position: relative;
+}
+.themeCard.locked::after {
+  content: "🔒";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 18px;
+  pointer-events: none;
+}

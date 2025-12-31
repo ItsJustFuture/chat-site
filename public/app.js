@@ -1,6 +1,24 @@
 // public/app.js
 "use strict";
 
+// ---- Theme registry with tiers
+const THEMES = [
+  // Public themes (everyone)
+  { id:"minimal-light", name:"Minimal Light", mode:"light", tier:"public" },
+  { id:"minimal-dark", name:"Minimal Dark", mode:"dark", tier:"public" },
+  { id:"minimal-light-hc", name:"Minimal Light (High Contrast)", mode:"light", tier:"public" },
+  { id:"minimal-dark-hc", name:"Minimal Dark (High Contrast)", mode:"dark", tier:"public" },
+  { id:"paper", name:"Paper / Parchment", mode:"light", tier:"public" },
+  { id:"sky-light", name:"Sky Light", mode:"light", tier:"public" },
+  { id:"fantasy-tavern", name:"Fantasy Tavern", mode:"dark", tier:"public" },
+  { id:"fantasy-tavern-ember", name:"Fantasy Tavern (Ember)", mode:"dark", tier:"public" },
+  { id:"desert-dusk", name:"Desert Dusk", mode:"dark", tier:"public" },
+
+  // VIP: everything else (future-proof)
+  { id:"__vip__", name:"VIP Exclusive", tier:"vip", hidden:true }
+];
+
+
 /* ---- Mobile viewport height fix (prevents input bars being hidden by browser UI) */
 (function initViewportHeightVar(){
   let raf = 0;
@@ -4033,3 +4051,9 @@ document.addEventListener("click", (e)=>{
   const username = el.dataset?.username || el.textContent?.trim();
   if(username) openUserProfile(username);
 });
+
+function canUseTheme(theme) {
+  const role = window.currentUser?.role || "public";
+  const hierarchy = { public:0, vip:1, staff:2, admin:3 };
+  return hierarchy[role] >= hierarchy[theme.tier];
+}
