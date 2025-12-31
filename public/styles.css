@@ -3603,13 +3603,8 @@ body[data-theme="Iris & Lola Neon"] #membersPane::after {
   }
 }
 
-/* Ensure top bar spans full width on Iris & Lola Neon */
-body[data-theme="Iris & Lola Neon"] header,
-body[data-theme="Iris & Lola Neon"] .topBar,
-body[data-theme="Iris & Lola Neon"] .topbar {
-  width: 100vw;
-  left: 0;
-  right: 0;
-  box-sizing: border-box;
-}
 
+
+/* Iris & Lola Neon: keep topbar full-width without breaking right-side buttons */
+body[data-theme="Iris & Lola Neon"] .chat { width: 100%; min-width: 0; }
+body[data-theme="Iris & Lola Neon"] .topbar { width: 100%; max-width: 100%; box-sizing: border-box; }
