@@ -2775,9 +2775,9 @@ html {
   flex: 0 0 auto;
 }
 
-/* Theme tier lock styling (VIP) */
+/* Theme tier lock styling (VIP) - keep full colors visible */
 .themeCard.locked{
-  cursor: not-allowed;
+  cursor: pointer;
   position: relative;
 }
 .themeCard.locked::after{
@@ -2787,6 +2787,46 @@ html {
   right: 6px;
   font-size: 18px;
   pointer-events: none;
+}
+
+.themeCard.locked .vipOnlyTag{
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.35);
+  color: #fff;
+  pointer-events: none;
+  text-transform: uppercase;
+}
+
+/* Preview button (appears on hover/focus; tap works on mobile via click) */
+.themeCard .previewBtn{
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.35);
+  background: rgba(0,0,0,0.45);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.themeCard.locked:hover .previewBtn,
+.themeCard.locked:focus-within .previewBtn{
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* VIP ONLY tag */
@@ -2828,4 +2868,236 @@ html {
 .themeCard.locked:focus-within .previewBtn{
   opacity: 1;
   pointer-events: auto;
+}
+
+
+/* ---- Restored theme definitions (were missing) ---- */
+
+
+:root[data-theme="Lavender Fog"],
+[data-theme="Lavender Fog"] {
+  --bg: #f6f1ff;
+  --bg2: #eee6ff;
+  --panel: #ffffff;
+  --panel2: #f3ecff;
+  --text: #20132f;
+  --muted: #4b2e6a;
+  --border: #d9c8ff;
+  --shadowColor: rgba(0,0,0,0.10);
+  --accent: #b57cff;
+  --accent2: #8b5cf6;
+  --danger: #dc2626;
+  --success: #16a34a;
+  --warning: #f59e0b;
+  --link: #7c3aed;
+  --messageSelfBg: linear-gradient(135deg, #b57cff, #8b5cf6);
+  --messageSelfText: #ffffff;
+  --messageOtherBg: rgba(255,255,255,0.85);
+  --messageOtherText: #20132f;
+  --messageSystemBg: rgba(139,92,246,0.10);
+  --messageSystemText: #4b2e6a;
+  --mentionBg: rgba(181,124,255,0.18);
+  --mentionText: #20132f;
+  --btnPrimaryBg: #8b5cf6;
+  --btnPrimaryText: #ffffff;
+  --btnSecondaryBg: rgba(32,19,47,0.06);
+  --btnSecondaryText: #20132f;
+  --inputBg: rgba(255,255,255,0.75);
+  --inputText: #20132f;
+  --inputPlaceholder: rgba(32,19,47,0.55);
+  --focusRing: 0 0 0 2px rgba(139,92,246,0.30);
+  --shadowSm: 0 4px 12px rgba(0,0,0,0.10);
+  --shadowMd: 0 10px 30px rgba(0,0,0,0.12);
+  --shadowLg: 0 18px 60px rgba(0,0,0,0.14);
+  color-scheme: light;
+}
+
+:root[data-theme="Ocean Mist"],
+[data-theme="Ocean Mist"] {
+  --bg: #e9fbff;
+  --bg2: #d7f5ff;
+  --panel: #ffffff;
+  --panel2: #eefbff;
+  --text: #06222b;
+  --muted: #0b4b5c;
+  --border: #bfe7f2;
+  --shadowColor: rgba(0,0,0,0.10);
+  --accent: #22c3d6;
+  --accent2: #0ea5b7;
+  --danger: #dc2626;
+  --success: #16a34a;
+  --warning: #f59e0b;
+  --link: #0ea5b7;
+  --messageSelfBg: linear-gradient(135deg, #22c3d6, #0ea5b7);
+  --messageSelfText: #06222b;
+  --messageOtherBg: rgba(255,255,255,0.88);
+  --messageOtherText: #06222b;
+  --messageSystemBg: rgba(34,195,214,0.10);
+  --messageSystemText: #0b4b5c;
+  --mentionBg: rgba(34,195,214,0.16);
+  --mentionText: #06222b;
+  --btnPrimaryBg: #0ea5b7;
+  --btnPrimaryText: #ffffff;
+  --btnSecondaryBg: rgba(6,34,43,0.06);
+  --btnSecondaryText: #06222b;
+  --inputBg: rgba(255,255,255,0.78);
+  --inputText: #06222b;
+  --inputPlaceholder: rgba(6,34,43,0.55);
+  --focusRing: 0 0 0 2px rgba(14,165,183,0.30);
+  --shadowSm: 0 4px 12px rgba(0,0,0,0.10);
+  --shadowMd: 0 10px 30px rgba(0,0,0,0.12);
+  --shadowLg: 0 18px 60px rgba(0,0,0,0.14);
+  color-scheme: light;
+}
+
+:root[data-theme="Sunlit Sand"],
+[data-theme="Sunlit Sand"] {
+  --bg: #fff6e6;
+  --bg2: #ffedd0;
+  --panel: #ffffff;
+  --panel2: #fff3dd;
+  --text: #2a1a08;
+  --muted: #6b3f16;
+  --border: #f3d7ad;
+  --shadowColor: rgba(0,0,0,0.10);
+  --accent: #f59e0b;
+  --accent2: #d97706;
+  --danger: #dc2626;
+  --success: #16a34a;
+  --warning: #b45309;
+  --link: #d97706;
+  --messageSelfBg: linear-gradient(135deg, #fbbf24, #f59e0b);
+  --messageSelfText: #2a1a08;
+  --messageOtherBg: rgba(255,255,255,0.88);
+  --messageOtherText: #2a1a08;
+  --messageSystemBg: rgba(245,158,11,0.12);
+  --messageSystemText: #6b3f16;
+  --mentionBg: rgba(245,158,11,0.18);
+  --mentionText: #2a1a08;
+  --btnPrimaryBg: #f59e0b;
+  --btnPrimaryText: #2a1a08;
+  --btnSecondaryBg: rgba(42,26,8,0.06);
+  --btnSecondaryText: #2a1a08;
+  --inputBg: rgba(255,255,255,0.80);
+  --inputText: #2a1a08;
+  --inputPlaceholder: rgba(42,26,8,0.55);
+  --focusRing: 0 0 0 2px rgba(245,158,11,0.30);
+  --shadowSm: 0 4px 12px rgba(0,0,0,0.10);
+  --shadowMd: 0 10px 30px rgba(0,0,0,0.12);
+  --shadowLg: 0 18px 60px rgba(0,0,0,0.14);
+  color-scheme: light;
+}
+
+:root[data-theme="Crimson Noir"],
+[data-theme="Crimson Noir"] {
+  --bg: #0b0a0d;
+  --bg2: #141018;
+  --panel: #17131c;
+  --panel2: #1b1522;
+  --text: #f7f2f6;
+  --muted: #c9b8c6;
+  --border: #2a2231;
+  --shadowColor: rgba(0,0,0,0.40);
+  --accent: #ef4444;
+  --accent2: #b91c1c;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --link: #fb7185;
+  --messageSelfBg: linear-gradient(135deg, #ef4444, #b91c1c);
+  --messageSelfText: #0b0a0d;
+  --messageOtherBg: rgba(255,255,255,0.06);
+  --messageOtherText: #f7f2f6;
+  --messageSystemBg: rgba(239,68,68,0.10);
+  --messageSystemText: #c9b8c6;
+  --mentionBg: rgba(239,68,68,0.16);
+  --mentionText: #f7f2f6;
+  --btnPrimaryBg: #ef4444;
+  --btnPrimaryText: #0b0a0d;
+  --btnSecondaryBg: rgba(255,255,255,0.08);
+  --btnSecondaryText: #f7f2f6;
+  --inputBg: rgba(255,255,255,0.08);
+  --inputText: #f7f2f6;
+  --inputPlaceholder: rgba(247,242,246,0.55);
+  --focusRing: 0 0 0 2px rgba(239,68,68,0.30);
+  --shadowSm: 0 4px 12px rgba(0,0,0,0.25);
+  --shadowMd: 0 10px 30px rgba(0,0,0,0.35);
+  --shadowLg: 0 18px 60px rgba(0,0,0,0.45);
+  color-scheme: dark;
+}
+
+:root[data-theme="Deep Ocean"],
+[data-theme="Deep Ocean"] {
+  --bg: #061722;
+  --bg2: #04121b;
+  --panel: #0a2230;
+  --panel2: #0b2736;
+  --text: #e6f2ff;
+  --muted: #a7c3d9;
+  --border: #123447;
+  --shadowColor: rgba(0,0,0,0.40);
+  --accent: #38bdf8;
+  --accent2: #0ea5e9;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --link: #38bdf8;
+  --messageSelfBg: linear-gradient(135deg, #38bdf8, #0ea5e9);
+  --messageSelfText: #061722;
+  --messageOtherBg: rgba(255,255,255,0.06);
+  --messageOtherText: #e6f2ff;
+  --messageSystemBg: rgba(56,189,248,0.10);
+  --messageSystemText: #a7c3d9;
+  --mentionBg: rgba(56,189,248,0.16);
+  --mentionText: #e6f2ff;
+  --btnPrimaryBg: #38bdf8;
+  --btnPrimaryText: #061722;
+  --btnSecondaryBg: rgba(255,255,255,0.08);
+  --btnSecondaryText: #e6f2ff;
+  --inputBg: rgba(255,255,255,0.08);
+  --inputText: #e6f2ff;
+  --inputPlaceholder: rgba(230,242,255,0.55);
+  --focusRing: 0 0 0 2px rgba(56,189,248,0.30);
+  --shadowSm: 0 4px 12px rgba(0,0,0,0.25);
+  --shadowMd: 0 10px 30px rgba(0,0,0,0.35);
+  --shadowLg: 0 18px 60px rgba(0,0,0,0.45);
+  color-scheme: dark;
+}
+
+:root[data-theme="Graphite"],
+[data-theme="Graphite"] {
+  --bg: #111214;
+  --bg2: #0d0e10;
+  --panel: #1b1d20;
+  --panel2: #17191c;
+  --text: #f1f5f9;
+  --muted: #cbd5e1;
+  --border: #2a2e34;
+  --shadowColor: rgba(0,0,0,0.40);
+  --accent: #a3a3a3;
+  --accent2: #d4d4d4;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --link: #e5e7eb;
+  --messageSelfBg: linear-gradient(135deg, #d4d4d4, #a3a3a3);
+  --messageSelfText: #111214;
+  --messageOtherBg: rgba(255,255,255,0.06);
+  --messageOtherText: #f1f5f9;
+  --messageSystemBg: rgba(255,255,255,0.08);
+  --messageSystemText: #cbd5e1;
+  --mentionBg: rgba(255,255,255,0.12);
+  --mentionText: #f1f5f9;
+  --btnPrimaryBg: #d4d4d4;
+  --btnPrimaryText: #111214;
+  --btnSecondaryBg: rgba(255,255,255,0.08);
+  --btnSecondaryText: #f1f5f9;
+  --inputBg: rgba(255,255,255,0.08);
+  --inputText: #f1f5f9;
+  --inputPlaceholder: rgba(241,245,249,0.55);
+  --focusRing: 0 0 0 2px rgba(212,212,212,0.25);
+  --shadowSm: 0 4px 12px rgba(0,0,0,0.25);
+  --shadowMd: 0 10px 30px rgba(0,0,0,0.35);
+  --shadowLg: 0 18px 60px rgba(0,0,0,0.45);
+  color-scheme: dark;
 }

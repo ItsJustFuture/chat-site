@@ -608,6 +608,16 @@ function previewText(text, max=180){
 }
 
 const ROLES = ["Guest","User","VIP","Moderator","Admin","Co-owner","Owner"];
+
+const PUBLIC_THEME_NAMES = new Set(["Minimal Light", "Minimal Dark", "Minimal Light (High Contrast)", "Minimal Dark (High Contrast)", "Paper / Parchment", "Sky Light", "Fantasy Tavern", "Fantasy Tavern (Ember)", "Desert Dusk"]);
+function canUseThemeName(themeName){
+  // Public themes always allowed
+  if(PUBLIC_THEME_NAMES.has(themeName)) return true;
+  // VIP and above can use all themes
+  const role = (typeof me !== "undefined" && me && me.role) ? me.role : "User";
+  return roleRank(role) >= roleRank("VIP");
+}
+
 function roleRank(role){ const i=ROLES.indexOf(role); return i===-1?1:i; }
 
 const STATUS_ALIASES = {
@@ -998,11 +1008,11 @@ async function loadUserPrefs(){
     }
   }catch{}
 }
-function applyTheme(themeName, { persist=true, silent=false } = {}){
+function applyTheme(themeName, { persist=true, silent=false, storeLocal=persist } = {}){
   const safe = sanitizeThemeName(themeName || DEFAULT_THEME);
   currentTheme = safe;
   document.body?.setAttribute("data-theme", safe);
-  setStoredTheme(safe);
+  if(storeLocal) setStoredTheme(safe);
   if(persist) persistThemePreference(safe);
   renderThemeGrid();
   if(themeMsg && !silent){
@@ -1074,7 +1084,33 @@ function renderThemeGrid(){
         </div>
       `;
       card.appendChild(createThemeThumbnail(theme.name));
-      card.addEventListener("click", () => applyTheme(theme.name, { persist:true }));
+      if (canUseThemeName(theme.name)) {
+        card.addEventListener("click", () => applyTheme(theme.name, { persist:true }));
+      } else {
+        card.classList.add("locked");
+        // VIP ONLY badge (keep full colors visible)
+        const vipTag = document.createElement("div");
+        vipTag.className = "vipOnlyTag";
+        vipTag.textContent = "VIP ONLY";
+        card.appendChild(vipTag);
+
+        // Preview button (10s) + card click preview
+        const previewBtn = document.createElement("button");
+        previewBtn.type = "button";
+        previewBtn.className = "previewBtn";
+        previewBtn.textContent = "Preview (10s)";
+        previewBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          previewTheme(theme.name, 10);
+        });
+        card.appendChild(previewBtn);
+
+        card.addEventListener("click", (e) => {
+          e.preventDefault();
+          previewTheme(theme.name, 10);
+        });
+      }
       body.appendChild(card);
     }
 
