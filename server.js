@@ -1370,7 +1370,11 @@ async function executeCommand(socket, rawText, room) {
   const parsed = parseCommand(rawText);
   if (!parsed) return false;
   const actor = socket.user;
-  const actorRole = godmodeUsers.has(actor.id) ? "Owner" : socket.request.session.user.role;
+  // On reconnects / session-store hiccups, socket.request.session.user can be
+  // temporarily missing. Commands should still work based on the live socket user.
+  const actorRole = godmodeUsers.has(actor.id)
+    ? "Owner"
+    : (socket.user?.role || socket.request?.session?.user?.role || "User");
   const meta = commandRegistry[parsed.name];
   if (!meta) {
     socket.emit("command response", { ok: false, message: "Unknown command" });
