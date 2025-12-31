@@ -1797,13 +1797,18 @@ function requireOwner(req, res, next) {
 
 function toChangelogPayload(row) {
   if (!row) return null;
+  const normalizeEpoch = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
   return {
     id: row.id,
     seq: row.seq,
     title: row.title,
     body: row.body || "",
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    // Always send numeric epoch millis (client formats to viewer's locale/timezone).
+    createdAt: normalizeEpoch(row.created_at),
+    updatedAt: normalizeEpoch(row.updated_at),
     authorId: row.author_id,
   };
 }
