@@ -4057,3 +4057,39 @@ function canUseTheme(theme) {
   const hierarchy = { public:0, vip:1, staff:2, admin:3 };
   return hierarchy[role] >= hierarchy[theme.tier];
 }
+
+
+let __themePreviewTimer = null;
+
+function getActiveThemeId() {
+  // Prefer body attribute, fall back to localStorage
+  const cur = document.body?.dataset?.theme;
+  if (cur && cur.trim()) return cur.trim();
+  try { return localStorage.getItem("theme") || ""; } catch (_) { return ""; }
+}
+
+function applyThemeId(themeId, persist = true) {
+  // Use existing setTheme if available; otherwise set body dataset.
+  if (typeof setTheme === "function") {
+    // setTheme is assumed to persist; use persist=false to avoid saving if supported
+    try { setTheme(themeId, persist); return; } catch (_) {}
+  }
+  if (document.body) document.body.dataset.theme = themeId;
+  if (persist) {
+    try { localStorage.setItem("theme", themeId); } catch (_) {}
+  }
+}
+
+function previewTheme(themeId, seconds = 10) {
+  const prev = getActiveThemeId();
+  if (__themePreviewTimer) {
+    clearTimeout(__themePreviewTimer);
+    __themePreviewTimer = null;
+  }
+  applyThemeId(themeId, false);
+  __themePreviewTimer = setTimeout(() => {
+    applyThemeId(prev, false);
+    __themePreviewTimer = null;
+  }, seconds * 1000);
+}
+
