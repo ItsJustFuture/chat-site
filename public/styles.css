@@ -2430,3 +2430,39 @@ input, textarea, select{
   /* keep icons from ballooning */
   .iconBtn, .iconBtn.smallIcon { font-size: 16px; }
 }
+/* =========================================================
+   iOS SAFARI – PREVENT INPUT ZOOM + UI BREAKAGE
+   ========================================================= */
+
+/* Stop Safari from resizing text automatically */
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Prevent iOS zooming when focusing inputs */
+@media (hover: none) and (pointer: coarse) {
+  input,
+  textarea,
+  select,
+  button {
+    font-size: 16px !important;
+    line-height: 1.35;
+  }
+
+  /* Stabilise chat + DM composer height so keyboard doesn't push UI */
+  .composer,
+  .dmComposer,
+  .messageComposer,
+  .chatInputBar {
+    min-height: 44px;
+    max-height: 44px;
+  }
+
+  /* Ensure input fields fill the bar properly */
+  .composer input,
+  .composer textarea,
+  .dmComposer input,
+  .dmComposer textarea {
+    height: 100%;
+  }
+}
