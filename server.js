@@ -2598,6 +2598,15 @@ app.get("/profile", requireLogin, async (req, res) => {
             likedByMe: !!Number(likesRow?.liked || 0),
             ...progressionFromRow(row, true),
           };
+          // update live socket presence so member list + chat avatars refresh immediately
+const sid = socketIdByUserId.get(userId);
+if (sid) {
+  const s = io.sockets.sockets.get(sid);
+  if (s?.user) {
+    if (avatar) s.user.avatar = avatar;
+    s.user.mood = mood;
+    if (s.currentRoom) emitUserList(s.currentRoom);
+  }
           return res.json(payload);
         }
       );
@@ -3287,7 +3296,27 @@ io.on("connection", (socket) => {
   onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
   initGoldTick(socket.user.id);
 
-  // Load profile bits for presence
+ // Load profile bits for presence (PG-first, SQLite fallback)
+(async () => {
+  try {
+    if (await pgUserExists(socket.user.id)) {
+      const { rows } = await pgPool.query(
+        "SELECT avatar, mood FROM users WHERE id=$1 LIMIT 1",
+        [socket.user.id]
+      );
+      const r = rows?.[0];
+      if (r) {
+        socket.user.avatar = r.avatar || "";
+        socket.user.mood = r.mood || "";
+        if (socket.currentRoom) emitUserList(socket.currentRoom); // refresh if already joined
+      }
+      return;
+    }
+  } catch (e) {
+    console.warn("[presence][pg] failed:", e?.message || e);
+  }
+
+  // SQLite fallback
   db.get(
     "SELECT avatar, mood FROM users WHERE id = ?",
     [socket.user.id],
@@ -3295,9 +3324,11 @@ io.on("connection", (socket) => {
       if (row) {
         socket.user.avatar = row.avatar || "";
         socket.user.mood = row.mood || "";
+        if (socket.currentRoom) emitUserList(socket.currentRoom); // refresh if already joined
       }
     }
   );
+})();
 
   socket.currentRoom = null;
     // --- SAFETY: ensure user is always in a room so messages can appear
