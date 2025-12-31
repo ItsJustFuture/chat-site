@@ -220,6 +220,12 @@ const THEME_LIST = [
   { name: "Deep Ocean", mode: "Dark" },
   { name: "Sunlit Sand", mode: "Light" },
   { name: "Graphite", mode: "Dark" },
+  { name: "Forest Night", mode: "Dark" },
+  { name: "Retro Terminal", mode: "Dark" },
+  { name: "Desert Dusk", mode: "Dark" },
+  { name: "Arctic Light", mode: "Light" },
+  { name: "Rose Quartz", mode: "Light" },
+  { name: "Lemonade", mode: "Light" },
 
 ];
 const DEFAULT_THEME = "Minimal Dark";
@@ -1012,31 +1018,64 @@ function createThemeThumbnail(themeName){
 }
 function renderThemeGrid(){
   if(!themeGrid) return;
+
+  // Split view: Light themes on the left, Dark themes on the right.
   themeGrid.innerHTML = "";
-  const filtered = THEME_LIST.filter((t) => {
-    if(themeFilter === "dark") return t.mode === "Dark";
-    if(themeFilter === "light") return t.mode === "Light";
-    return true;
-  });
-  for(const theme of filtered){
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = `themeCard${currentTheme === theme.name ? " selected" : ""}`;
-    card.dataset.themeName = theme.name;
-    card.innerHTML = `
-      <div class="themeCardHeader">
-        <div>
-          <div class="themeLabel">${escapeHtml(theme.name)}</div>
-          <div class="themeMode">${escapeHtml(theme.mode)}</div>
+  themeGrid.classList.toggle("oneColumn", themeFilter !== "all");
+  themeGrid.classList.toggle("onlyLight", themeFilter === "light");
+  themeGrid.classList.toggle("onlyDark", themeFilter === "dark");
+
+  const lightThemes = THEME_LIST.filter((t) => t.mode === "Light");
+  const darkThemes  = THEME_LIST.filter((t) => t.mode === "Dark");
+
+  const makeColumn = (title, mode, items) => {
+    const col = document.createElement("div");
+    col.className = `themeColumn ${mode.toLowerCase()}`;
+
+    const header = document.createElement("div");
+    header.className = "themeColumnHeader";
+    header.innerHTML = `<div class="themeColumnTitle">${escapeHtml(title)}</div>
+                        <div class="themeColumnHint">${escapeHtml(mode)}</div>`;
+
+    const body = document.createElement("div");
+    body.className = "themeColumnBody";
+
+    for(const theme of items){
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = `themeCard compact${currentTheme === theme.name ? " selected" : ""}`;
+      card.dataset.themeName = theme.name;
+      card.innerHTML = `
+        <div class="themeCardHeader">
+          <div>
+            <div class="themeLabel">${escapeHtml(theme.name)}</div>
+          </div>
+          <div class="themeCheck">✓</div>
         </div>
-        <div class="themeCheck">✓</div>
-      </div>
-    `;
-    card.appendChild(createThemeThumbnail(theme.name));
-    card.addEventListener("click", () => applyTheme(theme.name, { persist:true }));
-    themeGrid.appendChild(card);
+      `;
+      card.appendChild(createThemeThumbnail(theme.name));
+      card.addEventListener("click", () => applyTheme(theme.name, { persist:true }));
+      body.appendChild(card);
+    }
+
+    col.appendChild(header);
+    col.appendChild(body);
+    return col;
+  };
+
+  if(themeFilter === "light"){
+    themeGrid.appendChild(makeColumn("Light themes", "Light", lightThemes));
+    return;
   }
+  if(themeFilter === "dark"){
+    themeGrid.appendChild(makeColumn("Dark themes", "Dark", darkThemes));
+    return;
+  }
+
+  themeGrid.appendChild(makeColumn("Light themes", "Light", lightThemes));
+  themeGrid.appendChild(makeColumn("Dark themes", "Dark", darkThemes));
 }
+
 function setThemeFilter(filter){
   themeFilter = filter;
   themeFilterButtons.forEach((btn) => {

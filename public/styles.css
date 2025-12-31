@@ -898,6 +898,268 @@ body[data-theme="Cherry Blossom (Dark)"] .bubble {
   --mentionText: #eef2f7;
 }
 
+/* ------------------------------
+   Additional themes
+-------------------------------- */
+:root[data-theme="Forest Night"],
+[data-theme="Forest Night"] {
+  --bg: #0b1412;
+  --bg2: #07100e;
+  --panel: #111f1a;
+  --panel2: #0c1813;
+  --text: #e7f2ee;
+  --muted: #9bb8ae;
+  --border: #2a4a3f;
+  --shadowColor: rgba(0,0,0,.35);
+  --accent: #34d399;
+  --accent2: #10b981;
+  --danger: #ef4444;
+  --warn: #f59e0b;
+  --ok: #22c55e;
+  --radius: 12px;
+  --radiusLg: 16px;
+  --radiusMd: 12px;
+  --radiusSm: 10px;
+  --shadowSm: 0 8px 20px rgba(0,0,0,.22);
+  --shadowMd: 0 14px 40px rgba(0,0,0,.28);
+  --shadowLg: 0 22px 70px rgba(0,0,0,.32);
+  color-scheme: dark;
+
+  --messageSelfBg: rgba(52, 211, 153, 0.16);
+  --messageSelfText: var(--text);
+  --messageOtherBg: rgba(255,255,255,0.06);
+  --messageOtherText: var(--text);
+  --messageSystemBg: rgba(52, 211, 153, 0.10);
+  --messageSystemText: var(--text);
+  --mentionBg: rgba(52, 211, 153, 0.18);
+  --mentionText: var(--text);
+
+  --btnPrimaryBg: #10b981;
+  --btnPrimaryText: #042019;
+  --btnSecondaryBg: rgba(255,255,255,0.06);
+  --btnSecondaryText: var(--text);
+  --inputBg: rgba(255,255,255,0.06);
+  --inputText: var(--text);
+  --inputPlaceholder: rgba(231,242,238,0.6);
+  --focusRing: 0 0 0 2px rgba(16,185,129,0.35);
+}
+
+:root[data-theme="Retro Terminal"],
+[data-theme="Retro Terminal"] {
+  --bg: #051008;
+  --bg2: #030b05;
+  --panel: #0a1b0e;
+  --panel2: #06140a;
+  --text: #c7ffb9;
+  --muted: #7bdc8a;
+  --border: #124b22;
+  --shadowColor: rgba(0,0,0,.42);
+  --accent: #22c55e;
+  --accent2: #a3ff85;
+  --danger: #ff4d4d;
+  --warn: #f59e0b;
+  --ok: #22c55e;
+  --radius: 10px;
+  --radiusLg: 14px;
+  --radiusMd: 10px;
+  --radiusSm: 8px;
+  --shadowSm: 0 8px 20px rgba(0,0,0,.30);
+  --shadowMd: 0 14px 40px rgba(0,0,0,.36);
+  --shadowLg: 0 22px 70px rgba(0,0,0,.40);
+  color-scheme: dark;
+
+  --messageSelfBg: rgba(34, 197, 94, 0.16);
+  --messageSelfText: var(--text);
+  --messageOtherBg: rgba(199,255,185,0.06);
+  --messageOtherText: var(--text);
+  --messageSystemBg: rgba(34, 197, 94, 0.10);
+  --messageSystemText: var(--text);
+  --mentionBg: rgba(34, 197, 94, 0.18);
+  --mentionText: var(--text);
+
+  --btnPrimaryBg: #22c55e;
+  --btnPrimaryText: #031107;
+  --btnSecondaryBg: rgba(199,255,185,0.08);
+  --btnSecondaryText: var(--text);
+  --inputBg: rgba(199,255,185,0.06);
+  --inputText: var(--text);
+  --inputPlaceholder: rgba(199,255,185,0.6);
+  --focusRing: 0 0 0 2px rgba(34,197,94,0.35);
+}
+
+:root[data-theme="Desert Dusk"],
+[data-theme="Desert Dusk"] {
+  --bg: #1b1210;
+  --bg2: #140d0b;
+  --panel: #251a17;
+  --panel2: #1b1311;
+  --text: #f5e9db;
+  --muted: #d2b8a5;
+  --border: #4b342c;
+  --shadowColor: rgba(0,0,0,.34);
+  --accent: #fb923c;
+  --accent2: #f97316;
+  --danger: #ef4444;
+  --warn: #f59e0b;
+  --ok: #22c55e;
+  --radius: 14px;
+  --radiusLg: 18px;
+  --radiusMd: 14px;
+  --radiusSm: 12px;
+  --shadowSm: 0 8px 22px rgba(0,0,0,.22);
+  --shadowMd: 0 14px 44px rgba(0,0,0,.28);
+  --shadowLg: 0 22px 72px rgba(0,0,0,.32);
+  color-scheme: dark;
+
+  --messageSelfBg: rgba(251, 146, 60, 0.16);
+  --messageSelfText: var(--text);
+  --messageOtherBg: rgba(255,255,255,0.06);
+  --messageOtherText: var(--text);
+  --messageSystemBg: rgba(251, 146, 60, 0.10);
+  --messageSystemText: var(--text);
+  --mentionBg: rgba(251, 146, 60, 0.18);
+  --mentionText: var(--text);
+
+  --btnPrimaryBg: #f97316;
+  --btnPrimaryText: #1b0b05;
+  --btnSecondaryBg: rgba(255,255,255,0.06);
+  --btnSecondaryText: var(--text);
+  --inputBg: rgba(255,255,255,0.06);
+  --inputText: var(--text);
+  --inputPlaceholder: rgba(245,233,219,0.62);
+  --focusRing: 0 0 0 2px rgba(249,115,22,0.35);
+}
+
+:root[data-theme="Arctic Light"],
+[data-theme="Arctic Light"] {
+  --bg: #f3fbff;
+  --bg2: #e7f6ff;
+  --panel: #ffffff;
+  --panel2: #eff9ff;
+  --text: #0b1220;
+  --muted: #334155;
+  --border: #cbd5e1;
+  --shadowColor: rgba(0,0,0,.10);
+  --accent: #2563eb;
+  --accent2: #38bdf8;
+  --danger: #dc2626;
+  --warn: #d97706;
+  --ok: #16a34a;
+  --radius: 14px;
+  --radiusLg: 18px;
+  --radiusMd: 14px;
+  --radiusSm: 12px;
+  --shadowSm: 0 10px 28px rgba(0,0,0,.10);
+  --shadowMd: 0 16px 44px rgba(0,0,0,.12);
+  --shadowLg: 0 22px 66px rgba(0,0,0,.14);
+  color-scheme: light;
+
+  --messageSelfBg: rgba(37, 99, 235, 0.10);
+  --messageSelfText: #0b1220;
+  --messageOtherBg: #ffffff;
+  --messageOtherText: #0b1220;
+  --messageSystemBg: rgba(56, 189, 248, 0.16);
+  --messageSystemText: #0b1220;
+  --mentionBg: rgba(37, 99, 235, 0.12);
+  --mentionText: #0b1220;
+
+  --btnPrimaryBg: #2563eb;
+  --btnPrimaryText: #ffffff;
+  --btnSecondaryBg: #e2e8f0;
+  --btnSecondaryText: #0b1220;
+  --inputBg: #ffffff;
+  --inputText: #0b1220;
+  --inputPlaceholder: #475569;
+  --focusRing: 0 0 0 2px rgba(37,99,235,0.28);
+}
+
+:root[data-theme="Rose Quartz"],
+[data-theme="Rose Quartz"] {
+  --bg: #fff5f8;
+  --bg2: #ffe9f0;
+  --panel: #ffffff;
+  --panel2: #fff0f5;
+  --text: #1f1220;
+  --muted: #6b3b59;
+  --border: #f3c4d9;
+  --shadowColor: rgba(0,0,0,.10);
+  --accent: #ec4899;
+  --accent2: #fb7185;
+  --danger: #dc2626;
+  --warn: #d97706;
+  --ok: #16a34a;
+  --radius: 14px;
+  --radiusLg: 18px;
+  --radiusMd: 14px;
+  --radiusSm: 12px;
+  --shadowSm: 0 10px 26px rgba(0,0,0,.10);
+  --shadowMd: 0 16px 42px rgba(0,0,0,.12);
+  --shadowLg: 0 22px 62px rgba(0,0,0,.14);
+  color-scheme: light;
+
+  --messageSelfBg: rgba(236, 72, 153, 0.10);
+  --messageSelfText: #1f1220;
+  --messageOtherBg: #ffffff;
+  --messageOtherText: #1f1220;
+  --messageSystemBg: rgba(251, 113, 133, 0.16);
+  --messageSystemText: #1f1220;
+  --mentionBg: rgba(236, 72, 153, 0.12);
+  --mentionText: #1f1220;
+
+  --btnPrimaryBg: #ec4899;
+  --btnPrimaryText: #ffffff;
+  --btnSecondaryBg: #ffe4ee;
+  --btnSecondaryText: #1f1220;
+  --inputBg: #ffffff;
+  --inputText: #1f1220;
+  --inputPlaceholder: #6b7280;
+  --focusRing: 0 0 0 2px rgba(236,72,153,0.25);
+}
+
+:root[data-theme="Lemonade"],
+[data-theme="Lemonade"] {
+  --bg: #fffdf0;
+  --bg2: #fff7cc;
+  --panel: #ffffff;
+  --panel2: #fffbe0;
+  --text: #111827;
+  --muted: #374151;
+  --border: #e5e7eb;
+  --shadowColor: rgba(0,0,0,.10);
+  --accent: #eab308;
+  --accent2: #f59e0b;
+  --danger: #dc2626;
+  --warn: #d97706;
+  --ok: #16a34a;
+  --radius: 14px;
+  --radiusLg: 18px;
+  --radiusMd: 14px;
+  --radiusSm: 12px;
+  --shadowSm: 0 10px 26px rgba(0,0,0,.10);
+  --shadowMd: 0 16px 42px rgba(0,0,0,.12);
+  --shadowLg: 0 22px 62px rgba(0,0,0,.14);
+  color-scheme: light;
+
+  --messageSelfBg: rgba(234, 179, 8, 0.12);
+  --messageSelfText: #111827;
+  --messageOtherBg: #ffffff;
+  --messageOtherText: #111827;
+  --messageSystemBg: rgba(245, 158, 11, 0.16);
+  --messageSystemText: #111827;
+  --mentionBg: rgba(234, 179, 8, 0.14);
+  --mentionText: #111827;
+
+  --btnPrimaryBg: #eab308;
+  --btnPrimaryText: #111827;
+  --btnSecondaryBg: #fff7cc;
+  --btnSecondaryText: #111827;
+  --inputBg: #ffffff;
+  --inputText: #111827;
+  --inputPlaceholder: #4b5563;
+  --focusRing: 0 0 0 2px rgba(234,179,8,0.28);
+}
+
+
 [data-theme] {
   color-scheme: dark;
 }
@@ -1593,7 +1855,31 @@ body.dice-room .sys .diceFace{
   font-weight:800;
 }
 .pillBtn.active{ background:var(--panel); box-shadow: var(--shadowSm); }
-.themeGrid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:12px; }
+.themeGrid{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; align-items:start; }
+
+.themeGrid.oneColumn{ grid-template-columns: 1fr; }
+@media (max-width: 760px){
+  .themeGrid{ grid-template-columns: 1fr; }
+}
+
+/* Split columns */
+.themeColumn{ display:flex; flex-direction:column; gap:10px; }
+.themeColumnHeader{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; padding:2px 2px 0; }
+.themeColumnTitle{ font-weight:1000; letter-spacing:.2px; }
+.themeColumnHint{ font-size:11px; color:var(--muted); }
+
+/* Compact theme cards for picker */
+.themeCard.compact{ padding:8px; gap:6px; }
+.themeCard.compact .themeLabel{ font-size:13px; }
+.themeCard.compact .themeMode{ display:none; }
+.themeCard.compact .themeThumbnail{ padding:8px; border-radius: var(--radiusMd); }
+.themeCard.compact .themeMiniLayout{ grid-template-columns: 64px 1fr; gap:7px; }
+.themeCard.compact .themeMiniSidebar{ padding:5px; gap:5px; }
+.themeCard.compact .themeMiniMain{ padding:6px; gap:5px; }
+.themeCard.compact .themeMiniButton{ font-size:9px; padding:5px 6px; }
+.themeCard.compact .themeMiniBubble{ font-size:9px; padding:6px 7px; }
+.themeCard.compact .themeMiniAvatar{ width:14px; height:14px; }
+
 .themeCard{
   border:1px solid var(--border);
   border-radius:var(--radiusLg);
