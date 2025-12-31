@@ -3291,7 +3291,14 @@ io.on("connection", (socket) => {
     mood: "",
     avatar: "",
   };
-
+// Enforce single active connection per user (prevents duplicate presence)
+const existingSid = socketIdByUserId.get(socket.user.id);
+if (existingSid && existingSid !== socket.id) {
+  const oldSocket = io.sockets.sockets.get(existingSid);
+  if (oldSocket) {
+    oldSocket.disconnect(true);
+  }
+}
   socketIdByUserId.set(socket.user.id, socket.id);
   onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
   initGoldTick(socket.user.id);
@@ -4106,12 +4113,14 @@ if (!room) {
   socket.on("disconnect", () => {
     const room = socket.currentRoom;
 
-    socketIdByUserId.delete(socket.user.id);
-    onlineState.delete(socket.user.id);
+// Only clear if this socket is still the active one for that user
+if (socketIdByUserId.get(socket.user.id) === socket.id) {
+  socketIdByUserId.delete(socket.user.id);
+  onlineState.delete(socket.user.id);
+  onlineXpTrack.delete(socket.user.id);
     msgRate.delete(socket.id);
-    onlineXpTrack.delete(socket.user.id);
     initGoldTick(socket.user.id);
-
+    }
     db.run("UPDATE users SET last_seen=? WHERE id=?", [Date.now(), socket.user.id]);
 
     if (room) {
