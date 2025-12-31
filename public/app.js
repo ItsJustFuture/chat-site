@@ -2427,7 +2427,7 @@ function setTab(tab){
   viewAbout.style.display = tab==="about" ? "block" : "none";
   viewEdit.style.display = tab==="edit" ? "block" : "none";
   viewModeration.style.display = tab==="moderation" ? "block" : "none";
-  if(tab === "edit") showEditPanel("themes");
+  if(tab === "edit") showEditPanel("profile");
   focusActiveTab();
 }
 tabEdit.addEventListener("click", ()=>setTab("edit"));
