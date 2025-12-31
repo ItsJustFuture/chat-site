@@ -1173,14 +1173,16 @@ function closeReactionMenu(){
   if(reactionMenuRow) reactionMenuRow.classList.remove("showActions");
   reactionMenuFor = null;
   reactionMenuRow = null;
-
-
-// Close message action rails when tapping outside a message (mobile-friendly)
-document.addEventListener("click", (e) => {
-  if (e?.target?.closest(".msg")) return;
-  document.querySelectorAll(".msg.showActions").forEach((el) => el.classList.remove("showActions"));
-});
 }
+
+// Tap outside to hide message action buttons (mobile-friendly).
+// Use pointerdown so it works reliably on iOS Safari.
+document.addEventListener("pointerdown", (e) => {
+  if (e?.target?.closest(".msg")) return;
+  if (e?.target?.closest(".reactionMenu")) return;
+  document.querySelectorAll(".msg.showActions").forEach((el) => el.classList.remove("showActions"));
+  closeReactionMenu();
+}, { capture: true });
 
 // Tap outside to hide message action buttons (mobile).
 document.addEventListener("click", (e)=>{
@@ -1374,29 +1376,13 @@ function addMessage(m){
   };
   actions.prepend(replyBtn);
 
-// Mobile-friendly actions: tap a message bubble to toggle its action buttons.
-// This replaces long-press to reduce accidental triggers on iOS Safari.
-bubble.addEventListener("click", (e)=>{
-  // Ignore clicks originating from buttons/links inside the bubble.
-  if (e.target && e.target.closest && e.target.closest("button,a")) return;
 
-  const isTouch = window.matchMedia && window.matchMedia("(hover: none)").matches;
-  if (!isTouch && window.innerWidth > 980) return;
-
-  e.stopPropagation();
-  closeReactionMenu();
-
-  const willShow = !row.classList.contains("showActions");
-  document.querySelectorAll(".msg.showActions").forEach((el)=>{
-    if (el !== row) el.classList.remove("showActions");
-  });
-  row.classList.toggle("showActions", willShow);
-});
 
   // mobile: tap message to toggle actions (reply/react/delete)
 const toggleActions = (e) => {
   // Ignore taps on interactive elements inside the message
   if (e?.target?.closest("button, a, input, textarea, select, label")) return;
+  if (e?.stopPropagation) e.stopPropagation();
 
   // Close any other open action rails
   document.querySelectorAll(".msg.showActions").forEach((el) => {
@@ -1407,7 +1393,7 @@ const toggleActions = (e) => {
   if (!on) closeReactionMenu();
 };
 
-bubble.addEventListener("click", toggleActions);
+bubble.addEventListener("pointerdown", toggleActions);
 
   row.appendChild(av);
   row.appendChild(main);
