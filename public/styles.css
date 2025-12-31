@@ -941,13 +941,7 @@ button{ font-family:inherit; }
 
 /* AUTH */
 #authWrap{ height: calc(var(--vh) * 100); display:flex; align-items:center; justify-content:center; padding:20px; }
-/* Scale UI for small screens / user preference */
-#authWrap, #app{
-  transform: scale(var(--uiScale));
-  transform-origin: top left;
-  width: calc(100% / var(--uiScale));
-  height: calc((var(--vh) * 100) / var(--uiScale));
-}
+/* UI scale for small screens / user preference (no transform: fixes iOS hit-testing) */
 
 .authCard{
   width:min(420px, 94vw);
@@ -1638,7 +1632,6 @@ body.dice-room .sys .diceFace{
   .searchWrap{
     display:none !important;
   }
-}
   .customizeShell{ grid-template-columns: 1fr; }
   .customNav{ flex-direction:row; flex-wrap:wrap; }
   .customNavBtn{ flex:1; text-align:center; }
@@ -2393,3 +2386,37 @@ body.drawer-right-open { --rightDrawerW: min(86vw, 340px); }
 .bottomBar{
   padding-bottom: calc(10px + env(safe-area-inset-bottom));
 }
+
+/* UI scale: adjust key sizes without CSS transforms (transforms break taps on iOS) */
+html, body {
+  font-size: calc(16px * var(--uiScale));
+}
+
+.topbar{
+  height: calc(54px * var(--uiScale)) !important;
+  padding: 0 calc(14px * var(--uiScale)) !important;
+}
+
+.btn{
+  padding: calc(10px * var(--uiScale)) calc(12px * var(--uiScale)) !important;
+  font-size: calc(14px * var(--uiScale)) !important;
+}
+
+input, textarea, select{
+  font-size: calc(14px * var(--uiScale)) !important;
+}
+
+.field input, textarea, select{
+  padding: calc(11px * var(--uiScale)) calc(12px * var(--uiScale)) !important;
+}
+
+.iconBtn{
+  width: calc(38px * var(--uiScale)) !important;
+  height: calc(38px * var(--uiScale)) !important;
+}
+
+/* Keep tap targets sane even when scaled down */
+@media (max-width: 360px){
+  .btn, .iconBtn{ min-height: 38px; }
+}
+
