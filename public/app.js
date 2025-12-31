@@ -1304,6 +1304,19 @@ function closeMemberMenu(){
   memberMenuUsername = "";
 }
 
+
+// ---- Member quick-actions menu buttons
+memberViewProfileBtn?.addEventListener("click", ()=>{
+  const uname = (memberMenuUsername || memberMenuUser?.username || memberMenuUser?.name || "").trim();
+  if (uname) openMemberProfile(uname);
+  closeMemberMenu();
+});
+memberDmBtn?.addEventListener("click", ()=>{
+  const uname = (memberMenuUsername || memberMenuUser?.username || memberMenuUser?.name || "").trim();
+  if (uname) startDirectMessage(uname);
+  closeMemberMenu();
+});
+
 function openMemberMenu(user, anchor){
   if (!memberMenu || !membersPane) {
     // Fallback if the quick-actions menu is unavailable
