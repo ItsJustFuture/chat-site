@@ -127,6 +127,7 @@ let modalTargetUsername = null;
 let pendingFile = null;
 let uploadXhr = null;
 let memberMenuUser = null;
+let memberMenuUsername = "";
 let replyTarget = null;
 let dmReplyTarget = null;
 let chatPinned = true;
@@ -1300,15 +1301,19 @@ function closeMemberMenu(){
   if (!memberMenu) return;
   memberMenu.classList.remove("open");
   memberMenuUser = null;
+  memberMenuUsername = "";
 }
 
 function openMemberMenu(user, anchor){
   if (!memberMenu || !membersPane) {
-    openMemberProfile(user.name);
+    // Fallback if the quick-actions menu is unavailable
+    const uname = user?.username || user?.name || "";
+    if (uname) openMemberProfile(uname);
     return;
   }
 
   memberMenuUser = user;
+  memberMenuUsername = user?.username || user?.name || "";
   if (memberMenuName) memberMenuName.textContent = `${roleIcon(user.role)} ${user.name}`;
   memberMenu.classList.add("open");
 
@@ -2271,7 +2276,8 @@ dmBgColorText?.addEventListener("input", () => {
 });
 
 memberViewProfileBtn?.addEventListener("click", () => {
-  if (memberMenuUser) openMemberProfile(memberMenuUser.name);
+  const uname = (memberMenuUser?.username || memberMenuUser?.name || memberMenuUsername || "").trim();
+  if (uname) openMemberProfile(uname);
   closeMemberMenu();
 });
 
