@@ -3303,7 +3303,7 @@ if (existingSid && existingSid !== socket.id) {
   onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
   initGoldTick(socket.user.id);
 
- // Load profile bits for presence (PG-first, SQLite fallback)
+// Load profile bits for presence (PG-first, SQLite fallback) + refresh member list when ready
 (async () => {
   try {
     if (await pgUserExists(socket.user.id)) {
@@ -3315,7 +3315,7 @@ if (existingSid && existingSid !== socket.id) {
       if (r) {
         socket.user.avatar = r.avatar || "";
         socket.user.mood = r.mood || "";
-        if (socket.currentRoom) emitUserList(socket.currentRoom); // refresh if already joined
+        if (socket.currentRoom) emitUserList(socket.currentRoom);
       }
       return;
     }
@@ -3323,7 +3323,6 @@ if (existingSid && existingSid !== socket.id) {
     console.warn("[presence][pg] failed:", e?.message || e);
   }
 
-  // SQLite fallback
   db.get(
     "SELECT avatar, mood FROM users WHERE id = ?",
     [socket.user.id],
@@ -3331,7 +3330,7 @@ if (existingSid && existingSid !== socket.id) {
       if (row) {
         socket.user.avatar = row.avatar || "";
         socket.user.mood = row.mood || "";
-        if (socket.currentRoom) emitUserList(socket.currentRoom); // refresh if already joined
+        if (socket.currentRoom) emitUserList(socket.currentRoom);
       }
     }
   );
@@ -3672,11 +3671,13 @@ if (!room) {
                 [tid],
                 (_e2, rows) => {
                   for (const r of rows || []) {
-                    const sid = socketIdByUserId.get(r.user_id);
-                    const s = sid ? io.sockets.sockets.get(sid) : null;
-                    if (s && !s.rooms.has(`dm:${tid}`)) {
-                      s.emit("dm message", payload);
-                    }
+                    const sid = socketIdByUserId.get(userId);
+const s = sid ? io.sockets.sockets.get(sid) : null;
+if (s?.user) {
+  if (avatar) s.user.avatar = avatar;
+  s.user.mood = mood;
+  if (s.currentRoom) emitUserList(s.currentRoom);
+}
                   }
                 }
               );
