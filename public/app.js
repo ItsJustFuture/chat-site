@@ -262,6 +262,24 @@ const THEME_LIST = [
   { name: "Iris & Lola Neon", mode: "Dark" },
 
 ];
+
+const IRIS_LOLA_THEME = "Iris & Lola Neon";
+const IRIS_LOLA_ALLOWED_USERNAMES = ["Iri", "Lola Henderson"];
+let onlineUsers = [];
+
+function isIrisLolaAllowed() {
+  const u = String(me?.username || "");
+  return IRIS_LOLA_ALLOWED_USERNAMES.includes(u);
+}
+function bothIrisAndLolaOnline() {
+  const set = new Set((onlineUsers || []).map((n) => String(n)));
+  return IRIS_LOLA_ALLOWED_USERNAMES.every((n) => set.has(n));
+}
+function updateIrisLolaTogetherClass() {
+  const active = document.body?.getAttribute("data-theme") || "";
+  const on = active === IRIS_LOLA_THEME && isIrisLolaAllowed() && bothIrisAndLolaOnline();
+  document.body?.classList.toggle("irisLolaTogether", !!on);
+}
 const DEFAULT_THEME = "Minimal Dark";
 let currentTheme = document.body?.getAttribute("data-theme") || DEFAULT_THEME;
 let themeFilter = "all";
@@ -1069,8 +1087,9 @@ function renderThemeGrid(){
   themeGrid.classList.toggle("onlyLight", themeFilter === "light");
   themeGrid.classList.toggle("onlyDark", themeFilter === "dark");
 
-  const lightThemes = THEME_LIST.filter((t) => t.mode === "Light");
-  const darkThemes  = THEME_LIST.filter((t) => t.mode === "Dark");
+    const visibleThemes = THEME_LIST.filter((t) => t.name !== IRIS_LOLA_THEME || isIrisLolaAllowed());
+  const lightThemes = visibleThemes.filter((t) => t.mode === "Light");
+    const darkThemes  = visibleThemes.filter((t) => t.mode === "Dark");
 
   const makeColumn = (title, mode, items) => {
     const col = document.createElement("div");
@@ -3797,6 +3816,11 @@ async function startApp(){
   socket.on("connect", () => {
     // Join initial room so history + realtime messages work reliably
     joinRoom(currentRoom);
+  });
+
+  socket.on("onlineUsers", (names) => {
+    onlineUsers = Array.isArray(names) ? names : [];
+    updateIrisLolaTogetherClass();
   });
   socket.on("connect_error", (err) => {
   addSystem(`⚠️ Realtime connection failed: ${err?.message || err}`);
