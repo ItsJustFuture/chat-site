@@ -247,6 +247,19 @@ const THEME_LIST = [
   { name: "Rose Quartz", mode: "Light" },
   { name: "Lemonade", mode: "Light" },
 
+  // --- VIP gradient pack (locked behind VIP)
+  { name: "Sunrise Sorbet", mode: "Light" },
+  { name: "Cotton Candy Sky", mode: "Light" },
+  { name: "Prismatic Pearl", mode: "Light" },
+  { name: "Citrus Splash", mode: "Light" },
+  { name: "Glacier Bloom", mode: "Light" },
+  { name: "Aurora Pastel", mode: "Light" },
+
+  { name: "Midnight Mirage", mode: "Dark" },
+  { name: "Neon Abyss", mode: "Dark" },
+  { name: "Velvet Galaxy", mode: "Dark" },
+  { name: "Obsidian Aurora", mode: "Dark" },
+
 ];
 const DEFAULT_THEME = "Minimal Dark";
 let currentTheme = document.body?.getAttribute("data-theme") || DEFAULT_THEME;
