@@ -1144,19 +1144,33 @@ body[data-theme="Iris & Lola Neon"] {
 body[data-theme="Iris & Lola Neon"]::before {
   content: "";
   position: fixed;
-  inset: -20vh -20vw;
+  left: 50%;
+  top: 46%;
+  width: min(78vmin, 820px);
+  height: min(70vmin, 740px);
+  transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 0;
-  background:
-    radial-gradient(circle at 50% 45%,
-      rgba(0, 255, 119, 0.52) 0%,
-      rgba(0, 255, 119, 0.18) 16%,
-      rgba(181, 93, 255, 0.08) 36%,
-      rgba(18, 0, 24, 0.0) 62%);
-  filter: blur(10px);
-  animation: irisLolaGlow 5.5s ease-in-out infinite;
-}
 
+  /* Heart-shaped glow (subtle) */
+  background:
+    radial-gradient(circle at 50% 55%,
+      rgba(0, 255, 119, 0.42) 0%,
+      rgba(0, 255, 119, 0.16) 22%,
+      rgba(181, 93, 255, 0.08) 44%,
+      rgba(18, 0, 24, 0.0) 70%);
+  filter: blur(16px);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http:%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox=%220%200%20100%2090%22%3E%20%20%3Cpath%20d=%22M50%2085%20C20%2065%205%2045%2010%2028%20C15%2012%2032%2010%2042%2018%20C46%2022%2049%2027%2050%2031%20%20%20%20%20%20%20%20%20%20%20C51%2027%2054%2022%2058%2018%20C68%2010%2085%2012%2090%2028%20C95%2045%2080%2065%2050%2085%20Z%22%20fill=%22black%22%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http:%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox=%220%200%20100%2090%22%3E%20%20%3Cpath%20d=%22M50%2085%20C20%2065%205%2045%2010%2028%20C15%2012%2032%2010%2042%2018%20C46%2022%2049%2027%2050%2031%20%20%20%20%20%20%20%20%20%20%20C51%2027%2054%2022%2058%2018%20C68%2010%2085%2012%2090%2028%20C95%2045%2080%2065%2050%2085%20Z%22%20fill=%22black%22%2F%3E%3C%2Fsvg%3E");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+
+  animation: irisLolaGlow 4.8s ease-in-out infinite;
+}
 /* Center neon text */
 body[data-theme="Iris & Lola Neon"]::after {
   content: "I Love You";
@@ -1193,45 +1207,29 @@ body[data-theme="Iris & Lola Neon"] #membersPane {
   overflow: hidden;
 }
 
-body[data-theme="Iris & Lola Neon"] #roomsPanel::before,
-body[data-theme="Iris & Lola Neon"] #membersPane::before {
-  content: "";
-  position: absolute;
-  left: -35%;
-  right: -35%;
-  top: 55%;
-  bottom: -10%;
-  background-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http:%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox=%220%200%20600%20340%22%3E%20%20%3Cdefs%3E%20%20%20%20%3Cfilter%20id=%22g%22%20x=%22-20%%22%20y=%22-20%%22%20width=%22140%%22%20height=%22140%%22%3E%20%20%20%20%20%20%3CfeGaussianBlur%20stdDeviation=%226%22%20result=%22b%22%2F%3E%20%20%20%20%20%20%3CfeMerge%3E%20%20%20%20%20%20%20%20%3CfeMergeNode%20in=%22b%22%2F%3E%20%20%20%20%20%20%20%20%3CfeMergeNode%20in=%22SourceGraphic%22%2F%3E%20%20%20%20%20%20%3C%2FfeMerge%3E%20%20%20%20%3C%2Ffilter%3E%20%20%3C%2Fdefs%3E%20%20%3Cg%20filter=%22url(#g)%22%3E%20%20%20%20%3Cpath%20d=%22M300%20310%20C120%20210%2060%20140%2090%2085%20C125%2030%20200%2035%20245%2075%20C275%20100%20290%20125%20300%20145%20C310%20125%20325%20100%20355%2075%20C400%2035%20475%2030%20510%2085%20C540%20140%20480%20210%20300%20310%20Z%22%20%20%20%20%20%20fill=%22#00ff77%22%20fill-opacity=%220.32%22%2F%3E%20%20%20%20%3Ctext%20x=%22300%22%20y=%22170%22%20text-anchor=%22middle%22%20dominant-baseline=%22middle%22%20%20%20%20%20%20font-family=%22Verdana,%20Arial,%20sans-serif%22%20font-size=%2252%22%20font-weight=%22700%22%20%20%20%20%20%20fill=%22#00ff77%22%20fill-opacity=%220.85%22%3EIris%20&amp%3B%20Lola%3C%2Ftext%3E%20%20%3C%2Fg%3E%3C%2Fsvg%3E");
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: contain;
-  opacity: 0.70;
-  transform: rotate(-18deg);
-  pointer-events: none;
-  z-index: 0;
-  filter: drop-shadow(0 0 18px rgba(0, 255, 119, 0.22));
-}
 
 @keyframes irisLolaGlow {
-  0%   { transform: scale(1.00); opacity: 0.78; filter: hue-rotate(0deg) saturate(1.15) brightness(0.95); }
-  50%  { transform: scale(1.05); opacity: 1.00; filter: hue-rotate(-6deg) saturate(1.45) brightness(0.80); }
-  100% { transform: scale(1.00); opacity: 0.78; filter: hue-rotate(0deg) saturate(1.15) brightness(0.95); }
+  0%   { transform: translate(-50%, -50%) scale(0.98); opacity: 0.55; filter: blur(16px) saturate(1.10) brightness(0.98); }
+  50%  { transform: translate(-50%, -50%) scale(1.02); opacity: 0.80; filter: blur(16px) saturate(1.40) brightness(0.78); }
+  100% { transform: translate(-50%, -50%) scale(0.98); opacity: 0.55; filter: blur(16px) saturate(1.10) brightness(0.98); }
 }
 
 @keyframes irisLolaNeon {
   0%, 100% {
-    opacity: 0.92;
+    opacity: 0.78;
+    transform: translate(-50%, -50%) scale(0.99);
     text-shadow:
-      0 0 8px rgba(194, 110, 255, 0.60),
-      0 0 18px rgba(194, 110, 255, 0.42),
-      0 0 34px rgba(0, 255, 119, 0.20);
+      0 0 8px rgba(194, 110, 255, 0.55),
+      0 0 18px rgba(194, 110, 255, 0.38),
+      0 0 34px rgba(0, 255, 119, 0.18);
   }
   50% {
     opacity: 1;
+    transform: translate(-50%, -50%) scale(1.03);
     text-shadow:
-      0 0 10px rgba(194, 110, 255, 0.78),
-      0 0 26px rgba(194, 110, 255, 0.55),
-      0 0 46px rgba(0, 255, 119, 0.28);
+      0 0 12px rgba(194, 110, 255, 0.85),
+      0 0 30px rgba(194, 110, 255, 0.62),
+      0 0 54px rgba(0, 255, 119, 0.22);
   }
 }
 
@@ -3533,8 +3531,50 @@ html {
   color-scheme: dark;
 }
 
-body[data-theme="Iris & Lola Neon"] #roomsPanel > *,
-body[data-theme="Iris & Lola Neon"] #membersPane > * {
+
+/* Side-panel watermark (text inside green heart) */
+body[data-theme="Iris & Lola Neon"] #roomsPanel,
+body[data-theme="Iris & Lola Neon"] #membersPane {
   position: relative;
-  z-index: 1;
+  overflow: hidden;
+}
+
+/* Heart */
+body[data-theme="Iris & Lola Neon"] #roomsPanel::before,
+body[data-theme="Iris & Lola Neon"] #membersPane::before {
+  content: "💚";
+  position: absolute;
+  left: 50%;
+  top: 72%;
+  transform: translate(-50%, -50%) rotate(-18deg);
+  font-size: clamp(160px, 18vw, 240px);
+  line-height: 1;
+  opacity: 0.32;
+  pointer-events: none;
+  z-index: 5;
+  filter: drop-shadow(0 0 18px rgba(0, 255, 119, 0.18));
+}
+
+/* Text */
+body[data-theme="Iris & Lola Neon"] #roomsPanel::after,
+body[data-theme="Iris & Lola Neon"] #membersPane::after {
+  content: "Iris & Lola";
+  position: absolute;
+  left: -15%;
+  right: -15%;
+  top: 72%;
+  transform: rotate(-18deg);
+  text-align: center;
+  font-family: ui-rounded, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  font-size: clamp(26px, 3.4vw, 44px);
+  opacity: 0.70;
+  color: rgba(0, 255, 119, 0.92);
+  text-shadow:
+    0 0 10px rgba(0, 255, 119, 0.25),
+    0 0 20px rgba(0, 255, 119, 0.18),
+    0 0 30px rgba(181, 93, 255, 0.12);
+  pointer-events: none;
+  z-index: 6;
 }
