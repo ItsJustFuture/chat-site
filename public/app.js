@@ -2681,6 +2681,39 @@ function renderChangelogList(){
   }
 
   const isOwner = me && roleRank(me.role) >= roleRank("Owner");
+
+  // Format timestamps in the viewer's locale + timezone, but avoid showing "Invalid Date".
+  function formatChangelogDate(ts){
+    if(ts == null || ts === "") return "";
+    let d = null;
+
+    // Accept epoch millis/seconds (number or numeric string)
+    if(typeof ts === "number"){
+      const ms = ts < 1e12 ? ts * 1000 : ts;
+      d = new Date(ms);
+    } else if(typeof ts === "string"){
+      const trimmed = ts.trim();
+      if(!trimmed) return "";
+      const asNum = Number(trimmed);
+      if(Number.isFinite(asNum)){
+        const ms = asNum < 1e12 ? asNum * 1000 : asNum;
+        d = new Date(ms);
+      } else {
+        d = new Date(trimmed);
+      }
+    } else {
+      d = new Date(NaN);
+    }
+
+    if(!d || Number.isNaN(d.getTime())) return "";
+    try{
+      return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(d);
+    }catch{
+      // Older browsers fallback
+      return d.toLocaleString();
+    }
+  }
+
   for(const entry of changelogEntries){
     const wrap = document.createElement("div");
     wrap.className = "changelogEntry";
@@ -2698,7 +2731,7 @@ function renderChangelogList(){
     title.textContent = entry.title || "(untitled)";
     const meta = document.createElement("div");
     meta.className = "changelogEntryMeta";
-    meta.textContent = entry.createdAt ? new Date(entry.createdAt).toLocaleString() : "";
+    meta.textContent = formatChangelogDate(entry.createdAt);
 
     metaBlock.appendChild(title);
     metaBlock.appendChild(meta);
