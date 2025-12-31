@@ -867,22 +867,22 @@ body[data-theme="Cherry Blossom (Dark)"] .bubble {
   background-position: 0 0;
 }
 /* =========================================================
-   420 FRIENDLY — JOINTS + SMOKE BACKGROUND (READABLE SYMBOL)
+   420 FRIENDLY — BONG SILHOUETTE BACKGROUND
    ========================================================= */
 
 :root{
-  --weedJointPattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260' viewBox='0 0 260 260'%3E%3Cg opacity='0.26' stroke='%2300ff66' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3C!-- joint body --%3E%3Crect x='70' y='170' width='110' height='10' rx='5' stroke-width='2.8'/%3E%3C!-- filter tip --%3E%3Cline x1='180' y1='170' x2='196' y2='180' stroke-width='3.2'/%3E%3C!-- ember --%3E%3Ccircle cx='198' cy='176' r='3.5' stroke-width='2.4'/%3E%3C!-- smoke curls --%3E%3Cpath d='M110 160 C104 136 132 122 124 96' stroke-width='2.4'/%3E%3Cpath d='M138 156 C132 130 160 120 150 92' stroke-width='2.2'/%3E%3Cpath d='M166 158 C174 132 198 126 188 98' stroke-width='2'/%3E%3C/g%3E%3C/svg%3E");
+  --weedBongPattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260' viewBox='0 0 260 260'%3E%3Cg opacity='0.26' stroke='%2300ff66' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3C!-- bong base --%3E%3Cpath d='M110 200 C90 200 80 180 80 160 C80 132 100 120 110 120 C120 120 140 132 140 160 C140 180 130 200 110 200 Z' stroke-width='3'/%3E%3C!-- bong neck --%3E%3Crect x='104' y='70' width='12' height='55' rx='6' stroke-width='3'/%3E%3C!-- downstem --%3E%3Cline x1='116' y1='118' x2='146' y2='150' stroke-width='3'/%3E%3C!-- bowl --%3E%3Ccircle cx='150' cy='154' r='6' stroke-width='2.6'/%3E%3C!-- smoke --%3E%3Cpath d='M110 60 C100 40 120 32 112 18' stroke-width='2.2'/%3E%3Cpath d='M130 58 C140 38 160 32 150 14' stroke-width='2'/%3E%3C/g%3E%3C/svg%3E");
 }
-/* Apply 420 joint pattern subtly across background */
+/* Apply bong pattern to 420 themes */
 body[data-theme="420 Friendly (Dark)"]{
-  background-image: var(--weedJointPattern);
+  background-image: var(--weedBongPattern);
   background-size: 520px 520px;
   background-repeat: repeat;
   background-position: 80px 120px;
 }
 
 body[data-theme="420 Friendly (Light)"]{
-  background-image: var(--weedJointPattern);
+  background-image: var(--weedBongPattern);
   background-size: 620px 620px;
   background-repeat: repeat;
   background-position: 140px 160px;
