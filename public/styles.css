@@ -1394,7 +1394,17 @@ body.dice-room .sys .diceFace{
 .memberMenuActions .btn{ flex:1; }
 
 /* Modal/Profile */
-#modal{ position:fixed; inset:0; background:color-mix(in srgb, var(--shadowColor) 75%, transparent); display:none; align-items:center; justify-content:center; overflow: hidden; padding:18px; z-index: 400; }
+#modal{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 18px;
+  z-index: 400;
+}
 .modalCard{
   display: flex;
   flex-direction: column;
@@ -2305,4 +2315,19 @@ body.drawer-right-open { --rightDrawerW: min(86vw, 340px); }
 
 .modalContent{
   padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+
+/* === Mobile: allow profile modal to scroll fully and avoid safe-area overlap === */
+.modalBody{
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  min-height: 0;
+}
+.modalCard{
+  max-height: calc(100dvh - 20px);
+}
+.bottomBar{
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
 }
