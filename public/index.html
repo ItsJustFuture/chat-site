@@ -434,6 +434,56 @@
 
               <div class="msgline" id="customizeMsg"></div>
   </div>
+
+<div id="myProfileEdit" style="display:none; margin-top:12px;">
+                  <div class="sectionTitle">Edit my profile</div>
+                  <div class="panelBox">
+                    <div class="field">
+                      <label>Avatar</label>
+                      <input id="avatarFile" type="file" accept="image/*">
+                      <div class="small">Max 2MB. PNG/JPG/WEBP/GIF.</div>
+                    </div>
+
+                    <div class="field">
+                      <label>Mood</label>
+                      <input id="editMood" placeholder="e.g. chilling">
+                    </div>
+
+                    <div class="row">
+                      <div class="field" style="flex:1;">
+                        <label>Age (18+)</label>
+                        <input id="editAge" type="number" min="18" max="120" placeholder="18+">
+                      </div>
+                      <div class="field" style="flex:1;">
+                        <label>Gender</label>
+                        <select id="editGender">
+                          <option value="">Prefer not to say</option>
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                          <option value="Non-binary">Non-binary</option>
+                          <option value="Transgender">Transgender</option>
+                          <option value="Genderfluid">Genderfluid</option>
+                          <option value="Agender">Agender</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="field">
+                      <label>Bio (BBCode supported)</label>
+                      <textarea id="editBio" placeholder="[b]bold[/b] [i]italics[/i] [url=https://...]link[/url] [quote]...[/quote]"></textarea>
+                    </div>
+
+                    <div class="row">
+                      <button class="btn" id="saveProfileBtn" type="button">Save</button>
+                      <button class="btn secondary" id="refreshProfileBtn" type="button">Refresh</button>
+                      <button class="btn danger" id="logoutBtn" type="button">Logout</button>
+                    </div>
+
+                    <div class="msgline" id="profileMsg"></div>
+                  </div>
+                
+
 </div>
         <div class="modalContent" id="modalContent">
           <div id="viewInfo">
@@ -483,53 +533,6 @@
                 </div>
                 <div class="msgline" id="mediaMsg"></div>
 
-                <div id="myProfileEdit" style="display:none; margin-top:12px;">
-                  <div class="sectionTitle">Edit my profile</div>
-                  <div class="panelBox">
-                    <div class="field">
-                      <label>Avatar</label>
-                      <input id="avatarFile" type="file" accept="image/*">
-                      <div class="small">Max 2MB. PNG/JPG/WEBP/GIF.</div>
-                    </div>
-
-                    <div class="field">
-                      <label>Mood</label>
-                      <input id="editMood" placeholder="e.g. chilling">
-                    </div>
-
-                    <div class="row">
-                      <div class="field" style="flex:1;">
-                        <label>Age (18+)</label>
-                        <input id="editAge" type="number" min="18" max="120" placeholder="18+">
-                      </div>
-                      <div class="field" style="flex:1;">
-                        <label>Gender</label>
-                        <select id="editGender">
-                          <option value="">Prefer not to say</option>
-                          <option value="Male">Male</option>
-                          <option value="Female">Female</option>
-                          <option value="Non-binary">Non-binary</option>
-                          <option value="Transgender">Transgender</option>
-                          <option value="Genderfluid">Genderfluid</option>
-                          <option value="Agender">Agender</option>
-                          <option value="Other">Other</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div class="field">
-                      <label>Bio (BBCode supported)</label>
-                      <textarea id="editBio" placeholder="[b]bold[/b] [i]italics[/i] [url=https://...]link[/url] [quote]...[/quote]"></textarea>
-                    </div>
-
-                    <div class="row">
-                      <button class="btn" id="saveProfileBtn" type="button">Save</button>
-                      <button class="btn secondary" id="refreshProfileBtn" type="button">Refresh</button>
-                      <button class="btn danger" id="logoutBtn" type="button">Logout</button>
-                    </div>
-
-                    <div class="msgline" id="profileMsg"></div>
-                  </div>
                 </div>
 
                 <div id="memberModTools" style="display:none; margin-top:12px;">
