@@ -5,7 +5,7 @@
 const PRIVATE_THEME_ALLOWLIST = {
   "Iris & Lola Neon": {
     users: ["Iri", "Lola Henderson"],
-    requireBothOnline: true
+    requireBothOnline: false
   }
 };
 
@@ -2258,7 +2258,10 @@ app.get("/api/me/theme", requireLogin, async (req, res) => {
     if (!row.theme) await pgPool.query("UPDATE users SET theme = $1 WHERE id = $2", [theme, req.session.user.id]);
 
     req.session.user.theme = theme;
-    return res.json({ theme });
+        // Enforce private-theme rules server-side
+    const effective = canUseTheme(req.session.user, theme) ? theme : DEFAULT_THEME;
+    req.session.user.theme = effective;
+    return res.json({ theme: effective });
   } catch (e) {
     console.error(e);
     return res.status(500).send("Failed");
@@ -2269,6 +2272,12 @@ app.get("/api/me/theme", requireLogin, async (req, res) => {
 app.post("/api/me/theme", requireLogin, async (req, res) => {
   try {
     const theme = sanitizeThemeNameServer(req.body?.theme);
+
+    // Enforce private-theme rules server-side
+    if (!canUseTheme(req.session.user, theme)) {
+      return res.status(403).json({ error: "Theme not allowed" });
+    }
+
 
     // Update Postgres (new source of truth for theme)
     await pgPool.query("UPDATE users SET theme = $1 WHERE id = $2", [theme, req.session.user.id]);
@@ -3266,6 +3275,12 @@ function broadcastTyping(room) {
   io.to(room).emit("typing update", names);
 }
 
+function emitOnlineUsers() {
+  try {
+    io.emit("onlineUsers", Array.from(ONLINE_USERS));
+  } catch {}
+}
+
 function emitUserList(room) {
   // Build list from sockets in room
   const users = [];
@@ -3315,6 +3330,10 @@ io.on("connection", (socket) => {
     mood: "",
     avatar: "",
   };
+
+  // Track global online usernames (for private theme "together online" effects)
+  if (socket.user?.username) ONLINE_USERS.add(socket.user.username);
+  emitOnlineUsers();
 // Enforce single active connection per user (prevents duplicate presence)
 const existingSid = socketIdByUserId.get(socket.user.id);
 if (existingSid && existingSid !== socket.id) {
@@ -4137,6 +4156,7 @@ if (s?.user) {
 
   socket.on("disconnect", () => {
   if (user?.username) ONLINE_USERS.delete(user.username);
+    emitOnlineUsers();
 
     const room = socket.currentRoom;
 
