@@ -1181,6 +1181,14 @@ document.addEventListener("click", (e) => {
   document.querySelectorAll(".msg.showActions").forEach((el) => el.classList.remove("showActions"));
 });
 }
+
+// Tap outside to hide message action buttons (mobile).
+document.addEventListener("click", (e)=>{
+  const isTouch = window.matchMedia && window.matchMedia("(hover: none)").matches;
+  if (!isTouch && window.innerWidth > 980) return;
+  if (e.target && e.target.closest && e.target.closest(".msg")) return;
+  document.querySelectorAll(".msg.showActions").forEach((el)=>el.classList.remove("showActions"));
+});
 function openMediaLightbox(src, kind){
   if (!mediaLightbox || !mediaLightboxImg || !mediaLightboxVideo) return;
   mediaLightbox.classList.add("show");
@@ -1361,9 +1369,29 @@ function addMessage(m){
   replyBtn.onclick = (e)=>{
     e.stopPropagation();
     setReplyTarget({ id: m.messageId, user: m.user, text: m.text });
+    row.classList.remove("showActions");
     focusMainComposer();
   };
   actions.prepend(replyBtn);
+
+// Mobile-friendly actions: tap a message bubble to toggle its action buttons.
+// This replaces long-press to reduce accidental triggers on iOS Safari.
+bubble.addEventListener("click", (e)=>{
+  // Ignore clicks originating from buttons/links inside the bubble.
+  if (e.target && e.target.closest && e.target.closest("button,a")) return;
+
+  const isTouch = window.matchMedia && window.matchMedia("(hover: none)").matches;
+  if (!isTouch && window.innerWidth > 980) return;
+
+  e.stopPropagation();
+  closeReactionMenu();
+
+  const willShow = !row.classList.contains("showActions");
+  document.querySelectorAll(".msg.showActions").forEach((el)=>{
+    if (el !== row) el.classList.remove("showActions");
+  });
+  row.classList.toggle("showActions", willShow);
+});
 
   // mobile: tap message to toggle actions (reply/react/delete)
 const toggleActions = (e) => {
@@ -1849,7 +1877,7 @@ function renderDmThreads(){
     const other = otherParty(t);
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "dmAvatarBtn" + (String(activeThreadId)===String(t.id) ? " active" : "");
+    btn.className = "dmAvatarBtn" + (String(activeDmId)===String(t.id) ? " active" : "");
     btn.title = other ? `DM with ${other}` : "DM";
 
     const wrap = document.createElement("div");
@@ -1883,7 +1911,7 @@ function renderDmThreads(){
   }
 
   // Auto-open the newest thread if none selected
-  if (!activeThreadId && list[0]) {
+  if (!activeDmId && list[0]) {
     openDmThread(list[0].id);
   }
 }
@@ -3025,7 +3053,6 @@ if(latestUpdateViewBtn){
   });
 }
 if(changelogNewBtn) changelogNewBtn.addEventListener("click", ()=>openChangelogEditor());
- changelogNewBtn.addEventListener("click", ()=>openChangelogEditor());
 if(changelogCancelBtn) changelogCancelBtn.addEventListener("click", closeChangelogEditor);
 if(changelogSaveBtn) changelogSaveBtn.addEventListener("click", saveChangelogEntry);
 closeChangelogEditor();
@@ -3824,8 +3851,8 @@ socket.on("disconnect", (reason) => {
       setDmMeta(dmThreads.find((t) => t.id === threadId));
       renderDmMessages(threadId);
       // Consider the thread read once we've rendered its history.
-      const latest = (Array.isArray(dmMessagesCache) && dmMessagesCache.length)
-        ? dmMessagesCache[dmMessagesCache.length - 1].ts
+      const latest = (Array.isArray(messages) && messages.length)
+        ? messages[messages.length - 1].ts
         : Date.now();
       markDmRead(threadId, latest);
       dmUnreadThreads.delete(threadId);
