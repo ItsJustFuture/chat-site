@@ -161,12 +161,12 @@ const membersCloseBtn  = document.getElementById("membersCloseBtn");
 const tabEdit = document.getElementById("tabEdit");
 const viewEdit = document.getElementById("viewEdit");
 
+const editAboutBtn = document.getElementById("editAboutBtn");
 const editThemesBtn = document.getElementById("editThemesBtn");
 const editDmBtn = document.getElementById("editDmBtn");
+const editAboutPanel = document.getElementById("editAboutPanel");
 const editThemesPanel = document.getElementById("editThemesPanel");
 const editDmPanel = document.getElementById("editDmPanel");
-const editProfileBtn = document.getElementById("editProfileBtn");
-const editProfilePanel = document.getElementById("editProfilePanel");
 
 const authUser = document.getElementById("authUser");
 const authPass = document.getElementById("authPass");
@@ -1302,15 +1302,6 @@ function closeMemberMenu(){
   memberMenuUser = null;
 }
 
-
-// Member quick-actions menu buttons
-memberViewProfileBtn?.addEventListener("click", (e)=>{
-  e.preventDefault();
-  e.stopPropagation();
-  if (memberMenuUser?.name) openMemberProfile(memberMenuUser.name);
-  closeMemberMenu();
-});
-
 function openMemberMenu(user, anchor){
   if (!memberMenu || !membersPane) {
     openMemberProfile(user.name);
@@ -2427,26 +2418,28 @@ function setTab(tab){
   viewAbout.style.display = tab==="about" ? "block" : "none";
   viewEdit.style.display = tab==="edit" ? "block" : "none";
   viewModeration.style.display = tab==="moderation" ? "block" : "none";
-  if(tab === "edit") showEditPanel("profile");
+  if(tab === "edit") showEditPanel("about");
   focusActiveTab();
 }
 tabEdit.addEventListener("click", ()=>setTab("edit"));
 
 function showEditPanel(which){
+  const isAbout = which === "about";
   const isThemes = which === "themes";
   const isDm = which === "dm";
-  const isProfile = which === "profile";
-  editThemesPanel.style.display = isThemes ? "block" : "none";
-  editDmPanel.style.display = isDm ? "block" : "none";
-  editProfilePanel && (editProfilePanel.style.display = isProfile ? "block" : "none");
+
+  if (editAboutPanel) editAboutPanel.style.display = isAbout ? "block" : "none";
+  if (editThemesPanel) editThemesPanel.style.display = isThemes ? "block" : "none";
+  if (editDmPanel) editDmPanel.style.display = isDm ? "block" : "none";
+
+  editAboutBtn?.classList.toggle("active", isAbout);
   editThemesBtn?.classList.toggle("active", isThemes);
   editDmBtn?.classList.toggle("active", isDm);
-  editProfileBtn?.classList.toggle("active", isProfile);
 }
 
+editAboutBtn?.addEventListener("click", ()=>showEditPanel("about"));
 editThemesBtn?.addEventListener("click", ()=>showEditPanel("themes"));
 editDmBtn?.addEventListener("click", ()=>showEditPanel("dm"));
-editProfileBtn?.addEventListener("click", ()=>showEditPanel("profile"));
 tabInfo.addEventListener("click", ()=>setTab("info"));
 tabAbout.addEventListener("click", ()=>setTab("about"));
 tabCustomize?.addEventListener("click", ()=>setTab("customize"));

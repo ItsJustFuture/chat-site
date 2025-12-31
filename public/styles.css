@@ -1091,7 +1091,6 @@ textarea{ min-height:90px; resize:vertical; }
   border-radius:var(--radiusLg);
   border:1px solid var(--border);
   padding:10px;
-  padding-bottom: calc(10px + env(safe-area-inset-bottom));
   display:flex;
   flex-direction:column;
   gap:10px;
@@ -1411,18 +1410,8 @@ body.dice-room .sys .diceFace{
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: calc(16px + env(safe-area-inset-bottom));
 }
-
-.modalContent{
-  flex: 1 1 auto;
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-  padding-right: 2px;
-  padding-bottom: calc(16px + env(safe-area-inset-bottom));
-  min-height: 0;
-}
-
+.modalContent{ flex:1 1 auto; overflow:auto; -webkit-overflow-scrolling: touch; padding-right:2px; min-height:0; }
 .tabs{
   display:flex;
   gap:8px;
@@ -2302,4 +2291,18 @@ body.drawer-right-open { --rightDrawerW: min(86vw, 340px); }
   }
   /* Ensure the chat list never tucks under the fixed composer */
   .msgs{ padding-bottom: calc(96px + var(--safeB)); }
+}
+
+
+/* --- Mobile safe-area fixes (cumulative patch) --- */
+.bottomBar{
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+}
+
+.modalBody{
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+.modalContent{
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
 }
