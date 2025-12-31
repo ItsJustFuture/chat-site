@@ -3733,3 +3733,88 @@ body[data-theme="Iris & Lola Neon"] .chatInputWrap{
     top: 42%;
   }
 }
+/* ===== Iris & Lola Neon: iOS-safe overlay fix (no body pseudo, no CSS mask) ===== */
+body[data-theme="Iris & Lola Neon"]::before,
+body[data-theme="Iris & Lola Neon"]::after {
+  content: none !important;
+  display: none !important;
+}
+
+body[data-theme="Iris & Lola Neon"] .chat {
+  position: relative;
+  overflow: hidden; /* prevents off-canvas bleed */
+}
+
+body[data-theme="Iris & Lola Neon"] .chat::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: min(86vmin, 520px);
+  height: min(78vmin, 520px);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 0;
+
+  /* Heart glow SVG (iOS-safe) */
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20400%20360%22%3E%3Cdefs%3E%3CradialGradient%20id%3D%22rg%22%20cx%3D%2250%25%22%20cy%3D%2255%25%22%20r%3D%2262%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%2300ff77%22%20stop-opacity%3D%220.70%22/%3E%3Cstop%20offset%3D%2222%25%22%20stop-color%3D%22%2300ff77%22%20stop-opacity%3D%220.26%22/%3E%3Cstop%20offset%3D%2244%25%22%20stop-color%3D%22%23b55dff%22%20stop-opacity%3D%220.12%22/%3E%3Cstop%20offset%3D%2270%25%22%20stop-color%3D%22%23120018%22%20stop-opacity%3D%220%22/%3E%3C/radialGradient%3E%3Cfilter%20id%3D%22blur%22%20x%3D%22-30%25%22%20y%3D%22-30%25%22%20width%3D%22160%25%22%20height%3D%22160%25%22%3E%3CfeGaussianBlur%20stdDeviation%3D%2218%22/%3E%3C/filter%3E%3C/defs%3E%3Cpath%20filter%3D%22url(%23blur)%22%20d%3D%22M200%20330%20C90%20250%2040%20180%2055%20118%20C70%2060%20125%2052%20160%2078%20C180%2092%20193%20112%20200%20130%20C207%20112%20220%2092%20240%2078%20C275%2052%20330%2060%20345%20118%20C360%20180%20310%20250%20200%20330%20Z%22%20fill%3D%22url(%23rg)%22/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+
+  opacity: 0.55;
+  animation: irisLolaChatGlow2 5.2s ease-in-out infinite;
+}
+
+body[data-theme="Iris & Lola Neon"] .chat::after {
+  content: "I Love You";
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 0;
+
+  font-family: ui-rounded, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  font-size: clamp(30px, 8vw, 54px);
+  color: rgba(194, 110, 255, 0.95);
+  text-shadow:
+    0 0 10px rgba(194, 110, 255, 0.70),
+    0 0 22px rgba(194, 110, 255, 0.48),
+    0 0 44px rgba(0, 255, 119, 0.16);
+  opacity: 0.90;
+  animation: irisLolaChatNeon2 2.6s ease-in-out infinite;
+}
+
+/* Keep UI above overlays */
+body[data-theme="Iris & Lola Neon"] .topbar,
+body[data-theme="Iris & Lola Neon"] .msgs,
+body[data-theme="Iris & Lola Neon"] .composer,
+body[data-theme="Iris & Lola Neon"] .chatInputWrap {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes irisLolaChatGlow2 {
+  0%,100% { transform: translate(-50%, -50%) scale(0.98); opacity: 0.45; filter: saturate(1.05) brightness(1.00); }
+  50%     { transform: translate(-50%, -50%) scale(1.02); opacity: 0.72; filter: saturate(1.35) brightness(0.86); }
+}
+
+@keyframes irisLolaChatNeon2 {
+  0%,100% { opacity: 0.72; transform: translate(-50%, -50%) scale(0.99); }
+  50%     { opacity: 1.00; transform: translate(-50%, -50%) scale(1.03); }
+}
+
+@media (max-width: 520px) {
+  body[data-theme="Iris & Lola Neon"] .chat::before {
+    width: min(92vmin, 420px);
+    height: min(84vmin, 420px);
+    opacity: 0.42;
+  }
+  body[data-theme="Iris & Lola Neon"] .chat::after {
+    top: 44%;
+    opacity: 0.82;
+  }
+}
