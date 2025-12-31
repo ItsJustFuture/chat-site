@@ -165,6 +165,8 @@ const editThemesBtn = document.getElementById("editThemesBtn");
 const editDmBtn = document.getElementById("editDmBtn");
 const editThemesPanel = document.getElementById("editThemesPanel");
 const editDmPanel = document.getElementById("editDmPanel");
+const editProfileBtn = document.getElementById("editProfileBtn");
+const editProfilePanel = document.getElementById("editProfilePanel");
 
 const authUser = document.getElementById("authUser");
 const authPass = document.getElementById("authPass");
@@ -1300,6 +1302,15 @@ function closeMemberMenu(){
   memberMenuUser = null;
 }
 
+
+// Member quick-actions menu buttons
+memberViewProfileBtn?.addEventListener("click", (e)=>{
+  e.preventDefault();
+  e.stopPropagation();
+  if (memberMenuUser?.name) openMemberProfile(memberMenuUser.name);
+  closeMemberMenu();
+});
+
 function openMemberMenu(user, anchor){
   if (!memberMenu || !membersPane) {
     openMemberProfile(user.name);
@@ -2423,14 +2434,19 @@ tabEdit.addEventListener("click", ()=>setTab("edit"));
 
 function showEditPanel(which){
   const isThemes = which === "themes";
+  const isDm = which === "dm";
+  const isProfile = which === "profile";
   editThemesPanel.style.display = isThemes ? "block" : "none";
-  editDmPanel.style.display = which==="dm" ? "block" : "none";
+  editDmPanel.style.display = isDm ? "block" : "none";
+  editProfilePanel && (editProfilePanel.style.display = isProfile ? "block" : "none");
   editThemesBtn?.classList.toggle("active", isThemes);
-  editDmBtn?.classList.toggle("active", which === "dm");
+  editDmBtn?.classList.toggle("active", isDm);
+  editProfileBtn?.classList.toggle("active", isProfile);
 }
 
 editThemesBtn?.addEventListener("click", ()=>showEditPanel("themes"));
 editDmBtn?.addEventListener("click", ()=>showEditPanel("dm"));
+editProfileBtn?.addEventListener("click", ()=>showEditPanel("profile"));
 tabInfo.addEventListener("click", ()=>setTab("info"));
 tabAbout.addEventListener("click", ()=>setTab("about"));
 tabCustomize?.addEventListener("click", ()=>setTab("customize"));

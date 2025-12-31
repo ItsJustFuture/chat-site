@@ -389,6 +389,7 @@
     <div class="listBtns">
       <button class="btn secondary" id="editThemesBtn" type="button">Themes</button>
       <button class="btn secondary" id="editDmBtn" type="button">DM Customisation</button>
+      <button class="btn secondary" id="editProfileBtn" type="button">Profile</button>
     </div>
   </div>
 
@@ -434,14 +435,16 @@
 
               <div class="msgline" id="customizeMsg"></div>
   </div>
+</div>
 
+  <div class="panelBox" id="editProfilePanel" style="display:none;">
 <div id="myProfileEdit" style="display:none; margin-top:12px;">
                   <div class="sectionTitle">Edit my profile</div>
                   <div class="panelBox">
                     <div class="field">
                       <label>Avatar</label>
                       <input id="avatarFile" type="file" accept="image/*">
-                      <div class="small">Max 2MB. PNG/JPG/WEBP/GIF.</div>
+                      <div class="small">Max 5MB. PNG/JPG/WEBP/GIF.</div>
                     </div>
 
                     <div class="field">
@@ -482,8 +485,8 @@
 
                     <div class="msgline" id="profileMsg"></div>
                   </div>
-                
-
+                </div>
+  </div>
 </div>
         <div class="modalContent" id="modalContent">
           <div id="viewInfo">
@@ -532,8 +535,6 @@
                   <button class="btn secondary" id="copyUsernameBtn" type="button">Copy username</button>
                 </div>
                 <div class="msgline" id="mediaMsg"></div>
-
-                </div>
 
                 <div id="memberModTools" style="display:none; margin-top:12px;">
                   <div class="sectionTitle">Moderator tools</div>
