@@ -3991,7 +3991,6 @@ msgInput?.addEventListener("focus", () => {
     }catch{}
   }, 120);
 });
-});
 
 /* === Unified profile opener === */
 function openUserProfile(username){
