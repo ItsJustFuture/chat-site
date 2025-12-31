@@ -3717,3 +3717,18 @@ modal.addEventListener("show", closeDrawers);
 msgInput.addEventListener("focus", () => {
   setTimeout(() => msgInput.scrollIntoView({ block: "center", behavior: "smooth" }), 150);
 });
+
+/* === Unified profile opener === */
+function openUserProfile(username){
+  if(!username) return;
+  if(typeof showProfileModal === "function") showProfileModal();
+  if(typeof loadProfile === "function") loadProfile(username);
+}
+
+/* === Attach profile open on member click === */
+document.addEventListener("click", (e)=>{
+  const el = e.target.closest(".member, .memberName, .memberItem");
+  if(!el) return;
+  const username = el.dataset?.username || el.textContent?.trim();
+  if(username) openUserProfile(username);
+});
