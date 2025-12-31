@@ -410,6 +410,71 @@ const uiScaleRange = document.getElementById("uiScaleRange");
 const uiScaleValue = document.getElementById("uiScaleValue");
 const uiScaleResetBtn = document.getElementById("uiScaleResetBtn");
 
+
+// --- UI Scale popover (topbar) ---
+function uiScalePct(n){ return Math.round(n*100); }
+function syncUiScaleUI(){
+  if(!uiScaleRange || !uiScaleValue) return;
+  // if CSS var is set, reflect it; else show 100% (Auto)
+  const cur = getComputedStyle(document.documentElement).getPropertyValue("--uiScale").trim();
+  const n = Number(cur || "1");
+  const pct = Number.isFinite(n) ? uiScalePct(n) : 100;
+  uiScaleRange.value = String(Number.isFinite(n) ? n : 1);
+  uiScaleValue.textContent = pct + "%";
+}
+function openUiScalePanel(){
+  if(!uiScalePanel) return;
+  uiScalePanel.hidden = false;
+  syncUiScaleUI();
+  // Ensure panel is above and clickable
+  uiScalePanel.style.pointerEvents = "auto";
+}
+function closeUiScalePanel(){
+  if(!uiScalePanel) return;
+  uiScalePanel.hidden = true;
+}
+function toggleUiScalePanel(ev){
+  if(ev) ev.stopPropagation();
+  if(!uiScalePanel) return;
+  if(uiScalePanel.hidden) openUiScalePanel();
+  else closeUiScalePanel();
+}
+
+// Wire UI scale controls (only if elements exist)
+if(uiScaleBtn && uiScalePanel && uiScaleRange && uiScaleCloseBtn && uiScaleResetBtn){
+  uiScaleBtn.addEventListener("click", toggleUiScalePanel);
+  uiScaleCloseBtn.addEventListener("click", (e)=>{ e.stopPropagation(); closeUiScalePanel(); });
+
+  uiScaleRange.addEventListener("input", (e)=>{
+    e.stopPropagation();
+    const v = uiScaleRange.value;
+    applyUiScale(v);
+    syncUiScaleUI();
+  });
+
+  uiScaleResetBtn.addEventListener("click", (e)=>{
+    e.stopPropagation();
+    applyUiScale(null); // Auto
+    syncUiScaleUI();
+    closeUiScalePanel();
+  });
+
+  // Close when tapping outside
+  document.addEventListener("click", (e)=>{
+    if(uiScalePanel.hidden) return;
+    const t = e.target;
+    if(t === uiScaleBtn) return;
+    if(uiScalePanel.contains(t)) return;
+    closeUiScalePanel();
+  }, { passive: true });
+
+  // On load, apply saved scale and sync UI
+  try{
+    const saved = localStorage.getItem(UI_SCALE_KEY);
+    if(saved) applyUiScale(saved);
+  }catch{}
+}
+
 // member quick mod
 const memberModTools = document.getElementById("memberModTools");
 const quickReason = document.getElementById("quickReason");
