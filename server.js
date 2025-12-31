@@ -1,6 +1,18 @@
 // server.js
 "use strict";
 
+// === Iris & Lola private theme config ===
+const PRIVATE_THEME_ALLOWLIST = {
+  "Iris & Lola Neon": {
+    users: ["Iri", "Lola Henderson"],
+    requireBothOnline: true
+  }
+};
+
+const ONLINE_USERS = new Set();
+
+
+
 const path = require("path");
 const fs = require("fs");
 const express = require("express");
@@ -4124,6 +4136,8 @@ if (s?.user) {
   });
 
   socket.on("disconnect", () => {
+  if (user?.username) ONLINE_USERS.delete(user.username);
+
     const room = socket.currentRoom;
 
     // Always clear per-socket rate tracking
@@ -4154,3 +4168,18 @@ pgInitPromise.finally(() => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 });
+
+
+function areIrisAndLolaOnline() {
+  return ONLINE_USERS.has("Iri") && ONLINE_USERS.has("Lola Henderson");
+}
+
+function canUseTheme(user, themeName) {
+  const rule = PRIVATE_THEME_ALLOWLIST[themeName];
+  if (rule) {
+    if (!rule.users.includes(user.username)) return false;
+    if (rule.requireBothOnline && !areIrisAndLolaOnline()) return false;
+    return true;
+  }
+  return true;
+}
