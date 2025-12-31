@@ -4143,3 +4143,11 @@ function previewTheme(themeId, seconds = 10) {
   }, seconds * 1000);
 }
 
+
+
+function isThemeVisible(themeName) {
+  if (themeName === "Iris & Lola Neon") {
+    return ["Iri", "Lola Henderson"].includes(currentUser?.username);
+  }
+  return true;
+}

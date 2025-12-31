@@ -3608,3 +3608,30 @@ body[data-theme="Iris & Lola Neon"] #membersPane::after {
 /* Iris & Lola Neon: keep topbar full-width without breaking right-side buttons */
 body[data-theme="Iris & Lola Neon"] .chat { width: 100%; min-width: 0; }
 body[data-theme="Iris & Lola Neon"] .topbar { width: 100%; max-width: 100%; box-sizing: border-box; }
+
+.irisLolaHeart {
+  margin-left: 6px;
+  font-size: 0.9em;
+  opacity: 0.75;
+  animation: irisLolaHeartPulse 3.5s ease-in-out infinite;
+}
+
+@keyframes irisLolaHeartPulse {
+  0% { transform: scale(1); opacity: 0.65; }
+  50% { transform: scale(1.15); opacity: 0.95; }
+  100% { transform: scale(1); opacity: 0.65; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .irisLolaHeart { animation: none; }
+}
+
+body[data-theme="Iris & Lola Neon"].iris-lola-together::before {
+  animation: irisLolaTogether 6s ease-in-out infinite;
+}
+
+@keyframes irisLolaTogether {
+  0% { opacity: 0.55; filter: blur(14px) saturate(1.1); }
+  50% { opacity: 0.75; filter: blur(16px) saturate(1.35); }
+  100% { opacity: 0.55; filter: blur(14px) saturate(1.1); }
+}
