@@ -2466,3 +2466,38 @@ html {
     height: 100%;
   }
 }
+/* =========================================================
+   iOS keyboard: keep chat visible while typing
+   ========================================================= */
+
+:root { --vh: 1vh; }
+
+/* Your main app wrapper should be a vertical flex column */
+#app,
+.app,
+.mainLayout {
+  display: flex;
+  flex-direction: column;
+  height: calc(var(--vh) * 100);
+  min-height: 0; /* critical */
+}
+
+/* The chat/messages area must be allowed to shrink and scroll */
+#chatArea,
+#messages,
+.messages,
+.chatPane,
+.mainChat {
+  flex: 1 1 auto;
+  min-height: 0;     /* CRITICAL for iOS */
+  overflow: auto;    /* chat scroll stays here */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Composer stays at bottom */
+#composer,
+.composer,
+.chatInputBar,
+.messageComposer {
+  flex: 0 0 auto;
+}
