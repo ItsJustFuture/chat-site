@@ -1139,7 +1139,6 @@
 /* Animated glow layer */
 body[data-theme="Iris & Lola Neon"] {
   position: relative;
-  overflow-x: hidden;
 }
 body[data-theme="Iris & Lola Neon"]::before {
   content: "";
@@ -3577,4 +3576,29 @@ body[data-theme="Iris & Lola Neon"] #membersPane::after {
     0 0 30px rgba(181, 93, 255, 0.12);
   pointer-events: none;
   z-index: 6;
+}
+
+/* Mobile safety: reduce heavy fixed overlays to prevent layout/perf issues */
+@media (max-width: 720px) {
+  body[data-theme="Iris & Lola Neon"]::before {
+    width: min(72vmin, 520px);
+    height: min(64vmin, 460px);
+    filter: blur(12px);
+    opacity: 0.50;
+    animation-duration: 6.2s;
+  }
+  body[data-theme="Iris & Lola Neon"]::after {
+    top: 44%;
+    font-size: clamp(26px, 8vw, 44px);
+    opacity: 0.85;
+  }
+}
+@media (max-width: 520px) {
+  body[data-theme="Iris & Lola Neon"]::before {
+    display: none;
+  }
+  body[data-theme="Iris & Lola Neon"]::after {
+    top: 42%;
+    opacity: 0.80;
+  }
 }
