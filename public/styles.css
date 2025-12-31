@@ -3602,3 +3602,14 @@ body[data-theme="Iris & Lola Neon"] #membersPane::after {
     opacity: 0.80;
   }
 }
+
+/* Ensure top bar spans full width on Iris & Lola Neon */
+body[data-theme="Iris & Lola Neon"] header,
+body[data-theme="Iris & Lola Neon"] .topBar,
+body[data-theme="Iris & Lola Neon"] .topbar {
+  width: 100vw;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+}
+
