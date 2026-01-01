@@ -187,8 +187,14 @@ async function getAvatarUrl(username) {
 
 function otherParty(thread) {
   const parts = Array.isArray(thread.participants) ? thread.participants : [];
-  const meName = (me && me.username) ? me.username : "";
-  const other = parts.find(p => p && p !== meName) || parts[0] || "";
+  const meName = String((me && me.username) ? me.username : "").trim().toLowerCase();
+  // Normalize participant values to strings. Some server builds may return numbers/objects.
+  const norm = parts
+    .map((p) => (typeof p === "string" ? p : (p && typeof p === "object" ? (p.username || p.name || "") : String(p || ""))))
+    .map((p) => String(p || "").trim())
+    .filter(Boolean);
+
+  const other = norm.find((p) => p.toLowerCase() !== meName) || norm[0] || "";
   return other;
 }
 
@@ -2274,7 +2280,11 @@ function renderDmMessages(threadId){
 
   for (const m of msgsArr) {
     const wrap = document.createElement("div");
-    wrap.className = "dmBubble" + (m.user === me.username ? " self" : "");
+    const isSelf = String(m.user || "") === String(me?.username || "");
+    wrap.className = "dmBubble" + (isSelf ? " self" : "");
+
+    const bubble = document.createElement("div");
+    bubble.className = "dmBubbleBox";
 
     if (m.replyToId && (m.replyToUser || m.replyToText)) {
       const replyLink = document.createElement("button");
@@ -2289,25 +2299,29 @@ function renderDmMessages(threadId){
         const target = dmMessagesEl.querySelector(`[data-dm-mid="${m.replyToId}"]`);
         if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
       };
-      wrap.appendChild(replyLink);
+      bubble.appendChild(replyLink);
     }
 
-    const meta = document.createElement("div");
-    meta.className = "dmMetaRow";
-    meta.innerHTML = `<span>${escapeHtml(m.user)}</span><span>${new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span>`;
-    wrap.appendChild(meta);
-
     const text = document.createElement("div");
+    text.className = "dmText";
     text.innerHTML = applyMentions(m.text || "");
-    wrap.appendChild(text);
+    bubble.appendChild(text);
 
     const mid = m.messageId || m.id;
 
     const reacts = document.createElement("div");
     reacts.className = "reactions dmReactions";
     reacts.id = "dm-reacts-" + mid;
-    wrap.appendChild(reacts);
+    bubble.appendChild(reacts);
     if (dmReactionsCache[mid]) renderDmReactions(mid, dmReactionsCache[mid]);
+
+    wrap.appendChild(bubble);
+
+    // Username + time sit neatly under the bubble (not inside).
+    const under = document.createElement("div");
+    under.className = "dmUnder";
+    under.innerHTML = `<span class="dmUnderName">${escapeHtml(m.user)}</span><span class="dmUnderTime">${new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span>`;
+    wrap.appendChild(under);
 
     const dmActions = document.createElement("div");
     dmActions.className = "dmActions";
@@ -2358,7 +2372,7 @@ function renderDmMessages(threadId){
       });
       wrap.classList.toggle("showActions");
     };
-    wrap.addEventListener("pointerdown", toggleActions);
+    bubble.addEventListener("pointerdown", toggleActions);
 
     wrap.dataset.dmMid = mid;
     wrap.appendChild(dmActions);
@@ -2697,6 +2711,24 @@ async function toggleDmQuickBar(kind){
 
 dmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("direct"); });
 groupDmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("group"); });
+
+// Close the quick bars when clicking/tapping outside (and allow toggling buttons to close).
+document.addEventListener(
+  "pointerdown",
+  (e) => {
+    const directOpen = dmQuickBar && !dmQuickBar.hidden;
+    const groupOpen = groupQuickBar && !groupQuickBar.hidden;
+    if (!directOpen && !groupOpen) return;
+
+    const t = e.target;
+    // Don't close if interacting with the bar itself or the topbar buttons.
+    if (dmQuickBar?.contains(t) || groupQuickBar?.contains(t)) return;
+    if (dmToggleBtn?.contains(t) || groupDmToggleBtn?.contains(t)) return;
+
+    hideAllDmQuickBars();
+  },
+  { capture: true }
+);
 
 // The DM panel is entered only after selecting a thread from the quick strip.
 dmCreateGroupBtn?.addEventListener("click", () => openDmPicker("create"));
