@@ -2332,6 +2332,17 @@ async function startDirectMessage(username){
     }
 
     const data = await res.json();
+    /* dm thread fallback */
+    // Some server builds may return ok:true without threadId; recover by reloading threads.
+    if (data && data.ok && !data.threadId) {
+      try { await loadDmThreads(); } catch {}
+      const recovered = dmThreads.find((t) => {
+        if (t.is_group) return false;
+        const parts = (t.participants || []).map((p)=>String(p||'').toLowerCase());
+        return parts.includes(target.toLowerCase());
+      });
+      if (recovered) { openDmThread(recovered.id); return; }
+    }
     // Don't waste vertical space with a persistent "DM ready" banner.
     setDmNotice(data.reused ? "Opened existing DM." : "");
 
