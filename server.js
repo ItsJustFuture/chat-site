@@ -20,6 +20,7 @@ async function setRoleEverywhere(targetId, username, role) {
     }
   } catch {}
 }
+ server.js
 "use strict";
 
 // === Iris & Lola private theme config ===
@@ -206,22 +207,6 @@ const pgInitPromise = (async () => {
         author_id INTEGER REFERENCES users(id) ON DELETE SET NULL
       );
     `);
-
-    // ---- DMs (Postgres): reactions
-    // Note: In this repo build, DM messages/threads still live in SQLite.
-    // We store reactions in Postgres so they persist across restarts.
-    await pgPool.query(`
-      CREATE TABLE IF NOT EXISTS dm_reactions (
-        thread_id BIGINT NOT NULL,
-        message_id BIGINT NOT NULL,
-        username TEXT NOT NULL,
-        emoji TEXT NOT NULL,
-        ts BIGINT NOT NULL,
-        PRIMARY KEY (message_id, username)
-      );
-      CREATE INDEX IF NOT EXISTS idx_dm_reactions_thread ON dm_reactions(thread_id);
-      CREATE INDEX IF NOT EXISTS idx_dm_reactions_message ON dm_reactions(message_id);
-    `);
 // Fix camelCase columns that Postgres lowercased previously
 // ---- Fix camelCase timestamp columns Postgres lowercased
 try {
@@ -394,6 +379,7 @@ db.serialize(() => {
     ["last_room", "last_room TEXT"],
     ["last_status", "last_status TEXT"],
     ["theme", "theme TEXT NOT NULL DEFAULT 'Minimal Dark'"],
+    ["prefs_json", "prefs_json TEXT NOT NULL DEFAULT '{}'"],
     ["gold", "gold INTEGER NOT NULL DEFAULT 0"],
     ["xp", "xp INTEGER NOT NULL DEFAULT 0"],
     ["lastXpMessageAt", "lastXpMessageAt INTEGER"],
@@ -1786,65 +1772,13 @@ function fetchUsersByNames(usernames, cb) {
   );
   if (!cleaned.length) return cb(null, []);
 
-  // Prefer Postgres users when available (Render/prod), fall back to SQLite users.
-  (async () => {
-    try {
-      if (process.env.DATABASE_URL && pgPool) {
-        const { rows } = await pgPool.query(
-          `SELECT id, username FROM users WHERE lower(username) = ANY($1::text[])`,
-          [cleaned]
-        );
-        if (rows && rows.length) return cb(null, rows);
-      }
-    } catch (e) {
-      // fall back
-    }
-
-    const placeholders = cleaned.map(() => "?").join(",");
-    db.all(
-      `SELECT id, username FROM users WHERE lower(username) IN (${placeholders})`,
-      cleaned,
-      (err, rows) => cb(err, rows || [])
-    );
-  })();
+  const placeholders = cleaned.map(() => "?").join(",");
+  db.all(
+    `SELECT id, username FROM users WHERE lower(username) IN (${placeholders})`,
+    cleaned,
+    (err, rows) => cb(err, rows || [])
+  );
 }
-
-
-async function resolveUsernamesByIds(userIds) {
-  const ids = Array.from(new Set((userIds || []).map((n) => Number(n)).filter((n) => Number.isInteger(n))));
-  const out = new Map();
-  if (!ids.length) return out;
-
-  // Postgres first
-  try {
-    if (process.env.DATABASE_URL && pgPool) {
-      const { rows } = await pgPool.query(
-        `SELECT id, username FROM users WHERE id = ANY($1::bigint[])`,
-        [ids]
-      );
-      for (const r of rows || []) out.set(Number(r.id), r.username);
-      if (out.size) return out;
-    }
-  } catch (e) {
-    // continue to sqlite fallback
-  }
-
-  // SQLite fallback
-  await new Promise((resolve) => {
-    const placeholders = ids.map(() => '?').join(',');
-    db.all(
-      `SELECT id, username FROM users WHERE id IN (${placeholders})`,
-      ids,
-      (_e, rows) => {
-        for (const r of rows || []) out.set(Number(r.id), r.username);
-        resolve();
-      }
-    );
-  });
-
-  return out;
-}
-
 function sanitizeRoomName(r) {
   r = String(r || "").trim();
   r = r.replace(/^#+/, "");      // drop leading '#'
@@ -1852,7 +1786,6 @@ function sanitizeRoomName(r) {
   r = r.replace(/[^a-z0-9_-]/g, "");
   return r.slice(0, 24);
 }
-
 function loadThreadForUser(threadId, userId, cb) {
   db.get(
     `SELECT id, title, is_group FROM dm_threads WHERE id = ?`,
@@ -1867,18 +1800,14 @@ function loadThreadForUser(threadId, userId, cb) {
           if (err2 || !member) return cb(err2 || new Error("forbidden"));
 
           db.all(
-            `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
+            `SELECT u.username FROM dm_participants dp JOIN users u ON u.id = dp.user_id WHERE dp.thread_id = ?`,
             [threadId],
-            async (err3, rows) => {
+            (err3, parts) => {
               if (err3) return cb(err3);
-              const ids = (rows || []).map((r) => r.user_id);
-              try {
-                const map = await resolveUsernamesByIds(ids);
-                const names = ids.map((id) => map.get(Number(id))).filter(Boolean);
-                cb(null, { ...thread, participants: names });
-              } catch {
-                cb(null, { ...thread, participants: [] });
-              }
+              cb(null, {
+                ...thread,
+                participants: (parts || []).map((p) => p.username),
+              });
             }
           );
         }
@@ -3067,7 +2996,7 @@ function handleListDmThreads(req, res) {
        AND (t.is_group = 1 OR EXISTS (SELECT 1 FROM dm_messages WHERE thread_id = t.id))
      ORDER BY COALESCE(last_ts, t.created_at) DESC`,
     [userId],
-    async (err, threads) => {
+    (err, threads) => {
       if (err) {
         console.error("[dm/threads]", err);
         return res.status(500).send("Failed to load threads");
@@ -3078,29 +3007,21 @@ function handleListDmThreads(req, res) {
       const placeholders = ids.map(() => "?").join(",");
 
       db.all(
-        `SELECT thread_id, user_id
-         FROM dm_participants
-         WHERE thread_id IN (${placeholders})`,
+        `SELECT dp.thread_id, u.username
+         FROM dm_participants dp
+         JOIN users u ON u.id = dp.user_id
+         WHERE dp.thread_id IN (${placeholders})`,
         ids,
-        async (_e, rows) => {
-          const byThread = new Map();
-          const allUids = [];
-          for (const r of rows || []) {
-            if (!byThread.has(r.thread_id)) byThread.set(r.thread_id, []);
-            byThread.get(r.thread_id).push(r.user_id);
-            allUids.push(r.user_id);
+        (_e, parts) => {
+          const grouped = new Map();
+          for (const p of parts || []) {
+            if (!grouped.has(p.thread_id)) grouped.set(p.thread_id, []);
+            grouped.get(p.thread_id).push(p.username);
           }
-
-          let nameMap = new Map();
-          try {
-            nameMap = await resolveUsernamesByIds(allUids);
-          } catch {}
 
           const result = threads.map((t) => ({
             ...t,
-            participants: (byThread.get(t.id) || [])
-              .map((uid) => nameMap.get(Number(uid)))
-              .filter(Boolean),
+            participants: grouped.get(t.id) || [],
           }));
           res.json(result);
         }
@@ -3805,126 +3726,6 @@ if (!room) {
             participants: thread.participants || [],
             messages: msgs,
           });
-
-          // Also push DM reactions for these messages (Postgres-backed).
-          // Client renders them via "dm reaction update".
-          if (PG_READY && msgs.length) {
-            const ids = msgs.map((m) => Number(m.messageId)).filter((n) => Number.isFinite(n));
-            // Avoid huge ANY() arrays
-            if (ids.length) {
-              (async () => {
-                try {
-                  const { rows: rr } = await pgPool.query(
-                    `SELECT message_id, username, emoji
-                     FROM dm_reactions
-                     WHERE thread_id = $1 AND message_id = ANY($2::BIGINT[])`,
-                    [tid, ids]
-                  );
-                  const byMsg = {};
-                  for (const r of rr || []) {
-                    const mid = String(r.message_id);
-                    if (!byMsg[mid]) byMsg[mid] = {};
-                    byMsg[mid][r.username] = r.emoji;
-                  }
-                  for (const mid of Object.keys(byMsg)) {
-                    socket.emit("dm reaction update", { threadId: tid, messageId: mid, reactions: byMsg[mid] });
-                  }
-                } catch {}
-              })();
-            }
-          }
-        }
-      );
-    });
-  });
-
-  // DM reactions (Postgres-backed)
-  socket.on("dm reaction", async ({ threadId, messageId, emoji }) => {
-    const tid = Number(threadId);
-    const mid = Number(messageId);
-    const em = String(emoji || "").trim().slice(0, 16);
-    if (!Number.isInteger(tid) || !Number.isInteger(mid) || !em) return;
-
-    // Must be a participant in the thread
-    loadThreadForUser(tid, socket.user.id, async (err) => {
-      if (err) return;
-      if (!PG_READY) return;
-      try {
-        // Toggle behavior:
-        // - If you tap the same emoji you've already reacted with, remove your reaction.
-        // - Otherwise, set/update your reaction to that emoji.
-        const uname = socket.user.username;
-        const existing = await pgPool.query(
-          `SELECT emoji FROM dm_reactions WHERE thread_id=$1 AND message_id=$2 AND username=$3 LIMIT 1`,
-          [tid, mid, uname]
-        );
-        const prevEmoji = (existing.rows?.[0]?.emoji || "").trim();
-        if (prevEmoji && prevEmoji === em) {
-          await pgPool.query(
-            `DELETE FROM dm_reactions WHERE thread_id=$1 AND message_id=$2 AND username=$3`,
-            [tid, mid, uname]
-          );
-        } else {
-          const ts = Date.now();
-          await pgPool.query(
-            `INSERT INTO dm_reactions (thread_id, message_id, username, emoji, ts)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (message_id, username)
-             DO UPDATE SET emoji = EXCLUDED.emoji, thread_id = EXCLUDED.thread_id, ts = EXCLUDED.ts`,
-            [tid, mid, uname, em, ts]
-          );
-        }
-
-        const { rows } = await pgPool.query(
-          `SELECT username, emoji FROM dm_reactions WHERE thread_id=$1 AND message_id=$2`,
-          [tid, mid]
-        );
-        const map = {};
-        for (const r of rows || []) map[r.username] = r.emoji;
-        io.to(`dm:${tid}`).emit("dm reaction update", { threadId: tid, messageId: mid, reactions: map });
-      } catch {}
-    });
-  });
-
-  // DM delete (author can delete their own; Admin+ can delete any)
-  socket.on("dm delete message", ({ threadId, messageId }) => {
-    const tid = Number(threadId);
-    const mid = Number(messageId);
-    if (!Number.isInteger(tid) || !Number.isInteger(mid)) return;
-
-    loadThreadForUser(tid, socket.user.id, (err, thread) => {
-      if (err) return;
-
-      db.get(
-        `SELECT id, user_id FROM dm_messages WHERE id=? AND thread_id=?`,
-        [mid, tid],
-        async (_e, row) => {
-          if (!row) return;
-          const isOwner = Number(row.user_id) === Number(socket.user.id);
-          const canStaffDelete = requireMinRole(socket.user.role, "Admin");
-          if (!isOwner && !canStaffDelete) return;
-
-          db.run(`DELETE FROM dm_messages WHERE id=? AND thread_id=?`, [mid, tid], async () => {
-            // Clean up reactions for this DM message in Postgres.
-            if (PG_READY) {
-              try { await pgPool.query(`DELETE FROM dm_reactions WHERE thread_id=$1 AND message_id=$2`, [tid, mid]); } catch {}
-            }
-            io.to(`dm:${tid}`).emit("dm message deleted", { threadId: tid, messageId: mid });
-
-            // Ping other participants so their thread preview/unread state can refresh.
-            db.all(
-              `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
-              [tid],
-              (_e2, rows) => {
-                for (const r of rows || []) {
-                  const uid = r.user_id;
-                  if (!uid || uid === socket.user.id) continue;
-                  const sid = socketIdByUserId.get(uid);
-                  if (sid) io.to(sid).emit("dm ping", { threadId: tid, ts: Date.now() });
-                }
-              }
-            );
-          });
         }
       );
     });
@@ -3964,21 +3765,22 @@ if (!room) {
             };
             io.to(`dm:${tid}`).emit("dm message", payload);
             if (Array.isArray(thread.participants)) {
-              // Ping all participants (except sender) so their clients can refresh thread previews/unread badges.
-// Note: clients that are already joined to dm:<tid> will also receive the "dm message" broadcast above.
-db.all(
-  `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
-  [tid],
-  (_e2, rows) => {
-    for (const r of rows || []) {
-      const uid = r.user_id;
-      if (!uid || uid === socket.user.id) continue;
-      const sid = socketIdByUserId.get(uid);
-      if (sid) io.to(sid).emit("dm ping", { threadId: tid, ts });
-    }
-  }
-);
+              db.all(
+                `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
+                [tid],
+                (_e2, rows) => {
+                  for (const r of rows || []) {
+                    const sid = socketIdByUserId.get(userId);
+const s = sid ? io.sockets.sockets.get(sid) : null;
+if (s?.user) {
+  if (avatar) s.user.avatar = avatar;
+  s.user.mood = mood;
+  if (s.currentRoom) emitUserList(s.currentRoom);
 }
+                  }
+                }
+              );
+            }
           }
         );
       };
@@ -4148,38 +3950,17 @@ db.all(
     const em = String(emoji || "").slice(0, 8);
     if (!mid || !em) return;
 
-    const uname = socket.user.username;
-    // Toggle behavior:
-    // - If you tap the same emoji you've already reacted with, remove your reaction.
-    // - Otherwise, set/update your reaction to that emoji.
-    db.get(
-      "SELECT emoji FROM reactions WHERE message_id=? AND username=? LIMIT 1",
-      [mid, uname],
-      (_gErr, row) => {
-        const prevEmoji = String(row?.emoji || "").trim();
-        const afterWrite = () => {
-          db.all("SELECT username, emoji FROM reactions WHERE message_id=?", [mid], (_e, rows) => {
-            const reactions = {};
-            for (const r of rows || []) reactions[r.username] = r.emoji;
-            io.to(room).emit("reaction update", { messageId: mid, reactions });
-          });
-        };
-
-        if (prevEmoji && prevEmoji === em) {
-          db.run(
-            "DELETE FROM reactions WHERE message_id=? AND username=?",
-            [mid, uname],
-            afterWrite
-          );
-        } else {
-          db.run(
-            `INSERT INTO reactions (message_id, username, emoji)
-             VALUES (?, ?, ?)
-             ON CONFLICT(message_id, username) DO UPDATE SET emoji=excluded.emoji`,
-            [mid, uname, em],
-            afterWrite
-          );
-        }
+    db.run(
+      `INSERT INTO reactions (message_id, username, emoji)
+       VALUES (?, ?, ?)
+       ON CONFLICT(message_id, username) DO UPDATE SET emoji=excluded.emoji`,
+      [mid, socket.user.username, em],
+      () => {
+        db.all("SELECT username, emoji FROM reactions WHERE message_id=?", [mid], (_e, rows) => {
+          const reactions = {};
+          for (const r of rows || []) reactions[r.username] = r.emoji;
+          io.to(room).emit("reaction update", { messageId: mid, reactions });
+        });
       }
     );
   });
