@@ -20,7 +20,6 @@ async function setRoleEverywhere(targetId, username, role) {
     }
   } catch {}
 }
- server.js
 "use strict";
 
 // === Iris & Lola private theme config ===
