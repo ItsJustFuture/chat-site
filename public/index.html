@@ -208,10 +208,18 @@
             </div>
             <div class="goldPill mobOnly" id="goldPill" aria-live="polite"></div>
             <button class="iconBtn withBadge" id="dmToggleBtn" type="button" title="Direct messages">💬<span class="notifDot" id="dmBadgeDot" title="New DMs"></span></button>
-            <button class="iconBtn withBadge" id="groupDmToggleBtn" type="button" title="Group messages">👥<span class="notifDot" id="groupDmBadgeDot" title="New group DMs"></span></button>
+            <button class="iconBtn withBadge" id="groupDmToggleBtn" type="button" title="Group DMs">👥<span class="notifDot" id="groupDmBadgeDot" title="New group DMs"></span></button>
             <button class="iconBtn" id="uiScaleBtn" type="button" title="UI size">⚙️</button>
 <button class="iconBtn mobOnly" id="openMembersBtn" type="button" title="Members">👥</button>
           </div>
+        </div>
+
+        <!-- Quick avatar strips (shown before opening the DM panel) -->
+        <div class="dmQuickBar" id="dmQuickBar" hidden>
+          <div class="dmQuickStrip" id="dmQuickStrip" aria-label="Your direct message threads"></div>
+        </div>
+        <div class="dmQuickBar" id="groupQuickBar" hidden>
+          <div class="dmQuickStrip" id="groupQuickStrip" aria-label="Your group message threads"></div>
         </div>
 
 <div class="uiScalePanel" id="uiScalePanel" hidden>

@@ -2078,15 +2078,6 @@ padding: 18px;
   flex-wrap:wrap;
   margin:10px 0 12px;
   overflow-x:visible;
-  /* Keep the tab header from "scrolling" separately inside the modal.
-     The modal body scrolls; the tabs stay pinned at the top of that scroll area. */
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: var(--panel);
-  padding: 10px 0 10px;
-  margin: 0 0 12px;
-  overflow-y: hidden;
   -webkit-overflow-scrolling:touch;
   scrollbar-width:none;
 }
@@ -2435,12 +2426,56 @@ body.lockScroll{ overflow:hidden; }
 }
 .dmStrip::-webkit-scrollbar{ height:6px; }
 
+/* Quick DM avatar strips shown under the topbar (before opening DM panel) */
+.dmQuickBar{
+  display:flex;
+  justify-content:center;
+  padding:6px 10px;
+}
+.dmQuickStrip{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  padding:6px 8px;
+  border-radius:999px;
+  background: rgba(255,255,255,0.10);
+  border:1px solid rgba(255,255,255,0.10);
+  width: fit-content;
+  flex: 0 1 auto;
+  max-width: min(70vw, 560px);
+  overflow-x:auto;
+  overflow-y:hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.dmQuickStrip::-webkit-scrollbar{ height:6px; }
+
+/* Group DM "venn" preview inside group avatar buttons */
+.groupVenn{
+  position:relative;
+  width:34px;
+  height:34px;
+}
+.groupVenn .vennAvatar{
+  position:absolute;
+  width:22px;
+  height:22px;
+  border-radius:999px;
+  border:2px solid rgba(0,0,0,0.35);
+  box-sizing:border-box;
+}
+.groupVenn .vennAvatar.v1{ left:0; top:8px; }
+.groupVenn .vennAvatar.v2{ right:0; top:8px; }
+.groupVenn .vennAvatar.v3{ left:6px; top:0; }
+
 .dmTabs{
   display:flex;
   gap:6px;
   flex-wrap:wrap;
   margin:2px 0 6px;
 }
+
+/* Tabs are no longer shown inside the DM panel; group DMs have their own topbar button */
+#dmTabs{ display:none !important; }
 .dmTabBtn{
   padding:6px 10px;
   border-radius:999px;
@@ -2496,10 +2531,13 @@ body.lockScroll{ overflow:hidden; }
 .colorInputRow.tight{ gap:6px; }
 .colorInputRow.tight input[type="text"]{ min-width:120px; }
 .dmMessages{ flex:1; overflow:auto; padding:10px 12px; display:flex; flex-direction:column; gap:8px; min-height:0; }
-.dmBubble{ padding:9px 11px; border-radius:12px; background:var(--panel); border:1px solid var(--line); max-width:80%; }
+.dmBubble{ padding:9px 11px; border-radius:12px; background:var(--panel); border:1px solid var(--line); max-width:min(80%, calc(100% - 14px)); overflow-wrap:anywhere; word-break:break-word; }
 .dmBubble.self{ background:var(--bubbleSelf); color:white; margin-left:auto; }
-.dmMetaRow{ display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--muted); }
-.dmActions{ display:flex; gap:8px; margin-top:6px; }
+.dmMetaRow{ display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--muted); flex-wrap:wrap; }
+.dmActions{ display:none; gap:8px; margin-top:6px; }
+.dmBubble:hover .dmActions,
+.dmBubble.showActions .dmActions{ display:flex; }
+.dmActions .reactBtn{ padding:6px 10px; border-radius:12px; }
 .smallAction{ padding:6px 10px; border-radius:12px; border:1px solid var(--line); background:transparent; color:inherit; }
 .dmInput{ padding:10px 12px; border-top:1px solid var(--line); display:flex; gap:8px; flex-shrink:0; background: var(--panel2); position:relative; }
 .dmInput input{ flex:1; }
@@ -2514,7 +2552,7 @@ body.lockScroll{ overflow:hidden; }
   background: rgba(255,255,255,.03);
 }
 .dmEmpty{ color:var(--muted); font-size:12px; text-align:center; padding:12px; }
-.dmTabs{ display:flex; gap:8px; padding:6px 6px 0; position:sticky; top:0; background:var(--dm-bg); z-index:1; }
+.dmTabs{ display:none; }
 .segBtn{ flex:1; padding:10px; border-radius:12px; background:var(--panel); border:1px solid var(--line); color:inherit; font-weight:800; letter-spacing:.01em; }
 .segBtn.active{ background:var(--accent); color:#fff; border-color:var(--accent); }
 .dmThreadActions{ padding:4px 6px 6px; }
@@ -3884,13 +3922,3 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
     0 0 14px rgba(255, 100, 200, 0.6),
     inset 0 0 10px rgba(120, 40, 160, 0.8);
 }
-
-/* Hide DM mode tabs - direct vs group is controlled from topbar buttons */
-.dmTabs{ display:none !important; }
-
-/* Group DM avatar (3-circle venn) */
-.dmVenn{ position:relative; width:42px; height:42px; }
-.dmVennAv{ position:absolute; width:26px; height:26px; border-radius:999px; overflow:hidden; border:2px solid rgba(0,0,0,0.25); background:var(--avatar-bg); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:11px; }
-.dmVennAv-a{ left:0; top:10px; }
-.dmVennAv-b{ right:0; top:10px; }
-.dmVennAv-c{ left:8px; top:0; }

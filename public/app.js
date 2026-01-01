@@ -378,6 +378,14 @@ const mentionDropdown = document.getElementById("mentionDropdown");
 const dmPanel = document.getElementById("dmPanel");
 const dmToggleBtn = document.getElementById("dmToggleBtn");
 const groupDmToggleBtn = document.getElementById("groupDmToggleBtn");
+const dmBadgeDot = document.getElementById("dmBadgeDot");
+const groupDmBadgeDot = document.getElementById("groupDmBadgeDot");
+
+// Quick avatar strips (shown before opening the DM panel)
+const dmQuickBar = document.getElementById("dmQuickBar");
+const dmQuickStrip = document.getElementById("dmQuickStrip");
+const groupQuickBar = document.getElementById("groupQuickBar");
+const groupQuickStrip = document.getElementById("groupQuickStrip");
 const dmCloseBtn = document.getElementById("dmCloseBtn");
 const dmTabs = document.getElementById("dmTabs");
 const dmCreateGroupBtn = document.getElementById("dmCreateGroupBtn");
@@ -507,8 +515,7 @@ const groupBadgeColor = document.getElementById("groupBadgeColor");
 const directBadgeColorText = document.getElementById("directBadgeColorText");
 const groupBadgeColorText = document.getElementById("groupBadgeColorText");
 const saveBadgePrefsBtn = document.getElementById("saveBadgePrefsBtn");
-const dmBadgeDot = document.getElementById("dmBadgeDot");
-const groupDmBadgeDot = document.getElementById("groupDmBadgeDot");
+// (dmBadgeDot + groupDmBadgeDot declared above near DM panel wiring)
 
 // my profile edit
 const myProfileEdit = document.getElementById("myProfileEdit");
@@ -1887,32 +1894,6 @@ function threadAvatarNode(t){
   return wrap;
 }
 
-
-function groupVennNode(thread){
-  const parts = Array.isArray(thread.participants) ? thread.participants : [];
-  const meName = String(me?.username || "");
-  const others = parts.filter(p => p && p !== meName);
-  const pick = others.slice(0, 3);
-  while (pick.length < 3) pick.push(meName || "?");
-  const wrap = document.createElement("div");
-  wrap.className = "dmVenn";
-  const slots = ["a", "b", "c"];
-  pick.forEach((name, i) => {
-    const node = avatarNode(name || "?");
-    node.classList.add("dmVennAv", `dmVennAv-${slots[i]}`);
-    getAvatarUrl(name).then((url) => {
-      if (url && node && node.tagName && node.tagName.toLowerCase() === 'div') {
-        node.style.backgroundImage = `url('${url}')`;
-        node.style.backgroundSize = "cover";
-        node.style.backgroundPosition = "center";
-        node.textContent = "";
-      }
-    });
-    wrap.appendChild(node);
-  });
-  return wrap;
-}
-
 function syncDmTabUi(){
   dmTabs?.querySelectorAll("[data-dm-tab]")?.forEach((btn) => {
     const on = btn.dataset.dmTab === dmTab;
@@ -2005,56 +1986,41 @@ function renderThreadItem(t){
   return div;
 }
 
-function renderDmThreads(){
-  // The DM panel uses a horizontal avatar strip. Which threads are shown depends on whether we
-  // opened Direct DMs (💬) or Group DMs (👥) from the top bar.
-  const list = (dmThreads || []).filter(dmTab === "group" ? (t => !!t.is_group) : isDirectThread);
+function renderDirectThreads(){
+  const list = (dmThreads || []).filter(isDirectThread);
+  const stripEl = dmQuickStrip || dmStrip;
+  if (!stripEl) return;
 
-  // Fallback if strip element missing (older HTML)
-  if (!dmStrip) {
-    if (!dmThreadList) return;
-    dmThreadList.innerHTML = "";
-    for (const t of list) dmThreadList.appendChild(renderThreadItem(t));
-    return;
-  }
-
-  dmStrip.innerHTML = "";
+  stripEl.innerHTML = "";
   if (list.length === 0) {
-    dmStrip.style.display = "none";
+    stripEl.style.display = "none";
     return;
   }
-  dmStrip.style.display = "flex";
+  stripEl.style.display = "flex";
 
-  // newest-first
   list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
-
   for (const t of list) {
     const other = otherParty(t);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "dmAvatarBtn" + (String(activeDmId)===String(t.id) ? " active" : "");
-    btn.title = (dmTab === "group") ? (threadLabel(t) || "Group DM") : (other ? `DM with ${other}` : "DM");
+    btn.title = other ? `DM with ${other}` : "DM";
 
     const wrap = document.createElement("div");
     wrap.className = "dmAvatarWrap";
 
-    const av = (dmTab === "group") ? groupVennNode(t) : avatarNode(other || "?");
-
-    // try to upgrade to real avatar image (direct only)
-    if (dmTab !== "group") {
-      getAvatarUrl(other).then(url=>{
-        if (url && av && av.tagName && av.tagName.toLowerCase()==='div') {
-          av.style.backgroundImage = `url('${url}')`;
-          av.style.backgroundSize = "cover";
-          av.style.backgroundPosition = "center";
-          av.textContent = "";
-        }
-      });
-    }
+    const av = avatarNode(other || "?");
+    getAvatarUrl(other).then(url=>{
+      if (url && av && av.tagName && av.tagName.toLowerCase()==='div') {
+        av.style.backgroundImage = `url('${url}')`;
+        av.style.backgroundSize = "cover";
+        av.style.backgroundPosition = "center";
+        av.textContent = "";
+      }
+    });
 
     const badge = document.createElement("span");
     badge.className = "dmUnreadBadge";
-
     const lastRead = Number(dmLastRead[t.id] || 0);
     const lastTs = Number(t.last_ts || 0);
     const unread = dmUnreadThreads.has(t.id) || (lastTs > lastRead);
@@ -2064,14 +2030,82 @@ function renderDmThreads(){
     wrap.appendChild(badge);
     btn.appendChild(wrap);
 
-    btn.addEventListener("click", ()=> openDmThread(t.id));
-    dmStrip.appendChild(btn);
+    btn.addEventListener("click", ()=>{
+      hideAllDmQuickBars();
+      openDmPanel();
+      openDmThread(t.id);
+    });
+    stripEl.appendChild(btn);
   }
+}
 
-  // Auto-open the newest thread if none selected
-  if (!activeDmId && list[0]) {
-    openDmThread(list[0].id);
+function vennPreview(thread){
+  const wrap = document.createElement("div");
+  wrap.className = "groupVenn";
+  const parts = (thread.participants || []).filter(Boolean);
+  const others = parts.filter((p)=>String(p).toLowerCase() !== String(me?.username||"").toLowerCase());
+  const picks = (others.length ? others : parts).slice(0, 3);
+
+  for (let i=0;i<3;i++) {
+    const name = picks[i] || "?";
+    const av = avatarNode(name);
+    av.classList.add("vennAvatar", `v${i+1}`);
+    getAvatarUrl(name).then(url=>{
+      if (url && av && av.tagName && av.tagName.toLowerCase()==='div') {
+        av.style.backgroundImage = `url('${url}')`;
+        av.style.backgroundSize = "cover";
+        av.style.backgroundPosition = "center";
+        av.textContent = "";
+      }
+    });
+    wrap.appendChild(av);
   }
+  return wrap;
+}
+
+function renderGroupThreads(){
+  const list = (dmThreads || []).filter((t)=>!!t.is_group);
+  const stripEl = groupQuickStrip;
+  if (!stripEl) return;
+
+  stripEl.innerHTML = "";
+  if (list.length === 0) {
+    stripEl.style.display = "none";
+    return;
+  }
+  stripEl.style.display = "flex";
+  list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
+
+  for (const t of list) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "dmAvatarBtn" + (String(activeDmId)===String(t.id) ? " active" : "");
+    btn.title = threadLabel(t);
+
+    const badge = document.createElement("span");
+    badge.className = "dmUnreadBadge";
+    const lastRead = Number(dmLastRead[t.id] || 0);
+    const lastTs = Number(t.last_ts || 0);
+    const unread = dmUnreadThreads.has(t.id) || (lastTs > lastRead);
+    badge.style.display = unread ? "block" : "none";
+
+    const preview = vennPreview(t);
+    preview.appendChild(badge);
+    btn.appendChild(preview);
+
+    btn.addEventListener("click", ()=>{
+      hideAllDmQuickBars();
+      openDmPanel();
+      openDmThread(t.id);
+    });
+    stripEl.appendChild(btn);
+  }
+}
+
+function renderDmThreads(){
+  // Backwards-compatible entrypoint.
+  renderDirectThreads();
+  renderGroupThreads();
 }
 
 
@@ -2157,9 +2191,8 @@ async function startDirectMessage(username){
   }
 }
 
-function openDmPanel(mode){
+function openDmPanel(){
   dmPanel.classList.add("open");
-  if (mode === "group") setDmTab("group"); else setDmTab("direct");
   setDmNotice("");
   clearDmBadges();
   syncDmTabUi();
@@ -2221,16 +2254,29 @@ function renderDmMessages(threadId){
 
     const dmActions = document.createElement("div");
     dmActions.className = "dmActions";
+
     const replyBtn = document.createElement("button");
     replyBtn.type = "button";
-    replyBtn.textContent = "↩️ Reply";
-    replyBtn.className = "smallAction";
+    replyBtn.textContent = "↩️";
+    replyBtn.title = "Reply";
+    replyBtn.className = "reactBtn";
     replyBtn.onclick = (e) => {
       e.stopPropagation();
       setDmReplyTarget({ id: m.messageId || m.id, user: m.user, text: m.text });
       focusDmComposer();
     };
     dmActions.appendChild(replyBtn);
+    // Mobile/desktop: tap/click the bubble area to show actions (like main chat).
+    const toggleActions = (e) => {
+      if (e?.target?.closest("button, a, input, textarea, select, label")) return;
+      if (e?.stopPropagation) e.stopPropagation();
+      document.querySelectorAll(".dmBubble.showActions").forEach((el) => {
+        if (el !== wrap) el.classList.remove("showActions");
+      });
+      wrap.classList.toggle("showActions");
+    };
+    wrap.addEventListener("pointerdown", toggleActions);
+
     wrap.dataset.dmMid = m.messageId || m.id;
     wrap.appendChild(dmActions);
 
@@ -2543,8 +2589,33 @@ async function leaveGroup(threadId){
   }
 }
 
-dmToggleBtn?.addEventListener("click", () => { openDmPanel("direct"); });
-groupDmToggleBtn?.addEventListener("click", () => { openDmPanel("group"); });
+function hideAllDmQuickBars(){
+  if (dmQuickBar) dmQuickBar.hidden = true;
+  if (groupQuickBar) groupQuickBar.hidden = true;
+}
+
+async function toggleDmQuickBar(kind){
+  // kind: "direct" | "group"
+  const targetBar = kind === "group" ? groupQuickBar : dmQuickBar;
+  if (!targetBar) return;
+
+  // Toggle: if already open, close it.
+  const willShow = targetBar.hidden;
+  hideAllDmQuickBars();
+  targetBar.hidden = !willShow;
+
+  if (!willShow) return;
+
+  // Ensure threads are loaded before rendering strips.
+  if (!dmThreads.length) await loadDmThreads();
+  if (kind === "group") renderGroupThreads();
+  else renderDirectThreads();
+}
+
+dmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("direct"); });
+groupDmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("group"); });
+
+// The DM panel is entered only after selecting a thread from the quick strip.
 dmCreateGroupBtn?.addEventListener("click", () => openDmPicker("create"));
 dmCloseBtn?.addEventListener("click", closeDmPanel);
 dmSendBtn?.addEventListener("click", sendDmMessage);
@@ -4033,22 +4104,6 @@ socket.on("disconnect", (reason) => {
     }
     renderDmThreads();
   });
-
-
-socket.on("dm ping", (p) => {
-  try {
-    const tid = Number(p?.threadId);
-    if (!Number.isFinite(tid)) return;
-    if (!dmThreads.find((t) => t.id === tid)) {
-      loadDmThreads();
-    }
-    if (activeDmId !== tid) {
-      markDmNotification(tid, isGroupThread(tid));
-    }
-  } catch (e) {
-    // ignore
-  }
-});
 
   socket.on("dm message", (m) => {
   try {
