@@ -74,8 +74,8 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
 
 // ---- App + Server
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server, {
+const httpServer = http.createServer(app);
+const io = new Server(httpServer, {
   // Render uses HTTPS -> allow websocket upgrade
   cors: { origin: true, credentials: true },
 
@@ -4244,7 +4244,7 @@ if (s?.user) {
 
 // ---- Start
 pgInitPromise.finally(() => {
-  server.listen(PORT, () => {
+  httpServer.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 });
