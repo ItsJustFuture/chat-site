@@ -2908,6 +2908,57 @@ app.post("/profile", requireLogin, (req, res) => {
 });
 
 
+
+// Remove avatar (clears avatar field; best-effort deletes local file if present)
+app.delete("/profile/avatar", requireLogin, async (req, res) => {
+  const userId = req.session.user.id;
+
+  const clearAvatarInLivePresence = () => {
+    const sid = socketIdByUserId.get(userId);
+    const s = sid ? io.sockets.sockets.get(sid) : null;
+    if (!s?.user) return;
+    s.user.avatar = null;
+    if (s.currentRoom) emitUserList(s.currentRoom);
+  };
+
+  const tryDeleteLocalAvatarFile = (avatarUrl) => {
+    try {
+      const rel = String(avatarUrl || "");
+      if (!rel.startsWith("/avatars/")) return;
+      const fp = path.join(AVATARS_DIR, path.basename(rel));
+      fs.unlink(fp, () => {});
+    } catch {}
+  };
+
+  try {
+    // Prefer Postgres if present
+    if (await pgUserExists(userId)) {
+      const { rows } = await pgPool.query(`SELECT avatar FROM users WHERE id = $1`, [userId]);
+      const oldAvatar = rows?.[0]?.avatar || null;
+
+      await pgPool.query(`UPDATE users SET avatar = NULL WHERE id = $1`, [userId]);
+      req.session.user.avatar = null;
+      clearAvatarInLivePresence();
+      tryDeleteLocalAvatarFile(oldAvatar);
+      return res.json({ ok: true });
+    }
+  } catch (e) {
+    console.warn("[/profile/avatar][pg] delete failed, falling back to sqlite:", e?.message || e);
+  }
+
+  // SQLite fallback
+  db.get("SELECT avatar FROM users WHERE id = ?", [userId], (_e, row) => {
+    const oldAvatar = row?.avatar || null;
+    db.run(`UPDATE users SET avatar = NULL WHERE id = ?`, [userId], (err2) => {
+      if (err2) return res.status(500).send("Could not remove avatar");
+      req.session.user.avatar = null;
+      clearAvatarInLivePresence();
+      tryDeleteLocalAvatarFile(oldAvatar);
+      return res.json({ ok: true });
+    });
+  });
+});
+
 // ---- Uploads (10MB max). VIP can upload mp4/mov, everyone can upload images.
 const chatUpload = multer({
   storage: multer.diskStorage({
