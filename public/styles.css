@@ -2870,6 +2870,41 @@ body.lockScroll{ overflow:hidden; }
   .dmPanel{ right:0; bottom:0; }
 }
 
+
+
+/* --- DM width safety: keep bubbles/meta/typing inside frame --- */
+:root{
+  --dmActionsW: 104px; /* estimated width of 3 small action buttons + gaps */
+}
+.dmRow{
+  min-width:0;
+  box-sizing:border-box;
+}
+.dmBubbleWrap{
+  flex:0 1 auto;
+  min-width:0;
+  max-width: calc(100% - var(--dmActionsW));
+}
+.dmMetaRow{
+  max-width:100%;
+  overflow:hidden;
+}
+.dmMetaUser, .dmMetaTime{
+  max-width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.typing{
+  max-width:100%;
+  box-sizing:border-box;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+@media (max-width: 520px){
+  :root{ --dmActionsW: 92px; }
+}
 /* --- DM actions rail: smaller and hug bubbles more closely --- */
 .dmActionsRail{
   gap:4px;
