@@ -1770,13 +1770,65 @@ function fetchUsersByNames(usernames, cb) {
   );
   if (!cleaned.length) return cb(null, []);
 
-  const placeholders = cleaned.map(() => "?").join(",");
-  db.all(
-    `SELECT id, username FROM users WHERE lower(username) IN (${placeholders})`,
-    cleaned,
-    (err, rows) => cb(err, rows || [])
-  );
+  // Prefer Postgres users when available (Render/prod), fall back to SQLite users.
+  (async () => {
+    try {
+      if (process.env.DATABASE_URL && pgPool) {
+        const { rows } = await pgPool.query(
+          `SELECT id, username FROM users WHERE lower(username) = ANY($1::text[])`,
+          [cleaned]
+        );
+        if (rows && rows.length) return cb(null, rows);
+      }
+    } catch (e) {
+      // fall back
+    }
+
+    const placeholders = cleaned.map(() => "?").join(",");
+    db.all(
+      `SELECT id, username FROM users WHERE lower(username) IN (${placeholders})`,
+      cleaned,
+      (err, rows) => cb(err, rows || [])
+    );
+  })();
 }
+
+
+async function resolveUsernamesByIds(userIds) {
+  const ids = Array.from(new Set((userIds || []).map((n) => Number(n)).filter((n) => Number.isInteger(n))));
+  const out = new Map();
+  if (!ids.length) return out;
+
+  // Postgres first
+  try {
+    if (process.env.DATABASE_URL && pgPool) {
+      const { rows } = await pgPool.query(
+        `SELECT id, username FROM users WHERE id = ANY($1::bigint[])`,
+        [ids]
+      );
+      for (const r of rows || []) out.set(Number(r.id), r.username);
+      if (out.size) return out;
+    }
+  } catch (e) {
+    // continue to sqlite fallback
+  }
+
+  // SQLite fallback
+  await new Promise((resolve) => {
+    const placeholders = ids.map(() => '?').join(',');
+    db.all(
+      `SELECT id, username FROM users WHERE id IN (${placeholders})`,
+      ids,
+      (_e, rows) => {
+        for (const r of rows || []) out.set(Number(r.id), r.username);
+        resolve();
+      }
+    );
+  });
+
+  return out;
+}
+
 function sanitizeRoomName(r) {
   r = String(r || "").trim();
   r = r.replace(/^#+/, "");      // drop leading '#'
@@ -1784,6 +1836,7 @@ function sanitizeRoomName(r) {
   r = r.replace(/[^a-z0-9_-]/g, "");
   return r.slice(0, 24);
 }
+
 function loadThreadForUser(threadId, userId, cb) {
   db.get(
     `SELECT id, title, is_group FROM dm_threads WHERE id = ?`,
@@ -1798,14 +1851,18 @@ function loadThreadForUser(threadId, userId, cb) {
           if (err2 || !member) return cb(err2 || new Error("forbidden"));
 
           db.all(
-            `SELECT u.username FROM dm_participants dp JOIN users u ON u.id = dp.user_id WHERE dp.thread_id = ?`,
+            `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
             [threadId],
-            (err3, parts) => {
+            async (err3, rows) => {
               if (err3) return cb(err3);
-              cb(null, {
-                ...thread,
-                participants: (parts || []).map((p) => p.username),
-              });
+              const ids = (rows || []).map((r) => r.user_id);
+              try {
+                const map = await resolveUsernamesByIds(ids);
+                const names = ids.map((id) => map.get(Number(id))).filter(Boolean);
+                cb(null, { ...thread, participants: names });
+              } catch {
+                cb(null, { ...thread, participants: [] });
+              }
             }
           );
         }
@@ -2994,7 +3051,7 @@ function handleListDmThreads(req, res) {
        AND (t.is_group = 1 OR EXISTS (SELECT 1 FROM dm_messages WHERE thread_id = t.id))
      ORDER BY COALESCE(last_ts, t.created_at) DESC`,
     [userId],
-    (err, threads) => {
+    async (err, threads) => {
       if (err) {
         console.error("[dm/threads]", err);
         return res.status(500).send("Failed to load threads");
@@ -3005,21 +3062,29 @@ function handleListDmThreads(req, res) {
       const placeholders = ids.map(() => "?").join(",");
 
       db.all(
-        `SELECT dp.thread_id, u.username
-         FROM dm_participants dp
-         JOIN users u ON u.id = dp.user_id
-         WHERE dp.thread_id IN (${placeholders})`,
+        `SELECT thread_id, user_id
+         FROM dm_participants
+         WHERE thread_id IN (${placeholders})`,
         ids,
-        (_e, parts) => {
-          const grouped = new Map();
-          for (const p of parts || []) {
-            if (!grouped.has(p.thread_id)) grouped.set(p.thread_id, []);
-            grouped.get(p.thread_id).push(p.username);
+        async (_e, rows) => {
+          const byThread = new Map();
+          const allUids = [];
+          for (const r of rows || []) {
+            if (!byThread.has(r.thread_id)) byThread.set(r.thread_id, []);
+            byThread.get(r.thread_id).push(r.user_id);
+            allUids.push(r.user_id);
           }
+
+          let nameMap = new Map();
+          try {
+            nameMap = await resolveUsernamesByIds(allUids);
+          } catch {}
 
           const result = threads.map((t) => ({
             ...t,
-            participants: grouped.get(t.id) || [],
+            participants: (byThread.get(t.id) || [])
+              .map((uid) => nameMap.get(Number(uid)))
+              .filter(Boolean),
           }));
           res.json(result);
         }
