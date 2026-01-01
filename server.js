@@ -3850,14 +3850,30 @@ if (!room) {
       if (err) return;
       if (!PG_READY) return;
       try {
-        const ts = Date.now();
-        await pgPool.query(
-          `INSERT INTO dm_reactions (thread_id, message_id, username, emoji, ts)
-           VALUES ($1, $2, $3, $4, $5)
-           ON CONFLICT (message_id, username)
-           DO UPDATE SET emoji = EXCLUDED.emoji, thread_id = EXCLUDED.thread_id, ts = EXCLUDED.ts`,
-          [tid, mid, socket.user.username, em, ts]
+        // Toggle behavior:
+        // - If you tap the same emoji you've already reacted with, remove your reaction.
+        // - Otherwise, set/update your reaction to that emoji.
+        const uname = socket.user.username;
+        const existing = await pgPool.query(
+          `SELECT emoji FROM dm_reactions WHERE thread_id=$1 AND message_id=$2 AND username=$3 LIMIT 1`,
+          [tid, mid, uname]
         );
+        const prevEmoji = (existing.rows?.[0]?.emoji || "").trim();
+        if (prevEmoji && prevEmoji === em) {
+          await pgPool.query(
+            `DELETE FROM dm_reactions WHERE thread_id=$1 AND message_id=$2 AND username=$3`,
+            [tid, mid, uname]
+          );
+        } else {
+          const ts = Date.now();
+          await pgPool.query(
+            `INSERT INTO dm_reactions (thread_id, message_id, username, emoji, ts)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (message_id, username)
+             DO UPDATE SET emoji = EXCLUDED.emoji, thread_id = EXCLUDED.thread_id, ts = EXCLUDED.ts`,
+            [tid, mid, uname, em, ts]
+          );
+        }
 
         const { rows } = await pgPool.query(
           `SELECT username, emoji FROM dm_reactions WHERE thread_id=$1 AND message_id=$2`,
@@ -4132,17 +4148,38 @@ db.all(
     const em = String(emoji || "").slice(0, 8);
     if (!mid || !em) return;
 
-    db.run(
-      `INSERT INTO reactions (message_id, username, emoji)
-       VALUES (?, ?, ?)
-       ON CONFLICT(message_id, username) DO UPDATE SET emoji=excluded.emoji`,
-      [mid, socket.user.username, em],
-      () => {
-        db.all("SELECT username, emoji FROM reactions WHERE message_id=?", [mid], (_e, rows) => {
-          const reactions = {};
-          for (const r of rows || []) reactions[r.username] = r.emoji;
-          io.to(room).emit("reaction update", { messageId: mid, reactions });
-        });
+    const uname = socket.user.username;
+    // Toggle behavior:
+    // - If you tap the same emoji you've already reacted with, remove your reaction.
+    // - Otherwise, set/update your reaction to that emoji.
+    db.get(
+      "SELECT emoji FROM reactions WHERE message_id=? AND username=? LIMIT 1",
+      [mid, uname],
+      (_gErr, row) => {
+        const prevEmoji = String(row?.emoji || "").trim();
+        const afterWrite = () => {
+          db.all("SELECT username, emoji FROM reactions WHERE message_id=?", [mid], (_e, rows) => {
+            const reactions = {};
+            for (const r of rows || []) reactions[r.username] = r.emoji;
+            io.to(room).emit("reaction update", { messageId: mid, reactions });
+          });
+        };
+
+        if (prevEmoji && prevEmoji === em) {
+          db.run(
+            "DELETE FROM reactions WHERE message_id=? AND username=?",
+            [mid, uname],
+            afterWrite
+          );
+        } else {
+          db.run(
+            `INSERT INTO reactions (message_id, username, emoji)
+             VALUES (?, ?, ?)
+             ON CONFLICT(message_id, username) DO UPDATE SET emoji=excluded.emoji`,
+            [mid, uname, em],
+            afterWrite
+          );
+        }
       }
     );
   });
