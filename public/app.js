@@ -1316,6 +1316,33 @@ function openReactionMenu(messageId, anchorEl, rowEl){
   if(rowEl) rowEl.classList.add("showActions");
 }
 
+function openDmReactionMenu(threadId, messageId, anchorEl, rowEl){
+  ensureReactionMenu();
+  reactionMenuFor = String(messageId);
+  reactionMenuRow = rowEl;
+  const grid = reactionMenuEl.querySelector(".reactionGrid");
+  grid.innerHTML = "";
+  for(const em of EMOJI_CHOICES){
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = em;
+    b.onclick = ()=>{
+      socket?.emit("dm reaction", { threadId, messageId, emoji: em });
+      closeReactionMenu();
+    };
+    grid.appendChild(b);
+  }
+  const rect = anchorEl.getBoundingClientRect();
+  reactionMenuEl.classList.add("open");
+  const menuRect = reactionMenuEl.getBoundingClientRect();
+  let x = Math.min(window.innerWidth - menuRect.width - 12, Math.max(12, rect.left));
+  let y = rect.top - menuRect.height - 10;
+  if(y < 12) y = rect.bottom + 10;
+  reactionMenuEl.style.left = `${x}px`;
+  reactionMenuEl.style.top = `${y}px`;
+  if(rowEl) rowEl.classList.add("showActions");
+}
+
 function closeReactionMenu(){
   if(!reactionMenuEl) return;
   reactionMenuEl.classList.remove("open");
@@ -1573,6 +1600,28 @@ function renderReactions(messageId, reactionsMap){
     counts[em]=(counts[em]||0)+1;
   }
   const container=document.getElementById("reacts-"+messageId);
+  if(!container) return;
+  container.innerHTML="";
+  Object.entries(counts).forEach(([emoji,count])=>{
+    const pill=document.createElement("div");
+    pill.className="reactPill";
+    pill.textContent=`${emoji} ${count}`;
+    container.appendChild(pill);
+  });
+}
+
+
+
+// ---- DM reactions (per-message emoji)
+const dmReactionsCache = Object.create(null);
+function renderDmReactions(messageId, reactionsMap){
+  dmReactionsCache[messageId] = reactionsMap || {};
+  const counts = {};
+  for(const u in dmReactionsCache[messageId]){
+    const em = dmReactionsCache[messageId][u];
+    counts[em]=(counts[em]||0)+1;
+  }
+  const container=document.getElementById("dm-reacts-"+messageId);
   if(!container) return;
   container.innerHTML="";
   Object.entries(counts).forEach(([emoji,count])=>{
@@ -2252,20 +2301,54 @@ function renderDmMessages(threadId){
     text.innerHTML = applyMentions(m.text || "");
     wrap.appendChild(text);
 
+    const mid = m.messageId || m.id;
+
+    const reacts = document.createElement("div");
+    reacts.className = "reactions dmReactions";
+    reacts.id = "dm-reacts-" + mid;
+    wrap.appendChild(reacts);
+    if (dmReactionsCache[mid]) renderDmReactions(mid, dmReactionsCache[mid]);
+
     const dmActions = document.createElement("div");
     dmActions.className = "dmActions";
+
+    const reactBtn = document.createElement("button");
+    reactBtn.type = "button";
+    reactBtn.textContent = "🙂";
+    reactBtn.title = "React";
+    reactBtn.className = "reactBtn";
+    reactBtn.onclick = (e) => {
+      e.stopPropagation();
+      openDmReactionMenu(activeDmId, mid, reactBtn, wrap);
+    };
+    dmActions.appendChild(reactBtn);
 
     const replyBtn = document.createElement("button");
     replyBtn.type = "button";
     replyBtn.textContent = "↩️";
     replyBtn.title = "Reply";
-    replyBtn.className = "reactBtn";
+    replyBtn.className = "smallAction";
     replyBtn.onclick = (e) => {
       e.stopPropagation();
-      setDmReplyTarget({ id: m.messageId || m.id, user: m.user, text: m.text });
+      setDmReplyTarget({ id: mid, user: m.user, text: m.text });
       focusDmComposer();
     };
     dmActions.appendChild(replyBtn);
+
+    const canDelete = (m.user === me.username) || (roleRank(me.role) >= roleRank("Moderator"));
+    if (canDelete) {
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.textContent = "🗑️";
+      delBtn.title = "Delete";
+      delBtn.className = "smallAction";
+      delBtn.onclick = (e) => {
+        e.stopPropagation();
+        socket?.emit("dm delete message", { threadId: activeDmId, messageId: mid });
+      };
+      dmActions.appendChild(delBtn);
+    }
+
     // Mobile/desktop: tap/click the bubble area to show actions (like main chat).
     const toggleActions = (e) => {
       if (e?.target?.closest("button, a, input, textarea, select, label")) return;
@@ -2277,7 +2360,7 @@ function renderDmMessages(threadId){
     };
     wrap.addEventListener("pointerdown", toggleActions);
 
-    wrap.dataset.dmMid = m.messageId || m.id;
+    wrap.dataset.dmMid = mid;
     wrap.appendChild(dmActions);
 
     dmMessagesEl.appendChild(wrap);
@@ -4130,7 +4213,21 @@ socket.on("disconnect", (reason) => {
   }
 });
 
-  socket.on("dm thread invited", () => {
+  
+
+  socket.on("dm reaction update", ({ threadId, messageId, reactions }) => {
+    if (!messageId) return;
+    renderDmReactions(String(messageId), reactions || {});
+  });
+
+  socket.on("dm message deleted", ({ threadId, messageId }) => {
+    if (!threadId || !messageId) return;
+    const arr = dmMessages.get(threadId) || [];
+    const next = arr.filter((x) => String(x.messageId) !== String(messageId));
+    dmMessages.set(threadId, next);
+    if (activeDmId === threadId) renderDmMessages(threadId);
+  });
+socket.on("dm thread invited", () => {
     loadDmThreads();
   });
 
