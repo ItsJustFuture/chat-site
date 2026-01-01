@@ -1626,7 +1626,22 @@ button{ font-family:inherit; }
   .authBrand{ text-align:center; padding:6px 0 0; }
   .authTag{ max-width:520px; margin-left:auto; margin-right:auto; }
 }
+/* Mobile safety */
+@media (max-width: 820px) {
+  .authShell {
+    transform: none;          /* remove desktop left shift */
+    width: 100%;
+    max-width: 100%;
+    padding: 16px;
+    box-sizing: border-box;
+  }
 
+  .authCard {
+    width: 100%;
+    max-width: 420px;         /* fits all phones */
+    margin: 0 auto;
+  }
+}
 /* Shared form primitives */
 .field{ display:flex; flex-direction:column; gap:6px; margin:10px 0; }
 .field label{ font-size:12px; color:var(--muted); }
