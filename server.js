@@ -46,44 +46,6 @@ const http = require("http");
 const { Server } = require("socket.io");
 const sqlite3 = require("sqlite3").verbose();
 
-// ---- Role helpers
-function canonicalRole(input) {
-  const raw = String(input || "").trim();
-  if (!raw) return null;
-  // Compare roles case-insensitively, ignoring spaces, underscores and hyphens.
-  const key = raw.toLowerCase().replace(/[\s_-]+/g, "");
-  for (const r of ROLES) {
-    const rk = String(r).toLowerCase().replace(/[\s_-]+/g, "");
-    if (rk === key) return r;
-  }
-  return null;
-}
-
-function updateOnlineUserRoleAndBroadcast(userId, role) {
-  try {
-    // We enforce a single active socket per user, but search defensively.
-    for (const s of io.sockets.sockets.values()) {
-      if (!s?.user || s.user.id !== userId) continue;
-
-      s.user.role = role;
-
-      if (s.request?.session?.user) {
-        s.request.session.user.role = role;
-        // Persist session update best-effort (connect-pg-simple / sqlite store)
-        try { s.request.session.save?.(() => {}); } catch {}
-      }
-
-      // Emit fresh member lists for every room this user is currently in.
-      // (socket.rooms includes its own socket id; skip that)
-      try {
-        for (const r of s.rooms || []) {
-          if (r && r !== s.id) emitUserList(r);
-        }
-      } catch {}
-    }
-  } catch {}
-}
-
 const PORT = Number(process.env.PORT || 3000);
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, "chat.db");
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -1239,12 +1201,11 @@ const commandRegistry = {
     handler: async ({ args, actorRole }) => {
       if (args.length < 2) return { ok: false, message: "Missing arguments" };
       const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
-      const role = canonicalRole(args.slice(1).join(" "));
-      if (!role) return { ok: false, message: "Unknown role" };
+      const role = args[1].replace(/-/g, " ");
+      if (!ROLES.includes(role)) return { ok: false, message: "Unknown role" };
       if (roleRank(role) >= roleRank("Owner")) return { ok: false, message: "Cannot grant Owner" };
       if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
       await setRoleEverywhere(target.id, target.username, role);
-      updateOnlineUserRoleAndBroadcast(target.id, role);
       return { ok: true, message: `Role set to ${role} for ${target.username}` };
     },
   },
@@ -1256,12 +1217,10 @@ const commandRegistry = {
     handler: async ({ args, actorRole }) => {
       if (args.length < 2) return { ok: false, message: "Missing arguments" };
       const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
-      const role = canonicalRole(args.slice(1).join(" "));
-      if (!role) return { ok: false, message: "Unknown role" };
+      const role = args[1].replace(/-/g, " ");
       if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
       if (roleRank(role) >= roleRank(actorRole)) return { ok: false, message: "Cannot remove equal role" };
-      await setRoleEverywhere(target.id, target.username, "User");
-      updateOnlineUserRoleAndBroadcast(target.id, "User");
+      await dbRunAsync(`UPDATE users SET role='User' WHERE id=?`, [target.id]);
       return { ok: true, message: `Removed role from ${target.username}` };
     },
   },
@@ -3804,22 +3763,21 @@ if (!room) {
             };
             io.to(`dm:${tid}`).emit("dm message", payload);
             if (Array.isArray(thread.participants)) {
-              db.all(
-                `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
-                [tid],
-                (_e2, rows) => {
-                  for (const r of rows || []) {
-                    const sid = socketIdByUserId.get(userId);
-const s = sid ? io.sockets.sockets.get(sid) : null;
-if (s?.user) {
-  if (avatar) s.user.avatar = avatar;
-  s.user.mood = mood;
-  if (s.currentRoom) emitUserList(s.currentRoom);
+              // Ping all participants (except sender) so their clients can refresh thread previews/unread badges.
+// Note: clients that are already joined to dm:<tid> will also receive the "dm message" broadcast above.
+db.all(
+  `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
+  [tid],
+  (_e2, rows) => {
+    for (const r of rows || []) {
+      const uid = r.user_id;
+      if (!uid || uid === socket.user.id) continue;
+      const sid = socketIdByUserId.get(uid);
+      if (sid) io.to(sid).emit("dm ping", { threadId: tid, ts });
+    }
+  }
+);
 }
-                  }
-                }
-              );
-            }
           }
         );
       };
@@ -4233,8 +4191,15 @@ if (s?.user) {
           details: `role=${role} reason=${String(reason || "").slice(0, 180)}`,
         });
 
-        // If user is online, update their live socket/session and refresh member lists in any rooms they're in.
-        updateOnlineUserRoleAndBroadcast(target.id, role);
+        // if user is online, update session-ish info
+        const sid = socketIdByUserId.get(target.id);
+        if (sid) {
+          const s = io.sockets.sockets.get(sid);
+          if (s?.request?.session?.user) {
+            s.request.session.user.role = role;
+            s.user.role = role;
+          }
+        }
 
         io.to(room).emit("system", `${username} role set to ${role}.`);
         emitUserList(room);
