@@ -29,6 +29,20 @@ const PORT = Number(process.env.PORT || 3000);
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, "chat.db");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const UPLOADS_DIR = path.join(__dirname, "uploads");
+
+// ---- Startup sanity checks (fail fast in production)
+const IS_PROD = process.env.NODE_ENV === "production";
+if (IS_PROD) {
+  if (!process.env.SESSION_SECRET || String(process.env.SESSION_SECRET).trim().length < 16) {
+    console.error("FATAL: SESSION_SECRET is missing/too short. Set a strong secret in your environment.");
+    process.exit(1);
+  }
+  if (!process.env.DATABASE_URL) {
+    console.error("FATAL: DATABASE_URL is missing. Set your Postgres connection string in your environment.");
+    process.exit(1);
+  }
+}
+
 const AVATARS_DIR = path.join(__dirname, "avatars");
 
 // ---- Ensure folders exist
@@ -556,7 +570,7 @@ const sessionMiddleware = session({
     pool: pgPool,
     tableName: "session",
   }),
-  secret: process.env.SESSION_SECRET || "dev_secret_change_me",
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   proxy: true,
