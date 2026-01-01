@@ -104,6 +104,7 @@ function displayRoomName(room){ return room==="diceroom" ? "Dice Room" : room; }
 
 let lastUsers = [];
 const reactionsCache = Object.create(null);
+const dmReactionsCache = Object.create(null);
 const msgIndex = [];
 let dmThreads = [];
 let activeDmId = null;
@@ -1260,6 +1261,8 @@ const EMOJI_CHOICES = ["😀","😁","😂","🙂","😉","😍","😘","🤔","
 let reactionMenuEl = null;
 let reactionMenuFor = null;
 let reactionMenuRow = null;
+let reactionMenuMode = "main"; // "main" | "dm"
+let reactionMenuThreadId = null;
 
 function ensureReactionMenu(){
   if(reactionMenuEl) return;
@@ -1282,6 +1285,8 @@ function ensureReactionMenu(){
 
 function openReactionMenu(messageId, anchorEl, rowEl){
   ensureReactionMenu();
+  reactionMenuMode = "main";
+  reactionMenuThreadId = null;
   reactionMenuFor = messageId;
   reactionMenuRow = rowEl;
 
@@ -1293,7 +1298,11 @@ function openReactionMenu(messageId, anchorEl, rowEl){
     b.type = "button";
     b.textContent = em;
     b.onclick = ()=>{
-      socket?.emit("reaction", { messageId, emoji: em });
+      if (reactionMenuMode === "dm") {
+        socket?.emit("dm reaction", { threadId: reactionMenuThreadId, messageId, emoji: em });
+      } else {
+        socket?.emit("reaction", { messageId, emoji: em });
+      }
       closeReactionMenu();
     };
     grid.appendChild(b);
@@ -1314,6 +1323,38 @@ function openReactionMenu(messageId, anchorEl, rowEl){
 
   // on mobile, force show actions while menu is open
   if(rowEl) rowEl.classList.add("showActions");
+}
+
+function openDmReactionMenu(threadId, messageId, anchorEl, rowEl){
+  ensureReactionMenu();
+  reactionMenuMode = "dm";
+  reactionMenuThreadId = threadId;
+  reactionMenuFor = messageId;
+  reactionMenuRow = rowEl;
+
+  const grid = reactionMenuEl.querySelector(".reactionGrid");
+  grid.innerHTML = "";
+
+  for (const em of EMOJI_CHOICES) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = em;
+    b.onclick = ()=>{
+      socket?.emit("dm reaction", { threadId, messageId, emoji: em });
+      closeReactionMenu();
+    };
+    grid.appendChild(b);
+  }
+
+  const rect = anchorEl.getBoundingClientRect();
+  reactionMenuEl.classList.add("open");
+  const menuRect = reactionMenuEl.getBoundingClientRect();
+  let x = Math.min(window.innerWidth - menuRect.width - 12, Math.max(12, rect.left));
+  let y = rect.top - menuRect.height - 10;
+  if (y < 12) y = rect.bottom + 10;
+  reactionMenuEl.style.left = `${x}px`;
+  reactionMenuEl.style.top = `${y}px`;
+  if (rowEl) rowEl.classList.add("showActions");
 }
 
 function closeReactionMenu(){
@@ -1579,6 +1620,24 @@ function renderReactions(messageId, reactionsMap){
     const pill=document.createElement("div");
     pill.className="reactPill";
     pill.textContent=`${emoji} ${count}`;
+    container.appendChild(pill);
+  });
+}
+
+function renderDmReactions(messageId, reactionsMap){
+  dmReactionsCache[messageId] = reactionsMap || {};
+  const counts = {};
+  for (const u in dmReactionsCache[messageId]) {
+    const em = dmReactionsCache[messageId][u];
+    counts[em] = (counts[em] || 0) + 1;
+  }
+  const container = document.getElementById("dm-reacts-" + messageId);
+  if (!container) return;
+  container.innerHTML = "";
+  Object.entries(counts).forEach(([emoji, count]) => {
+    const pill = document.createElement("div");
+    pill.className = "reactPill";
+    pill.textContent = `${emoji} ${count}`;
     container.appendChild(pill);
   });
 }
@@ -2243,8 +2302,7 @@ function renderDmMessages(threadId){
     reactBtn.textContent = "😀";
     reactBtn.onclick = (e) => {
       e.stopPropagation();
-      // DM reactions are not yet wired server-side; keep UI-only for now.
-      setDmNotice("Reactions in DMs coming next.");
+      openDmReactionMenu(threadId, (m.messageId || m.id), reactBtn, row);
     };
 
     const replyBtn = document.createElement("button");
@@ -2265,7 +2323,9 @@ function renderDmMessages(threadId){
     delBtn.textContent = "🗑️";
     delBtn.onclick = (e) => {
       e.stopPropagation();
-      setDmNotice("Delete in DMs coming next.");
+      const ok = confirm("Delete this message?");
+      if (!ok) return;
+      socket?.emit("dm delete message", { threadId, messageId: (m.messageId || m.id) });
     };
 
     actions.appendChild(reactBtn);
@@ -2300,6 +2360,11 @@ function renderDmMessages(threadId){
     text.innerHTML = applyMentions(m.text || "");
     bubble.appendChild(text);
 
+    const reacts = document.createElement("div");
+    reacts.className = "reacts";
+    reacts.id = "dm-reacts-" + (m.messageId || m.id);
+    bubble.appendChild(reacts);
+
     const meta = document.createElement("div");
     meta.className = "dmMetaRow";
     const u = document.createElement("span");
@@ -2313,6 +2378,10 @@ function renderDmMessages(threadId){
 
     bubbleWrap.appendChild(bubble);
     bubbleWrap.appendChild(meta);
+
+    // If we already have reactions cached for this message, render them now.
+    const midKey = String(m.messageId || m.id);
+    if (dmReactionsCache[midKey]) renderDmReactions(midKey, dmReactionsCache[midKey]);
 
     // Order: for self messages, actions on the right; for others, actions on the left
     if (isSelf) {
@@ -4198,6 +4267,35 @@ socket.on("disconnect", (reason) => {
     console.error("dm message handler failed", err, m);
   }
 });
+
+  socket.on("dm reaction update", ({ threadId, messageId, reactions }) => {
+    // Keep cache even if the thread isn't open yet.
+    const midKey = String(messageId);
+    dmReactionsCache[midKey] = reactions || {};
+    // Only render if the message is currently in the DOM.
+    renderDmReactions(midKey, dmReactionsCache[midKey]);
+  });
+
+  socket.on("dm message deleted", ({ threadId, messageId }) => {
+    const midKey = String(messageId);
+    const row = document.querySelector(`[data-dm-mid="${midKey}"]`);
+    if (row) row.remove();
+    delete dmReactionsCache[midKey];
+
+    // Remove from cached messages
+    const tidKey = threadId;
+    const arr = dmMessages.get(tidKey) || [];
+    const idx = arr.findIndex((x) => String(x.messageId || x.id) === midKey);
+    if (idx !== -1) {
+      arr.splice(idx, 1);
+      dmMessages.set(tidKey, arr);
+    }
+
+    if (String(activeDmId) === String(threadId)) {
+      // Close any open action menus
+      closeReactionMenu();
+    }
+  });
 
   socket.on("dm thread invited", () => {
     loadDmThreads();
