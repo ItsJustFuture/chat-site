@@ -11,25 +11,44 @@
 <body>
   <!-- AUTH -->
   <div id="authWrap">
-    <div class="authCard">
-      <div class="authTitle">Login / Register</div>
+    <div class="authBackdrop" aria-hidden="true"></div>
 
-      <div class="field">
-        <label>Username</label>
-        <input id="authUser" autocomplete="username" placeholder="username">
+    <div class="authShell">
+      <div class="authBrand">
+        <div class="authLogo">Banter <span class="amp">&amp;</span> Brats</div>
+        <div class="authTag">18+ community chat • rooms • DMs • games</div>
       </div>
 
-      <div class="field">
-        <label>Password</label>
-        <input id="authPass" type="password" autocomplete="current-password" placeholder="password">
+      <div class="authCard" role="dialog" aria-label="Login or register">
+        <div class="authHeader">
+          <div class="authTitle">Welcome</div>
+          <div class="authSub">Log in or create an account to continue.</div>
+        </div>
+
+        <div class="authForm">
+          <div class="field">
+            <label for="authUser">Username</label>
+            <input id="authUser" autocomplete="username" placeholder="username">
+          </div>
+
+          <div class="field">
+            <label for="authPass">Password</label>
+            <input id="authPass" type="password" autocomplete="current-password" placeholder="password">
+          </div>
+
+          <div class="row authActions">
+            <button class="btn" id="loginBtn" type="button">Login</button>
+            <button class="btn secondary" id="regBtn" type="button">Register</button>
+          </div>
+
+          <div class="authHint small muted">Tip: you can register with any username — no email required (for now).</div>
+          <div class="msgline" id="authMsg"></div>
+        </div>
       </div>
 
-      <div class="row">
-        <button class="btn" id="loginBtn" type="button">Login</button>
-        <button class="btn secondary" id="regBtn" type="button">Register</button>
+      <div class="authFoot small muted">
+        By continuing, you confirm you are 18+ and agree to follow the rules of the community.
       </div>
-
-      <div class="msgline" id="authMsg"></div>
     </div>
   </div>
 
