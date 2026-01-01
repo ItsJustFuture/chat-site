@@ -4218,3 +4218,24 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
     0 0 14px rgba(255, 100, 200, 0.6),
     inset 0 0 10px rgba(120, 40, 160, 0.8);
 }
+.avatar {
+  border-radius: 999px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.avatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Fallback style uses your existing role gradients */
+.avatarFallback {
+  font-weight: 700;
+  font-size: 14px;
+  color: #fff;
+}
