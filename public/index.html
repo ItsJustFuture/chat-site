@@ -418,7 +418,43 @@
       <div class="modalBody">
         <div class="small" id="modalMeta"></div>
 
-     <div class="tabs" id="tabs">
+     
+        <!-- Profile sheet header (custom layout, not a clone) -->
+        <div class="profileSheetHero" id="profileSheetHero">
+          <div class="profileSheetBg"></div>
+
+          <div class="profileSheetContent">
+            <div class="profileSheetAvatarCard">
+              <div class="profileSheetAvatar" id="profileSheetAvatar"></div>
+
+              <div class="profileSheetAvatarActions" id="profileSheetAvatarActions" style="display:none;">
+                <button class="iconPill" id="profileAvatarRemoveBtn" type="button" aria-label="Remove avatar">
+                  <span class="ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                  </span>
+                </button>
+                <button class="iconPill" id="profileAvatarChangeBtn" type="button" aria-label="Change avatar">
+                  <span class="ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h4l2-2h4l2 2h4v14H4V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" stroke="currentColor" stroke-width="2"/></svg>
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <div class="profileSheetMeta">
+              <div class="profileSheetNameRow">
+                <span class="profileRoleChip" id="profileSheetRoleChip">Role</span>
+                <span class="profileSheetName" id="profileSheetName">—</span>
+              </div>
+              <div class="profileSheetStats" id="profileSheetStats" style="display:none;">
+                <span class="statPill" id="profileSheetStars">⭐ 0</span>
+                <span class="statPill" id="profileSheetLikes">♡ 0</span>
+              </div>
+              <div class="profileSheetSub" id="profileSheetSub"></div>
+            </div>
+          </div>
+        </div>
+<div class="tabs" id="tabs">
   <div class="tab active" data-tab="info" id="tabInfo">Info</div>
   <div class="tab" data-tab="about" id="tabAbout">About</div>
   <div class="tab" data-tab="edit" id="tabEdit">Edit</div>
@@ -426,8 +462,59 @@
 </div>
 
         <div id="viewEdit" style="display:none;">
+  <div class="profileMenu" id="profileMenu">
+    <button class="profileMenuRow" type="button" data-action="edit-about">
+      <span class="menuIcon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M7 7h10M7 11h10M7 15h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 3h12a2 2 0 0 1 2 2v16l-3-2-3 2-3-2-3 2-3-2V5a2 2 0 0 1 2-2z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="menuLabel">Edit profile</span>
+      <span class="menuHint">Avatar, mood, age, bio</span>
+    </button>
+
+    <button class="profileMenuRow" type="button" data-action="edit-themes">
+      <span class="menuIcon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 3a9 9 0 1 0 0 18c3 0 3-2 3-3s-1-2-2-2h-2a3 3 0 0 1-3-3c0-1 .4-1.9 1.1-2.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="10" r="1" fill="currentColor"/><circle cx="12" cy="8" r="1" fill="currentColor"/><circle cx="16" cy="10" r="1" fill="currentColor"/></svg>
+      </span>
+      <span class="menuLabel">Theme settings</span>
+      <span class="menuHint">Pick a theme + preview</span>
+    </button>
+
+    <button class="profileMenuRow" type="button" data-action="edit-dm">
+      <span class="menuIcon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="menuLabel">DM customisation</span>
+      <span class="menuHint">Background + badge colors</span>
+    </button>
+
+    <button class="profileMenuRow vipOnly" type="button" data-action="edit-gifts">
+      <span class="menuIcon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M20 12v9H4v-9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M2 7h20v5H2V7z" stroke="currentColor" stroke-width="2"/><path d="M12 7v14" stroke="currentColor" stroke-width="2"/><path d="M12 7c-2.5 0-4-1-4-2.5S9.5 2 12 7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 7c2.5 0 4-1 4-2.5S14.5 2 12 7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="menuLabel">VIP gifts</span>
+      <span class="menuHint">Inventory + history</span>
+      <span class="vipPill" aria-hidden="true">VIP</span>
+    </button>
+
+    <button class="profileMenuRow" type="button" data-action="open-preferences">
+      <span class="menuIcon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.9 7.9 0 0 0 .1-2l2-1.2-2-3.5-2.3.7a7.7 7.7 0 0 0-1.7-1l-.3-2.4h-4l-.3 2.4a7.7 7.7 0 0 0-1.7 1L6.9 8.3 4.9 11.8l2 1.2a7.9 7.9 0 0 0 .1 2l-2 1.2 2 3.5 2.3-.7a7.7 7.7 0 0 0 1.7 1l.3 2.4h4l.3-2.4a7.7 7.7 0 0 0 1.7-1l2.3.7 2-3.5-2-1.2z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="menuLabel">Preferences</span>
+      <span class="menuHint">Coming soon</span>
+    </button>
+  </div>
+
+  <div class="panelBox" id="editGiftsPanel" style="display:none;">
+    <div class="sectionTitle">VIP gifts</div>
+    <div class="panelBox">
+      <div class="small">This section is wired and ready — add your gifts system whenever you want.</div>
+      <div class="small" style="margin-top:6px;">Tip: later load inventory/history via an endpoint like <code>/gifts</code> and render it here.</div>
+    </div>
+  </div>
+
   <div class="panelBox">
-    <div class="listBtns">
+    <div class="listBtns" style="display:none;">
       <button class="btn secondary" id="editAboutBtn" type="button">About</button>
       <button class="btn secondary" id="editThemesBtn" type="button">Themes</button>
       <button class="btn secondary" id="editDmBtn" type="button">DM Customisation</button>
@@ -574,7 +661,7 @@
                 <div class="row" style="gap:8px; margin-top:10px; flex-wrap:wrap;">
                   <button class="btn secondary" id="dmUserBtn" type="button">Message</button>
                   <button class="btn secondary" id="copyUsernameBtn" type="button">Copy username</button>
-               ss="msgline" id="profileMsg"></div>
+                <div class="msgline" id="mediaMsg"></div>
                   </div>
                 </div>
 

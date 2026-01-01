@@ -4207,3 +4207,173 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
   font-size: 14px;
   color: #fff;
 }
+
+
+/* ==== Profile sheet modal (custom, not a clone) ==== */
+.profileSheetHero{
+  position: relative;
+  margin: 10px 0 6px;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.25);
+}
+.profileSheetBg{
+  height: 170px;
+  background:
+    radial-gradient(900px 260px at 70% 30%, rgba(255,180,80,.45), transparent 60%),
+    linear-gradient(135deg, rgba(255,106,43,.75), rgba(43,15,8,.85));
+  filter: saturate(1.08);
+}
+.profileSheetContent{
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 14px;
+  padding: 14px;
+  margin-top: -64px;
+  align-items: end;
+  position: relative;
+  z-index: 1;
+}
+.profileSheetAvatarCard{
+  width: 110px;
+  height: 110px;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 2px solid rgba(255,255,255,.14);
+  background: rgba(0,0,0,.40);
+  backdrop-filter: blur(10px);
+  position: relative;
+}
+.profileSheetAvatar{
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+.profileSheetAvatar .avatarWrap{ width: 100%; height: 100%; }
+.profileSheetAvatarActions{
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 8px;
+  padding: 6px;
+  background: rgba(0,0,0,.45);
+  border-radius: 14px;
+}
+.iconPill{
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-radius: 12px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.14);
+  color: #fff;
+}
+.iconPill .ico{ width: 18px; height: 18px; display: inline-block; }
+.iconPill svg{ width: 18px; height: 18px; display:block; }
+.profileSheetMeta{ color: #fff; padding-bottom: 6px; }
+.profileSheetNameRow{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.profileSheetName{ font-size: 22px; font-weight: 800; letter-spacing: .2px; }
+.profileRoleChip{
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.08);
+}
+.profileSheetSub{
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: .9;
+}
+.profileSheetStats{
+  margin-top: 6px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  opacity: .95;
+}
+.statPill{
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(0,0,0,.25);
+  font-size: 12px;
+}
+
+.profileMenu{
+  display: grid;
+  gap: 10px;
+  margin: 10px 0 14px;
+}
+.profileMenuRow{
+  width: 100%;
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  grid-template-areas:
+    "ico label badge"
+    "ico hint badge";
+  gap: 2px 10px;
+  align-items: center;
+  padding: 12px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.04);
+  color: #f2f2f2;
+  text-align: left;
+  transition: transform .12s ease, background .12s ease, border-color .12s ease;
+}
+.profileMenuRow:hover{
+  transform: translateY(-1px);
+  background: rgba(255,255,255,.06);
+  border-color: rgba(255,255,255,.14);
+}
+.profileMenuRow:active{ transform: translateY(0px); }
+.menuIcon{
+  grid-area: ico;
+  width: 34px; height: 34px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,.25);
+  border: 1px solid rgba(255,255,255,.10);
+}
+.menuIcon svg{ width: 18px; height: 18px; display:block; }
+.menuLabel{ grid-area: label; font-weight: 800; }
+.menuHint{ grid-area: hint; font-size: 12px; opacity: .85; }
+.vipPill{
+  grid-area: badge;
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(90,170,255,.22);
+  background: rgba(90,170,255,.14);
+  color: #dfefff;
+  align-self: start;
+}
+
+/* Smooth panel swap in the modal */
+#modal .modalBody > div{ animation: profilePanelIn .18s ease both; }
+@keyframes profilePanelIn{
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 760px){
+  .profileSheetBg{ height: 150px; }
+  .profileSheetContent{
+    grid-template-columns: 96px 1fr;
+    margin-top: -56px;
+    padding: 12px;
+  }
+  .profileSheetAvatarCard{ width: 96px; height: 96px; border-radius: 16px; }
+  .profileSheetName{ font-size: 20px; }
+  .profileMenuRow{ grid-template-columns: 42px 1fr auto; }
+  .profileMenu{ margin-bottom: calc(12px + env(safe-area-inset-bottom)); }
+}

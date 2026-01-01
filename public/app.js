@@ -3072,6 +3072,10 @@ function showEditPanel(which){
 editAboutBtn?.addEventListener("click", ()=>showEditPanel("about"));
 editThemesBtn?.addEventListener("click", ()=>showEditPanel("themes"));
 editDmBtn?.addEventListener("click", ()=>showEditPanel("dm"));
+
+// New profile edit menu + avatar action wiring
+wireProfileMenu();
+wireProfileAvatarActions();
 tabInfo.addEventListener("click", ()=>setTab("info"));
 tabAbout.addEventListener("click", ()=>setTab("about"));
 tabCustomize?.addEventListener("click", ()=>setTab("customize"));
@@ -3770,9 +3774,123 @@ function fillProfileUI(p, isSelf){
   syncProfileLikes(p, isSelf);
   if (profileLikeMsg) profileLikeMsg.textContent = "";
 }
+
+
+function fillProfileSheetHeader(p, isSelf){
+  if (!profileSheetHero) return;
+
+  // Avatar
+  if (profileSheetAvatar){
+    profileSheetAvatar.innerHTML = "";
+    profileSheetAvatar.appendChild(avatarNode(p.avatar, p.username, p.role));
+  }
+
+  // Name + role chip
+  if (profileSheetName) profileSheetName.textContent = p.username || "—";
+  if (profileSheetRoleChip){
+    profileSheetRoleChip.textContent = p.role ? `${roleIcon(p.role)} ${p.role}` : "User";
+    profileSheetRoleChip.style.color = roleBadgeColor(p.role || "User");
+  }
+
+  // Subline: mood + status/room snapshot
+  const mood = p.mood ? `Mood: ${p.mood}` : "Mood: (none)";
+  const room = p.current_room ? `• In #${p.current_room}` : (p.last_room ? `• Last: #${p.last_room}` : "");
+  const statusLabel = normalizeStatusLabel(p.last_status, "");
+  const status = statusLabel ? `• ${statusLabel}` : "";
+  if (profileSheetSub) profileSheetSub.textContent = `${mood} ${status} ${room}`.trim();
+
+  // Stats (likes are real; "stars" is a placeholder hook you can wire later)
+  if (profileSheetStats){
+    profileSheetStats.style.display = "flex";
+    if (profileSheetLikes){
+      const likesVal = Number(p.likes || 0);
+      profileSheetLikes.textContent = `${isSelf ? "❤️" : (p.likedByMe ? "❤️" : "♡")} ${likesVal.toLocaleString()}`;
+    }
+    if (profileSheetStars){
+      // If you later add "stars" / "reputation", set p.stars and it will display automatically.
+      const starsVal = Number(p.stars || 0);
+      profileSheetStars.textContent = `⭐ ${starsVal.toLocaleString()}`;
+    }
+  }
+
+  // Avatar action buttons only for self
+  if (profileSheetAvatarActions){
+    profileSheetAvatarActions.style.display = isSelf ? "flex" : "none";
+  }
+}
+
+function applyProfileMenuVisibility(){
+  // VIP-only rows are hidden for non-VIP.
+  const isVip = roleRank(me?.role || "User") >= roleRank("VIP");
+  document.querySelectorAll(".vipOnly").forEach(el => {
+    el.style.display = isVip ? "" : "none";
+  });
+}
+
+function wireProfileMenu(){
+  if (!profileMenu) return;
+  if (profileMenu._wired) return;
+  profileMenu._wired = true;
+
+  profileMenu.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    const action = btn.dataset.action;
+
+    // Always ensure we're in the Edit tab when using this menu
+    setTab("edit");
+
+    if (action === "edit-about") return showEditPanel("about");
+    if (action === "edit-themes") return showEditPanel("themes");
+    if (action === "edit-dm") return showEditPanel("dm");
+    if (action === "edit-gifts") return showEditPanel("gifts");
+
+    if (action === "open-preferences"){
+      // placeholder hook - wired, but not implemented yet
+      if (profileMsg) profileMsg.textContent = "Preferences coming soon.";
+      return;
+    }
+  });
+}
+
+function wireProfileAvatarActions(){
+  if (profileAvatarChangeBtn && !profileAvatarChangeBtn._wired){
+    profileAvatarChangeBtn._wired = true;
+    profileAvatarChangeBtn.addEventListener("click", () => {
+      setTab("edit");
+      showEditPanel("about");
+      // Open file picker for avatar
+      try{ avatarFile?.click(); } catch {}
+    });
+  }
+
+  if (profileAvatarRemoveBtn && !profileAvatarRemoveBtn._wired){
+    profileAvatarRemoveBtn._wired = true;
+    profileAvatarRemoveBtn.addEventListener("click", async () => {
+      if (!me?.username) return;
+      if (!confirm("Remove your avatar?")) return;
+      if (profileMsg) profileMsg.textContent = "Removing avatar...";
+      try{
+        const res = await fetch("/profile/avatar", { method: "DELETE" });
+        if (!res.ok){
+          const t = await res.text().catch(()=> "");
+          if (profileMsg) profileMsg.textContent = t || "Could not remove avatar.";
+          return;
+        }
+        if (profileMsg) profileMsg.textContent = "Avatar removed.";
+        await loadMyProfile();
+        await openMyProfile();
+      }catch{
+        if (profileMsg) profileMsg.textContent = "Could not remove avatar.";
+      }
+    });
+  }
+}
+
 function syncProfileLikes(p = {}, isSelf = false){
   const likesVal = Number(p.likes || 0);
   if (likeCount) likeCount.textContent = likesVal.toLocaleString();
+  if (profileSheetLikes) profileSheetLikes.textContent = `${isSelf ? "❤️" : (p.likedByMe ? "❤️" : "♡")} ${likesVal.toLocaleString()}`;
   if (likeProfileBtn) {
     likeProfileBtn.disabled = !!isSelf;
     likeProfileBtn.classList.toggle("active", !!p.likedByMe);
