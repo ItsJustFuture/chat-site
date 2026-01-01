@@ -206,6 +206,22 @@ const pgInitPromise = (async () => {
         author_id INTEGER REFERENCES users(id) ON DELETE SET NULL
       );
     `);
+
+    // ---- DMs (Postgres): reactions
+    // Note: In this repo build, DM messages/threads still live in SQLite.
+    // We store reactions in Postgres so they persist across restarts.
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS dm_reactions (
+        thread_id BIGINT NOT NULL,
+        message_id BIGINT NOT NULL,
+        username TEXT NOT NULL,
+        emoji TEXT NOT NULL,
+        ts BIGINT NOT NULL,
+        PRIMARY KEY (message_id, username)
+      );
+      CREATE INDEX IF NOT EXISTS idx_dm_reactions_thread ON dm_reactions(thread_id);
+      CREATE INDEX IF NOT EXISTS idx_dm_reactions_message ON dm_reactions(message_id);
+    `);
 // Fix camelCase columns that Postgres lowercased previously
 // ---- Fix camelCase timestamp columns Postgres lowercased
 try {
@@ -527,19 +543,6 @@ db.serialize(() => {
       ts INTEGER NOT NULL
     )
   `);
-
-  // ---- DM reactions (1 reaction per user per DM message)
-  db.run(`
-    CREATE TABLE IF NOT EXISTS dm_reactions (
-      message_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      username TEXT NOT NULL,
-      emoji TEXT NOT NULL,
-      ts INTEGER NOT NULL,
-      PRIMARY KEY(message_id, user_id)
-    )
-  `);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_dm_reactions_message ON dm_reactions(message_id)`);
 
   ensureColumns("dm_messages", [
     ["reply_to_id", "reply_to_id INTEGER"],
@@ -3780,54 +3783,132 @@ if (!room) {
       socket.join(`dm:${tid}`);
 
       db.all(
-        `SELECT id, thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text
-         FROM dm_messages
-         WHERE thread_id=?
-         ORDER BY ts DESC
-         LIMIT 50`,
+        `SELECT id, thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text FROM dm_messages WHERE thread_id=? ORDER BY ts DESC LIMIT 50`,
         [tid],
         (_e, rows) => {
-          const ordered = (rows || []).reverse();
-          const ids = ordered.map((r) => r.id).filter((x) => Number.isInteger(x));
+          const msgs = (rows || []).reverse().map((r) => ({
+            messageId: r.id,
+            id: r.id,
+            threadId: r.thread_id,
+            userId: r.user_id,
+            user: r.username,
+            text: r.text,
+            ts: r.ts,
+            replyToId: r.reply_to_id || null,
+            replyToUser: r.reply_to_user || "",
+            replyToText: r.reply_to_text || "",
+          }));
+          socket.emit("dm history", {
+            threadId: tid,
+            title: thread.title || "",
+            isGroup: !!thread.is_group,
+            participants: thread.participants || [],
+            messages: msgs,
+          });
 
-          const send = (reactionsByMsg = {}) => {
-            const msgs = ordered.map((r) => ({
-              messageId: r.id,
-              id: r.id,
-              threadId: r.thread_id,
-              userId: r.user_id,
-              user: r.username,
-              text: r.text,
-              ts: r.ts,
-              replyToId: r.reply_to_id || null,
-              replyToUser: r.reply_to_user || "",
-              replyToText: r.reply_to_text || "",
-              reactions: reactionsByMsg[r.id] || null,
-            }));
-            socket.emit("dm history", {
-              threadId: tid,
-              title: thread.title || "",
-              isGroup: !!thread.is_group,
-              participants: thread.participants || [],
-              messages: msgs,
-            });
-          };
-
-          if (!ids.length) return send({});
-
-          const placeholders = ids.map(() => "?").join(",");
-          db.all(
-            `SELECT message_id, username, emoji FROM dm_reactions WHERE message_id IN (${placeholders})`,
-            ids,
-            (_e2, rrows) => {
-              const byMsg = {};
-              for (const r of rrows || []) {
-                if (!byMsg[r.message_id]) byMsg[r.message_id] = {};
-                byMsg[r.message_id][r.username] = r.emoji;
-              }
-              send(byMsg);
+          // Also push DM reactions for these messages (Postgres-backed).
+          // Client renders them via "dm reaction update".
+          if (PG_READY && msgs.length) {
+            const ids = msgs.map((m) => Number(m.messageId)).filter((n) => Number.isFinite(n));
+            // Avoid huge ANY() arrays
+            if (ids.length) {
+              (async () => {
+                try {
+                  const { rows: rr } = await pgPool.query(
+                    `SELECT message_id, username, emoji
+                     FROM dm_reactions
+                     WHERE thread_id = $1 AND message_id = ANY($2::BIGINT[])`,
+                    [tid, ids]
+                  );
+                  const byMsg = {};
+                  for (const r of rr || []) {
+                    const mid = String(r.message_id);
+                    if (!byMsg[mid]) byMsg[mid] = {};
+                    byMsg[mid][r.username] = r.emoji;
+                  }
+                  for (const mid of Object.keys(byMsg)) {
+                    socket.emit("dm reaction update", { threadId: tid, messageId: mid, reactions: byMsg[mid] });
+                  }
+                } catch {}
+              })();
             }
-          );
+          }
+        }
+      );
+    });
+  });
+
+  // DM reactions (Postgres-backed)
+  socket.on("dm reaction", async ({ threadId, messageId, emoji }) => {
+    const tid = Number(threadId);
+    const mid = Number(messageId);
+    const em = String(emoji || "").trim().slice(0, 16);
+    if (!Number.isInteger(tid) || !Number.isInteger(mid) || !em) return;
+
+    // Must be a participant in the thread
+    loadThreadForUser(tid, socket.user.id, async (err) => {
+      if (err) return;
+      if (!PG_READY) return;
+      try {
+        const ts = Date.now();
+        await pgPool.query(
+          `INSERT INTO dm_reactions (thread_id, message_id, username, emoji, ts)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (message_id, username)
+           DO UPDATE SET emoji = EXCLUDED.emoji, thread_id = EXCLUDED.thread_id, ts = EXCLUDED.ts`,
+          [tid, mid, socket.user.username, em, ts]
+        );
+
+        const { rows } = await pgPool.query(
+          `SELECT username, emoji FROM dm_reactions WHERE thread_id=$1 AND message_id=$2`,
+          [tid, mid]
+        );
+        const map = {};
+        for (const r of rows || []) map[r.username] = r.emoji;
+        io.to(`dm:${tid}`).emit("dm reaction update", { threadId: tid, messageId: mid, reactions: map });
+      } catch {}
+    });
+  });
+
+  // DM delete (author can delete their own; Admin+ can delete any)
+  socket.on("dm delete message", ({ threadId, messageId }) => {
+    const tid = Number(threadId);
+    const mid = Number(messageId);
+    if (!Number.isInteger(tid) || !Number.isInteger(mid)) return;
+
+    loadThreadForUser(tid, socket.user.id, (err, thread) => {
+      if (err) return;
+
+      db.get(
+        `SELECT id, user_id FROM dm_messages WHERE id=? AND thread_id=?`,
+        [mid, tid],
+        async (_e, row) => {
+          if (!row) return;
+          const isOwner = Number(row.user_id) === Number(socket.user.id);
+          const canStaffDelete = requireMinRole(socket.user.role, "Admin");
+          if (!isOwner && !canStaffDelete) return;
+
+          db.run(`DELETE FROM dm_messages WHERE id=? AND thread_id=?`, [mid, tid], async () => {
+            // Clean up reactions for this DM message in Postgres.
+            if (PG_READY) {
+              try { await pgPool.query(`DELETE FROM dm_reactions WHERE thread_id=$1 AND message_id=$2`, [tid, mid]); } catch {}
+            }
+            io.to(`dm:${tid}`).emit("dm message deleted", { threadId: tid, messageId: mid });
+
+            // Ping other participants so their thread preview/unread state can refresh.
+            db.all(
+              `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
+              [tid],
+              (_e2, rows) => {
+                for (const r of rows || []) {
+                  const uid = r.user_id;
+                  if (!uid || uid === socket.user.id) continue;
+                  const sid = socketIdByUserId.get(uid);
+                  if (sid) io.to(sid).emit("dm ping", { threadId: tid, ts: Date.now() });
+                }
+              }
+            );
+          });
         }
       );
     });
@@ -3897,173 +3978,6 @@ db.all(
       } else {
         doInsert();
       }
-    });
-  });
-
-  // ---- DM reactions
-  socket.on("dm reaction", ({ threadId, messageId, emoji }) => {
-    const tid = Number(threadId);
-    const mid = Number(messageId);
-    const em = String(emoji || "").trim().slice(0, 16);
-    if (!Number.isInteger(tid) || !Number.isInteger(mid)) return;
-
-    loadThreadForUser(tid, socket.user.id, (err) => {
-      if (err) return;
-
-      // Make sure the message belongs to this thread.
-      db.get(
-        `SELECT id FROM dm_messages WHERE id=? AND thread_id=?`,
-        [mid, tid],
-        (_e, row) => {
-          if (!row) return;
-
-          const finalize = () => {
-            db.all(
-              `SELECT username, emoji FROM dm_reactions WHERE message_id=?`,
-              [mid],
-              (_e2, rows) => {
-                const reactions = {};
-                for (const r of rows || []) reactions[r.username] = r.emoji;
-                io.to(`dm:${tid}`).emit("dm reaction update", { threadId: tid, messageId: mid, reactions });
-              }
-            );
-          };
-
-          // Empty emoji => remove reaction.
-          if (!em) {
-            db.run(
-              `DELETE FROM dm_reactions WHERE message_id=? AND user_id=?`,
-              [mid, socket.user.id],
-              finalize
-            );
-            return;
-          }
-
-          const now = Date.now();
-          // Toggle off if same emoji already set.
-          db.get(
-            `SELECT emoji FROM dm_reactions WHERE message_id=? AND user_id=?`,
-            [mid, socket.user.id],
-            (_e3, existing) => {
-              if (existing && existing.emoji === em) {
-                db.run(
-                  `DELETE FROM dm_reactions WHERE message_id=? AND user_id=?`,
-                  [mid, socket.user.id],
-                  finalize
-                );
-              } else {
-                db.run(
-                  `INSERT INTO dm_reactions (message_id, user_id, username, emoji, ts)
-                   VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT(message_id, user_id) DO UPDATE SET emoji=excluded.emoji, ts=excluded.ts`,
-                  [mid, socket.user.id, socket.user.username, em, now],
-                  finalize
-                );
-              }
-            }
-          );
-        }
-      );
-    });
-  });
-
-  // ---- DM per-message delete (author can delete their own; Admin+ can delete any)
-  socket.on("dm delete message", ({ threadId, messageId }) => {
-    const tid = Number(threadId);
-    const mid = Number(messageId);
-    if (!Number.isInteger(tid) || !Number.isInteger(mid)) return;
-
-    loadThreadForUser(tid, socket.user.id, (err) => {
-      if (err) return;
-
-      db.get(
-        `SELECT id, user_id FROM dm_messages WHERE id=? AND thread_id=?`,
-        [mid, tid],
-        (_e, row) => {
-          if (!row) return;
-
-          const actorRole = godmodeUsers.has(socket.user.id) ? "Owner" : socket.user.role;
-          const canDeleteAny = requireMinRole(actorRole, "Admin");
-          if (!canDeleteAny && row.user_id !== socket.user.id) return;
-
-          // Delete message + any reactions, then broadcast.
-          db.run(`DELETE FROM dm_reactions WHERE message_id=?`, [mid], () => {
-            db.run(`DELETE FROM dm_messages WHERE id=? AND thread_id=?`, [mid, tid], () => {
-              io.to(`dm:${tid}`).emit("dm message deleted", { threadId: tid, messageId: mid });
-
-              // Update thread preview/meta.
-              db.get(
-                `SELECT text, ts FROM dm_messages WHERE thread_id=? ORDER BY ts DESC LIMIT 1`,
-                [tid],
-                (_e2, last) => {
-                  io.to(`dm:${tid}`).emit("dm thread meta", {
-                    threadId: tid,
-                    last_text: last?.text || "",
-                    last_ts: last?.ts || null,
-                  });
-                }
-              );
-            });
-          });
-        }
-      );
-    });
-  });
-
-  // ---- DM reactions (persisted): 1 reaction per user per DM message
-  socket.on("dm reaction", ({ threadId, messageId, emoji }) => {
-    const tid = Number(threadId);
-    const mid = Number(messageId);
-    const em = String(emoji || "").trim().slice(0, 16);
-    if (!Number.isInteger(tid) || !Number.isInteger(mid)) return;
-
-    loadThreadForUser(tid, socket.user.id, (err) => {
-      if (err) return;
-      // Ensure message belongs to thread.
-      db.get(
-        `SELECT id FROM dm_messages WHERE id=? AND thread_id=?`,
-        [mid, tid],
-        (_e, row) => {
-          if (!row) return;
-
-          const finish = () => {
-            db.all(
-              `SELECT username, emoji FROM dm_reactions WHERE message_id=?`,
-              [mid],
-              (_e2, rows) => {
-                const reactions = {};
-                for (const r of rows || []) reactions[r.username] = r.emoji;
-                io.to(`dm:${tid}`).emit("dm reaction update", { threadId: tid, messageId: mid, reactions });
-              }
-            );
-          };
-
-          // If emoji empty => remove reaction.
-          if (!em) {
-            db.run(`DELETE FROM dm_reactions WHERE message_id=? AND user_id=?`, [mid, socket.user.id], () => finish());
-            return;
-          }
-
-          const now = Date.now();
-          db.get(
-            `SELECT emoji FROM dm_reactions WHERE message_id=? AND user_id=?`,
-            [mid, socket.user.id],
-            (_e3, existing) => {
-              if (existing && existing.emoji === em) {
-                db.run(`DELETE FROM dm_reactions WHERE message_id=? AND user_id=?`, [mid, socket.user.id], () => finish());
-              } else {
-                db.run(
-                  `INSERT INTO dm_reactions (message_id, user_id, username, emoji, ts)
-                   VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT(message_id, user_id) DO UPDATE SET emoji=excluded.emoji, ts=excluded.ts`,
-                  [mid, socket.user.id, socket.user.username, em, now],
-                  () => finish()
-                );
-              }
-            }
-          );
-        }
-      );
     });
   });
 
