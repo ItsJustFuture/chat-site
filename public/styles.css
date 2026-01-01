@@ -3814,3 +3814,18 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
     background-image: none;
   }
 }
+
+
+/* ---- Core layout guardrails (themes should not override these) */
+#topBar, .topBar, header.topBar {
+  width: 100%;
+  left: 0;
+  right: 0;
+}
+#topRight, .topRight, .topbarRight, .topBarRight {
+  pointer-events: auto;
+}
+#composer, .composer, #msgForm, form#msgForm {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
