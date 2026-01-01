@@ -591,6 +591,9 @@ const sessionMiddleware = session({
   store: new PgSession({
     pool: pgPool,
     tableName: "session",
+    // Prevent cold-start / deploy races where the session table isn't ready yet.
+    // connect-pg-simple will create it on demand if missing.
+    createTableIfMissing: true,
   }),
   secret: process.env.SESSION_SECRET,
   resave: false,
