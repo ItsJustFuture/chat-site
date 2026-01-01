@@ -723,10 +723,24 @@ function populateReasonPresets(container, targetInput){
 }
 populateReasonPresets(quickReasonPresets, quickReason);
 populateReasonPresets(modReasonPresets, modReason);
-function avatarNode(url, fallbackText){
+
+function roleKey(role){
+  const r = String(role || "").toLowerCase().replace(/[_\s]+/g, "-");
+  if(r.includes("co") && r.includes("owner")) return "coowner";
+  if(r.includes("owner")) return "owner";
+  if(r.includes("admin")) return "admin";
+  if(r.includes("mod")) return "moderator";
+  if(r.includes("vip")) return "vip";
+  if(r.includes("guest")) return "guest";
+  return "member";
+}
+
+function avatarNode(url, fallbackText, role){
+  const rKey = roleKey(role);
+
   const buildFallback = () => {
     const wrap=document.createElement("div");
-    wrap.className = "avatarFallback";
+    wrap.className = `avatarFallback role-${rKey}` + (rKey === "vip" ? " vipDiamond" : "");
     wrap.textContent=(fallbackText||"?").slice(0,1).toUpperCase();
     return wrap;
   };
@@ -1357,7 +1371,7 @@ function addMessage(m){
 
   const av = document.createElement("div");
   av.className = "msgAvatar";
-  av.appendChild(avatarNode(m.avatar, m.user));
+  av.appendChild(avatarNode(m.avatar, m.user, m.role));
   av.title = `View ${m.user} profile`;
   av.tabIndex = 0;
   const openProfile = (e) => {
@@ -1696,7 +1710,7 @@ function renderMembers(users){
 
     const av=document.createElement("div");
     av.className="mAvatar";
-    av.appendChild(avatarNode(u.avatar, u.name));
+    av.appendChild(avatarNode(u.avatar, u.name, u.role));
 
     const dot=document.createElement("div");
     dot.className="dot";
@@ -1869,7 +1883,7 @@ function formatDmTime(ts){
 function threadAvatarNode(t){
   const wrap = document.createElement("div");
   wrap.className = "dmAvatar";
-  wrap.appendChild(avatarNode(null, threadLabel(t)));
+  wrap.appendChild(avatarNode(null, threadLabel(t), "member"));
   return wrap;
 }
 
@@ -2320,7 +2334,7 @@ function renderDmPickerList(){
 
     const avatarWrap = document.createElement("div");
     avatarWrap.className = "dmAvatar";
-    avatarWrap.appendChild(avatarNode(u.avatar, u.name));
+    avatarWrap.appendChild(avatarNode(u.avatar, u.name, u.role));
 
     const meta = document.createElement("div");
     meta.className = "dmItemMeta";
@@ -2434,7 +2448,7 @@ async function openDmInfo(threadId = activeDmId){
       row.className = "dmInfoMember";
       const avatar = document.createElement("div");
       avatar.className = "dmAvatar";
-      avatar.appendChild(avatarNode(null, name));
+      avatar.appendChild(avatarNode(null, name, "member"));
       const label = document.createElement("div");
       label.textContent = name;
       row.appendChild(avatar);
@@ -3397,13 +3411,13 @@ async function loadMyProfile(){
   meName.textContent=p.username;
   meRole.textContent=`${roleIcon(p.role)} ${p.role}`;
   meAvatar.innerHTML="";
-  meAvatar.appendChild(avatarNode(p.avatar, p.username));
+  meAvatar.appendChild(avatarNode(p.avatar, p.username, p.role));
   renderLevelProgress(progression, true);
 }
 
 function fillProfileUI(p, isSelf){
   modalAvatar.innerHTML="";
-  modalAvatar.appendChild(avatarNode(p.avatar, p.username));
+  modalAvatar.appendChild(avatarNode(p.avatar, p.username, p.role));
   modalName.textContent=p.username;
   modalRole.textContent=`${roleIcon(p.role)} ${p.role}`;
   modalRole.style.color=roleBadgeColor(p.role);

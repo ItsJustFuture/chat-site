@@ -2109,6 +2109,35 @@ body.dice-room .sys .diceFace{
   background:var(--avatar-bg);
   text-transform:uppercase;
 }
+
+/* Role-based fallback avatars (used when a user has no avatar or it fails to load) */
+.avatarFallback{
+  color:#fff;
+  letter-spacing:0.5px;
+}
+
+.avatarFallback.role-owner{
+  background: radial-gradient(circle at 30% 30%, #7CFF4A 0%, #0B4D1E 78%);
+}
+.avatarFallback.role-coowner{
+  background: radial-gradient(circle at 30% 30%, #8A2BE2 0%, #FF4FA3 78%);
+}
+.avatarFallback.role-admin{
+  /* gold outside, orange inside */
+  background: radial-gradient(circle at 30% 30%, #FF8C00 0%, #FFD700 78%);
+}
+.avatarFallback.role-moderator{
+  /* darker red inside */
+  background: radial-gradient(circle at 30% 30%, #7A0000 0%, #E02020 78%);
+}
+.avatarFallback.role-vip{
+  background: #7FD3FF; /* light blue “diamond” */
+  color:#0B2B3A;
+}
+.avatarFallback.vipDiamond{
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+}
+
 .small{ font-size:12px; color:var(--muted); }
 .sectionTitle{ font-weight:900; margin:10px 0 6px; }
 .panelBox{ background:var(--panel2); border:1px solid var(--border); border-radius:14px; padding:10px; }
