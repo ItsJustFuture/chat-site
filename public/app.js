@@ -3467,8 +3467,7 @@ modalTargetUsername = p.username;
   applyProgressionPayload(p);
 
   modalTitle.textContent="My Profile";
-  // Keep the header area clean (no creation date in the top info strip)
-  modalMeta.textContent = "";
+  modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
 
   fillProfileUI(p, true);
   syncCustomizationUI();
@@ -3522,8 +3521,7 @@ async function openMemberProfile(username){
   if (isSelf) applyProgressionPayload(p);
 
   modalTitle.textContent="Member Profile";
-  // Keep the header area clean (no creation date in the top info strip)
-  modalMeta.textContent = "";
+  modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
   fillProfileUI(p, isSelf);
   syncCustomizationUI();
 
@@ -4009,6 +4007,22 @@ socket.on("disconnect", (reason) => {
     }
     renderDmThreads();
   });
+
+
+socket.on("dm ping", (p) => {
+  try {
+    const tid = Number(p?.threadId);
+    if (!Number.isFinite(tid)) return;
+    if (!dmThreads.find((t) => t.id === tid)) {
+      loadDmThreads();
+    }
+    if (activeDmId !== tid) {
+      markDmNotification(tid, isGroupThread(tid));
+    }
+  } catch (e) {
+    // ignore
+  }
+});
 
   socket.on("dm message", (m) => {
   try {
