@@ -4169,7 +4169,8 @@ if (s?.user) {
   });
 
   socket.on("disconnect", () => {
-  if (user?.username) ONLINE_USERS.delete(user.username);
+    // socket.user is attached after successful auth; guard for anonymous / early disconnects
+    if (socket.user?.username) ONLINE_USERS.delete(socket.user.username);
     emitOnlineUsers();
 
     const room = socket.currentRoom;
@@ -4178,17 +4179,21 @@ if (s?.user) {
     msgRate.delete(socket.id);
 
     // Only clear per-user mappings if THIS socket is still the active one
-    if (socketIdByUserId.get(socket.user.id) === socket.id) {
+    if (socket.user?.id && socketIdByUserId.get(socket.user.id) === socket.id) {
       socketIdByUserId.delete(socket.user.id);
       onlineState.delete(socket.user.id);
       onlineXpTrack.delete(socket.user.id);
     }
-    db.run("UPDATE users SET last_seen=? WHERE id=?", [Date.now(), socket.user.id]);
+
+    // last_seen + typing indicators only apply to authenticated users
+    if (socket.user?.id) {
+      db.run("UPDATE users SET last_seen=? WHERE id=?", [Date.now(), socket.user.id]);
+    }
 
     if (room) {
       const set = typingByRoom.get(room);
       if (set) {
-        set.delete(socket.user.username);
+        if (socket.user?.username) set.delete(socket.user.username);
         broadcastTyping(room);
       }
       emitUserList(room);
