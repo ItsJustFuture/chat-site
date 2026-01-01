@@ -2605,6 +2605,10 @@ body.lockScroll{ overflow:hidden; }
 }
 .dmQuickStrip::-webkit-scrollbar{ height:6px; }
 
+/* Ensure the HTML [hidden] attribute reliably hides the quick DM strips */
+#dmQuickBar[hidden], #groupQuickBar[hidden]{ display:none !important; }
+
+
 /* Group DM "venn" preview inside group avatar buttons */
 .groupVenn{
   position:relative;
@@ -2692,6 +2696,16 @@ body.lockScroll{ overflow:hidden; }
 .dmMessages{ padding:14px 16px; gap:12px; }
 .dmRow{ width:100%; display:flex; align-items:flex-start; gap:10px; }
 .dmRow.self{ justify-content:flex-end; }
+
+/* Order DM action rails: outgoing buttons left, incoming buttons right */
+.dmRow.self .dmActionsRail{ order:1; }
+.dmRow.self .dmBubbleWrap{ order:2; }
+.dmRow:not(.self) .dmBubbleWrap{ order:1; }
+.dmRow:not(.self) .dmActionsRail{ order:2; }
+
+/* Reduce reserved space between bubbles and action rails */
+.dmRow{ gap:6px; }
+
 .dmActionsRail{
   display:flex;
   flex-direction:column;
@@ -2855,39 +2869,6 @@ body.lockScroll{ overflow:hidden; }
 @media (max-width: 980px){
   .dmPanel{ right:0; bottom:0; }
 }
-
-/* --- Quick-strip avatars: show role gradients even when the user has a real avatar image --- */
-.avatarFrame{
-  width:42px;
-  height:42px;
-  border-radius:14px;
-  padding:2px;
-  box-sizing:border-box;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-}
-.avatarInner{
-  width:100%;
-  height:100%;
-  border-radius:12px;
-  overflow:hidden;
-  background:rgba(0,0,0,0.18);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-weight:900;
-  color:#fff;
-  text-transform:uppercase;
-}
-.avatarInner.hasImg{ background-size:cover; background-position:center; color:transparent; }
-
-/* Mirror the role gradient palettes used by .avatarFallback */
-.avatarFrame.role-owner{ background: radial-gradient(circle at 30% 30%, #7CFF4A 0%, #0B4D1E 78%); }
-.avatarFrame.role-coowner{ background: radial-gradient(circle at 30% 30%, #8A2BE2 0%, #FF4FA3 78%); }
-.avatarFrame.role-admin{ background: radial-gradient(circle at 30% 30%, #FF8C00 0%, #FFD700 78%); }
-.avatarFrame.role-moderator{ background: radial-gradient(circle at 30% 30%, #7A0000 0%, #E02020 78%); }
-.avatarFrame.role-vip{ background:#7FD3FF; }
 
 /* --- DM actions rail: smaller and hug bubbles more closely --- */
 .dmActionsRail{
