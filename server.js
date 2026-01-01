@@ -1,4 +1,26 @@
-// server.js
+//
+
+// Update a user's role in SQLite (legacy) and Postgres (Render/prod) when available.
+async function setRoleEverywhere(targetId, username, role) {
+  // SQLite
+  try {
+    if (targetId != null) {
+      await dbRunAsync("UPDATE users SET role=? WHERE id=?", [role, targetId]);
+    } else if (username) {
+      await dbRunAsync("UPDATE users SET role=? WHERE lower(username)=lower(?)", [role, username]);
+    }
+  } catch {}
+
+  // Postgres
+  try {
+    if (targetId != null) {
+      await pgPool.query("UPDATE users SET role=$1 WHERE id=$2", [role, targetId]);
+    } else if (username) {
+      await pgPool.query("UPDATE users SET role=$1 WHERE lower(username)=lower($2)", [role, username]);
+    }
+  } catch {}
+}
+ server.js
 "use strict";
 
 // === Iris & Lola private theme config ===
@@ -1184,7 +1206,7 @@ const commandRegistry = {
       if (!ROLES.includes(role)) return { ok: false, message: "Unknown role" };
       if (roleRank(role) >= roleRank("Owner")) return { ok: false, message: "Cannot grant Owner" };
       if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
-      await dbRunAsync(`UPDATE users SET role=? WHERE id=?`, [role, target.id]);
+      await setRoleEverywhere(target.id, target.username, role);
       return { ok: true, message: `Role set to ${role} for ${target.username}` };
     },
   },
@@ -2692,49 +2714,68 @@ app.get("/profile", requireLogin, async (req, res) => {
   );
 });
 
-app.get("/profile/:username", requireLogin, (req, res) => {
+app.get("/profile/:username", requireLogin, async (req, res) => {
   const u = sanitizeUsername(req.params.username);
   if (!u) return res.status(400).send("Bad username");
 
-  db.get(
-    `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp
-     FROM users WHERE lower(username) = lower(?)`,
-    [u],
-    (err, row) => {
-      if (err || !row) return res.status(404).send("Not found");
-      const live = onlineState.get(row.id);
-      const lastStatus = normalizeStatus(live?.status || row.last_status, "");
-      const includePrivate = req.session.user.id === row.id;
-      db.get(
-        `SELECT
-          (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
-          EXISTS(SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?) AS liked
-        `,
-        [row.id, req.session.user.id, row.id],
-        (_likeErr, likesRow) => {
-          const payload = {
-            id: row.id,
-            username: row.username,
-            role: row.role,
-            avatar: row.avatar,
-            bio: row.bio,
-            mood: row.mood,
-            age: row.age,
-            gender: row.gender,
-            created_at: row.created_at,
-            last_seen: row.last_seen,
-            last_room: row.last_room,
-            last_status: lastStatus || null,
-            current_room: live?.room || null,
-            likes: Number(likesRow?.likes || 0),
-            likedByMe: !!Number(likesRow?.liked || 0),
-            ...progressionFromRow(row, includePrivate),
-          };
-          return res.json(payload);
-        }
+  try {
+    // Prefer Postgres first (Render/prod path). Some users may not exist in SQLite yet.
+    let row = null;
+    try {
+      const r = await pgPool.query(
+        `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp
+         FROM users WHERE lower(username) = lower($1) LIMIT 1`,
+        [u]
+      );
+      row = r.rows?.[0] || null;
+    } catch {}
+
+    // Fallback to SQLite
+    if (!row) {
+      row = await dbGet(
+        `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp
+         FROM users WHERE lower(username) = lower(?)`,
+        [u]
       );
     }
-  );
+
+    if (!row) return res.status(404).send("Not found");
+
+    const live = onlineState.get(row.id);
+    const lastStatus = normalizeStatus(live?.status || row.last_status, "");
+    const includePrivate = req.session.user.id === row.id;
+
+    db.get(
+      `SELECT
+        (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
+        EXISTS(SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?) AS liked
+      `,
+      [row.id, req.session.user.id, row.id],
+      (_likeErr, likesRow) => {
+        const payload = {
+          id: row.id,
+          username: row.username,
+          role: row.role,
+          avatar: row.avatar,
+          bio: row.bio,
+          mood: live?.mood ?? row.mood,
+          age: row.age,
+          gender: row.gender,
+          created_at: row.created_at,
+          last_seen: row.last_seen,
+          last_room: row.last_room,
+          last_status: lastStatus || null,
+          current_room: live?.room || null,
+          likes: Number(likesRow?.likes || 0),
+          likedByMe: !!Number(likesRow?.liked || 0),
+          ...progressionFromRow(row, includePrivate),
+        };
+        return res.json(payload);
+      }
+    );
+  } catch (e) {
+    return res.status(500).send("Server error");
+  }
 });
 
 app.post("/profile/:username/like", requireLogin, (req, res) => {
@@ -4142,7 +4183,7 @@ if (s?.user) {
       // don't allow lowering Owner unless it's yourself (simple safety)
       if (target.oldRole === "Owner" && target.id !== socket.user.id) return;
 
-      db.run("UPDATE users SET role=? WHERE id=?", [role, target.id], () => {
+      setRoleEverywhere(target.id, username, role).then(() => {
         logModAction({
           actor: socket.user,
           action: "SET_ROLE",
