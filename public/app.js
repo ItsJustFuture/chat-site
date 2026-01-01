@@ -338,9 +338,7 @@ const authMsg = document.getElementById("authMsg");
 const loginBtn = document.getElementById("loginBtn");
 const regBtn = document.getElementById("regBtn");
 const togglePassBtn = document.getElementById("togglePassBtn");
-const authMsg = document.getElementById("authMsg");
-const loginBtn = document.getElementById("loginBtn");
-const regBtn = document.getElementById("regBtn");
+
 
 // Auth: show/hide password
 togglePassBtn?.addEventListener("click", ()=>{
