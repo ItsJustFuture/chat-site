@@ -824,44 +824,18 @@ const ROLE_DISPLAY = {
 };
 
 function findUserByMention(raw, cb) {
-  // Accept @mentions, quoted names, and names with spaces.
-  const name = sanitizeUsername(String(raw || "").replace(/^@+/, "")).trim();
+  const name = sanitizeUsername(String(raw || "").replace(/^@+/, ""));
   if (!name) return cb(new Error("User not found"));
-
-  // Prefer Postgres in production (Render). Fall back to SQLite for legacy/local.
-  const trySqlite = () => {
-    db.get(
-      `SELECT id, username, role FROM users
-       WHERE lower(username)=lower(?)
-       ORDER BY CASE WHEN username=? THEN 0 ELSE 1 END LIMIT 1`,
-      [name, name],
-      (err, row) => {
-        if (err || !row) return cb(new Error("User not found"));
-        cb(null, row);
-      }
-    );
-  };
-
-  if (process.env.DATABASE_URL) {
-    pgPool
-      .query(
-        `SELECT id, username, role
-           FROM users
-          WHERE lower(username)=lower($1)
-          ORDER BY CASE WHEN username=$1 THEN 0 ELSE 1 END
-          LIMIT 1`,
-        [name]
-      )
-      .then(({ rows }) => {
-        const row = rows && rows[0];
-        if (row && row.id != null) return cb(null, { id: row.id, username: row.username, role: row.role || "User" });
-        return trySqlite();
-      })
-      .catch(() => trySqlite());
-    return;
-  }
-
-  trySqlite();
+  db.get(
+    `SELECT id, username, role FROM users
+     WHERE lower(username)=lower(?)
+     ORDER BY CASE WHEN username=? THEN 0 ELSE 1 END LIMIT 1`,
+    [name, name],
+    (err, row) => {
+      if (err || !row) return cb(new Error("User not found"));
+      cb(null, row);
+    }
+  );
 }
 
 function logCommandAudit({ executor, commandName, args, targets, room, success, error }) {
@@ -883,71 +857,13 @@ function logCommandAudit({ executor, commandName, args, targets, room, success, 
   );
 }
 
-function tokenizeCommandArgs(input) {
-  // Supports quotes for usernames with spaces:
-  //   /givegold "Lola Henderson" 50
-  // Also tolerates unquoted multi-word usernames in commands where the *last*
-  // argument is numeric (we reconstruct later in handlers).
-  const s = String(input || "").trim();
-  const out = [];
-  let cur = "";
-  let q = null; // ' or "
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (q) {
-      if (ch === "\\" && i + 1 < s.length) {
-        // basic escape handling inside quotes
-        const next = s[i + 1];
-        if (next === q || next === "\\") {
-          cur += next;
-          i++;
-          continue;
-        }
-      }
-      if (ch === q) {
-        q = null;
-      } else {
-        cur += ch;
-      }
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      q = ch;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      if (cur) out.push(cur);
-      cur = "";
-      continue;
-    }
-    cur += ch;
-  }
-  if (cur) out.push(cur);
-  return out;
-}
-
 function parseCommand(text) {
   const raw = String(text || "").trim();
   if (!raw.startsWith("/")) return null;
-  const parts = tokenizeCommandArgs(raw.slice(1));
+  const parts = raw.slice(1).split(/\s+/).filter(Boolean);
   if (!parts.length) return null;
   const [name, ...args] = parts;
   return { name: name.toLowerCase(), args };
-}
-
-function normalizeRoleInput(rawRole) {
-  const r = String(rawRole || "").trim();
-  if (!r) return "";
-  const key = r.replace(/[_\s-]+/g, " ").trim().toLowerCase();
-  // Accept a few common variants
-  if (key === "co owner" || key === "coowner" || key === "co-owner") return "Co-owner";
-  if (key === "vip") return "VIP";
-  if (key === "owner") return "Owner";
-  if (key === "admin") return "Admin";
-  if (key === "moderator" || key === "mod") return "Moderator";
-  if (key === "member" || key === "user") return "User";
-  if (key === "guest") return "Guest";
-  return r;
 }
 
 const slowmodeTracker = new Map(); // key `${room}:${userId}` -> last ts
@@ -1284,10 +1200,8 @@ const commandRegistry = {
     example: "/giverole @sam Admin",
     handler: async ({ args, actorRole }) => {
       if (args.length < 2) return { ok: false, message: "Missing arguments" };
-      // Allow usernames with spaces if quoted, e.g. /giverole "Lola Henderson" Moderator
-      // For role, allow multi-word and hyphen variants: "Co owner" -> "Co-owner".
       const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
-      const role = normalizeRoleInput(args.slice(1).join(" "));
+      const role = args[1].replace(/-/g, " ");
       if (!ROLES.includes(role)) return { ok: false, message: "Unknown role" };
       if (roleRank(role) >= roleRank("Owner")) return { ok: false, message: "Cannot grant Owner" };
       if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
@@ -1303,7 +1217,7 @@ const commandRegistry = {
     handler: async ({ args, actorRole }) => {
       if (args.length < 2) return { ok: false, message: "Missing arguments" };
       const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
-      const role = normalizeRoleInput(args.slice(1).join(" "));
+      const role = args[1].replace(/-/g, " ");
       if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
       if (roleRank(role) >= roleRank(actorRole)) return { ok: false, message: "Cannot remove equal role" };
       await dbRunAsync(`UPDATE users SET role='User' WHERE id=?`, [target.id]);
@@ -1316,15 +1230,9 @@ const commandRegistry = {
     usage: "/givegold @user amount",
     example: "/givegold @sam 50",
     handler: async ({ args }) => {
-      // Support:
-      //   /givegold @sam 50
-      //   /givegold "Lola Henderson" 50
-      //   /givegold Lola Henderson 50
-      if (args.length < 2) return { ok: false, message: "Missing arguments" };
-      const amt = Number(args[args.length - 1]);
-      if (!Number.isFinite(amt)) return { ok: false, message: "Missing arguments" };
-      const targetRaw = args.slice(0, -1).join(" ");
-      const target = await new Promise((resolve, reject) => findUserByMention(targetRaw, (e, u) => (e ? reject(e) : resolve(u))));
+      const amt = Number(args[1]);
+      if (!args[0] || !Number.isFinite(amt)) return { ok: false, message: "Missing arguments" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
       await dbRunAsync(`UPDATE users SET gold = gold + ? WHERE id=?`, [amt, target.id]);
       emitProgressionUpdate(target.id);
       return { ok: true, message: `Gave ${amt} gold to ${target.username}` };
@@ -1336,11 +1244,9 @@ const commandRegistry = {
     usage: "/setgold @user amount",
     example: "/setgold @sam 0",
     handler: async ({ args }) => {
-      if (args.length < 2) return { ok: false, message: "Missing arguments" };
-      const amt = Number(args[args.length - 1]);
-      if (!Number.isFinite(amt)) return { ok: false, message: "Missing arguments" };
-      const targetRaw = args.slice(0, -1).join(" ");
-      const target = await new Promise((resolve, reject) => findUserByMention(targetRaw, (e, u) => (e ? reject(e) : resolve(u))));
+      const amt = Number(args[1]);
+      if (!args[0] || !Number.isFinite(amt)) return { ok: false, message: "Missing arguments" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
       await dbRunAsync(`UPDATE users SET gold=? WHERE id=?`, [amt, target.id]);
       emitProgressionUpdate(target.id);
       return { ok: true, message: `Set gold for ${target.username} to ${amt}` };
@@ -1364,11 +1270,9 @@ const commandRegistry = {
     usage: "/setlevel @user level",
     example: "/setlevel @sam 5",
     handler: async ({ args }) => {
-      if (args.length < 2) return { ok: false, message: "Missing arguments" };
-      const level = Number(args[args.length - 1]);
-      if (!Number.isFinite(level) || level < 1) return { ok: false, message: "Missing arguments" };
-      const targetRaw = args.slice(0, -1).join(" ");
-      const target = await new Promise((resolve, reject) => findUserByMention(targetRaw, (e, u) => (e ? reject(e) : resolve(u))));
+      const level = Number(args[1]);
+      if (!args[0] || !Number.isFinite(level) || level < 1) return { ok: false, message: "Missing arguments" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
       let xpNeeded = 0;
       for (let i = 1; i < Math.floor(level); i++) xpNeeded += i * 100;
       await dbRunAsync(`UPDATE users SET xp=? WHERE id=?`, [xpNeeded, target.id]);
@@ -3859,22 +3763,21 @@ if (!room) {
             };
             io.to(`dm:${tid}`).emit("dm message", payload);
             if (Array.isArray(thread.participants)) {
-              db.all(
-                `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
-                [tid],
-                (_e2, rows) => {
-                  for (const r of rows || []) {
-                    const sid = socketIdByUserId.get(userId);
-const s = sid ? io.sockets.sockets.get(sid) : null;
-if (s?.user) {
-  if (avatar) s.user.avatar = avatar;
-  s.user.mood = mood;
-  if (s.currentRoom) emitUserList(s.currentRoom);
+              // Ping all participants (except sender) so their clients can refresh thread previews/unread badges.
+// Note: clients that are already joined to dm:<tid> will also receive the "dm message" broadcast above.
+db.all(
+  `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
+  [tid],
+  (_e2, rows) => {
+    for (const r of rows || []) {
+      const uid = r.user_id;
+      if (!uid || uid === socket.user.id) continue;
+      const sid = socketIdByUserId.get(uid);
+      if (sid) io.to(sid).emit("dm ping", { threadId: tid, ts });
+    }
+  }
+);
 }
-                  }
-                }
-              );
-            }
           }
         );
       };
