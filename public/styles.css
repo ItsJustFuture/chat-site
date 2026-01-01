@@ -2077,14 +2077,16 @@ padding: 18px;
   gap:8px;
   flex-wrap:wrap;
   margin:10px 0 12px;
-  /* Keep the tab strip (Info / About / Edit / Moderation) from becoming its own scroll area.
-     The modal body can scroll, but the tab bar itself should stay stable and non-scrollable. */
+  overflow-x:visible;
+  /* Keep the tab header from "scrolling" separately inside the modal.
+     The modal body scrolls; the tabs stay pinned at the top of that scroll area. */
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 5;
   background: var(--panel);
-  overflow: hidden;
-  overflow-x: visible;
+  padding: 10px 0 10px;
+  margin: 0 0 12px;
+  overflow-y: hidden;
   -webkit-overflow-scrolling:touch;
   scrollbar-width:none;
 }

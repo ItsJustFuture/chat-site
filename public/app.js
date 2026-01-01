@@ -3467,7 +3467,7 @@ modalTargetUsername = p.username;
   applyProgressionPayload(p);
 
   modalTitle.textContent="My Profile";
-  // Keep the header area compact (no creation date here).
+  // Keep the header area clean (no creation date in the top info strip)
   modalMeta.textContent = "";
 
   fillProfileUI(p, true);
@@ -3522,7 +3522,7 @@ async function openMemberProfile(username){
   if (isSelf) applyProgressionPayload(p);
 
   modalTitle.textContent="Member Profile";
-  // Keep the header area compact (no creation date here).
+  // Keep the header area clean (no creation date in the top info strip)
   modalMeta.textContent = "";
   fillProfileUI(p, isSelf);
   syncCustomizationUI();
