@@ -44,6 +44,14 @@ const THEMES = [
     }
   }
 
+    // Toggle keyboard-open state for iOS Safari layouts (used by CSS to hide typing overlay)
+    try {
+      const kbInsetStr = getComputedStyle(document.documentElement).getPropertyValue("--kb-inset") || "0px";
+      const kbInset = Math.max(0, Math.round(parseFloat(kbInsetStr) || 0));
+      document.documentElement.style.setProperty("--kbOffset", kbInset + "px");
+      if (document.body) document.body.classList.toggle("kb-open", kbInset > 80);
+    } catch (e) { /* no-op */ }
+
   function scheduleSetVh(){
     if(raf) cancelAnimationFrame(raf);
     raf = requestAnimationFrame(()=>{ raf = 0; setVhNow(); });
@@ -2332,17 +2340,6 @@ async function startDirectMessage(username){
     }
 
     const data = await res.json();
-    /* dm thread fallback */
-    // Some server builds may return ok:true without threadId; recover by reloading threads.
-    if (data && data.ok && !data.threadId) {
-      try { await loadDmThreads(); } catch {}
-      const recovered = dmThreads.find((t) => {
-        if (t.is_group) return false;
-        const parts = (t.participants || []).map((p)=>String(p||'').toLowerCase());
-        return parts.includes(target.toLowerCase());
-      });
-      if (recovered) { openDmThread(recovered.id); return; }
-    }
     // Don't waste vertical space with a persistent "DM ready" banner.
     setDmNotice(data.reused ? "Opened existing DM." : "");
 

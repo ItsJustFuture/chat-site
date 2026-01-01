@@ -4417,3 +4417,7 @@ body.kb-open #typing{
   overflow-wrap:anywhere;
   word-break:break-word;
 }
+
+/* Hide typing overlay while keyboard is open (prevents large dark block on iOS) */
+body.kb-open .typing,
+body.kb-open #typing{ display:none !important; }
