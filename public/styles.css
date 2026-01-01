@@ -4379,59 +4379,41 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 }
 
 
-/* --- DM bubble containment fix --- */
-.dmMessages, .dm-thread, .messages {
-  padding: 8px 10px;
-  box-sizing: border-box;
-  overflow-x: hidden;
+/* --- Keyboard + typing indicator (override/fix) --- */
+body.kb-open .typing,
+body.kb-open #typing{
+  display:none !important;
 }
 
-.message,
-.chatBubble,
-.dmBubble {
-  max-width: calc(100% - 20px);
-  box-sizing: border-box;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+/* Avoid double-padding empty "box" when keyboard opens */
+.chatPane, .dmPane, #chatPane, #dmPane{
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
 }
 
-.message.outgoing,
-.chatBubble.outgoing,
-.dmBubble.outgoing {
-  margin-left: auto;
-  margin-right: 0;
+/* Keep composer above iOS home bar + keyboard */
+.messageComposer, .composer, #messageComposer, #composer, .dmComposer, #dmComposer, .dmInput{
+  padding-bottom: calc(env(safe-area-inset-bottom) + var(--kbOffset, 0px));
 }
 
-.message.incoming,
-.chatBubble.incoming,
-.dmBubble.incoming {
-  margin-right: auto;
-  margin-left: 0;
-}
-
-
-/* --- iOS keyboard / typing indicator containment --- */
-:root { --kbOffset: 0px; }
-
-body.kb-open .typingIndicator,
-body.kb-open #typingIndicator,
-body.kb-open .typing-indicator {
-  display: none !important;
-}
-
-.chatPane, .dmPane, #chatPane, #dmPane {
-  padding-bottom: calc(16px + env(safe-area-inset-bottom) + var(--kbOffset));
-}
-
-.messageComposer, .composer, #messageComposer, #composer, .dmComposer, #dmComposer {
-  padding-bottom: calc(env(safe-area-inset-bottom) + var(--kbOffset));
-}
-
-.typingIndicator, #typingIndicator, .typing-indicator {
+/* Ensure typing area never grows huge */
+.typing, #typing{
   max-height: 22px;
   overflow: hidden;
   padding: 0 10px;
   margin: 4px 0;
   font-size: 12px;
   line-height: 22px;
+}
+
+
+/* --- DM bubble overflow hardening --- */
+.dmMessages{ overflow-x:hidden; }
+.dmRow, .dmBubbleWrap, .dmBubble{
+  min-width:0;
+  box-sizing:border-box;
+}
+.dmBubble{
+  max-width:100%;
+  overflow-wrap:anywhere;
+  word-break:break-word;
 }

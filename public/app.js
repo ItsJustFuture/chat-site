@@ -886,7 +886,7 @@ function escapeRegex(str){
 }
 function applyMentions(text){
   const safe = escapeHtml(text);
-  const names = new Set((lastUsers || []).map((u) => u.name));
+  const names = new Set((lastUsers || []).map((u) => u.username || u.name));
   if (me?.username) names.add(me.username);
   const list = Array.from(names).filter(Boolean);
   if (!list.length) return safe;
@@ -899,7 +899,7 @@ function isNearBottom(el, threshold = 120){
   return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
 }
 function mentionCandidates(){
-  const names = new Set((lastUsers || []).map((u) => u.name));
+  const names = new Set((lastUsers || []).map((u) => u.username || u.name));
   if (me?.username) names.add(me.username);
   return Array.from(names).filter(Boolean);
 }
@@ -4672,83 +4672,3 @@ function isThemeVisible(themeName) {
 }
 
 try{ syncDesktopMembersWidth(); }catch{}
-
-
-
-
-/* --- Profile sheet DOM refs --- */
-function getProfileSheetRefs() {
-  return {
-    profileMenu: document.getElementById('profileMenu'),
-    profileSheetHero: document.getElementById('profileSheetHero'),
-    profileSheetAvatar: document.getElementById('profileSheetAvatar'),
-    profileSheetName: document.getElementById('profileSheetName'),
-    profileSheetRoleChip: document.getElementById('profileSheetRoleChip'),
-    profileSheetLikes: document.getElementById('profileSheetLikes'),
-    profileSheetCreated: document.getElementById('profileSheetCreated'),
-  };
-}
-
-/* --- Profile Edit gating --- */
-function setProfileEditAvailability(isOwnProfile) {
-  const editTabBtn = document.getElementById('profileTabEdit');
-  const editPanel = document.getElementById('myProfileEdit');
-  if (editTabBtn) editTabBtn.style.display = isOwnProfile ? '' : 'none';
-  if (editPanel) editPanel.style.display = isOwnProfile ? '' : 'none';
-}
-
-/* --- iOS keyboard handling --- */
-(function setupIOSKeyboardHandling() {
-  try {
-    const vv = window.visualViewport;
-    const root = document.documentElement;
-    const body = document.body;
-
-    let lastOffset = 0;
-
-    function computeKbOffset() {
-      if (!vv) return 0;
-      // When keyboard opens on iOS, visualViewport height shrinks.
-      const delta = window.innerHeight - vv.height - (vv.offsetTop || 0);
-      return Math.max(0, Math.round(delta));
-    }
-
-    function apply() {
-      const off = computeKbOffset();
-      if (off !== lastOffset) {
-        lastOffset = off;
-        root.style.setProperty('--kbOffset', off + 'px');
-      }
-      if (off > 80) body.classList.add('kb-open');
-      else body.classList.remove('kb-open');
-    }
-
-    if (vv) {
-      vv.addEventListener('resize', apply);
-      vv.addEventListener('scroll', apply);
-    }
-    window.addEventListener('resize', apply);
-
-    // Also toggle while focusing message inputs (helps in Safari that delays vv events)
-    document.addEventListener('focusin', (e) => {
-      const t = e.target;
-      if (!t) return;
-      if (t.matches('input[type="text"], input:not([type]), textarea')) {
-        setTimeout(apply, 50);
-        setTimeout(apply, 250);
-      }
-    });
-    document.addEventListener('focusout', () => {
-      setTimeout(apply, 50);
-      setTimeout(() => {
-        root.style.setProperty('--kbOffset', '0px');
-        body.classList.remove('kb-open');
-      }, 250);
-    });
-
-    // Initial
-    apply();
-  } catch (e) {
-    // no-op
-  }
-})();
