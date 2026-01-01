@@ -1532,18 +1532,102 @@ a{ color:inherit; }
 button{ font-family:inherit; }
 
 /* AUTH */
-#authWrap{ height: calc(var(--vh, 1vh) * 100); display:flex; align-items:center; justify-content:center; padding:20px; }
-/* UI scale for small screens / user preference (no transform: fixes iOS hit-testing) */
+#authWrap{
+  height: calc(var(--vh, 1vh) * 100);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:22px;
+  position:relative;
+  overflow:hidden;
+}
+
+#authWrap .authBackdrop{
+  position:absolute;
+  inset:-40px;
+  background:
+    radial-gradient(800px 500px at 20% 10%, rgba(160,110,255,0.25), transparent 60%),
+    radial-gradient(700px 500px at 80% 20%, rgba(80,200,255,0.18), transparent 55%),
+    radial-gradient(900px 700px at 50% 90%, rgba(255,120,190,0.12), transparent 65%),
+    linear-gradient(180deg, rgba(0,0,0,0.35), rgba(0,0,0,0.55));
+  filter: blur(0px);
+  pointer-events:none;
+}
+
+.authShell{
+  width:min(980px, 100%);
+  display:grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap:22px;
+  align-items:center;
+  position:relative;
+  z-index:1;
+}
+
+/* Nudge slightly left on wide desktop so the card never kisses the right edge */
+@media (min-width: 821px){
+  .authShell{ transform: translateX(-18px); }
+}
+
+.authBrand{
+  padding:18px 10px;
+}
+
+.authLogo{
+  font-weight:1000;
+  letter-spacing:0.5px;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height:1.05;
+  text-shadow: 0 10px 30px rgba(0,0,0,0.35);
+}
+
+.authLogo .amp{
+  opacity:0.95;
+  filter: drop-shadow(0 0 14px rgba(190,120,255,0.25));
+}
+
+.authTag{
+  margin-top:10px;
+  font-size:14px;
+  color:var(--muted);
+}
 
 .authCard{
-  width:min(420px, 94vw);
-  background:var(--panel);
-  border:1px solid var(--line);
-  border-radius:16px;
+  width:100%;
+  background: color-mix(in oklab, var(--panel) 92%, rgba(0,0,0,0.25));
+  border:1px solid color-mix(in oklab, var(--line) 85%, rgba(255,255,255,0.08));
+  border-radius:18px;
   padding:18px;
   box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
 }
-.authTitle{ font-size:18px; font-weight:900; margin:0 0 12px; }
+
+.authHeader{
+  margin-bottom:12px;
+}
+
+.authTitle{ font-size:20px; font-weight:1000; margin:0; }
+.authSub{ margin-top:6px; font-size:13px; color:var(--muted); }
+
+.authActions{ margin-top:12px; }
+.authActions .btn{ flex:1; min-width:140px; }
+
+.authHint{ margin-top:10px; }
+
+.authFoot{
+  grid-column: 1 / -1;
+  padding-top:2px;
+  text-align:center;
+}
+
+/* keep auth usable on mobile */
+@media (max-width: 820px){
+  .authShell{ grid-template-columns: 1fr; }
+  .authBrand{ text-align:center; padding:6px 0 0; }
+  .authTag{ max-width:520px; margin-left:auto; margin-right:auto; }
+}
+
+/* Shared form primitives */
 .field{ display:flex; flex-direction:column; gap:6px; margin:10px 0; }
 .field label{ font-size:12px; color:var(--muted); }
 .field input, textarea, select{
@@ -1554,10 +1638,39 @@ button{ font-family:inherit; }
   color:var(--inputText);
   outline:none;
 }
+
+/* Password show/hide */
+.passWrap{ position:relative; display:flex; align-items:center; }
+.passWrap > input{ width:100%; padding-right:44px; }
+.passToggle{
+  position:absolute;
+  right:8px;
+  top:50%;
+  transform: translateY(-50%);
+  border:0;
+  background:transparent;
+  color: var(--muted);
+  cursor:pointer;
+  width:34px;
+  height:34px;
+  display:grid;
+  place-items:center;
+  border-radius:10px;
+}
+.passToggle:hover{ background: color-mix(in oklab, var(--panel) 70%, rgba(255,255,255,0.08)); color: var(--text); }
+.passToggle:active{ transform: translateY(-50%) translateY(1px); }
+.passToggle:focus{ outline:none; box-shadow: 0 0 0 3px rgba(120,120,255,0.18); }
+
+.field input:focus, textarea:focus, select:focus{
+  border-color: color-mix(in oklab, var(--brand) 55%, var(--border));
+  box-shadow: 0 0 0 3px rgba(120,120,255,0.15);
+}
 textarea{ min-height:90px; resize:vertical; }
+
 .colorInputRow{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .colorInputRow input[type="text"]{ flex:1; min-width:140px; }
 .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+
 .btn{
   border:0;
   border-radius:var(--radiusMd);
@@ -1572,7 +1685,10 @@ textarea{ min-height:90px; resize:vertical; }
 .btn.secondary{ background:var(--btnSecondaryBg); color:var(--btnSecondaryText); }
 .btn.danger{ background:var(--danger); color:var(--btnPrimaryText); }
 .btn:active{ transform: translateY(1px); }
+
 .msgline{ margin-top:10px; font-size:12px; color:var(--muted); min-height:16px; white-space:pre-wrap; }
+
+
 
 /* APP LAYOUT */
 #app{ height: calc(var(--vh, 1vh) * 100); display:none; }
