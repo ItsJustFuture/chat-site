@@ -3401,6 +3401,8 @@ function emitUserList(room) {
       const status = normalizeStatus(s.user.status, "Online");
       users.push({
         name: s.user.username,
+        username: s.user.username,
+        id: s.user.id,
         role: s.user.role,
         status,
         mood: s.user.mood || "",
