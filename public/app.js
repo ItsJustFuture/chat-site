@@ -334,9 +334,21 @@ const editDmPanel = document.getElementById("editDmPanel");
 
 const authUser = document.getElementById("authUser");
 const authPass = document.getElementById("authPass");
+const togglePassBtn = document.getElementById("togglePassBtn");
 const authMsg = document.getElementById("authMsg");
 const loginBtn = document.getElementById("loginBtn");
 const regBtn = document.getElementById("regBtn");
+
+// Auth: show/hide password
+togglePassBtn?.addEventListener("click", ()=>{
+  if (!authPass) return;
+  const isHidden = authPass.type === "password";
+  authPass.type = isHidden ? "text" : "password";
+  togglePassBtn.textContent = isHidden ? "🙈" : "👁";
+  togglePassBtn.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
+  togglePassBtn.title = isHidden ? "Hide password" : "Show password";
+  authPass.focus();
+});
 
 const chanList = document.getElementById("chanList");
 const nowRoom = document.getElementById("nowRoom");

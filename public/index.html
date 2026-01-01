@@ -16,7 +16,7 @@
     <div class="authShell">
       <div class="authBrand">
         <div class="authLogo">Banter <span class="amp">&amp;</span> Brats</div>
-        <div class="authTag">18+ chat • Rooms • DMs • Games</div>
+        <div class="authTag">18+ community chat • rooms • DMs • games</div>
       </div>
 
       <div class="authCard" role="dialog" aria-label="Login or register">
@@ -33,7 +33,10 @@
 
           <div class="field">
             <label for="authPass">Password</label>
-            <input id="authPass" type="password" autocomplete="current-password" placeholder="password">
+            <div class="passWrap">
+              <input id="authPass" type="password" autocomplete="current-password" placeholder="password">
+              <button class="passToggle" id="togglePassBtn" type="button" aria-label="Show password" title="Show password">👁</button>
+            </div>
           </div>
 
           <div class="row authActions">
@@ -41,7 +44,7 @@
             <button class="btn secondary" id="regBtn" type="button">Register</button>
           </div>
 
-          <div class="authHint small muted">Tip: you can register with any username. No email required (for now).</div>
+          <div class="authHint small muted">Tip: you can register with any username — no email required (for now).</div>
           <div class="msgline" id="authMsg"></div>
         </div>
       </div>

@@ -1564,6 +1564,11 @@ button{ font-family:inherit; }
   z-index:1;
 }
 
+/* Nudge slightly left on wide desktop so the card never kisses the right edge */
+@media (min-width: 821px){
+  .authShell{ transform: translateX(-18px); }
+}
+
 .authBrand{
   padding:18px 10px;
 }
@@ -1633,6 +1638,29 @@ button{ font-family:inherit; }
   color:var(--inputText);
   outline:none;
 }
+
+/* Password show/hide */
+.passWrap{ position:relative; display:flex; align-items:center; }
+.passWrap > input{ width:100%; padding-right:44px; }
+.passToggle{
+  position:absolute;
+  right:8px;
+  top:50%;
+  transform: translateY(-50%);
+  border:0;
+  background:transparent;
+  color: var(--muted);
+  cursor:pointer;
+  width:34px;
+  height:34px;
+  display:grid;
+  place-items:center;
+  border-radius:10px;
+}
+.passToggle:hover{ background: color-mix(in oklab, var(--panel) 70%, rgba(255,255,255,0.08)); color: var(--text); }
+.passToggle:active{ transform: translateY(-50%) translateY(1px); }
+.passToggle:focus{ outline:none; box-shadow: 0 0 0 3px rgba(120,120,255,0.18); }
+
 .field input:focus, textarea:focus, select:focus{
   border-color: color-mix(in oklab, var(--brand) 55%, var(--border));
   box-shadow: 0 0 0 3px rgba(120,120,255,0.15);
