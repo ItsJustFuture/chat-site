@@ -3467,7 +3467,8 @@ modalTargetUsername = p.username;
   applyProgressionPayload(p);
 
   modalTitle.textContent="My Profile";
-  modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
+  // Keep the header area compact (no creation date here).
+  modalMeta.textContent = "";
 
   fillProfileUI(p, true);
   syncCustomizationUI();
@@ -3521,7 +3522,8 @@ async function openMemberProfile(username){
   if (isSelf) applyProgressionPayload(p);
 
   modalTitle.textContent="Member Profile";
-  modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
+  // Keep the header area compact (no creation date here).
+  modalMeta.textContent = "";
   fillProfileUI(p, isSelf);
   syncCustomizationUI();
 
