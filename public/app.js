@@ -788,26 +788,46 @@ function roleForUser(name){
   return hit?.role || "member";
 }
 
-function framedAvatar(name){
-  const role = roleForUser(name);
-  const rKey = roleKey(role);
+function makeAvatarEl({ username, role, avatarUrl, size = 34 }) {
+  // outer element
+  const el = document.createElement("div");
+  el.className = "avatar";
+  el.style.width = `${size}px`;
+  el.style.height = `${size}px`;
 
-  const frame = document.createElement("div");
-  frame.className = `avatarFrame avatar role-${rKey}`;
+  // If we have a real avatar URL, use it as an <img> so it’s guaranteed to render as-is.
+  if (avatarUrl) {
+    const img = document.createElement("img");
+    img.className = "avatarImg";
+    img.src = avatarUrl;
+    img.alt = username || "avatar";
 
-  const inner = document.createElement("div");
-  inner.className = "avatarInner";
-  inner.textContent = (name || "?").slice(0,1).toUpperCase();
-  frame.appendChild(inner);
+    // If the image fails, fall back to gradient default
+    img.onerror = () => {
+      el.innerHTML = "";
+      el.classList.add("avatarFallback", `role-${roleKey(role)}`);
+      el.textContent = (username || "?").slice(0, 1).toUpperCase();
+    };
 
-  getAvatarUrl(name).then((url)=>{
-    if (!url) return;
-    inner.classList.add("hasImg");
-    inner.style.backgroundImage = `url('${url}')`;
-    inner.textContent = "";
-  });
+    el.appendChild(img);
+    return el;
+  }
 
-  return frame;
+  // No avatar URL -> default gradient fallback
+  el.classList.add("avatarFallback", `role-${roleKey(role)}`);
+  el.textContent = (username || "?").slice(0, 1).toUpperCase();
+  return el;
+}
+
+// Normalize roles to your CSS keys
+function roleKey(role) {
+  const r = (role || "").toLowerCase();
+  if (r.includes("owner")) return "owner";
+  if (r.includes("co")) return "coowner";
+  if (r.includes("admin")) return "admin";
+  if (r.includes("mod")) return "mod";
+  if (r.includes("vip")) return "vip";
+  return "member";
 }
 
 function clearMsgs(){
@@ -2109,6 +2129,14 @@ function renderThreadItem(t){
 function renderDirectThreads(){
   const list = (dmThreads || []).filter(isDirectThread);
   const stripEl = dmQuickStrip || dmStrip;
+  const u = lastUsers.find(x => x.username === otherName); // or however you store online users
+const avatarEl = makeAvatarEl({
+  username: u?.username || otherName,
+  role: u?.role,
+  avatarUrl: u?.avatar || u?.avatarUrl, // whichever your payload uses
+  size: 34
+});
+stripItem.appendChild(avatarEl);
   if (!stripEl) return;
 
   stripEl.innerHTML = "";
