@@ -1502,6 +1502,12 @@ body[data-theme="420 Friendly (Light)"]{
   /* UI scaling (auto for very small screens; user override via JS sets --uiScale) */
   --uiScaleAuto: 1;
   --uiScale: var(--uiScaleAuto);
+
+  /* Desktop sidebars */
+  --membersW: 300px;
+
+  /* Desktop DM dock offset (prevents the DM composer falling off-screen on shorter viewports) */
+  --dmDockBottom: 56px;
 }
 @media (max-width: 360px){
   :root{ --uiScaleAuto: 0.92; }
@@ -2256,6 +2262,39 @@ padding: 18px;
   clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
 }
 
+/* Avatar frames (show the same role gradients even when an image avatar exists) */
+.avatarFrame{
+  width:100%;
+  height:100%;
+  border-radius:999px;
+  padding:2px;
+  box-sizing:border-box;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.avatarInner{
+  width:100%;
+  height:100%;
+  border-radius:999px;
+  overflow:hidden;
+  background: var(--avatar-bg);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:900;
+  color:#fff;
+  text-transform:uppercase;
+}
+.avatarInner.hasImg{ background-size:cover; background-position:center; color:transparent; }
+
+.avatarFrame.role-owner{ background: radial-gradient(circle at 30% 30%, #7CFF4A 0%, #0B4D1E 78%); }
+.avatarFrame.role-coowner{ background: radial-gradient(circle at 30% 30%, #8A2BE2 0%, #FF4FA3 78%); }
+.avatarFrame.role-admin{ background: radial-gradient(circle at 30% 30%, #FF8C00 0%, #FFD700 78%); }
+.avatarFrame.role-moderator{ background: radial-gradient(circle at 30% 30%, #7A0000 0%, #E02020 78%); }
+.avatarFrame.role-vip{ background: #7FD3FF; }
+.avatarFrame.role-vip .avatarInner{ color:#0B2B3A; background: rgba(255,255,255,0.65); }
+
 .small{ font-size:12px; color:var(--muted); }
 .sectionTitle{ font-weight:900; margin:10px 0 6px; }
 .panelBox{ background:var(--panel2); border:1px solid var(--border); border-radius:14px; padding:10px; }
@@ -2439,8 +2478,9 @@ body.lockScroll{ overflow:hidden; }
 .dmPanel{
   position:fixed;
   top:16px;
-  bottom:16px;
-  right: 16px;
+  /* Leave a little breathing room for the desktop composer and avoid covering the members list. */
+  bottom: var(--dmDockBottom);
+  right: calc(16px + var(--membersW));
   width:min(640px, 48vw);
   height:auto;
   max-height:none;
@@ -2766,7 +2806,7 @@ body.lockScroll{ overflow:hidden; }
 .mobOnly.goldPill.show{ display:flex; }
 
 @media (max-width: 1260px){
-  .dmPanel{ right:16px; width:min(640px, 70vw); }
+  .dmPanel{ right: calc(16px + var(--membersW)); width:min(640px, 70vw); }
 }
 @media (max-width: 980px){
     :root{ --topbarH: 54px; }
@@ -2819,6 +2859,74 @@ body.lockScroll{ overflow:hidden; }
   transition:transform .18s ease;
   z-index:160;
   box-shadow: 12px 0 30px rgba(0,0,0,.55);
+}
+
+/* If members panel is hidden (mobile/tablet), don't reserve space on the right */
+@media (max-width: 980px){
+  .dmPanel{ right:0; bottom:0; }
+}
+
+/* --- Quick-strip avatars: show role gradients even when the user has a real avatar image --- */
+.avatarFrame{
+  width:42px;
+  height:42px;
+  border-radius:14px;
+  padding:2px;
+  box-sizing:border-box;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.avatarInner{
+  width:100%;
+  height:100%;
+  border-radius:12px;
+  overflow:hidden;
+  background:rgba(0,0,0,0.18);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:900;
+  color:#fff;
+  text-transform:uppercase;
+}
+.avatarInner.hasImg{ background-size:cover; background-position:center; color:transparent; }
+
+/* Mirror the role gradient palettes used by .avatarFallback */
+.avatarFrame.role-owner{ background: radial-gradient(circle at 30% 30%, #7CFF4A 0%, #0B4D1E 78%); }
+.avatarFrame.role-coowner{ background: radial-gradient(circle at 30% 30%, #8A2BE2 0%, #FF4FA3 78%); }
+.avatarFrame.role-admin{ background: radial-gradient(circle at 30% 30%, #FF8C00 0%, #FFD700 78%); }
+.avatarFrame.role-moderator{ background: radial-gradient(circle at 30% 30%, #7A0000 0%, #E02020 78%); }
+.avatarFrame.role-vip{ background:#7FD3FF; }
+
+/* --- DM actions rail: smaller and hug bubbles more closely --- */
+.dmActionsRail{
+  gap:4px;
+}
+.dmActionsRail .iconBtn.smallIcon{
+  width:28px;
+  height:28px;
+  border-radius:10px;
+  font-size:14px;
+}
+
+/* --- Mobile typing indicator: float above the composer instead of stealing chat height --- */
+@media (max-width: 980px){
+  .typing{
+    position:fixed;
+    left:0;
+    right:0;
+    bottom: calc(62px + env(safe-area-inset-bottom));
+    height:auto;
+    padding:6px 12px;
+    display:none;
+    background: rgba(0,0,0,0.35);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid rgba(255,255,255,0.08);
+    pointer-events:none;
+    z-index:180;
+  }
+  .typing:not(:empty){ display:flex; }
 }
 
 /* iOS Safari: prefer the small viewport unit when available */

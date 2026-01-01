@@ -780,6 +780,36 @@ function avatarNode(url, fallbackText, role){
   return buildFallback();
 }
 
+function roleForUser(name){
+  const n = String(name || "").toLowerCase();
+  if (!n) return "member";
+  if (String(me?.username||"").toLowerCase() === n) return me?.role || "member";
+  const hit = (lastUsers || []).find((u)=>String(u?.name||"").toLowerCase()===n);
+  return hit?.role || "member";
+}
+
+function framedAvatar(name){
+  const role = roleForUser(name);
+  const rKey = roleKey(role);
+
+  const frame = document.createElement("div");
+  frame.className = `avatarFrame avatar role-${rKey}`;
+
+  const inner = document.createElement("div");
+  inner.className = "avatarInner";
+  inner.textContent = (name || "?").slice(0,1).toUpperCase();
+  frame.appendChild(inner);
+
+  getAvatarUrl(name).then((url)=>{
+    if (!url) return;
+    inner.classList.add("hasImg");
+    inner.style.backgroundImage = `url('${url}')`;
+    inner.textContent = "";
+  });
+
+  return frame;
+}
+
 function clearMsgs(){
   msgs.innerHTML="";
   typingEl.textContent="";
@@ -2099,15 +2129,7 @@ function renderDirectThreads(){
     const wrap = document.createElement("div");
     wrap.className = "dmAvatarWrap";
 
-    const av = avatarNode(null, other || "?", "member");
-    getAvatarUrl(other).then(url=>{
-      if (url && av && av.tagName && av.tagName.toLowerCase()==='div') {
-        av.style.backgroundImage = `url('${url}')`;
-        av.style.backgroundSize = "cover";
-        av.style.backgroundPosition = "center";
-        av.textContent = "";
-      }
-    });
+    const av = framedAvatar(other || "?");
 
     const badge = document.createElement("span");
     badge.className = "dmUnreadBadge";
@@ -2138,16 +2160,8 @@ function vennPreview(thread){
 
   for (let i=0;i<3;i++) {
     const name = picks[i] || "?";
-    const av = avatarNode(null, name, "member");
+    const av = framedAvatar(name);
     av.classList.add("vennAvatar", `v${i+1}`);
-    getAvatarUrl(name).then(url=>{
-      if (url && av && av.tagName && av.tagName.toLowerCase()==='div') {
-        av.style.backgroundImage = `url('${url}')`;
-        av.style.backgroundSize = "cover";
-        av.style.backgroundPosition = "center";
-        av.textContent = "";
-      }
-    });
     wrap.appendChild(av);
   }
   return wrap;
@@ -2415,13 +2429,14 @@ function renderDmMessages(threadId){
     const midKey = String(m.messageId || m.id);
     if (dmReactionsCache[midKey]) renderDmReactions(midKey, dmReactionsCache[midKey]);
 
-    // Order: for self messages, actions on the right; for others, actions on the left
+    // Order: for self messages, actions on the LEFT of the bubble;
+    // for incoming messages, actions on the RIGHT.
     if (isSelf) {
-      row.appendChild(bubbleWrap);
       row.appendChild(actions);
+      row.appendChild(bubbleWrap);
     } else {
-      row.appendChild(actions);
       row.appendChild(bubbleWrap);
+      row.appendChild(actions);
     }
 
     // Mobile/desktop: tap/click the row to toggle actions
@@ -2769,20 +2784,23 @@ async function toggleDmQuickBar(kind){
 dmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("direct"); });
 groupDmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("group"); });
 
-// Close the quick DM avatar strips when clicking/tapping outside of them.
-document.addEventListener("pointerdown", (e) => {
+function closeQuickBarsOnOutside(e){
   const t = e.target;
-  // If neither bar is open, nothing to do.
   const directOpen = dmQuickBar && !dmQuickBar.hidden;
   const groupOpen = groupQuickBar && !groupQuickBar.hidden;
   if (!directOpen && !groupOpen) return;
 
-  // Clicks on the toggle buttons or inside the bars should not close them.
   if (dmToggleBtn?.contains(t) || groupDmToggleBtn?.contains(t)) return;
   if (dmQuickBar?.contains(t) || groupQuickBar?.contains(t)) return;
 
   hideAllDmQuickBars();
-});
+}
+
+// Close the quick DM avatar strips when clicking/tapping outside of them.
+// (Some mobile browsers can be flaky with pointer events, so listen to a few.)
+document.addEventListener("pointerdown", closeQuickBarsOnOutside, true);
+document.addEventListener("mousedown", closeQuickBarsOnOutside, true);
+document.addEventListener("touchstart", closeQuickBarsOnOutside, { capture: true, passive: true });
 
 
 // The DM panel is entered only after selecting a thread from the quick strip.
