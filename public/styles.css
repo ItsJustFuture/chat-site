@@ -2531,13 +2531,39 @@ body.lockScroll{ overflow:hidden; }
 .colorInputRow.tight{ gap:6px; }
 .colorInputRow.tight input[type="text"]{ min-width:120px; }
 .dmMessages{ flex:1; overflow:auto; padding:10px 12px; display:flex; flex-direction:column; gap:8px; min-height:0; }
-.dmBubble{ padding:9px 11px; border-radius:12px; background:var(--panel); border:1px solid var(--line); max-width:min(80%, calc(100% - 14px)); overflow-wrap:anywhere; word-break:break-word; }
-.dmBubble.self{ background:var(--bubbleSelf); color:white; margin-left:auto; }
-.dmMetaRow{ display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--muted); flex-wrap:wrap; }
-.dmActions{ display:none; gap:8px; margin-top:6px; }
-.dmBubble:hover .dmActions,
-.dmBubble.showActions .dmActions{ display:flex; }
-.dmActions .reactBtn{ padding:6px 10px; border-radius:12px; }
+
+/* DM messages: bubble should hug content (not full width), with meta/snackbar underneath */
+.dmRow{ display:flex; flex-direction:column; align-items:flex-start; gap:4px; position:relative; }
+.dmRow.self{ align-items:flex-end; }
+
+.dmBubble{
+  display:inline-block;
+  padding:9px 11px;
+  border-radius:12px;
+  background:var(--panel);
+  border:1px solid var(--line);
+  max-width:min(80%, calc(100% - 14px));
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+.dmBubble.self{ background:var(--bubbleSelf); color:white; }
+
+.dmMetaRow{
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+  font-size:12px;
+  color:var(--muted);
+  flex-wrap:wrap;
+  width:min(80%, calc(100% - 14px));
+}
+.dmRow.self .dmMetaRow{ justify-content:flex-end; }
+
+/* actions (react/reply/delete) live OUTSIDE the bubble */
+.dmActionsRail{ display:none; gap:8px; }
+.dmRow:hover .dmActionsRail,
+.dmRow.showActions .dmActionsRail{ display:flex; }
+.dmActionsRail .reactBtn{ padding:6px 10px; border-radius:12px; }
 .smallAction{ padding:6px 10px; border-radius:12px; border:1px solid var(--line); background:transparent; color:inherit; }
 .dmInput{ padding:10px 12px; border-top:1px solid var(--line); display:flex; gap:8px; flex-shrink:0; background: var(--panel2); position:relative; }
 .dmInput input{ flex:1; }
