@@ -2531,62 +2531,10 @@ body.lockScroll{ overflow:hidden; }
 .colorInputRow.tight{ gap:6px; }
 .colorInputRow.tight input[type="text"]{ min-width:120px; }
 .dmMessages{ flex:1; overflow:auto; padding:10px 12px; display:flex; flex-direction:column; gap:8px; min-height:0; }
-
-/* DM message row container (the bubble box + under/meta + actions) */
-.dmBubble{
-  position:relative;
-  display:flex;
-  flex-direction:column;
-  align-items:flex-start;
-  max-width:100%;
-  padding:0;
-}
-.dmBubble.self{ align-items:flex-end; }
-
-/* The actual rounded bubble */
-.dmBubbleBox{
-  padding:9px 11px;
-  border-radius:16px;
-  background:var(--panel);
-  border:1px solid var(--line);
-  max-width:min(80%, calc(100% - 52px));
-  overflow-wrap:anywhere;
-  word-break:break-word;
-}
-.dmBubble.self .dmBubbleBox{
-  background:var(--bubbleSelf);
-  color:white;
-  border-color:transparent;
-}
-.dmText{ white-space:pre-wrap; }
-
-/* Username + time under the bubble */
-.dmUnder{
-  display:flex;
-  gap:10px;
-  margin-top:4px;
-  font-size:11px;
-  color:var(--muted);
-  max-width:min(80%, calc(100% - 52px));
-}
-.dmBubble.self .dmUnder{ justify-content:flex-end; }
-.dmUnderName{ font-weight:800; }
-.dmUnderTime{ opacity:.85; }
-
-/* Action buttons sit OUTSIDE the bubble (above it, near the edge) */
-.dmActions{
-  position:absolute;
-  top:-10px;
-  left:0;
-  display:none;
-  gap:6px;
-  padding:4px;
-  border-radius:12px;
-  background:rgba(0,0,0,0.25);
-  border:1px solid rgba(255,255,255,0.08);
-  backdrop-filter: blur(8px);
-}
-.dmBubble.self .dmActions{ left:auto; right:0; }
+.dmBubble{ padding:9px 11px; border-radius:12px; background:var(--panel); border:1px solid var(--line); max-width:min(80%, calc(100% - 14px)); overflow-wrap:anywhere; word-break:break-word; }
+.dmBubble.self{ background:var(--bubbleSelf); color:white; margin-left:auto; }
+.dmMetaRow{ display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--muted); flex-wrap:wrap; }
+.dmActions{ display:none; gap:8px; margin-top:6px; }
 .dmBubble:hover .dmActions,
 .dmBubble.showActions .dmActions{ display:flex; }
 .dmActions .reactBtn{ padding:6px 10px; border-radius:12px; }
