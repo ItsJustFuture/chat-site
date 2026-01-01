@@ -819,16 +819,17 @@ function makeAvatarEl({ username, role, avatarUrl, size = 34 }) {
   return el;
 }
 
-// Normalize roles to your CSS keys
-function roleKey(role) {
-  const r = (role || "").toLowerCase();
-  if (r.includes("owner")) return "owner";
-  if (r.includes("co")) return "coowner";
-  if (r.includes("admin")) return "admin";
-  if (r.includes("mod")) return "mod";
-  if (r.includes("vip")) return "vip";
-  return "member";
+// Resolve role + avatar URL for a username from the latest presence list.
+function getUserMeta(username){
+  const name = String(username || "");
+  const meName = String(me?.username || "");
+  if (name && meName && name.toLowerCase() === meName.toLowerCase()) {
+    return { role: me?.role || "member", avatarUrl: me?.avatar || me?.avatarUrl || null, username: meName };
+  }
+  const u = (lastUsers || []).find(x => String((x.username||x.name||"")).toLowerCase() === name.toLowerCase());
+  return { role: u?.role || "member", avatarUrl: u?.avatar || u?.avatarUrl || null, username: u?.username || u?.name || name };
 }
+
 
 function clearMsgs(){
   msgs.innerHTML="";
@@ -1305,7 +1306,7 @@ function clearDmBadges(){
   setBadgeVisibility("group", false);
 }
 function isGroupThread(threadId){
-  const meta = dmThreads.find((t) => t.id === threadId);
+  const meta = dmThreads.find((t) => String(t.id) === String(threadId));
   return !!(meta?.is_group || meta?.isGroup);
 }
 function markDmNotification(threadId, isGroupHint){
@@ -1953,6 +1954,28 @@ function setLeftDrawerOpen(isOpen){
 function setRightDrawerOpen(isOpen){
   document.body.classList.toggle("drawer-right-open", !!isOpen);
 }
+
+// Keep CSS vars in sync so the DM panel can avoid covering the members pane on desktop.
+function syncDesktopMembersWidth(){
+  try{
+    const root = document.documentElement;
+    const isDesktop = window.matchMedia("(min-width: 981px)").matches;
+    if (!isDesktop || !membersPane){
+      root.style.setProperty("--membersW", "0px");
+      return;
+    }
+    const cs = getComputedStyle(membersPane);
+    if (cs.display === "none" || cs.visibility === "hidden"){
+      root.style.setProperty("--membersW", "0px");
+      return;
+    }
+    const r = membersPane.getBoundingClientRect();
+    // If the drawer is off-canvas, treat it as closed.
+    const onScreen = r.width > 0 && r.left < window.innerWidth && r.right > 0;
+    root.style.setProperty("--membersW", onScreen ? `${Math.round(r.width)}px` : "0px");
+  }catch{}
+}
+window.addEventListener("resize", syncDesktopMembersWidth);
 function closeDrawers(){
   channelsPane?.classList.remove("open");
   membersPane?.classList.remove("open");
@@ -1960,6 +1983,7 @@ function closeDrawers(){
   // When drawers close, let the mobile composer span full width again.
   document.body.classList.remove("drawer-left-open", "drawer-right-open");
   closeMemberMenu();
+  syncDesktopMembersWidth();
 }
 function openChannels(){
   // toggle
@@ -1971,6 +1995,7 @@ function openChannels(){
   // Mobile: shift the fixed composer so it doesn't overlap the left drawer.
   document.body.classList.add("drawer-left-open");
   document.body.classList.remove("drawer-right-open");
+  syncDesktopMembersWidth();
 }
 
 function openMembers(){
@@ -1983,6 +2008,7 @@ function openMembers(){
   // Mobile: shift the fixed composer so it doesn't overlap the right drawer.
   document.body.classList.add("drawer-right-open");
   document.body.classList.remove("drawer-left-open");
+  syncDesktopMembersWidth();
 }
 
 openChannelsBtn?.addEventListener("click", openChannels);
@@ -2129,14 +2155,6 @@ function renderThreadItem(t){
 function renderDirectThreads(){
   const list = (dmThreads || []).filter(isDirectThread);
   const stripEl = dmQuickStrip || dmStrip;
-  const u = lastUsers.find(x => x.username === otherName); // or however you store online users
-const avatarEl = makeAvatarEl({
-  username: u?.username || otherName,
-  role: u?.role,
-  avatarUrl: u?.avatar || u?.avatarUrl, // whichever your payload uses
-  size: 34
-});
-stripItem.appendChild(avatarEl);
   if (!stripEl) return;
 
   stripEl.innerHTML = "";
@@ -2148,7 +2166,7 @@ stripItem.appendChild(avatarEl);
 
   list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
   for (const t of list) {
-    const other = otherParty(t);
+    const other = otherParty(t) || "?";
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "dmAvatarBtn" + (String(activeDmId)===String(t.id) ? " active" : "");
@@ -2157,7 +2175,9 @@ stripItem.appendChild(avatarEl);
     const wrap = document.createElement("div");
     wrap.className = "dmAvatarWrap";
 
-    const av = framedAvatar(other || "?");
+    const meta = getUserMeta(other);
+    const av = makeAvatarEl({ username: meta.username || other, role: meta.role, avatarUrl: meta.avatarUrl, size: 34 });
+    av.classList.add("dmAvatar");
 
     const badge = document.createElement("span");
     badge.className = "dmUnreadBadge";
@@ -2188,7 +2208,8 @@ function vennPreview(thread){
 
   for (let i=0;i<3;i++) {
     const name = picks[i] || "?";
-    const av = framedAvatar(name);
+    const um = getUserMeta(name);
+    const av = makeAvatarEl({ username: um.username || name, role: um.role, avatarUrl: um.avatarUrl, size: 30 });
     av.classList.add("vennAvatar", `v${i+1}`);
     wrap.appendChild(av);
   }
@@ -2505,7 +2526,7 @@ function setDmMeta(thread){
 
 function openDmThread(threadId){
   activeDmId = threadId;
-  const meta = dmThreads.find(t => t.id === threadId);
+  const meta = dmThreads.find(t => String(t.id) === String(threadId));
   if (meta) setDmTab(meta.is_group ? "group" : "direct");
   dmUnreadThreads.delete(threadId);
   renderDmThreads();
@@ -2523,7 +2544,7 @@ async function deleteDmHistory(){
     return;
   }
 
-  const meta = dmThreads.find((t) => t.id === activeDmId);
+  const meta = dmThreads.find((t) => String(t.id) === String(activeDmId));
   const label = meta ? threadLabel(meta) : "this DM";
   const ok = confirm(`Delete all messages in "${label}" for everyone?`);
   if (!ok) return;
@@ -2538,7 +2559,7 @@ async function deleteDmHistory(){
     }
 
     dmMessages.set(activeDmId, []);
-    const thread = dmThreads.find((t) => t.id === activeDmId);
+    const thread = dmThreads.find((t) => String(t.id) === String(activeDmId));
     if (thread) {
       thread.last_text = "";
       thread.last_ts = null;
@@ -2553,7 +2574,7 @@ async function deleteDmHistory(){
 }
 
 function upsertThreadMeta(tid, updater){
-  const idx = dmThreads.findIndex(t => t.id === tid);
+  const idx = dmThreads.findIndex(t => String(t.id) === String(tid));
   if (idx === -1) dmThreads.unshift({ id: tid, participants: [], ...updater });
   else dmThreads[idx] = { ...dmThreads[idx], ...updater };
   renderDmThreads();
@@ -2706,7 +2727,7 @@ async function fetchDmInfo(threadId){
 }
 
 async function openDmInfo(threadId = activeDmId){
-  const meta = dmThreads.find((t) => t.id === threadId);
+  const meta = dmThreads.find((t) => String(t.id) === String(threadId));
   if (!meta || !meta.is_group) {
     setDmNotice("Group info is only available inside a group chat.");
     return;
@@ -2853,7 +2874,7 @@ dmModalSearch?.addEventListener("input", () => { renderDmPickerList(); syncDmPic
 dmInfoCloseBtn?.addEventListener("click", closeDmInfo);
 dmInfoModal?.addEventListener("click", (e) => { if (e.target === dmInfoModal) closeDmInfo(); });
 dmInfoAddBtn?.addEventListener("click", () => {
-  const meta = dmThreads.find((t) => t.id === activeDmId);
+  const meta = dmThreads.find((t) => String(t.id) === String(activeDmId));
   const existing = meta?.participants || [];
   closeDmInfo();
   if (activeDmId) openDmPicker("add", activeDmId, existing);
@@ -4276,11 +4297,11 @@ socket.on("disconnect", (reason) => {
     const { threadId, messages = [], participants = [], title = "" } = payload || {};
     const lastText = messages.length
       ? messages[messages.length - 1].text || ""
-      : (dmThreads.find((t) => t.id === threadId)?.last_text || "");
+      : (dmThreads.find((t) => String(t.id) === String(threadId))?.last_text || "");
 
     const lastTs = messages.length
       ? messages[messages.length - 1].ts
-      : (dmThreads.find((t) => t.id === threadId)?.last_ts || Date.now());
+      : (dmThreads.find((t) => String(t.id) === String(threadId))?.last_ts || Date.now());
 
     upsertThreadMeta(threadId, {
       participants,
@@ -4294,7 +4315,7 @@ socket.on("disconnect", (reason) => {
     renderDmThreads();
 
     if (String(activeDmId) === String(threadId)) {
-      setDmMeta(dmThreads.find((t) => t.id === threadId));
+      setDmMeta(dmThreads.find((t) => String(t.id) === String(threadId)));
       renderDmMessages(threadId);
       // Consider the thread read once we've rendered its history.
       const latest = (Array.isArray(messages) && messages.length)
@@ -4309,7 +4330,7 @@ socket.on("disconnect", (reason) => {
   socket.on("dm history cleared", ({ threadId }) => {
     if (!threadId) return;
     dmMessages.set(threadId, []);
-    const meta = dmThreads.find((t) => t.id === threadId);
+    const meta = dmThreads.find((t) => String(t.id) === String(threadId));
     if (meta) {
       meta.last_text = "";
       meta.last_ts = null;
@@ -4329,7 +4350,7 @@ socket.on("disconnect", (reason) => {
 
     upsertThreadMeta(m.threadId, { last_text: m.text || "", last_ts: m.ts });
 
-    if (!dmThreads.find((t) => t.id === m.threadId)) loadDmThreads();
+    if (!dmThreads.find((t) => String(t.id) === String(m.threadId))) loadDmThreads();
 
     if (String(activeDmId) !== String(m.threadId)) {
       markDmNotification(m.threadId, isGroupThread(m.threadId));
@@ -4531,3 +4552,5 @@ function isThemeVisible(themeName) {
   }
   return true;
 }
+
+try{ syncDesktopMembersWidth(); }catch{}

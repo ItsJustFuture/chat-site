@@ -1507,7 +1507,7 @@ body[data-theme="420 Friendly (Light)"]{
   --membersW: 300px;
 
   /* Desktop DM dock offset (prevents the DM composer falling off-screen on shorter viewports) */
-  --dmDockBottom: 56px;
+  --dmDockBottom: 72px;
 }
 @media (max-width: 360px){
   :root{ --uiScaleAuto: 0.92; }
@@ -2757,16 +2757,6 @@ body.lockScroll{ overflow:hidden; }
 }
 .dmReplyContext .replyUser{ font-weight:900; font-size:12px; }
 .dmReplyContext .replySnippet{ font-size:12px; opacity:.9; }
-
-
-.dmBubble{ padding:9px 11px; border-radius:12px; background:var(--panel); border:1px solid var(--line); max-width:min(80%, calc(100% - 14px)); overflow-wrap:anywhere; word-break:break-word; }
-.dmBubble.self{ background:var(--bubbleSelf); color:white; margin-left:auto; }
-.dmMetaRow{ display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--muted); flex-wrap:wrap; }
-.dmActions{ display:none; gap:8px; margin-top:6px; }
-.dmBubble:hover .dmActions,
-.dmBubble.showActions .dmActions{ display:flex; }
-.dmActions .reactBtn{ padding:6px 10px; border-radius:12px; }
-.smallAction{ padding:6px 10px; border-radius:12px; border:1px solid var(--line); background:transparent; color:inherit; }
 .dmInput{ padding:10px 12px; border-top:1px solid var(--line); display:flex; gap:8px; flex-shrink:0; background: var(--panel2); position:relative; }
 .dmInput input{ flex:1; }
 .dmSectionTitle{
@@ -3237,44 +3227,6 @@ main.chat{ position: relative; }
   bottom: 0;
   z-index: 5;
 }
-/* Ensure DM message list is not centered; make it stretch full width */
-#dmModal .dmMessages,
-#dmModal .dmMsgs,
-.dmPanel .dmMessages,
-.dmPanel .dmMsgs {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;     /* this is the big one */
-}
-
-/* Each DM message row should be full width */
-#dmModal .dmMsg,
-#dmModal .dmRow,
-#dmModal .msg,
-.dmPanel .dmMsg,
-.dmPanel .dmRow,
-.dmPanel .msg {
-  width: 100%;
-}
-
-/* Bubbles can use most/all of the width */
-#dmModal .bubble,
-.dmPanel .bubble {
-  max-width: 100%;
-}
-
-/* If you have a DM-specific bubble class, include it too */
-#dmModal .dmBubble,
-.dmPanel .dmBubble {
-  max-width: 100%;
-}
-/* Right-align self messages without shrinking the message column */
-#dmModal .dmRow.self,
-.dmPanel .dmRow.self {
-  display: flex;
-  justify-content: flex-end;
-}
-
 @media (max-width: 980px){
   /* Keep composers visible above iOS Safari address bar + safe area */
   .inputBar{
