@@ -1518,7 +1518,7 @@ body{
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   background:var(--bg);
   color:var(--text);
-  height: calc(var(--vh) * 100);
+  height: calc(var(--vh, 1vh) * 100);
   overflow:hidden;
 }
 .msgs,
@@ -1532,7 +1532,7 @@ a{ color:inherit; }
 button{ font-family:inherit; }
 
 /* AUTH */
-#authWrap{ height: calc(var(--vh) * 100); display:flex; align-items:center; justify-content:center; padding:20px; }
+#authWrap{ height: calc(var(--vh, 1vh) * 100); display:flex; align-items:center; justify-content:center; padding:20px; }
 /* UI scale for small screens / user preference (no transform: fixes iOS hit-testing) */
 
 .authCard{
@@ -1575,7 +1575,7 @@ textarea{ min-height:90px; resize:vertical; }
 .msgline{ margin-top:10px; font-size:12px; color:var(--muted); min-height:16px; white-space:pre-wrap; }
 
 /* APP LAYOUT */
-#app{ height: calc(var(--vh) * 100); display:none; }
+#app{ height: calc(var(--vh, 1vh) * 100); display:none; }
 .layout{ height:100%; display:flex; min-height:0; }
 
 /* Channels */
@@ -2049,14 +2049,16 @@ body.dice-room .sys .diceFace{
   display: none;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  padding: 18px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+padding: 18px;
   z-index: 400;
 }
 .modalCard{
   display: flex;
   flex-direction: column;
-  max-height: calc((var(--vh) * 100) - 20px);
+  max-height: calc((var(--vh, 1vh) * 100) - 20px);
   overflow: hidden;
   background: var(--panel);
   border-radius: 14px;
@@ -2558,7 +2560,7 @@ body.lockScroll{ overflow:hidden; }
   .dmPanel{
     inset:0;
     width:100vw;
-    height: calc(var(--vh) * 100);
+    height: calc(var(--vh, 1vh) * 100);
     max-height:none;
     border-radius:0;
     border:0;
@@ -2576,7 +2578,7 @@ body.lockScroll{ overflow:hidden; }
   .dmMessages{ padding-bottom:14px; }
 
  .channels{
-  position:fixed; top: var(--topbarH); left:0; height: calc((var(--vh) * 100) - var(--topbarH));
+  position:fixed; top: var(--topbarH); left:0; height: calc((var(--vh, 1vh) * 100) - var(--topbarH));
   width:min(86vw, 320px);
   transform:translateX(-105%);
   transition:transform .18s ease;
@@ -2592,7 +2594,7 @@ body.lockScroll{ overflow:hidden; }
 
   .members.drawer{
   display:block;
-  position:fixed; top: var(--topbarH); right:0; height: calc((var(--vh) * 100) - var(--topbarH));
+  position:fixed; top: var(--topbarH); right:0; height: calc((var(--vh, 1vh) * 100) - var(--topbarH));
   width:min(86vw, 320px);
   transform:translateX(105%);
   transition:transform .18s ease;
@@ -2711,7 +2713,7 @@ body.lockScroll{ overflow:hidden; }
   .modalCard{
     width: 100vw;
     max-width: 100vw;
-    max-height: calc((var(--vh) * 100) - 20px);
+    max-height: calc((var(--vh, 1vh) * 100) - 20px);
     border-radius: 16px;
   }
   @supports (height: 100svh){
@@ -3038,7 +3040,7 @@ body.drawer-right-open { --rightDrawerW: min(86vw, 340px); }
   min-height: 0;
 }
 .modalCard{
-  max-height: calc((var(--vh) * 100) - 20px);
+  max-height: calc((var(--vh, 1vh) * 100) - 20px);
 }
 .bottomBar{
   padding-bottom: calc(10px + env(safe-area-inset-bottom));
@@ -3135,7 +3137,7 @@ html {
 .mainLayout {
   display: flex;
   flex-direction: column;
-  height: calc(var(--vh) * 100);
+  height: calc(var(--vh, 1vh) * 100);
   min-height: 0; /* critical */
 }
 
