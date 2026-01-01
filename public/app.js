@@ -287,6 +287,7 @@ let themeFilter = "all";
 let modalTargetUsername = null;
 let pendingFile = null;
 let uploadXhr = null;
+let uploadingAndAutoSending = false;
 let memberMenuUser = null;
 let memberMenuUsername = "";
 let replyTarget = null;
@@ -2387,7 +2388,17 @@ function renderDmMessages(threadId){
     const meta = document.createElement("div");
     meta.className = "dmMetaRow";
     const t = m.ts ? new Date(m.ts) : null;
-    meta.innerHTML = `<span>${escapeHtml(m.user)}</span><span>${t ? t.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) : ""}</span>`;
+
+    const userSpan = document.createElement("span");
+    userSpan.className = "dmMetaUser";
+    userSpan.textContent = m.user || "";
+
+    const timeSpan = document.createElement("span");
+    timeSpan.className = "dmMetaTime";
+    timeSpan.textContent = t ? t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+
+    meta.appendChild(userSpan);
+    meta.appendChild(timeSpan);
 
     // Mobile/desktop: tap/click anywhere on the row to toggle actions.
     const toggleActions = (e) => {
@@ -2890,6 +2901,42 @@ function clearUploadPreview(){
   uploadInfo.textContent="";
   uploadProgress.style.width="0%";
 }
+
+async function autoUploadAndSend(file, opts = {}) {
+  if (!socket) return;
+  if (uploadingAndAutoSending) return;
+  uploadingAndAutoSending = true;
+
+  try {
+    showUploadPreview(file);
+
+    // Upload first
+    const attachment = await uploadChatFileWithProgress(file);
+
+    // Use any text already in the composer, otherwise send attachment-only.
+    const text = (msgInput?.value || "").trim();
+
+    socket.emit("chat message", {
+      text,
+      replyToId: replyTarget?.id || null,
+      attachmentUrl: attachment?.url || "",
+      attachmentType: attachment?.type || "",
+      attachmentMime: attachment?.mime || "",
+      attachmentSize: attachment?.size || 0,
+    });
+
+    // Clear composer state
+    msgInput.value = "";
+    setReplyTarget(null);
+    socket.emit("stop typing");
+  } catch (e) {
+    addSystem(`Upload failed: ${e?.message || e}`);
+  } finally {
+    uploadingAndAutoSending = false;
+    fileInput.value = "";
+    clearUploadPreview();
+  }
+}
 fileInput.addEventListener("change", () => {
   const f=fileInput.files?.[0];
   if(!f) return clearUploadPreview();
@@ -2898,7 +2945,8 @@ fileInput.addEventListener("change", () => {
     fileInput.value="";
     return clearUploadPreview();
   }
-  showUploadPreview(f);
+  // No extra confirmation: selecting a file uploads + sends automatically when finished.
+  autoUploadAndSend(f, { source: "picker" });
 });
 cancelUploadBtn.addEventListener("click", () => {
   if(uploadXhr){ uploadXhr.abort(); uploadXhr=null; addSystem("Upload canceled."); }
@@ -3451,6 +3499,31 @@ msgInput.addEventListener("input", (e)=>{ emitTyping(); renderMentionDropdown(me
 msgInput.addEventListener("keydown",(e)=>{
   if(e.key==="Enter"){ e.preventDefault(); sendMessage(); }
 });
+// Allow iOS/Android GIF keyboards (and screenshots) to paste as an image and auto-send.
+msgInput.addEventListener("paste", (e) => {
+  try {
+    const dt = e.clipboardData;
+    const items = dt?.items ? Array.from(dt.items) : [];
+    let file = null;
+
+    for (const it of items) {
+      if (it.kind === "file") {
+        const f = it.getAsFile();
+        if (f && (f.type || "").startsWith("image/")) { file = f; break; }
+      }
+    }
+    if (!file && dt?.files && dt.files.length) {
+      const f = dt.files[0];
+      if (f && (f.type || "").startsWith("image/")) file = f;
+    }
+    if (!file) return;
+
+    e.preventDefault();
+    autoUploadAndSend(file, { source: "paste" });
+  } catch {
+    // no-op
+  }
+});
 sendBtn.addEventListener("click", sendMessage);
 replyPreviewClose?.addEventListener("click", ()=>setReplyTarget(null));
 dmReplyClose?.addEventListener("click", ()=>setDmReplyTarget(null));
@@ -3461,6 +3534,10 @@ dmText?.addEventListener("focus", ()=>renderMentionDropdown(dmMentionDropdown, d
 
 async function sendMessage(){
   if(!socket) return;
+  if (uploadingAndAutoSending) {
+    addSystem("Upload in progress…");
+    return;
+  }
   const text = msgInput.value || "";
   const file = pendingFile;
   if(!text.trim() && !file) return;
