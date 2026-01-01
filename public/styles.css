@@ -3858,3 +3858,18 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+
+/* Neon glow for Owner / Co-Owner avatars */
+.avatar.role-owner {
+  box-shadow:
+    0 0 6px rgba(0, 255, 128, 0.7),
+    0 0 14px rgba(0, 200, 100, 0.6),
+    inset 0 0 10px rgba(0, 120, 60, 0.8);
+}
+
+.avatar.role-coowner {
+  box-shadow:
+    0 0 6px rgba(180, 80, 255, 0.7),
+    0 0 14px rgba(255, 100, 200, 0.6),
+    inset 0 0 10px rgba(120, 40, 160, 0.8);
+}
