@@ -1887,6 +1887,32 @@ function threadAvatarNode(t){
   return wrap;
 }
 
+
+function groupVennNode(thread){
+  const parts = Array.isArray(thread.participants) ? thread.participants : [];
+  const meName = String(me?.username || "");
+  const others = parts.filter(p => p && p !== meName);
+  const pick = others.slice(0, 3);
+  while (pick.length < 3) pick.push(meName || "?");
+  const wrap = document.createElement("div");
+  wrap.className = "dmVenn";
+  const slots = ["a", "b", "c"];
+  pick.forEach((name, i) => {
+    const node = avatarNode(name || "?");
+    node.classList.add("dmVennAv", `dmVennAv-${slots[i]}`);
+    getAvatarUrl(name).then((url) => {
+      if (url && node && node.tagName && node.tagName.toLowerCase() === 'div') {
+        node.style.backgroundImage = `url('${url}')`;
+        node.style.backgroundSize = "cover";
+        node.style.backgroundPosition = "center";
+        node.textContent = "";
+      }
+    });
+    wrap.appendChild(node);
+  });
+  return wrap;
+}
+
 function syncDmTabUi(){
   dmTabs?.querySelectorAll("[data-dm-tab]")?.forEach((btn) => {
     const on = btn.dataset.dmTab === dmTab;
@@ -1980,8 +2006,9 @@ function renderThreadItem(t){
 }
 
 function renderDmThreads(){
-  // In the new UI, the DM panel is *not* a hub. We only show direct DM threads as a horizontal avatar strip.
-  const list = (dmThreads || []).filter(isDirectThread);
+  // The DM panel uses a horizontal avatar strip. Which threads are shown depends on whether we
+  // opened Direct DMs (💬) or Group DMs (👥) from the top bar.
+  const list = (dmThreads || []).filter(dmTab === "group" ? (t => !!t.is_group) : isDirectThread);
 
   // Fallback if strip element missing (older HTML)
   if (!dmStrip) {
@@ -2006,21 +2033,24 @@ function renderDmThreads(){
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "dmAvatarBtn" + (String(activeDmId)===String(t.id) ? " active" : "");
-    btn.title = other ? `DM with ${other}` : "DM";
+    btn.title = (dmTab === "group") ? (threadLabel(t) || "Group DM") : (other ? `DM with ${other}` : "DM");
 
     const wrap = document.createElement("div");
     wrap.className = "dmAvatarWrap";
 
-    const av = avatarNode(other || "?");
-    // try to upgrade to real avatar image
-    getAvatarUrl(other).then(url=>{
-      if (url && av && av.tagName && av.tagName.toLowerCase()==='div') {
-        av.style.backgroundImage = `url('${url}')`;
-        av.style.backgroundSize = "cover";
-        av.style.backgroundPosition = "center";
-        av.textContent = "";
-      }
-    });
+    const av = (dmTab === "group") ? groupVennNode(t) : avatarNode(other || "?");
+
+    // try to upgrade to real avatar image (direct only)
+    if (dmTab !== "group") {
+      getAvatarUrl(other).then(url=>{
+        if (url && av && av.tagName && av.tagName.toLowerCase()==='div') {
+          av.style.backgroundImage = `url('${url}')`;
+          av.style.backgroundSize = "cover";
+          av.style.backgroundPosition = "center";
+          av.textContent = "";
+        }
+      });
+    }
 
     const badge = document.createElement("span");
     badge.className = "dmUnreadBadge";
@@ -2127,8 +2157,9 @@ async function startDirectMessage(username){
   }
 }
 
-function openDmPanel(){
+function openDmPanel(mode){
   dmPanel.classList.add("open");
+  if (mode === "group") setDmTab("group"); else setDmTab("direct");
   setDmNotice("");
   clearDmBadges();
   syncDmTabUi();
@@ -2512,13 +2543,8 @@ async function leaveGroup(threadId){
   }
 }
 
-dmToggleBtn?.addEventListener("click", () => { setDmTab("direct"); openDmPanel(); });
-groupDmToggleBtn?.addEventListener("click", () => { setDmTab("group"); openDmPanel(); });
-dmTabs?.addEventListener("click", (e) => {
-  const btn = e.target.closest("[data-dm-tab]");
-  if (!btn) return;
-  setDmTab(btn.dataset.dmTab);
-});
+dmToggleBtn?.addEventListener("click", () => { openDmPanel("direct"); });
+groupDmToggleBtn?.addEventListener("click", () => { openDmPanel("group"); });
 dmCreateGroupBtn?.addEventListener("click", () => openDmPicker("create"));
 dmCloseBtn?.addEventListener("click", closeDmPanel);
 dmSendBtn?.addEventListener("click", sendDmMessage);

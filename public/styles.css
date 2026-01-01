@@ -3884,3 +3884,13 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
     0 0 14px rgba(255, 100, 200, 0.6),
     inset 0 0 10px rgba(120, 40, 160, 0.8);
 }
+
+/* Hide DM mode tabs - direct vs group is controlled from topbar buttons */
+.dmTabs{ display:none !important; }
+
+/* Group DM avatar (3-circle venn) */
+.dmVenn{ position:relative; width:42px; height:42px; }
+.dmVennAv{ position:absolute; width:26px; height:26px; border-radius:999px; overflow:hidden; border:2px solid rgba(0,0,0,0.25); background:var(--avatar-bg); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:11px; }
+.dmVennAv-a{ left:0; top:10px; }
+.dmVennAv-b{ right:0; top:10px; }
+.dmVennAv-c{ left:8px; top:0; }
