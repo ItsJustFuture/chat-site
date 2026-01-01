@@ -824,18 +824,44 @@ const ROLE_DISPLAY = {
 };
 
 function findUserByMention(raw, cb) {
-  const name = sanitizeUsername(String(raw || "").replace(/^@+/, ""));
+  // Accept @mentions, quoted names, and names with spaces.
+  const name = sanitizeUsername(String(raw || "").replace(/^@+/, "")).trim();
   if (!name) return cb(new Error("User not found"));
-  db.get(
-    `SELECT id, username, role FROM users
-     WHERE lower(username)=lower(?)
-     ORDER BY CASE WHEN username=? THEN 0 ELSE 1 END LIMIT 1`,
-    [name, name],
-    (err, row) => {
-      if (err || !row) return cb(new Error("User not found"));
-      cb(null, row);
-    }
-  );
+
+  // Prefer Postgres in production (Render). Fall back to SQLite for legacy/local.
+  const trySqlite = () => {
+    db.get(
+      `SELECT id, username, role FROM users
+       WHERE lower(username)=lower(?)
+       ORDER BY CASE WHEN username=? THEN 0 ELSE 1 END LIMIT 1`,
+      [name, name],
+      (err, row) => {
+        if (err || !row) return cb(new Error("User not found"));
+        cb(null, row);
+      }
+    );
+  };
+
+  if (process.env.DATABASE_URL) {
+    pgPool
+      .query(
+        `SELECT id, username, role
+           FROM users
+          WHERE lower(username)=lower($1)
+          ORDER BY CASE WHEN username=$1 THEN 0 ELSE 1 END
+          LIMIT 1`,
+        [name]
+      )
+      .then(({ rows }) => {
+        const row = rows && rows[0];
+        if (row && row.id != null) return cb(null, { id: row.id, username: row.username, role: row.role || "User" });
+        return trySqlite();
+      })
+      .catch(() => trySqlite());
+    return;
+  }
+
+  trySqlite();
 }
 
 function logCommandAudit({ executor, commandName, args, targets, room, success, error }) {
@@ -857,56 +883,41 @@ function logCommandAudit({ executor, commandName, args, targets, room, success, 
   );
 }
 
-function normalizeRoleInput(input) {
-  const raw = String(input || "").trim();
-  if (!raw) return "";
-  const key = raw.toLowerCase().replace(/[_\s]+/g, " ").trim();
-  // Accept common variants
-  if (key === "co owner" || key === "co-owner" || key === "coowner") return "Co-owner";
-  if (key === "vip") return "VIP";
-  if (key === "moderator" || key === "mod") return "Moderator";
-  if (key === "admin" || key === "administrator") return "Admin";
-  if (key === "owner") return "Owner";
-  if (key === "guest") return "Guest";
-  if (key === "user" || key === "member") return "User";
-  // Fallback: try exact-cased match in ROLES
-  const candidate = raw
-    .split(/\s+/)
-    .map((w) => w ? (w[0].toUpperCase() + w.slice(1).toLowerCase()) : w)
-    .join(" ");
-  return candidate;
-}
-
-function tokenizeCommandArgs(raw) {
-  // Supports: quoted strings ("...") and simple backslash escapes inside quotes.
-  const s = String(raw || "");
+function tokenizeCommandArgs(input) {
+  // Supports quotes for usernames with spaces:
+  //   /givegold "Lola Henderson" 50
+  // Also tolerates unquoted multi-word usernames in commands where the *last*
+  // argument is numeric (we reconstruct later in handlers).
+  const s = String(input || "").trim();
   const out = [];
   let cur = "";
-  let inQuotes = false;
+  let q = null; // ' or "
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
-    if (inQuotes) {
+    if (q) {
       if (ch === "\\" && i + 1 < s.length) {
-        cur += s[i + 1];
-        i++;
-        continue;
+        // basic escape handling inside quotes
+        const next = s[i + 1];
+        if (next === q || next === "\\") {
+          cur += next;
+          i++;
+          continue;
+        }
       }
-      if (ch === '"') {
-        inQuotes = false;
-        continue;
+      if (ch === q) {
+        q = null;
+      } else {
+        cur += ch;
       }
-      cur += ch;
       continue;
     }
-    if (ch === '"') {
-      inQuotes = true;
+    if (ch === '"' || ch === "'") {
+      q = ch;
       continue;
     }
     if (/\s/.test(ch)) {
-      if (cur) {
-        out.push(cur);
-        cur = "";
-      }
+      if (cur) out.push(cur);
+      cur = "";
       continue;
     }
     cur += ch;
@@ -918,10 +929,25 @@ function tokenizeCommandArgs(raw) {
 function parseCommand(text) {
   const raw = String(text || "").trim();
   if (!raw.startsWith("/")) return null;
-  const parts = tokenizeCommandArgs(raw.slice(1)).filter(Boolean);
+  const parts = tokenizeCommandArgs(raw.slice(1));
   if (!parts.length) return null;
   const [name, ...args] = parts;
   return { name: name.toLowerCase(), args };
+}
+
+function normalizeRoleInput(rawRole) {
+  const r = String(rawRole || "").trim();
+  if (!r) return "";
+  const key = r.replace(/[_\s-]+/g, " ").trim().toLowerCase();
+  // Accept a few common variants
+  if (key === "co owner" || key === "coowner" || key === "co-owner") return "Co-owner";
+  if (key === "vip") return "VIP";
+  if (key === "owner") return "Owner";
+  if (key === "admin") return "Admin";
+  if (key === "moderator" || key === "mod") return "Moderator";
+  if (key === "member" || key === "user") return "User";
+  if (key === "guest") return "Guest";
+  return r;
 }
 
 const slowmodeTracker = new Map(); // key `${room}:${userId}` -> last ts
@@ -1258,30 +1284,11 @@ const commandRegistry = {
     example: "/giverole @sam Admin",
     handler: async ({ args, actorRole }) => {
       if (args.length < 2) return { ok: false, message: "Missing arguments" };
-
-      // Support usernames with spaces (quoted or unquoted) and role variants.
-      // Examples:
-      //   /giverole "Lola Henderson" Moderator
-      //   /giverole Lola Henderson Co owner
-      let roleGuess = "";
-      let userPart = args;
-      // Try 1..3 tokens from the end as the role.
-      for (let take = 1; take <= 3 && take < args.length; take++) {
-        const candidate = normalizeRoleInput(args.slice(args.length - take).join(" "));
-        if (ROLES.includes(candidate)) {
-          roleGuess = candidate;
-          userPart = args.slice(0, args.length - take);
-          break;
-        }
-      }
-      if (!roleGuess) return { ok: false, message: "Unknown role" };
-
-      const targetName = userPart.join(" ");
-      const target = await new Promise((resolve, reject) =>
-        findUserByMention(targetName, (e, u) => (e ? reject(e) : resolve(u)))
-      );
-
-      const role = roleGuess;
+      // Allow usernames with spaces if quoted, e.g. /giverole "Lola Henderson" Moderator
+      // For role, allow multi-word and hyphen variants: "Co owner" -> "Co-owner".
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      const role = normalizeRoleInput(args.slice(1).join(" "));
+      if (!ROLES.includes(role)) return { ok: false, message: "Unknown role" };
       if (roleRank(role) >= roleRank("Owner")) return { ok: false, message: "Cannot grant Owner" };
       if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
       await setRoleEverywhere(target.id, target.username, role);
@@ -1294,19 +1301,11 @@ const commandRegistry = {
     usage: "/removerole @user role",
     example: "/removerole @sam Moderator",
     handler: async ({ args, actorRole }) => {
-      if (args.length < 1) return { ok: false, message: "Missing arguments" };
-
-      // Support usernames with spaces. Role arg is optional; we always reset to User.
-      // Examples:
-      //   /removerole "Lola Henderson"
-      //   /removerole Lola Henderson
-      const targetName = args.join(" ");
-      const target = await new Promise((resolve, reject) =>
-        findUserByMention(targetName, (e, u) => (e ? reject(e) : resolve(u)))
-      );
-
+      if (args.length < 2) return { ok: false, message: "Missing arguments" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+      const role = normalizeRoleInput(args.slice(1).join(" "));
       if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
-      if (roleRank(target.role) >= roleRank(actorRole)) return { ok: false, message: "Cannot remove equal/higher role" };
+      if (roleRank(role) >= roleRank(actorRole)) return { ok: false, message: "Cannot remove equal role" };
       await dbRunAsync(`UPDATE users SET role='User' WHERE id=?`, [target.id]);
       return { ok: true, message: `Removed role from ${target.username}` };
     },
@@ -1317,13 +1316,15 @@ const commandRegistry = {
     usage: "/givegold @user amount",
     example: "/givegold @sam 50",
     handler: async ({ args }) => {
+      // Support:
+      //   /givegold @sam 50
+      //   /givegold "Lola Henderson" 50
+      //   /givegold Lola Henderson 50
       if (args.length < 2) return { ok: false, message: "Missing arguments" };
       const amt = Number(args[args.length - 1]);
-      if (!Number.isFinite(amt)) return { ok: false, message: "Amount must be a number" };
-      const targetName = args.slice(0, -1).join(" ");
-      const target = await new Promise((resolve, reject) =>
-        findUserByMention(targetName, (e, u) => (e ? reject(e) : resolve(u)))
-      );
+      if (!Number.isFinite(amt)) return { ok: false, message: "Missing arguments" };
+      const targetRaw = args.slice(0, -1).join(" ");
+      const target = await new Promise((resolve, reject) => findUserByMention(targetRaw, (e, u) => (e ? reject(e) : resolve(u))));
       await dbRunAsync(`UPDATE users SET gold = gold + ? WHERE id=?`, [amt, target.id]);
       emitProgressionUpdate(target.id);
       return { ok: true, message: `Gave ${amt} gold to ${target.username}` };
@@ -1337,11 +1338,9 @@ const commandRegistry = {
     handler: async ({ args }) => {
       if (args.length < 2) return { ok: false, message: "Missing arguments" };
       const amt = Number(args[args.length - 1]);
-      if (!Number.isFinite(amt)) return { ok: false, message: "Amount must be a number" };
-      const targetName = args.slice(0, -1).join(" ");
-      const target = await new Promise((resolve, reject) =>
-        findUserByMention(targetName, (e, u) => (e ? reject(e) : resolve(u)))
-      );
+      if (!Number.isFinite(amt)) return { ok: false, message: "Missing arguments" };
+      const targetRaw = args.slice(0, -1).join(" ");
+      const target = await new Promise((resolve, reject) => findUserByMention(targetRaw, (e, u) => (e ? reject(e) : resolve(u))));
       await dbRunAsync(`UPDATE users SET gold=? WHERE id=?`, [amt, target.id]);
       emitProgressionUpdate(target.id);
       return { ok: true, message: `Set gold for ${target.username} to ${amt}` };
@@ -1353,11 +1352,8 @@ const commandRegistry = {
     usage: "/resetxp @user",
     example: "/resetxp @sam",
     handler: async ({ args }) => {
-      if (!args.length) return { ok: false, message: "Missing user" };
-      const targetName = args.join(" ");
-      const target = await new Promise((resolve, reject) =>
-        findUserByMention(targetName, (e, u) => (e ? reject(e) : resolve(u)))
-      );
+      if (!args[0]) return { ok: false, message: "Missing user" };
+      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
       await dbRunAsync(`UPDATE users SET xp=0 WHERE id=?`, [target.id]);
       return { ok: true, message: `Reset XP for ${target.username}` };
     },
@@ -1370,11 +1366,9 @@ const commandRegistry = {
     handler: async ({ args }) => {
       if (args.length < 2) return { ok: false, message: "Missing arguments" };
       const level = Number(args[args.length - 1]);
-      if (!Number.isFinite(level) || level < 1) return { ok: false, message: "Level must be a positive number" };
-      const targetName = args.slice(0, -1).join(" ");
-      const target = await new Promise((resolve, reject) =>
-        findUserByMention(targetName, (e, u) => (e ? reject(e) : resolve(u)))
-      );
+      if (!Number.isFinite(level) || level < 1) return { ok: false, message: "Missing arguments" };
+      const targetRaw = args.slice(0, -1).join(" ");
+      const target = await new Promise((resolve, reject) => findUserByMention(targetRaw, (e, u) => (e ? reject(e) : resolve(u))));
       let xpNeeded = 0;
       for (let i = 1; i < Math.floor(level); i++) xpNeeded += i * 100;
       await dbRunAsync(`UPDATE users SET xp=? WHERE id=?`, [xpNeeded, target.id]);
@@ -4271,14 +4265,12 @@ if (s?.user) {
     const room = socket.currentRoom;
     if (!room) return;
 
-    const actorRole = socket.user?.role || socket.request?.session?.user?.role || "User";
-    // Allow Co-owner+ to set roles, but only Owner can grant Owner.
-    if (!requireMinRole(actorRole, "Co-owner")) return;
+    const actorRole = socket.request.session.user.role;
+    if (actorRole !== "Owner") return;
 
     username = sanitizeUsername(username);
-    role = normalizeRoleInput(role);
+    role = String(role || "").trim();
     if (!ROLES.includes(role)) return;
-    if (role === "Owner" && actorRole !== "Owner") return;
 
     db.get("SELECT id, role as oldRole FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
       if (!target) return;
