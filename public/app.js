@@ -287,7 +287,6 @@ let themeFilter = "all";
 let modalTargetUsername = null;
 let pendingFile = null;
 let uploadXhr = null;
-let uploadingAndAutoSending = false;
 let memberMenuUser = null;
 let memberMenuUsername = "";
 let replyTarget = null;
@@ -334,21 +333,9 @@ const editDmPanel = document.getElementById("editDmPanel");
 
 const authUser = document.getElementById("authUser");
 const authPass = document.getElementById("authPass");
-const togglePassBtn = document.getElementById("togglePassBtn");
 const authMsg = document.getElementById("authMsg");
 const loginBtn = document.getElementById("loginBtn");
 const regBtn = document.getElementById("regBtn");
-
-// Auth: show/hide password
-togglePassBtn?.addEventListener("click", ()=>{
-  if (!authPass) return;
-  const isHidden = authPass.type === "password";
-  authPass.type = isHidden ? "text" : "password";
-  togglePassBtn.textContent = isHidden ? "🙈" : "👁";
-  togglePassBtn.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
-  togglePassBtn.title = isHidden ? "Hide password" : "Show password";
-  authPass.focus();
-});
 
 const chanList = document.getElementById("chanList");
 const nowRoom = document.getElementById("nowRoom");
@@ -1270,69 +1257,6 @@ applyDmThemePrefs();
 initCustomizationUi();
 const EMOJI_CHOICES = ["😀","😁","😂","🙂","😉","😍","😘","🤔","😤","😭","😡","🥹","😈","💀","🔥","👀","🖕","♥️","💯","👍","👎","🎉","📸","🫦",];
 
-// --- DM reaction menu (separate from main chat reaction menu)
-let dmReactionMenuEl = null;
-let dmReactionMenuFor = null;
-let dmReactionMenuRow = null;
-
-function ensureDmReactionMenu(){
-  if (dmReactionMenuEl) return;
-  dmReactionMenuEl = document.createElement("div");
-  dmReactionMenuEl.className = "reactionMenu";
-  dmReactionMenuEl.innerHTML = `<div class="reactionGrid"></div>`;
-  document.body.appendChild(dmReactionMenuEl);
-
-  document.addEventListener("mousedown", (e)=>{
-    if(dmReactionMenuEl?.classList.contains("open") && !dmReactionMenuEl.contains(e.target)){
-      closeDmReactionMenu();
-    }
-  });
-  document.addEventListener("keydown", (e)=>{
-    if(e.key === "Escape") closeDmReactionMenu();
-  });
-  window.addEventListener("scroll", ()=>closeDmReactionMenu(), {passive:true});
-}
-
-function openDmReactionMenu(threadId, messageId, anchorEl, rowEl){
-  ensureDmReactionMenu();
-  dmReactionMenuFor = messageId;
-  dmReactionMenuRow = rowEl;
-
-  const grid = dmReactionMenuEl.querySelector(".reactionGrid");
-  grid.innerHTML = "";
-
-  for (const em of EMOJI_CHOICES) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.textContent = em;
-    b.onclick = ()=>{
-      socket?.emit("dm reaction", { threadId, messageId, emoji: em });
-      closeDmReactionMenu();
-    };
-    grid.appendChild(b);
-  }
-
-  const rect = anchorEl.getBoundingClientRect();
-  dmReactionMenuEl.classList.add("open");
-
-  const menuRect = dmReactionMenuEl.getBoundingClientRect();
-  let x = Math.min(window.innerWidth - menuRect.width - 12, Math.max(12, rect.left));
-  let y = rect.top - menuRect.height - 10;
-  if (y < 12) y = rect.bottom + 10;
-
-  dmReactionMenuEl.style.left = `${x}px`;
-  dmReactionMenuEl.style.top = `${y}px`;
-  if (rowEl) rowEl.classList.add("showActions");
-}
-
-function closeDmReactionMenu(){
-  if (!dmReactionMenuEl) return;
-  dmReactionMenuEl.classList.remove("open");
-  if (dmReactionMenuRow) dmReactionMenuRow.classList.remove("showActions");
-  dmReactionMenuFor = null;
-  dmReactionMenuRow = null;
-}
-
 let reactionMenuEl = null;
 let reactionMenuFor = null;
 let reactionMenuRow = null;
@@ -1655,24 +1579,6 @@ function renderReactions(messageId, reactionsMap){
     const pill=document.createElement("div");
     pill.className="reactPill";
     pill.textContent=`${emoji} ${count}`;
-    container.appendChild(pill);
-  });
-}
-
-function renderDmReactions(messageId, reactionsMap){
-  const counts = {};
-  const map = reactionsMap || {};
-  for (const u in map) {
-    const em = map[u];
-    counts[em] = (counts[em] || 0) + 1;
-  }
-  const container = document.getElementById("dm-reacts-" + messageId);
-  if (!container) return;
-  container.innerHTML = "";
-  Object.entries(counts).forEach(([emoji, count]) => {
-    const pill = document.createElement("div");
-    pill.className = "reactPill";
-    pill.textContent = `${emoji} ${count}`;
     container.appendChild(pill);
   });
 }
@@ -2103,7 +2009,7 @@ function renderDirectThreads(){
     const wrap = document.createElement("div");
     wrap.className = "dmAvatarWrap";
 
-    const av = avatarNode(other || "?");
+    const av = avatarNode(null, other || "?", "member");
     getAvatarUrl(other).then(url=>{
       if (url && av && av.tagName && av.tagName.toLowerCase()==='div') {
         av.style.backgroundImage = `url('${url}')`;
@@ -2142,7 +2048,7 @@ function vennPreview(thread){
 
   for (let i=0;i<3;i++) {
     const name = picks[i] || "?";
-    const av = avatarNode(name);
+    const av = avatarNode(null, name, "member");
     av.classList.add("vennAvatar", `v${i+1}`);
     getAvatarUrl(name).then(url=>{
       if (url && av && av.tagName && av.tagName.toLowerCase()==='div') {
@@ -2303,8 +2209,10 @@ function closeDmPanel(){
 
 function renderDmMessages(threadId){
   if (!dmMessagesEl) return;
+
   const keepOffset = dmMessagesEl.scrollHeight - dmMessagesEl.scrollTop;
   const stick = isNearBottom(dmMessagesEl, 160);
+
   dmMessagesEl.innerHTML = "";
   const msgsArr = dmMessages.get(threadId) || [];
 
@@ -2318,9 +2226,55 @@ function renderDmMessages(threadId){
   }
 
   for (const m of msgsArr) {
-    const isSelf = m.user === me.username;
+    const isSelf = String(m.user) === String(me?.username);
+
     const row = document.createElement("div");
     row.className = "dmRow" + (isSelf ? " self" : "");
+    row.dataset.dmMid = m.messageId || m.id;
+
+    // Actions rail (outside the bubble)
+    const actions = document.createElement("div");
+    actions.className = "dmActionsRail";
+
+    const reactBtn = document.createElement("button");
+    reactBtn.type = "button";
+    reactBtn.className = "iconBtn smallIcon";
+    reactBtn.title = "React";
+    reactBtn.textContent = "😀";
+    reactBtn.onclick = (e) => {
+      e.stopPropagation();
+      // DM reactions are not yet wired server-side; keep UI-only for now.
+      setDmNotice("Reactions in DMs coming next.");
+    };
+
+    const replyBtn = document.createElement("button");
+    replyBtn.type = "button";
+    replyBtn.className = "iconBtn smallIcon";
+    replyBtn.title = "Reply";
+    replyBtn.textContent = "↩️";
+    replyBtn.onclick = (e) => {
+      e.stopPropagation();
+      setDmReplyTarget({ id: m.messageId || m.id, user: m.user, text: m.text });
+      focusDmComposer();
+    };
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "iconBtn smallIcon";
+    delBtn.title = "Delete";
+    delBtn.textContent = "🗑️";
+    delBtn.onclick = (e) => {
+      e.stopPropagation();
+      setDmNotice("Delete in DMs coming next.");
+    };
+
+    actions.appendChild(reactBtn);
+    actions.appendChild(replyBtn);
+    actions.appendChild(delBtn);
+
+    // Bubble + meta
+    const bubbleWrap = document.createElement("div");
+    bubbleWrap.className = "dmBubbleWrap";
 
     const bubble = document.createElement("div");
     bubble.className = "dmBubble" + (isSelf ? " self" : "");
@@ -2342,80 +2296,36 @@ function renderDmMessages(threadId){
     }
 
     const text = document.createElement("div");
+    text.className = "dmText";
     text.innerHTML = applyMentions(m.text || "");
     bubble.appendChild(text);
 
-    // actions rail (outside the bubble)
-    const actions = document.createElement("div");
-    actions.className = "dmActionsRail";
-
-    const reactBtn = document.createElement("button");
-    reactBtn.className = "reactBtn";
-    reactBtn.type = "button";
-    reactBtn.textContent = "❤️‍🔥";
-    reactBtn.title = "React";
-    reactBtn.onclick = (e) => {
-      e.stopPropagation();
-      const mid = m.messageId || m.id;
-      // toggle if already open for same message
-      if (dmReactionMenuFor === mid) closeDmReactionMenu();
-      else openDmReactionMenu(threadId, mid, reactBtn, row);
-    };
-    actions.appendChild(reactBtn);
-
-    const replyBtn = document.createElement("button");
-    replyBtn.className = "reactBtn";
-    replyBtn.type = "button";
-    replyBtn.textContent = "↩️";
-    replyBtn.title = "Reply";
-    replyBtn.onclick = (e) => {
-      e.stopPropagation();
-      setDmReplyTarget({ id: m.messageId || m.id, user: m.user, text: m.text });
-      focusDmComposer();
-    };
-    actions.appendChild(replyBtn);
-
-    // delete: author can delete their own, Admin+ can delete any (enforced server-side)
-    const delBtn = document.createElement("button");
-    delBtn.className = "reactBtn";
-    delBtn.type = "button";
-    delBtn.textContent = "🗑️";
-    delBtn.title = "Delete";
-    delBtn.onclick = (e) => {
-      e.stopPropagation();
-      const mid = m.messageId || m.id;
-      const ok = confirm("Delete this DM message?");
-      if (!ok) return;
-      socket?.emit("dm delete message", { threadId, messageId: mid });
-      row.classList.remove("showActions");
-      closeDmReactionMenu();
-    };
-    actions.appendChild(delBtn);
-
-    // reactions display (below bubble, outside)
-    const reacts = document.createElement("div");
-    reacts.className = "reactions";
-    reacts.id = "dm-reacts-" + (m.messageId || m.id);
-
     const meta = document.createElement("div");
     meta.className = "dmMetaRow";
-    const t = m.ts ? new Date(m.ts) : null;
+    const u = document.createElement("span");
+    u.className = "dmMetaUser";
+    u.textContent = m.user || "";
+    const t = document.createElement("span");
+    t.className = "dmMetaTime";
+    t.textContent = m.ts ? new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) : "";
+    meta.appendChild(u);
+    meta.appendChild(t);
 
-    const userSpan = document.createElement("span");
-    userSpan.className = "dmMetaUser";
-    userSpan.textContent = m.user || "";
+    bubbleWrap.appendChild(bubble);
+    bubbleWrap.appendChild(meta);
 
-    const timeSpan = document.createElement("span");
-    timeSpan.className = "dmMetaTime";
-    timeSpan.textContent = t ? t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    // Order: for self messages, actions on the right; for others, actions on the left
+    if (isSelf) {
+      row.appendChild(bubbleWrap);
+      row.appendChild(actions);
+    } else {
+      row.appendChild(actions);
+      row.appendChild(bubbleWrap);
+    }
 
-    meta.appendChild(userSpan);
-    meta.appendChild(timeSpan);
-
-    // Mobile/desktop: tap/click anywhere on the row to toggle actions.
+    // Mobile/desktop: tap/click the row to toggle actions
     const toggleActions = (e) => {
       if (e?.target?.closest("button, a, input, textarea, select, label")) return;
-      if (e?.stopPropagation) e.stopPropagation();
       document.querySelectorAll(".dmRow.showActions").forEach((el) => {
         if (el !== row) el.classList.remove("showActions");
       });
@@ -2423,17 +2333,7 @@ function renderDmMessages(threadId){
     };
     row.addEventListener("pointerdown", toggleActions);
 
-    row.dataset.dmMid = m.messageId || m.id;
-    bubble.dataset.dmMid = m.messageId || m.id;
-
-    row.appendChild(bubble);
-    row.appendChild(actions);
-    row.appendChild(reacts);
-    row.appendChild(meta);
     dmMessagesEl.appendChild(row);
-
-    // initial reactions render (if present)
-    if (m.reactions) renderDmReactions(m.messageId || m.id, m.reactions);
   }
 
   requestAnimationFrame(() => {
@@ -2768,6 +2668,22 @@ async function toggleDmQuickBar(kind){
 dmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("direct"); });
 groupDmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("group"); });
 
+// Close the quick DM avatar strips when clicking/tapping outside of them.
+document.addEventListener("pointerdown", (e) => {
+  const t = e.target;
+  // If neither bar is open, nothing to do.
+  const directOpen = dmQuickBar && !dmQuickBar.hidden;
+  const groupOpen = groupQuickBar && !groupQuickBar.hidden;
+  if (!directOpen && !groupOpen) return;
+
+  // Clicks on the toggle buttons or inside the bars should not close them.
+  if (dmToggleBtn?.contains(t) || groupDmToggleBtn?.contains(t)) return;
+  if (dmQuickBar?.contains(t) || groupQuickBar?.contains(t)) return;
+
+  hideAllDmQuickBars();
+});
+
+
 // The DM panel is entered only after selecting a thread from the quick strip.
 dmCreateGroupBtn?.addEventListener("click", () => openDmPicker("create"));
 dmCloseBtn?.addEventListener("click", closeDmPanel);
@@ -2913,42 +2829,6 @@ function clearUploadPreview(){
   uploadInfo.textContent="";
   uploadProgress.style.width="0%";
 }
-
-async function autoUploadAndSend(file, opts = {}) {
-  if (!socket) return;
-  if (uploadingAndAutoSending) return;
-  uploadingAndAutoSending = true;
-
-  try {
-    showUploadPreview(file);
-
-    // Upload first
-    const attachment = await uploadChatFileWithProgress(file);
-
-    // Use any text already in the composer, otherwise send attachment-only.
-    const text = (msgInput?.value || "").trim();
-
-    socket.emit("chat message", {
-      text,
-      replyToId: replyTarget?.id || null,
-      attachmentUrl: attachment?.url || "",
-      attachmentType: attachment?.type || "",
-      attachmentMime: attachment?.mime || "",
-      attachmentSize: attachment?.size || 0,
-    });
-
-    // Clear composer state
-    msgInput.value = "";
-    setReplyTarget(null);
-    socket.emit("stop typing");
-  } catch (e) {
-    addSystem(`Upload failed: ${e?.message || e}`);
-  } finally {
-    uploadingAndAutoSending = false;
-    fileInput.value = "";
-    clearUploadPreview();
-  }
-}
 fileInput.addEventListener("change", () => {
   const f=fileInput.files?.[0];
   if(!f) return clearUploadPreview();
@@ -2957,8 +2837,7 @@ fileInput.addEventListener("change", () => {
     fileInput.value="";
     return clearUploadPreview();
   }
-  // No extra confirmation: selecting a file uploads + sends automatically when finished.
-  autoUploadAndSend(f, { source: "picker" });
+  showUploadPreview(f);
 });
 cancelUploadBtn.addEventListener("click", () => {
   if(uploadXhr){ uploadXhr.abort(); uploadXhr=null; addSystem("Upload canceled."); }
@@ -3511,31 +3390,6 @@ msgInput.addEventListener("input", (e)=>{ emitTyping(); renderMentionDropdown(me
 msgInput.addEventListener("keydown",(e)=>{
   if(e.key==="Enter"){ e.preventDefault(); sendMessage(); }
 });
-// Allow iOS/Android GIF keyboards (and screenshots) to paste as an image and auto-send.
-msgInput.addEventListener("paste", (e) => {
-  try {
-    const dt = e.clipboardData;
-    const items = dt?.items ? Array.from(dt.items) : [];
-    let file = null;
-
-    for (const it of items) {
-      if (it.kind === "file") {
-        const f = it.getAsFile();
-        if (f && (f.type || "").startsWith("image/")) { file = f; break; }
-      }
-    }
-    if (!file && dt?.files && dt.files.length) {
-      const f = dt.files[0];
-      if (f && (f.type || "").startsWith("image/")) file = f;
-    }
-    if (!file) return;
-
-    e.preventDefault();
-    autoUploadAndSend(file, { source: "paste" });
-  } catch {
-    // no-op
-  }
-});
 sendBtn.addEventListener("click", sendMessage);
 replyPreviewClose?.addEventListener("click", ()=>setReplyTarget(null));
 dmReplyClose?.addEventListener("click", ()=>setDmReplyTarget(null));
@@ -3546,10 +3400,6 @@ dmText?.addEventListener("focus", ()=>renderMentionDropdown(dmMentionDropdown, d
 
 async function sendMessage(){
   if(!socket) return;
-  if (uploadingAndAutoSending) {
-    addSystem("Upload in progress…");
-    return;
-  }
   const text = msgInput.value || "";
   const file = pendingFile;
   if(!text.trim() && !file) return;
@@ -4296,7 +4146,7 @@ socket.on("disconnect", (reason) => {
     dmMessages.set(threadId, messages);
     renderDmThreads();
 
-    if (activeDmId === threadId) {
+    if (String(activeDmId) === String(threadId)) {
       setDmMeta(dmThreads.find((t) => t.id === threadId));
       renderDmMessages(threadId);
       // Consider the thread read once we've rendered its history.
@@ -4309,35 +4159,6 @@ socket.on("disconnect", (reason) => {
     }
   });
 
-  socket.on("dm reaction update", ({ threadId, messageId, reactions }) => {
-    const tid = Number(threadId);
-    const mid = Number(messageId);
-    if (!Number.isInteger(tid) || !Number.isInteger(mid)) return;
-    const arr = dmMessages.get(tid) || [];
-    const idx = arr.findIndex((x) => Number(x.messageId || x.id) === mid);
-    if (idx !== -1) {
-      arr[idx] = { ...arr[idx], reactions: reactions || {} };
-      dmMessages.set(tid, arr);
-    }
-    renderDmReactions(mid, reactions || {});
-  });
-
-  socket.on("dm message deleted", ({ threadId, messageId }) => {
-    const tid = Number(threadId);
-    const mid = Number(messageId);
-    if (!Number.isInteger(tid) || !Number.isInteger(mid)) return;
-    const arr = (dmMessages.get(tid) || []).filter((m) => Number(m.messageId || m.id) !== mid);
-    dmMessages.set(tid, arr);
-    if (activeDmId === tid) renderDmMessages(tid);
-    // Thread preview will be corrected by dm thread meta (if emitted).
-  });
-
-  socket.on("dm thread meta", ({ threadId, last_text, last_ts }) => {
-    const tid = Number(threadId);
-    if (!Number.isInteger(tid)) return;
-    upsertThreadMeta(tid, { last_text: last_text || "", last_ts: last_ts || null });
-  });
-
   socket.on("dm history cleared", ({ threadId }) => {
     if (!threadId) return;
     dmMessages.set(threadId, []);
@@ -4346,7 +4167,7 @@ socket.on("disconnect", (reason) => {
       meta.last_text = "";
       meta.last_ts = null;
     }
-    if (activeDmId === threadId) {
+    if (String(activeDmId) === String(threadId)) {
       renderDmMessages(threadId);
       setDmNotice("History was cleared.");
     }
@@ -4363,11 +4184,11 @@ socket.on("disconnect", (reason) => {
 
     if (!dmThreads.find((t) => t.id === m.threadId)) loadDmThreads();
 
-    if (activeDmId !== m.threadId) {
+    if (String(activeDmId) !== String(m.threadId)) {
       markDmNotification(m.threadId, isGroupThread(m.threadId));
     }
 
-    if (activeDmId === m.threadId) {
+    if (String(activeDmId) === String(m.threadId)) {
       renderDmMessages(m.threadId);
       markDmRead(m.threadId, m.ts || Date.now());
       dmUnreadThreads.delete(m.threadId);

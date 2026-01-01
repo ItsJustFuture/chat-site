@@ -1532,117 +1532,18 @@ a{ color:inherit; }
 button{ font-family:inherit; }
 
 /* AUTH */
-#authWrap{
-  height: calc(var(--vh, 1vh) * 100);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding:22px;
-  position:relative;
-  overflow:hidden;
-}
-
-#authWrap .authBackdrop{
-  position:absolute;
-  inset:-40px;
-  background:
-    radial-gradient(800px 500px at 20% 10%, rgba(160,110,255,0.25), transparent 60%),
-    radial-gradient(700px 500px at 80% 20%, rgba(80,200,255,0.18), transparent 55%),
-    radial-gradient(900px 700px at 50% 90%, rgba(255,120,190,0.12), transparent 65%),
-    linear-gradient(180deg, rgba(0,0,0,0.35), rgba(0,0,0,0.55));
-  filter: blur(0px);
-  pointer-events:none;
-}
-
-.authShell{
-  width:min(980px, 100%);
-  display:grid;
-  grid-template-columns: 1.1fr 1fr;
-  gap:22px;
-  align-items:center;
-  position:relative;
-  z-index:1;
-}
-
-/* Nudge slightly left on wide desktop so the card never kisses the right edge */
-@media (min-width: 821px){
-  .authShell{ transform: translateX(-18px); }
-}
-
-.authBrand{
-  padding:18px 10px;
-}
-
-.authLogo{
-  font-weight:1000;
-  letter-spacing:0.5px;
-  font-size: clamp(28px, 4vw, 44px);
-  line-height:1.05;
-  text-shadow: 0 10px 30px rgba(0,0,0,0.35);
-}
-
-.authLogo .amp{
-  opacity:0.95;
-  filter: drop-shadow(0 0 14px rgba(190,120,255,0.25));
-}
-
-.authTag{
-  margin-top:10px;
-  font-size:14px;
-  color:var(--muted);
-}
+#authWrap{ height: calc(var(--vh, 1vh) * 100); display:flex; align-items:center; justify-content:center; padding:20px; }
+/* UI scale for small screens / user preference (no transform: fixes iOS hit-testing) */
 
 .authCard{
-  width:100%;
-  background: color-mix(in oklab, var(--panel) 92%, rgba(0,0,0,0.25));
-  border:1px solid color-mix(in oklab, var(--line) 85%, rgba(255,255,255,0.08));
-  border-radius:18px;
+  width:min(420px, 94vw);
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:16px;
   padding:18px;
   box-shadow: var(--shadow);
-  backdrop-filter: blur(10px);
 }
-
-.authHeader{
-  margin-bottom:12px;
-}
-
-.authTitle{ font-size:20px; font-weight:1000; margin:0; }
-.authSub{ margin-top:6px; font-size:13px; color:var(--muted); }
-
-.authActions{ margin-top:12px; }
-.authActions .btn{ flex:1; min-width:140px; }
-
-.authHint{ margin-top:10px; }
-
-.authFoot{
-  grid-column: 1 / -1;
-  padding-top:2px;
-  text-align:center;
-}
-
-/* keep auth usable on mobile */
-@media (max-width: 820px){
-  .authShell{ grid-template-columns: 1fr; }
-  .authBrand{ text-align:center; padding:6px 0 0; }
-  .authTag{ max-width:520px; margin-left:auto; margin-right:auto; }
-}
-/* Mobile safety */
-@media (max-width: 820px) {
-  .authShell {
-    transform: none;          /* remove desktop left shift */
-    width: 100%;
-    max-width: 100%;
-    padding: 16px;
-    box-sizing: border-box;
-  }
-
-  .authCard {
-    width: 100%;
-    max-width: 420px;         /* fits all phones */
-    margin: 0 auto;
-  }
-}
-/* Shared form primitives */
+.authTitle{ font-size:18px; font-weight:900; margin:0 0 12px; }
 .field{ display:flex; flex-direction:column; gap:6px; margin:10px 0; }
 .field label{ font-size:12px; color:var(--muted); }
 .field input, textarea, select{
@@ -1653,39 +1554,10 @@ button{ font-family:inherit; }
   color:var(--inputText);
   outline:none;
 }
-
-/* Password show/hide */
-.passWrap{ position:relative; display:flex; align-items:center; }
-.passWrap > input{ width:100%; padding-right:44px; }
-.passToggle{
-  position:absolute;
-  right:8px;
-  top:50%;
-  transform: translateY(-50%);
-  border:0;
-  background:transparent;
-  color: var(--muted);
-  cursor:pointer;
-  width:34px;
-  height:34px;
-  display:grid;
-  place-items:center;
-  border-radius:10px;
-}
-.passToggle:hover{ background: color-mix(in oklab, var(--panel) 70%, rgba(255,255,255,0.08)); color: var(--text); }
-.passToggle:active{ transform: translateY(-50%) translateY(1px); }
-.passToggle:focus{ outline:none; box-shadow: 0 0 0 3px rgba(120,120,255,0.18); }
-
-.field input:focus, textarea:focus, select:focus{
-  border-color: color-mix(in oklab, var(--brand) 55%, var(--border));
-  box-shadow: 0 0 0 3px rgba(120,120,255,0.15);
-}
 textarea{ min-height:90px; resize:vertical; }
-
 .colorInputRow{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .colorInputRow input[type="text"]{ flex:1; min-width:140px; }
 .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-
 .btn{
   border:0;
   border-radius:var(--radiusMd);
@@ -1700,10 +1572,7 @@ textarea{ min-height:90px; resize:vertical; }
 .btn.secondary{ background:var(--btnSecondaryBg); color:var(--btnSecondaryText); }
 .btn.danger{ background:var(--danger); color:var(--btnPrimaryText); }
 .btn:active{ transform: translateY(1px); }
-
 .msgline{ margin-top:10px; font-size:12px; color:var(--muted); min-height:16px; white-space:pre-wrap; }
-
-
 
 /* APP LAYOUT */
 #app{ height: calc(var(--vh, 1vh) * 100); display:none; }
@@ -2455,7 +2324,7 @@ body.lockScroll{ overflow:hidden; }
   position:fixed;
   top:16px;
   bottom:16px;
-  right: calc(300px + 18px);
+  right: 16px;
   width:min(640px, 48vw);
   height:auto;
   max-height:none;
@@ -2661,43 +2530,86 @@ body.lockScroll{ overflow:hidden; }
 .dmSettingsRow:last-child{ border-bottom:0; }
 .colorInputRow.tight{ gap:6px; }
 .colorInputRow.tight input[type="text"]{ min-width:120px; }
-.dmMessages{ flex:1; overflow:auto; padding:10px 18px; display:flex; flex-direction:column; gap:8px; min-height:0; }
+.dmMessages{ flex:1; overflow:auto; padding:10px 12px; display:flex; flex-direction:column; gap:8px; min-height:0; }
 
-/* DM messages: bubble should hug content (not full width), with meta/snackbar underneath */
-.dmRow{ display:flex; flex-direction:column; align-items:flex-start; gap:4px; position:relative; padding:0 6px; }
-.dmRow.self{ align-items:flex-end; }
-
+/* --- DM message layout (Telegram-like) --- */
+.dmMessages{ padding:14px 16px; gap:12px; }
+.dmRow{ width:100%; display:flex; align-items:flex-start; gap:10px; }
+.dmRow.self{ justify-content:flex-end; }
+.dmActionsRail{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  padding-top:2px;
+  opacity:0;
+  pointer-events:none;
+  transition: opacity .15s ease;
+}
+@media (hover:hover){
+  .dmRow:hover .dmActionsRail{
+    opacity:1;
+    pointer-events:auto;
+  }
+}
+/* JS can force show on tap */
+.dmRow.showActions .dmActionsRail{
+  opacity:1;
+  pointer-events:auto;
+}
+.dmBubbleWrap{
+  display:flex;
+  flex-direction:column;
+  max-width: min(78%, 560px);
+}
 .dmBubble{
   display:inline-block;
-  padding:9px 11px;
-  border-radius:12px;
-  background:var(--panel);
+  padding:10px 12px;
+  border-radius:14px;
+  background: var(--panel);
   border:1px solid var(--line);
-  max-width:min(80%, calc(100% - 14px));
+  max-width:100%;
   overflow-wrap:anywhere;
   word-break:break-word;
 }
-.dmBubble.self{ background:var(--bubbleSelf); color:white; }
-
+.dmBubble.self{
+  background: var(--bubbleSelf);
+  color:#fff;
+  border-color: rgba(255,255,255,0.10);
+}
 .dmMetaRow{
   display:flex;
   justify-content:flex-start;
   align-items:baseline;
   gap:6px;
+  margin-top:4px;
   font-size:12px;
-  color:var(--muted);
-  flex-wrap:wrap;
-  max-width:min(80%, calc(100% - 14px));
+  color: var(--muted);
 }
-.dmRow.self .dmMetaRow{ justify-content:flex-end; }
-
+.dmMetaUser{ font-weight:800; }
 .dmMetaTime{ opacity:.85; }
 
-/* actions (react/reply/delete) live OUTSIDE the bubble */
-.dmActionsRail{ display:none; gap:8px; }
-.dmRow:hover .dmActionsRail,
-.dmRow.showActions .dmActionsRail{ display:flex; }
-.dmActionsRail .reactBtn{ padding:6px 10px; border-radius:12px; }
+.dmReplyContext{
+  width:100%;
+  text-align:left;
+  border:0;
+  background: rgba(255,255,255,.06);
+  color: inherit;
+  border-radius:12px;
+  padding:8px 10px;
+  margin-bottom:8px;
+  cursor:pointer;
+}
+.dmReplyContext .replyUser{ font-weight:900; font-size:12px; }
+.dmReplyContext .replySnippet{ font-size:12px; opacity:.9; }
+
+
+.dmBubble{ padding:9px 11px; border-radius:12px; background:var(--panel); border:1px solid var(--line); max-width:min(80%, calc(100% - 14px)); overflow-wrap:anywhere; word-break:break-word; }
+.dmBubble.self{ background:var(--bubbleSelf); color:white; margin-left:auto; }
+.dmMetaRow{ display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--muted); flex-wrap:wrap; }
+.dmActions{ display:none; gap:8px; margin-top:6px; }
+.dmBubble:hover .dmActions,
+.dmBubble.showActions .dmActions{ display:flex; }
+.dmActions .reactBtn{ padding:6px 10px; border-radius:12px; }
 .smallAction{ padding:6px 10px; border-radius:12px; border:1px solid var(--line); background:transparent; color:inherit; }
 .dmInput{ padding:10px 12px; border-top:1px solid var(--line); display:flex; gap:8px; flex-shrink:0; background: var(--panel2); position:relative; }
 .dmInput input{ flex:1; }
@@ -3133,8 +3045,8 @@ main.chat{ position: relative; }
   max-width: 100%;
 }
 /* Right-align self messages without shrinking the message column */
-#dmModal .self,
-.dmPanel .self {
+#dmModal .dmRow.self,
+.dmPanel .dmRow.self {
   display: flex;
   justify-content: flex-end;
 }
