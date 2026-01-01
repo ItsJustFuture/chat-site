@@ -546,10 +546,24 @@ db.serialize(() => {
     ["joined_at", "joined_at INTEGER NOT NULL DEFAULT 0"],
   ]);
 
-  // Helpful indexes
+    // ---- DM reactions (per-message emoji by user)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dm_reactions (
+      thread_id INTEGER NOT NULL,
+      message_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      emoji TEXT NOT NULL,
+      ts INTEGER NOT NULL,
+      UNIQUE(message_id, user_id)
+    )
+  `);
+
+// Helpful indexes
   db.run(`CREATE INDEX IF NOT EXISTS idx_dm_participants_user ON dm_participants(user_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_dm_participants_thread ON dm_participants(thread_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_dm_messages_thread_ts ON dm_messages(thread_id, ts)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_dm_reactions_thread_msg ON dm_reactions(thread_id, message_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_dm_reactions_message_user ON dm_reactions(message_id, user_id)`);
 
   // Ensure Iri is always Owner
   db.run("UPDATE users SET role='Owner' WHERE lower(username)='iri'");
@@ -3789,6 +3803,34 @@ if (!room) {
             participants: thread.participants || [],
             messages: msgs,
           });
+
+          // Send DM reactions for the loaded message window
+          try {
+            const ids = (msgs || []).map((m) => m.messageId).filter(Boolean);
+            if (ids.length) {
+              const ph = ids.map(() => "?").join(",");
+              db.all(
+                `SELECT r.message_id, u.username AS username, r.emoji
+                 FROM dm_reactions r
+                 JOIN users u ON u.id = r.user_id
+                 WHERE r.thread_id = ? AND r.message_id IN (${ph})`,
+                [tid, ...ids],
+                (_re, rrows) => {
+                  const byMsg = {};
+                  for (const rr of rrows || []) {
+                    const mid = String(rr.message_id);
+                    if (!byMsg[mid]) byMsg[mid] = {};
+                    byMsg[mid][rr.username] = rr.emoji;
+                  }
+                  for (const mid of Object.keys(byMsg)) {
+                    socket.emit("dm reaction update", { threadId: tid, messageId: mid, reactions: byMsg[mid] });
+                  }
+                }
+              );
+            }
+          } catch {}
+
+
         }
       );
     });
@@ -3861,7 +3903,85 @@ db.all(
     });
   });
 
+
+  // ---- DM reactions (emoji)
+  socket.on("dm reaction", ({ threadId, messageId, emoji }) => {
+    const tid = Number(threadId);
+    const mid = Number(messageId);
+    const em = String(emoji || "").trim().slice(0, 10);
+    if (!Number.isInteger(tid) || !Number.isInteger(mid) || !em) return;
+
+    loadThreadForUser(tid, socket.user.id, (err) => {
+      if (err) return;
+      const ts = Date.now();
+      db.run(
+        `INSERT OR REPLACE INTO dm_reactions (thread_id, message_id, user_id, emoji, ts)
+         VALUES (?, ?, ?, ?, ?)`,
+        [tid, mid, socket.user.id, em, ts],
+        (insErr) => {
+          if (insErr) return;
+          db.all(
+            `SELECT u.username AS username, r.emoji AS emoji
+             FROM dm_reactions r
+             JOIN users u ON u.id = r.user_id
+             WHERE r.thread_id = ? AND r.message_id = ?`,
+            [tid, mid],
+            (_e2, rows) => {
+              const reactions = {};
+              for (const r of rows || []) {
+                if (r.username) reactions[r.username] = r.emoji;
+              }
+              io.to(`dm:${tid}`).emit("dm reaction update", { threadId: tid, messageId: mid, reactions });
+            }
+          );
+        }
+      );
+    });
+  });
+
+  // ---- DM delete (own messages; moderators+ may also delete)
+  socket.on("dm delete message", ({ threadId, messageId }) => {
+    const tid = Number(threadId);
+    const mid = Number(messageId);
+    if (!Number.isInteger(tid) || !Number.isInteger(mid)) return;
+
+    loadThreadForUser(tid, socket.user.id, (err) => {
+      if (err) return;
+
+      db.get(
+        `SELECT user_id FROM dm_messages WHERE id = ? AND thread_id = ?`,
+        [mid, tid],
+        (_e, row) => {
+          if (!row) return;
+          const ownerId = row.user_id;
+          const canDelete = ownerId === socket.user.id || requireMinRole(socket.user.role, "Moderator");
+          if (!canDelete) return;
+
+          db.run(`DELETE FROM dm_messages WHERE id = ? AND thread_id = ?`, [mid, tid], (delErr) => {
+            if (delErr) return;
+            db.run(`DELETE FROM dm_reactions WHERE thread_id = ? AND message_id = ?`, [tid, mid], () => {});
+            io.to(`dm:${tid}`).emit("dm message deleted", { threadId: tid, messageId: mid });
+
+            // Ping participants so thread previews can refresh if the latest message was removed
+            db.all(
+              `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
+              [tid],
+              (_e2, rows) => {
+                for (const r of rows || []) {
+                  const uid = r.user_id;
+                  if (!uid) continue;
+                  const sid = socketIdByUserId.get(uid);
+                  if (sid) io.to(sid).emit("dm ping", { threadId: tid, ts: Date.now() });
+                }
+              }
+            );
+          });
+        }
+      );
+    });
+  });
   socket.on("status change", ({ status }) => {
+
     status = normalizeStatus(status, "Online");
     socket.user.status = status;
 
