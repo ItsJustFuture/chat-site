@@ -324,6 +324,20 @@ const channelsCloseBtn = document.getElementById("channelsCloseBtn");
 const membersCloseBtn  = document.getElementById("membersCloseBtn");
 const tabEdit = document.getElementById("tabEdit");
 const viewEdit = document.getElementById("viewEdit");
+// profile sheet + edit menu (new UI)
+const profileSheetHero = document.getElementById("profileSheetHero");
+const profileSheetAvatar = document.getElementById("profileSheetAvatar");
+const profileSheetAvatarActions = document.getElementById("profileSheetAvatarActions");
+const profileAvatarChangeBtn = document.getElementById("profileAvatarChangeBtn");
+const profileAvatarRemoveBtn = document.getElementById("profileAvatarRemoveBtn");
+const profileSheetRoleChip = document.getElementById("profileSheetRoleChip");
+const profileSheetName = document.getElementById("profileSheetName");
+const profileSheetSub = document.getElementById("profileSheetSub");
+const profileSheetStats = document.getElementById("profileSheetStats");
+const profileSheetStars = document.getElementById("profileSheetStars");
+const profileSheetLikes = document.getElementById("profileSheetLikes");
+const profileMenu = document.getElementById("profileMenu");
+
 
 const editAboutBtn = document.getElementById("editAboutBtn");
 const editThemesBtn = document.getElementById("editThemesBtn");
@@ -3919,6 +3933,7 @@ modalTargetUsername = p.username;
   applyProgressionPayload(p);
 
   modalTitle.textContent="My Profile";
+  if (tabEdit) tabEdit.style.display = "block";
   modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
 
   fillProfileUI(p, true);
@@ -3978,6 +3993,9 @@ async function openMemberProfile(username){
   syncCustomizationUI();
 
   myProfileEdit.style.display="none";
+  // Editing is only for your own profile
+  if (tabEdit) tabEdit.style.display = isSelf ? "block" : "none";
+  if (!isSelf) { viewEdit.style.display = "none"; }
 
   const iCanMod = (roleRank(me.role) >= roleRank("Moderator")) && (roleRank(me.role) > roleRank(p.role));
   memberModTools.style.display = iCanMod ? "block" : "none";
