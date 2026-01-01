@@ -4377,3 +4377,61 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
   .profileMenuRow{ grid-template-columns: 42px 1fr auto; }
   .profileMenu{ margin-bottom: calc(12px + env(safe-area-inset-bottom)); }
 }
+
+
+/* --- DM bubble containment fix --- */
+.dmMessages, .dm-thread, .messages {
+  padding: 8px 10px;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+.message,
+.chatBubble,
+.dmBubble {
+  max-width: calc(100% - 20px);
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.message.outgoing,
+.chatBubble.outgoing,
+.dmBubble.outgoing {
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.message.incoming,
+.chatBubble.incoming,
+.dmBubble.incoming {
+  margin-right: auto;
+  margin-left: 0;
+}
+
+
+/* --- iOS keyboard / typing indicator containment --- */
+:root { --kbOffset: 0px; }
+
+body.kb-open .typingIndicator,
+body.kb-open #typingIndicator,
+body.kb-open .typing-indicator {
+  display: none !important;
+}
+
+.chatPane, .dmPane, #chatPane, #dmPane {
+  padding-bottom: calc(16px + env(safe-area-inset-bottom) + var(--kbOffset));
+}
+
+.messageComposer, .composer, #messageComposer, #composer, .dmComposer, #dmComposer {
+  padding-bottom: calc(env(safe-area-inset-bottom) + var(--kbOffset));
+}
+
+.typingIndicator, #typingIndicator, .typing-indicator {
+  max-height: 22px;
+  overflow: hidden;
+  padding: 0 10px;
+  margin: 4px 0;
+  font-size: 12px;
+  line-height: 22px;
+}

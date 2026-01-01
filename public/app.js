@@ -324,20 +324,6 @@ const channelsCloseBtn = document.getElementById("channelsCloseBtn");
 const membersCloseBtn  = document.getElementById("membersCloseBtn");
 const tabEdit = document.getElementById("tabEdit");
 const viewEdit = document.getElementById("viewEdit");
-// profile sheet + edit menu (new UI)
-const profileSheetHero = document.getElementById("profileSheetHero");
-const profileSheetAvatar = document.getElementById("profileSheetAvatar");
-const profileSheetAvatarActions = document.getElementById("profileSheetAvatarActions");
-const profileAvatarChangeBtn = document.getElementById("profileAvatarChangeBtn");
-const profileAvatarRemoveBtn = document.getElementById("profileAvatarRemoveBtn");
-const profileSheetRoleChip = document.getElementById("profileSheetRoleChip");
-const profileSheetName = document.getElementById("profileSheetName");
-const profileSheetSub = document.getElementById("profileSheetSub");
-const profileSheetStats = document.getElementById("profileSheetStats");
-const profileSheetStars = document.getElementById("profileSheetStars");
-const profileSheetLikes = document.getElementById("profileSheetLikes");
-const profileMenu = document.getElementById("profileMenu");
-
 
 const editAboutBtn = document.getElementById("editAboutBtn");
 const editThemesBtn = document.getElementById("editThemesBtn");
@@ -3933,7 +3919,6 @@ modalTargetUsername = p.username;
   applyProgressionPayload(p);
 
   modalTitle.textContent="My Profile";
-  if (tabEdit) tabEdit.style.display = "block";
   modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
 
   fillProfileUI(p, true);
@@ -3993,9 +3978,6 @@ async function openMemberProfile(username){
   syncCustomizationUI();
 
   myProfileEdit.style.display="none";
-  // Editing is only for your own profile
-  if (tabEdit) tabEdit.style.display = isSelf ? "block" : "none";
-  if (!isSelf) { viewEdit.style.display = "none"; }
 
   const iCanMod = (roleRank(me.role) >= roleRank("Moderator")) && (roleRank(me.role) > roleRank(p.role));
   memberModTools.style.display = iCanMod ? "block" : "none";
@@ -4690,3 +4672,83 @@ function isThemeVisible(themeName) {
 }
 
 try{ syncDesktopMembersWidth(); }catch{}
+
+
+
+
+/* --- Profile sheet DOM refs --- */
+function getProfileSheetRefs() {
+  return {
+    profileMenu: document.getElementById('profileMenu'),
+    profileSheetHero: document.getElementById('profileSheetHero'),
+    profileSheetAvatar: document.getElementById('profileSheetAvatar'),
+    profileSheetName: document.getElementById('profileSheetName'),
+    profileSheetRoleChip: document.getElementById('profileSheetRoleChip'),
+    profileSheetLikes: document.getElementById('profileSheetLikes'),
+    profileSheetCreated: document.getElementById('profileSheetCreated'),
+  };
+}
+
+/* --- Profile Edit gating --- */
+function setProfileEditAvailability(isOwnProfile) {
+  const editTabBtn = document.getElementById('profileTabEdit');
+  const editPanel = document.getElementById('myProfileEdit');
+  if (editTabBtn) editTabBtn.style.display = isOwnProfile ? '' : 'none';
+  if (editPanel) editPanel.style.display = isOwnProfile ? '' : 'none';
+}
+
+/* --- iOS keyboard handling --- */
+(function setupIOSKeyboardHandling() {
+  try {
+    const vv = window.visualViewport;
+    const root = document.documentElement;
+    const body = document.body;
+
+    let lastOffset = 0;
+
+    function computeKbOffset() {
+      if (!vv) return 0;
+      // When keyboard opens on iOS, visualViewport height shrinks.
+      const delta = window.innerHeight - vv.height - (vv.offsetTop || 0);
+      return Math.max(0, Math.round(delta));
+    }
+
+    function apply() {
+      const off = computeKbOffset();
+      if (off !== lastOffset) {
+        lastOffset = off;
+        root.style.setProperty('--kbOffset', off + 'px');
+      }
+      if (off > 80) body.classList.add('kb-open');
+      else body.classList.remove('kb-open');
+    }
+
+    if (vv) {
+      vv.addEventListener('resize', apply);
+      vv.addEventListener('scroll', apply);
+    }
+    window.addEventListener('resize', apply);
+
+    // Also toggle while focusing message inputs (helps in Safari that delays vv events)
+    document.addEventListener('focusin', (e) => {
+      const t = e.target;
+      if (!t) return;
+      if (t.matches('input[type="text"], input:not([type]), textarea')) {
+        setTimeout(apply, 50);
+        setTimeout(apply, 250);
+      }
+    });
+    document.addEventListener('focusout', () => {
+      setTimeout(apply, 50);
+      setTimeout(() => {
+        root.style.setProperty('--kbOffset', '0px');
+        body.classList.remove('kb-open');
+      }, 250);
+    });
+
+    // Initial
+    apply();
+  } catch (e) {
+    // no-op
+  }
+})();
