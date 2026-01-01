@@ -1620,6 +1620,15 @@ function renderReactions(messageId, reactionsMap){
     const pill=document.createElement("div");
     pill.className="reactPill";
     pill.textContent=`${emoji} ${count}`;
+    // Tap/click a reaction pill:
+    // - If it's your current reaction, remove it.
+    // - If it's someone else's (or you reacted with a different emoji), add yours (counts +1).
+    pill.title = "React";
+    pill.style.cursor = "pointer";
+    pill.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      socket?.emit("reaction", { messageId, emoji });
+    });
     container.appendChild(pill);
   });
 }
@@ -1638,6 +1647,15 @@ function renderDmReactions(messageId, reactionsMap){
     const pill = document.createElement("div");
     pill.className = "reactPill";
     pill.textContent = `${emoji} ${count}`;
+    pill.title = "React";
+    pill.style.cursor = "pointer";
+    pill.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      // Use current active DM thread id
+      const tid = (window.activeDmId != null) ? Number(window.activeDmId) : null;
+      if (!Number.isInteger(tid)) return;
+      socket?.emit("dm reaction", { threadId: tid, messageId, emoji });
+    });
     container.appendChild(pill);
   });
 }
@@ -2363,6 +2381,7 @@ function renderDmMessages(threadId){
     const reacts = document.createElement("div");
     reacts.className = "reacts";
     reacts.id = "dm-reacts-" + (m.messageId || m.id);
+    reacts.dataset.threadId = String(threadId);
     bubble.appendChild(reacts);
 
     const meta = document.createElement("div");
