@@ -659,6 +659,9 @@ const typingByRoom = new Map(); // room -> Set(username)
 const msgRate = new Map(); // socket.id -> { lastTs, count }
 const onlineXpTrack = new Map(); // userId -> { lastTs, carryMs }
 
+// ---- DM read receipts (in-memory; resets on restart)
+const dmReadState = new Map(); // threadId -> Map(userId -> { messageId, ts })
+
 db.get(`SELECT value FROM config WHERE key='maintenance'`, [], (_e, row) => {
   maintenanceState.enabled = row?.value === "on";
 });
@@ -3897,7 +3900,33 @@ if (!room) {
     });
   });
 
-  socket.on("dm message", ({ threadId, text, replyToId }) => {
+  
+  socket.on("dm mark read", ({ threadId, messageId, ts }) => {
+    const tid = Number(threadId);
+    const mid = Number(messageId);
+    const tms = Number(ts) || Date.now();
+    if (!socket.user) return;
+    if (!Number.isInteger(tid) || !Number.isInteger(mid)) return;
+
+    // ensure user is allowed in this thread
+    loadThreadForUser(tid, socket.user.id, (err, thread) => {
+      if (err || !thread) return;
+
+      let perThread = dmReadState.get(tid);
+      if (!perThread) dmReadState.set(tid, (perThread = new Map()));
+      perThread.set(socket.user.id, { messageId: mid, ts: tms });
+
+      // Broadcast to everyone in the dm room (clients can ignore self)
+      io.to(`dm:${tid}`).emit("dm read", {
+        threadId: tid,
+        userId: socket.user.id,
+        messageId: mid,
+        ts: tms
+      });
+    });
+  });
+
+socket.on("dm message", ({ threadId, text, replyToId }) => {
     const tid = Number(threadId);
     const body = String(text || "").trim().slice(0, 800);
     if (!Number.isInteger(tid) || !body) return;
