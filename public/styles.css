@@ -4745,3 +4745,35 @@ body.kb-open #typing{ display:none !important; }
 .msgs{
   padding-bottom: calc(160px + var(--safeB)) !important;
 }
+/* === MAIN CHAT: fix message area being constrained/cut off === */
+/* Ensure the center chat column can actually give height to the scroll area */
+.chat,
+.chatMain,
+main.chatMain,
+main {
+  min-height: 0;
+}
+
+/* The main chat area must be a column: top content + msgs (flex) + composer (fixed) */
+.chatMain,
+main.chatMain {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+/* The message list is the scrollable region and should fill the available space */
+.msgs {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+
+  /* IMPORTANT: don’t “bottom-pack” messages into a tiny strip */
+  justify-content: flex-start !important;
+}
+
+/* Composer stays at bottom, doesn't steal layout height */
+.inputBar {
+  flex: 0 0 auto;
+}
