@@ -68,7 +68,85 @@ const THEMES = [
   document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) scheduleSetVh(); });
 
   scheduleSetVh();
+})()
+
+/* ---- Quiet sound cues (optional) ---- */
+const Sound = (() => {
+  // Settings keys
+  const KEY_ENABLED = "soundEnabled";
+  const KEY_ROOM = "soundRoom";
+  const KEY_DM = "soundDm";
+  const KEY_MENTION = "soundMention";
+
+  let ctx = null;
+
+  function getBool(key, def = false){
+    const v = localStorage.getItem(key);
+    if (v === null) return def;
+    return v === "1";
+  }
+  function setBool(key, on){
+    localStorage.setItem(key, on ? "1" : "0");
+  }
+
+  function enabled(){ return getBool(KEY_ENABLED, false); }
+  function roomOn(){ return getBool(KEY_ROOM, true); }
+  function dmOn(){ return getBool(KEY_DM, true); }
+  function mentionOn(){ return getBool(KEY_MENTION, true); }
+
+  async function ensureUnlocked(){
+    if (!enabled()) return false;
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === "suspended") {
+      try { await ctx.resume(); } catch {}
+    }
+    return ctx && ctx.state === "running";
+  }
+
+  function beep({ freq = 660, dur = 0.06, vol = 0.05, type = "sine" } = {}){
+    if (!enabled()) return;
+    if (!ctx) return; // not unlocked yet (needs a user gesture)
+    try{
+      const t0 = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t0);
+
+      // Very quiet, gentle envelope
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), t0 + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(t0);
+      osc.stop(t0 + dur + 0.02);
+    }catch{}
+  }
+
+  const cues = {
+    room: () => beep({ freq: 520, dur: 0.05, vol: 0.045 }),
+    dm: () => { beep({ freq: 740, dur: 0.05, vol: 0.05 }); setTimeout(()=>beep({ freq: 980, dur: 0.05, vol: 0.04 }), 70); },
+    mention: () => beep({ freq: 880, dur: 0.06, vol: 0.05, type: "triangle" }),
+  };
+
+  function shouldRoom(){ return enabled() && roomOn(); }
+  function shouldDm(){ return enabled() && dmOn(); }
+  function shouldMention(){ return enabled() && mentionOn(); }
+
+  return {
+    keys: { KEY_ENABLED, KEY_ROOM, KEY_DM, KEY_MENTION },
+    get: { enabled, roomOn, dmOn, mentionOn },
+    set: { setBool },
+    ensureUnlocked,
+    cues,
+    shouldRoom, shouldDm, shouldMention
+  };
 })();
+;
 
 /* ---- iOS Safari: prevent input-focus zoom (font-size must be >= 16px) */
 (function preventIosInputZoom(){
@@ -339,6 +417,14 @@ const editDmBtn = document.getElementById("editDmBtn");
 const editAboutPanel = document.getElementById("editAboutPanel");
 const editThemesPanel = document.getElementById("editThemesPanel");
 const editDmPanel = document.getElementById("editDmPanel");
+
+const editPreferencesPanel = document.getElementById("editPreferencesPanel");
+const prefSoundEnabled = document.getElementById("prefSoundEnabled");
+const prefSoundRoom = document.getElementById("prefSoundRoom");
+const prefSoundDm = document.getElementById("prefSoundDm");
+const prefSoundMention = document.getElementById("prefSoundMention");
+const prefSoundStatus = document.getElementById("prefSoundStatus");
+
 
 const authUser = document.getElementById("authUser");
 const authPass = document.getElementById("authPass");
@@ -3067,10 +3153,14 @@ function showEditPanel(which){
   const isAbout = which === "about";
   const isThemes = which === "themes";
   const isDm = which === "dm";
+  const isGifts = which === "gifts";
+  const isPrefs = which === "preferences";
 
   if (editAboutPanel) editAboutPanel.style.display = isAbout ? "block" : "none";
   if (editThemesPanel) editThemesPanel.style.display = isThemes ? "block" : "none";
   if (editDmPanel) editDmPanel.style.display = isDm ? "block" : "none";
+  if (editGiftsPanel) editGiftsPanel.style.display = isGifts ? "block" : "none";
+  if (editPreferencesPanel) editPreferencesPanel.style.display = isPrefs ? "block" : "none";
 
   editAboutBtn?.classList.toggle("active", isAbout);
   editThemesBtn?.classList.toggle("active", isThemes);
@@ -3083,6 +3173,7 @@ editDmBtn?.addEventListener("click", ()=>showEditPanel("dm"));
 
 // New profile edit menu + avatar action wiring
 wireProfileMenu();
+wireSoundPrefs();
 wireProfileAvatarActions();
 tabInfo.addEventListener("click", ()=>setTab("info"));
 tabAbout.addEventListener("click", ()=>setTab("about"));
@@ -3835,6 +3926,83 @@ function applyProfileMenuVisibility(){
   });
 }
 
+
+function syncSoundPrefsUI(tryUnlock = false){
+  if (!prefSoundEnabled) return;
+
+  // Defaults: master off, individual on (so enabling master immediately works)
+  const k = Sound.keys;
+  const enabled = (localStorage.getItem(k.KEY_ENABLED) === "1");
+  const roomOn = (localStorage.getItem(k.KEY_ROOM) !== "0");      // default true
+  const dmOn = (localStorage.getItem(k.KEY_DM) !== "0");          // default true
+  const mentionOn = (localStorage.getItem(k.KEY_MENTION) !== "0");// default true
+
+  prefSoundEnabled.checked = enabled;
+  if (prefSoundRoom) prefSoundRoom.checked = roomOn;
+  if (prefSoundDm) prefSoundDm.checked = dmOn;
+  if (prefSoundMention) prefSoundMention.checked = mentionOn;
+
+  const subDisabled = !enabled;
+  if (prefSoundRoom) prefSoundRoom.disabled = subDisabled;
+  if (prefSoundDm) prefSoundDm.disabled = subDisabled;
+  if (prefSoundMention) prefSoundMention.disabled = subDisabled;
+
+  if (prefSoundStatus){
+    prefSoundStatus.textContent = enabled
+      ? "Sounds enabled. If you don't hear anything on iOS, toggle once to unlock audio."
+      : "Sounds disabled.";
+  }
+
+  if (tryUnlock && enabled) {
+    Sound.ensureUnlocked().then((ok) => {
+      if (prefSoundStatus && enabled) {
+        prefSoundStatus.textContent = ok
+          ? "Sounds enabled."
+          : "Sounds enabled (tap once in the app if your browser requires audio unlock).";
+      }
+    });
+  }
+}
+
+function wireSoundPrefs(){
+  if (!prefSoundEnabled || prefSoundEnabled._wired) return;
+  prefSoundEnabled._wired = true;
+
+  // Initialize defaults if missing
+  const k = Sound.keys;
+  if (localStorage.getItem(k.KEY_ROOM) === null) localStorage.setItem(k.KEY_ROOM, "1");
+  if (localStorage.getItem(k.KEY_DM) === null) localStorage.setItem(k.KEY_DM, "1");
+  if (localStorage.getItem(k.KEY_MENTION) === null) localStorage.setItem(k.KEY_MENTION, "1");
+
+  syncSoundPrefsUI(false);
+
+  prefSoundEnabled.addEventListener("change", async () => {
+    Sound.set.setBool(k.KEY_ENABLED, prefSoundEnabled.checked);
+    syncSoundPrefsUI(true);
+
+    // User gesture here: attempt to unlock + play a tiny confirmation
+    if (prefSoundEnabled.checked) {
+      await Sound.ensureUnlocked();
+      Sound.cues.room();
+    }
+  });
+
+  prefSoundRoom?.addEventListener("change", () => {
+    Sound.set.setBool(k.KEY_ROOM, prefSoundRoom.checked);
+    syncSoundPrefsUI(false);
+  });
+
+  prefSoundDm?.addEventListener("change", () => {
+    Sound.set.setBool(k.KEY_DM, prefSoundDm.checked);
+    syncSoundPrefsUI(false);
+  });
+
+  prefSoundMention?.addEventListener("change", () => {
+    Sound.set.setBool(k.KEY_MENTION, prefSoundMention.checked);
+    syncSoundPrefsUI(false);
+  });
+}
+
 function wireProfileMenu(){
   if (!profileMenu) return;
   if (profileMenu._wired) return;
@@ -3854,8 +4022,11 @@ function wireProfileMenu(){
     if (action === "edit-gifts") return showEditPanel("gifts");
 
     if (action === "open-preferences"){
-      // placeholder hook - wired, but not implemented yet
-      if (profileMsg) profileMsg.textContent = "Preferences coming soon.";
+      setTab("edit");
+      showEditPanel("preferences");
+      if (profileMsg) profileMsg.textContent = "";
+      // Sync UI toggles
+      try { syncSoundPrefsUI(true); } catch {}
       return;
     }
   });
@@ -4404,6 +4575,18 @@ socket.on("disconnect", (reason) => {
   socket.on("chat message", (m)=>{
     safeAddMessage(m);
     applySearch();
+
+    // Quiet sound cues (optional)
+    try{
+      const from = String(m?.username || "");
+      const self = String(me?.username || "");
+      if (from && self && from !== self) {
+        const txt = String(m?.text || "");
+        const mentioned = self && txt.toLowerCase().includes("@"+self.toLowerCase());
+        if (mentioned && Sound.shouldMention()) Sound.cues.mention();
+        else if (Sound.shouldRoom()) Sound.cues.room();
+      }
+    }catch{}
   });
     socket.on("reaction update", ({ messageId, reactions }) => {
     renderReactions(messageId, reactions);
@@ -4475,6 +4658,19 @@ socket.on("disconnect", (reason) => {
     dmMessages.set(m.threadId, arr);
 
     upsertThreadMeta(m.threadId, { last_text: m.text || "", last_ts: m.ts });
+
+    // Quiet sound cues (optional)
+    try{
+      const self = String(me?.username || "");
+      const from = String(m?.user || "");
+      if (self && from && from !== self) {
+        const txt = String(m?.text || "");
+        const mentioned = self && txt.toLowerCase().includes("@"+self.toLowerCase());
+        if (mentioned && Sound.shouldMention()) Sound.cues.mention();
+        else if (Sound.shouldDm()) Sound.cues.dm();
+      }
+    }catch{}
+
 
     if (!dmThreads.find((t) => String(t.id) === String(m.threadId))) loadDmThreads();
 

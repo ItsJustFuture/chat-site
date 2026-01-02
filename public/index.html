@@ -501,7 +501,7 @@
         <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.9 7.9 0 0 0 .1-2l2-1.2-2-3.5-2.3.7a7.7 7.7 0 0 0-1.7-1l-.3-2.4h-4l-.3 2.4a7.7 7.7 0 0 0-1.7 1L6.9 8.3 4.9 11.8l2 1.2a7.9 7.9 0 0 0 .1 2l-2 1.2 2 3.5 2.3-.7a7.7 7.7 0 0 0 1.7 1l.3 2.4h4l.3-2.4a7.7 7.7 0 0 0 1.7-1l2.3.7 2-3.5-2-1.2z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
       </span>
       <span class="menuLabel">Preferences</span>
-      <span class="menuHint">Coming soon</span>
+      <span class="menuHint">Sounds + notifications</span>
     </button>
   </div>
 
@@ -510,6 +510,36 @@
     <div class="panelBox">
       <div class="small">This section is wired and ready — add your gifts system whenever you want.</div>
       <div class="small" style="margin-top:6px;">Tip: later load inventory/history via an endpoint like <code>/gifts</code> and render it here.</div>
+    </div>
+  </div>
+
+
+  <div class="panelBox" id="editPreferencesPanel" style="display:none;">
+    <div class="sectionTitle">Preferences</div>
+    <div class="panelBox">
+      <div class="small" style="margin-bottom:10px;">Sound cues are quiet and optional. On iOS you may need to toggle once to enable audio.</div>
+
+      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <label style="margin:0;">Enable sound cues</label>
+        <input id="prefSoundEnabled" type="checkbox">
+      </div>
+
+      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <label style="margin:0;">Room messages</label>
+        <input id="prefSoundRoom" type="checkbox">
+      </div>
+
+      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <label style="margin:0;">Direct messages</label>
+        <input id="prefSoundDm" type="checkbox">
+      </div>
+
+      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <label style="margin:0;">Mentions (@you)</label>
+        <input id="prefSoundMention" type="checkbox">
+      </div>
+
+      <div class="small" id="prefSoundStatus" style="margin-top:8px;"></div>
     </div>
   </div>
 

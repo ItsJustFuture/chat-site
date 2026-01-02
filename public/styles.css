@@ -2185,6 +2185,22 @@ padding: 18px;
   background: var(--panel);
   border-radius: 14px;
 }
+
+
+/* Wider, cleaner modal on desktop */
+@media (min-width: 761px){
+  .modalCard{
+    width: min(980px, calc(100vw - 48px));
+  }
+  .modalBody{
+    padding: 0 18px 18px;
+  }
+  .profileSheetHero{
+    margin-top: 0;
+  }
+  .profileSheetName{ font-size: 24px; }
+  .tabs{ gap: 8px; }
+}
 .modalTop{ display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;flex-shrink: 0; }
 .modalTop strong{ font-size:14px; }
 .modalBody{
