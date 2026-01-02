@@ -1841,7 +1841,35 @@ function emitProgressionUpdate(userId) {
 }
 
 
-function fetchUsersByNames(usernames, cb) {
+async function pgUsersEnabled() {
+  if (!process.env.DATABASE_URL) return false;
+  try {
+    await pgInitPromise;
+    return PG_READY;
+  } catch (e) {
+    return false;
+  }
+}
+
+function sqliteFetchUsersByNames(exacts, lowers) {
+  return new Promise((resolve, reject) => {
+    const exPh = exacts.map(() => "?").join(",");
+    const loPh = lowers.map(() => "?").join(",");
+
+    const where = [];
+    const args = [];
+    if (exacts.length) { where.push(`username IN (${exPh})`); args.push(...exacts); }
+    if (lowers.length) { where.push(`lower(username) IN (${loPh})`); args.push(...lowers); }
+
+    db.all(
+      `SELECT id, username FROM users WHERE ${where.join(" OR ")}`,
+      args,
+      (err, rows) => (err ? reject(err) : resolve(rows || []))
+    );
+  });
+}
+
+async function fetchUsersByNames(usernames) {
   // Keep BOTH exact strings and lowercased keys.
   // This avoids breaking lookups for usernames containing emoji/symbols where LOWER() behavior can be inconsistent.
   const exacts = [];
@@ -1857,37 +1885,109 @@ function fetchUsersByNames(usernames, cb) {
     if (!seenLower.has(k)) { seenLower.add(k); lowers.push(k); }
   }
 
-  if (!exacts.length && !lowers.length) return cb(null, []);
+  if (!exacts.length && !lowers.length) return [];
 
-  const exPh = exacts.map(() => "?").join(",");
-  const loPh = lowers.map(() => "?").join(",");
+  const expectedKeys = new Set(lowers);
+  const merged = new Map();
 
-  // Build WHERE parts dynamically to avoid IN () invalid SQL.
-  const where = [];
-  const args = [];
-  if (exacts.length) { where.push(`username IN (${exPh})`); args.push(...exacts); }
-  if (lowers.length) { where.push(`lower(username) IN (${loPh})`); args.push(...lowers); }
+  if (await pgUsersEnabled()) {
+    try {
+      const { rows } = await pgPool.query(
+        `SELECT id, username FROM users
+         WHERE username = ANY($1::text[])
+            OR lower(username) = ANY($2::text[])`,
+        [exacts, lowers]
+      );
+      for (const row of rows || []) {
+        if (!row?.id || !row?.username) continue;
+        const id = Number(row.id);
+        if (!Number.isInteger(id)) continue;
+        merged.set(id, { id, username: row.username });
+      }
 
-  db.all(
-    `SELECT id, username FROM users WHERE ${where.join(" OR ")}`,
-    args,
-    (err, rows) => cb(err, rows || [])
-  );
+      const foundKeys = new Set(Array.from(merged.values()).map((u) => normKey(u.username)));
+      const missing = Array.from(expectedKeys).filter((k) => !foundKeys.has(k));
+      if (!missing.length) return Array.from(merged.values());
+
+      // Fall through to SQLite to cover any users that only exist there.
+      const missingNames = exacts.filter((name) => missing.includes(normKey(name)));
+      const fallbackRows = await sqliteFetchUsersByNames(missingNames, missing);
+      for (const row of fallbackRows || []) {
+        const id = Number(row?.id);
+        if (!Number.isInteger(id) || merged.has(id)) continue;
+        merged.set(id, { id, username: row.username });
+      }
+      return Array.from(merged.values());
+    } catch (e) {
+      console.warn("[fetchUsersByNames][pg] failed, falling back to sqlite:", e?.message || e);
+      try {
+        const rows = await sqliteFetchUsersByNames(exacts, lowers);
+        return rows;
+      } catch (fallbackErr) {
+        throw fallbackErr;
+      }
+    }
+  }
+
+  const rows = await sqliteFetchUsersByNames(exacts, lowers);
+  return rows;
 }
 
-function fetchUsersByIds(ids, cb) {
+function sqliteFetchUsersByIds(cleaned) {
+  return new Promise((resolve, reject) => {
+    const placeholders = cleaned.map(() => "?").join(",");
+    db.all(
+      `SELECT id, username FROM users WHERE id IN (${placeholders})`,
+      cleaned,
+      (err, rows) => (err ? reject(err) : resolve(rows || []))
+    );
+  });
+}
+
+async function fetchUsersByIds(ids) {
   const cleaned = Array.from(
     new Set((ids || [])
       .map((v) => Number(v))
       .filter((n) => Number.isInteger(n) && n > 0))
   );
-  if (!cleaned.length) return cb(null, []);
-  const placeholders = cleaned.map(() => "?").join(",");
-  db.all(
-    `SELECT id, username FROM users WHERE id IN (${placeholders})`,
-    cleaned,
-    (err, rows) => cb(err, rows || [])
-  );
+  if (!cleaned.length) return [];
+
+  if (await pgUsersEnabled()) {
+    try {
+      const { rows } = await pgPool.query(
+        `SELECT id, username FROM users WHERE id = ANY($1::int[])`,
+        [cleaned]
+      );
+      const merged = new Map();
+      for (const row of rows || []) {
+        const id = Number(row?.id);
+        if (!Number.isInteger(id)) continue;
+        merged.set(id, { id, username: row.username });
+      }
+
+      const missing = cleaned.filter((id) => !merged.has(id));
+      if (!missing.length) return Array.from(merged.values());
+
+      const sqliteRows = await sqliteFetchUsersByIds(missing);
+      for (const row of sqliteRows || []) {
+        const id = Number(row?.id);
+        if (!Number.isInteger(id) || merged.has(id)) continue;
+        merged.set(id, { id, username: row.username });
+      }
+      return Array.from(merged.values());
+    } catch (e) {
+      console.warn("[fetchUsersByIds][pg] failed, falling back to sqlite:", e?.message || e);
+      try {
+        const rows = await sqliteFetchUsersByIds(cleaned);
+        return rows;
+      } catch (fallbackErr) {
+        throw fallbackErr;
+      }
+    }
+  }
+
+  const rows = await sqliteFetchUsersByIds(cleaned);
+  return rows;
 }
 
 function sanitizeRoomName(r) {
@@ -3248,7 +3348,7 @@ app.get("/api/dm/thread/:id", requireLogin, (req, res) => {
 });
 
 // --- DM thread creation (shared by /dm and /api prefixes)
-function handleCreateDmThread(req, res) {
+async function handleCreateDmThread(req, res) {
   // Accept multiple payload shapes for compatibility:
   // { participants:["a"], kind:"direct" }
   // { participant:"a" } / { user:"a" } / { to:"a" } / { username:"a" }
@@ -3314,13 +3414,11 @@ function handleCreateDmThread(req, res) {
   }
 
   // Resolve recipients by BOTH name and id, then merge (dedupe by id).
-  
-fetchUsersByNames(cleanedNames, (err, usersByName) => {
-    if (err) return res.status(500).send("Failed to create thread");
-
+  try {
+    const usersByName = await fetchUsersByNames(cleanedNames);
     if (usersByName.length !== cleanedNames.length) {
-      const found = new Set((usersByName || []).map(u => normKey(u.username)));
-      const missing = cleanedNames.filter(n => !found.has(normKey(n))).slice(0, 3);
+      const found = new Set((usersByName || []).map((u) => normKey(u.username)));
+      const missing = cleanedNames.filter((n) => !found.has(normKey(n))).slice(0, 3);
       return res.status(404).send(missing.length ? `User not found: ${missing.join(", ")}` : "User not found");
     }
 
@@ -3328,30 +3426,30 @@ fetchUsersByNames(cleanedNames, (err, usersByName) => {
     const now = Date.now();
     let users = [];
 
-    fetchUsersByIds(participantIds, (err2, usersById) => {
-      if (err2) return res.status(500).send("Failed to create thread");
+    const usersById = await fetchUsersByIds(participantIds);
 
-      if (usersById.length !== participantIds.length) {
-        const foundIds = new Set((usersById || []).map(u => Number(u.id)));
-        const missingIds = participantIds.filter(id => !foundIds.has(Number(id))).slice(0, 3);
-        return res.status(404).send(missingIds.length ? `User not found (id): ${missingIds.join(", ")}` : "User not found");
-      }
+    if (usersById.length !== participantIds.length) {
+      const foundIds = new Set((usersById || []).map((u) => Number(u.id)));
+      const missingIds = participantIds.filter((id) => !foundIds.has(Number(id))).slice(0, 3);
+      return res.status(404).send(missingIds.length ? `User not found (id): ${missingIds.join(", ")}` : "User not found");
+    }
 
-      // Merge recipients (dedupe by id), and always exclude self.
-      const merged = new Map();
-      for (const u of (usersByName || [])) merged.set(Number(u.id), u);
-      for (const u of (usersById || [])) merged.set(Number(u.id), u);
-      merged.delete(Number(myId));
-      users = Array.from(merged.values());
+    // Merge recipients (dedupe by id), and always exclude self.
+    const merged = new Map();
+    for (const u of usersByName || []) merged.set(Number(u.id), u);
+    for (const u of usersById || []) merged.set(Number(u.id), u);
+    merged.delete(Number(myId));
+    users = Array.from(merged.values());
 
-      // For direct DMs we expect exactly one other participant.
-      if (!isGroup && users.length !== 1) {
-        return res.status(400).send("Pick exactly one person for a direct DM");
-      }
+    // For direct DMs we expect exactly one other participant.
+    if (!isGroup && users.length !== 1) {
+      return res.status(400).send("Pick exactly one person for a direct DM");
+    }
 
-      // If it's a direct DM, reuse existing 1:1 thread (prevents duplicates)
-      if (!isGroup && users.length === 1) {
-        const otherId = users[0].id;
+    // If it's a direct DM, reuse existing 1:1 thread (prevents duplicates)
+    if (!isGroup && users.length === 1) {
+      const otherId = users[0].id;
+      const row = await new Promise((resolve, reject) => {
         db.get(
           `SELECT t.id FROM dm_threads t
            JOIN dm_participants p1 ON p1.thread_id=t.id AND p1.user_id=?
@@ -3359,62 +3457,59 @@ fetchUsersByNames(cleanedNames, (err, usersByName) => {
            WHERE t.is_group=0
            ORDER BY t.id DESC LIMIT 1`,
           [myId, otherId],
-          (getErr, row) => {
-            if (getErr) return res.status(500).send("Failed to create thread");
-            if (row && row.id) {
-              res.json({ ok: true, threadId: row.id, reused: true });
-              return;
-            }
-            return createNewThread();
-          }
+          (getErr, foundRow) => (getErr ? reject(getErr) : resolve(foundRow))
         );
+      });
+      if (row && row.id) {
+        res.json({ ok: true, threadId: row.id, reused: true });
         return;
       }
+    }
 
-      return createNewThread();
-    });
-
-function createNewThread() {
+    const threadId = await new Promise((resolve, reject) => {
       db.run(
         `INSERT INTO dm_threads (title, is_group, created_by, created_at) VALUES (?, ?, ?, ?)`,
         [title || null, isGroup ? 1 : 0, myId, now],
         function (insertErr) {
-          if (insertErr) return res.status(500).send("Failed to create thread");
-          const threadId = this.lastID;
-
-          const participantIds = users.map((u) => u.id);
-          participantIds.push(myId);
-
-          for (const uid of participantIds) {
-            db.run(
-              `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
-              [threadId, uid, myId, now]
-            );
-          }
-
-          const allNames = users.map((u) => u.username);
-          allNames.push(req.session.user.username);
-
-          // join sockets + notify invited users
-          for (const uid of participantIds) {
-            const sid = socketIdByUserId.get(uid);
-            if (sid) {
-              const sock = io.sockets.sockets.get(sid);
-              if (sock) sock.join(`dm:${threadId}`);
-              io.to(sid).emit("dm thread invited", {
-                threadId,
-                title,
-                isGroup,
-                participants: allNames,
-              });
-            }
-          }
-
-          res.json({ ok: true, threadId });
+          if (insertErr) return reject(insertErr);
+          resolve(this.lastID);
         }
       );
+    });
+
+    const newParticipantIds = users.map((u) => u.id);
+    newParticipantIds.push(myId);
+
+    for (const uid of newParticipantIds) {
+      db.run(
+        `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
+        [threadId, uid, myId, now]
+      );
     }
-  });
+
+    const allNames = users.map((u) => u.username);
+    allNames.push(req.session.user.username);
+
+    // join sockets + notify invited users
+    for (const uid of newParticipantIds) {
+      const sid = socketIdByUserId.get(uid);
+      if (sid) {
+        const sock = io.sockets.sockets.get(sid);
+        if (sock) sock.join(`dm:${threadId}`);
+        io.to(sid).emit("dm thread invited", {
+          threadId,
+          title,
+          isGroup,
+          participants: allNames,
+        });
+      }
+    }
+
+    return res.json({ ok: true, threadId });
+  } catch (err) {
+    console.error("[dm:create] failed", err);
+    return res.status(500).send("Failed to create thread");
+  }
 }
 
 app.post("/dm/thread", requireLogin, handleCreateDmThread);
@@ -3444,49 +3539,54 @@ app.post("/dm/thread/:id/participants", requireLogin, (req, res) => {
 
     if (!cleaned.length) return res.status(400).send("Pick at least one new member");
 
-    fetchUsersByNames(cleaned, (fetchErr, users) => {
-      if (fetchErr) return res.status(500).send("Failed to add members");
-      if (users.length !== cleaned.length) {
-      const found = new Set((users||[]).map(u=>normKey(u.username)));
-      const missing = cleaned.filter(n => !found.has(normKey(n))).slice(0, 3);
-      return res.status(404).send(missing.length ? `User not found: ${missing.join(", ")}` : "User not found");
-    }
-
-      db.all(
-        `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
-        [tid],
-        (listErr, rows) => {
-          if (listErr) return res.status(500).send("Failed to add members");
-          const existingIds = new Set((rows || []).map((r) => r.user_id));
-          const newUsers = users.filter((u) => !existingIds.has(u.id));
-          if (!newUsers.length) return res.status(400).send("Everyone is already in the group");
-
-          const now = Date.now();
-          for (const u of newUsers) {
-            db.run(
-              `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
-              [tid, u.id, req.session.user.id, now]
-            );
-            const sid = socketIdByUserId.get(u.id);
-            if (sid) {
-              const sock = io.sockets.sockets.get(sid);
-              if (sock) sock.join(`dm:${tid}`);
-              io.to(sid).emit("dm thread invited", {
-                threadId: tid,
-                title: thread.title || null,
-                isGroup: true,
-                participants: thread.participants,
-              });
-            }
-          }
-
-          loadThreadForUser(tid, req.session.user.id, (infoErr, fresh) => {
-            if (infoErr) return res.status(500).send("Added but could not refresh");
-            return res.json({ ok: true, participants: fresh.participants });
-          });
+    (async () => {
+      try {
+        const users = await fetchUsersByNames(cleaned);
+        if (users.length !== cleaned.length) {
+          const found = new Set((users || []).map((u) => normKey(u.username)));
+          const missing = cleaned.filter((n) => !found.has(normKey(n))).slice(0, 3);
+          return res.status(404).send(missing.length ? `User not found: ${missing.join(", ")}` : "User not found");
         }
-      );
-    });
+
+        db.all(
+          `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
+          [tid],
+          (listErr, rows) => {
+            if (listErr) return res.status(500).send("Failed to add members");
+            const existingIds = new Set((rows || []).map((r) => r.user_id));
+            const newUsers = users.filter((u) => !existingIds.has(u.id));
+            if (!newUsers.length) return res.status(400).send("Everyone is already in the group");
+
+            const now = Date.now();
+            for (const u of newUsers) {
+              db.run(
+                `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
+                [tid, u.id, req.session.user.id, now]
+              );
+              const sid = socketIdByUserId.get(u.id);
+              if (sid) {
+                const sock = io.sockets.sockets.get(sid);
+                if (sock) sock.join(`dm:${tid}`);
+                io.to(sid).emit("dm thread invited", {
+                  threadId: tid,
+                  title: thread.title || null,
+                  isGroup: true,
+                  participants: thread.participants,
+                });
+              }
+            }
+
+            loadThreadForUser(tid, req.session.user.id, (infoErr, fresh) => {
+              if (infoErr) return res.status(500).send("Added but could not refresh");
+              return res.json({ ok: true, participants: fresh.participants });
+            });
+          }
+        );
+      } catch (fetchErr) {
+        console.error("[dm:add] failed", fetchErr);
+        return res.status(500).send("Failed to add members");
+      }
+    })();
   });
 });
 
