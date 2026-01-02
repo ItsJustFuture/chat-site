@@ -1019,7 +1019,7 @@ const commandRegistry = {
       await dbRunAsync(`DELETE FROM punishments WHERE user_id=? AND type='mute'`, [target.id]);
       return { ok: true, message: `Unmuted ${target.username}`, targets: target.id };
     },
-  },,
+  },
   setrole: {
     minRole: "Admin",
     description: "Set a user's role (Admin+). Owners can set any role; Admins can only set roles below Admin.",
