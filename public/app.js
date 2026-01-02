@@ -494,6 +494,10 @@ const dmQuickBar = document.getElementById("dmQuickBar");
 const dmQuickStrip = document.getElementById("dmQuickStrip");
 const groupQuickBar = document.getElementById("groupQuickBar");
 const groupQuickStrip = document.getElementById("groupQuickStrip");
+const dmQuickEmpty = document.getElementById("dmQuickEmpty");
+const groupQuickEmpty = document.getElementById("groupQuickEmpty");
+const groupQuickStartBtn = document.getElementById("groupQuickStartBtn");
+
 const dmCloseBtn = document.getElementById("dmCloseBtn");
 const dmTabs = document.getElementById("dmTabs");
 const dmCreateGroupBtn = document.getElementById("dmCreateGroupBtn");
@@ -2254,8 +2258,14 @@ function renderDirectThreads(){
   stripEl.innerHTML = "";
   if (list.length === 0) {
     stripEl.style.display = "none";
+    // Empty state for the quick bar (so users know the DM button works)
+    if (stripEl === dmQuickStrip) {
+      if (dmQuickEmpty) dmQuickEmpty.hidden = false;
+      if (dmQuickBar) dmQuickBar.hidden = false;
+    }
     return;
   }
+  if (stripEl === dmQuickStrip && dmQuickEmpty) dmQuickEmpty.hidden = true;
   stripEl.style.display = "flex";
 
   list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
@@ -2318,8 +2328,14 @@ function renderGroupThreads(){
   stripEl.innerHTML = "";
   if (list.length === 0) {
     stripEl.style.display = "none";
+    // Empty state for the group quick bar
+    if (stripEl === groupQuickStrip) {
+      if (groupQuickEmpty) groupQuickEmpty.hidden = false;
+      if (groupQuickBar) groupQuickBar.hidden = false;
+    }
     return;
   }
+  if (stripEl === groupQuickStrip && groupQuickEmpty) groupQuickEmpty.hidden = true;
   stripEl.style.display = "flex";
   list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
 
@@ -2926,6 +2942,13 @@ async function toggleDmQuickBar(kind){
 
 dmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("direct"); });
 groupDmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("group"); });
+
+groupQuickStartBtn?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  // Use the same group DM picker used inside the group DM panel
+  hideAllDmQuickBars();
+  openDmPicker("create");
+});
 
 function closeQuickBarsOnOutside(e){
   const t = e.target;

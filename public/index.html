@@ -239,9 +239,14 @@
         <!-- Quick avatar strips (shown before opening the DM panel) -->
         <div class="dmQuickBar" id="dmQuickBar" hidden>
           <div class="dmQuickStrip" id="dmQuickStrip" aria-label="Your direct message threads"></div>
+          <div class="dmQuickEmpty" id="dmQuickEmpty" hidden>No active DMs</div>
         </div>
         <div class="dmQuickBar" id="groupQuickBar" hidden>
           <div class="dmQuickStrip" id="groupQuickStrip" aria-label="Your group message threads"></div>
+          <div class="dmQuickEmpty" id="groupQuickEmpty" hidden>
+            <div class="dmQuickEmptyText">No active Group DMs</div>
+            <button class="btn dmQuickEmptyBtn" id="groupQuickStartBtn" type="button">Start a new Group DM</button>
+          </div>
         </div>
 
 <div class="uiScalePanel" id="uiScalePanel" hidden>
