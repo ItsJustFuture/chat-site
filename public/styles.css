@@ -4635,3 +4635,83 @@ body.kb-open #typing{ display:none !important; }
 .dmRow.g-mid .dmBubble::after{
   content:none !important;
 }
+
+
+/* === FINAL DM CONSTRAINTS (prevents right overflow + keeps meta/reactions/seen visible) === */
+.dmMessages{
+  overflow-x:hidden;
+  padding-left: 16px;
+  padding-right: 16px;
+  box-sizing:border-box;
+}
+
+.dmRow{
+  width:100%;
+  max-width:100%;
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  box-sizing:border-box;
+  min-width:0;
+}
+
+.dmRow.self{ justify-content:flex-end; }
+.dmRow:not(.self){ justify-content:flex-start; }
+
+.dmActionsRail{
+  flex:0 0 auto;
+  width:34px;
+  min-width:34px;
+}
+
+.dmBubbleWrap{
+  flex:0 1 auto;          /* critical: do NOT grow to full width */
+  max-width:66%;          /* never exceed 2/3 of panel */
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+}
+
+.dmRow.self .dmBubbleWrap{
+  margin-left:auto;       /* pin to right, expand left */
+  align-items:flex-end;
+}
+.dmRow:not(.self) .dmBubbleWrap{
+  margin-right:auto;
+  align-items:flex-start;
+}
+
+.dmBubble{
+  display:inline-block;
+  width:fit-content;      /* size to content */
+  max-width:100%;
+}
+
+.dmMetaRow{
+  max-width:100%;
+  min-width:0;
+  overflow:hidden;
+}
+
+/* Ensure meta items (username/time/reactions/seen) never render off-panel */
+.dmMetaRow > *{
+  min-width:0;
+  max-width:100%;
+}
+
+/* --- Desktop main composer: force visible and positioned correctly --- */
+@media (min-width: 900px){
+  .inputBar{
+    display:flex !important;
+    position: sticky !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    z-index: 140 !important;
+    box-sizing: border-box;
+  }
+  main.chatMain, main{
+    min-height:0;
+  }
+}
