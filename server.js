@@ -626,6 +626,14 @@ app.use(express.static(PUBLIC_DIR));
 function normalizeUsername(u) {
   return String(u || "").trim();
 }
+function cleanUsernameForLookup(u) {
+  // For lookups (DMs, commands), do NOT strip emoji/symbols — just normalize & remove control chars.
+  let s = String(u || "").normalize("NFKC").trim();
+  s = s.replace(/[\u0000-\u001F\u007F]/g, ""); // drop control chars
+  // collapse internal whitespace
+  s = s.replace(/\s+/g, " ");
+  return s.slice(0, 64);
+}
 function normKey(u) {
   return normalizeUsername(u).toLowerCase();
 }
@@ -1854,7 +1862,7 @@ function fetchUsersByNames(usernames, cb) {
   const cleaned = Array.from(
     new Set(
       (usernames || [])
-        .map((u) => sanitizeUsername(u))
+        .map((u) => cleanUsernameForLookup(u))
         .filter(Boolean)
         .map((u) => normKey(u))
     )
@@ -3215,7 +3223,7 @@ function handleCreateDmThread(req, res) {
   const cleaned = [];
   const seen = new Set();
   for (const name of participants || []) {
-    const s = sanitizeUsername(name);
+    const s = cleanUsernameForLookup(name);
     const key = normKey(s);
     if (!s || seen.has(key)) continue;
     if (key === normKey(req.session.user.username)) continue;
@@ -3237,7 +3245,11 @@ function handleCreateDmThread(req, res) {
 
   fetchUsersByNames(cleaned, (err, users) => {
     if (err) return res.status(500).send("Failed to create thread");
-    if (users.length !== cleaned.length) return res.status(404).send("User not found");
+    if (users.length !== cleaned.length) {
+      const found = new Set((users||[]).map(u=>normKey(u.username)));
+      const missing = cleaned.filter(n => !found.has(normKey(n))).slice(0, 3);
+      return res.status(404).send(missing.length ? `User not found: ${missing.join(", ")}` : "User not found");
+    }
 
     const now = Date.now();
     const isGroup = kindRaw === "group"
@@ -3330,7 +3342,7 @@ app.post("/dm/thread/:id/participants", requireLogin, (req, res) => {
     const cleaned = [];
     const seen = new Set();
     for (const name of participants || []) {
-      const s = sanitizeUsername(name);
+      const s = cleanUsernameForLookup(name);
       const key = normKey(s);
       if (!s || seen.has(key)) continue;
       if (key === normKey(req.session.user.username)) continue;
@@ -3342,7 +3354,11 @@ app.post("/dm/thread/:id/participants", requireLogin, (req, res) => {
 
     fetchUsersByNames(cleaned, (fetchErr, users) => {
       if (fetchErr) return res.status(500).send("Failed to add members");
-      if (users.length !== cleaned.length) return res.status(404).send("User not found");
+      if (users.length !== cleaned.length) {
+      const found = new Set((users||[]).map(u=>normKey(u.username)));
+      const missing = cleaned.filter(n => !found.has(normKey(n))).slice(0, 3);
+      return res.status(404).send(missing.length ? `User not found: ${missing.join(", ")}` : "User not found");
+    }
 
       db.all(
         `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
