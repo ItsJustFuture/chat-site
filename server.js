@@ -845,47 +845,27 @@ const ROLE_DISPLAY = {
 
 function findUserByMention(raw, cb) {
   const rawName = String(raw || "").replace(/^@+/, "").trim().slice(0, 64);
-  const sanitized = sanitizeUsername(rawName);
+  const cleaned = cleanUsernameForLookup(rawName);
+  const legacy = sanitizeUsername(rawName);
 
-  // First try an exact (case-insensitive) match on the raw trimmed name.
-  // This preserves usernames that include characters sanitizeUsername strips out (emoji, symbols, etc.).
-  if (rawName) {
+  const tryOne = (name, next) => {
+    if (!name) return next();
     db.get(
       `SELECT id, username, role FROM users
-       WHERE lower(username)=lower(?)
-       ORDER BY CASE WHEN username=? THEN 0 ELSE 1 END LIMIT 1`,
-      [rawName, rawName],
+       WHERE username = ?
+          OR lower(username) = lower(?)
+       ORDER BY CASE WHEN username = ? THEN 0 ELSE 1 END
+       LIMIT 1`,
+      [name, name, name],
       (err, row) => {
         if (!err && row) return cb(null, row);
-
-        // Fallback to sanitized variant for older usernames / mentions.
-        if (!sanitized) return cb(new Error("User not found"));
-        db.get(
-          `SELECT id, username, role FROM users
-           WHERE lower(username)=lower(?)
-           ORDER BY CASE WHEN username=? THEN 0 ELSE 1 END LIMIT 1`,
-          [sanitized, sanitized],
-          (err2, row2) => {
-            if (err2 || !row2) return cb(new Error("User not found"));
-            cb(null, row2);
-          }
-        );
+        next();
       }
     );
-    return;
-  }
+  };
 
-  if (!sanitized) return cb(new Error("User not found"));
-  db.get(
-    `SELECT id, username, role FROM users
-     WHERE lower(username)=lower(?)
-     ORDER BY CASE WHEN username=? THEN 0 ELSE 1 END LIMIT 1`,
-    [sanitized, sanitized],
-    (err, row) => {
-      if (err || !row) return cb(new Error("User not found"));
-      cb(null, row);
-    }
-  );
+  // Try the most faithful version first, then the cleaned lookup, then legacy sanitized.
+  tryOne(rawName, () => tryOne(cleaned, () => tryOne(legacy, () => cb(new Error("User not found")))));
 }
 
 
@@ -1859,23 +1839,54 @@ function emitProgressionUpdate(userId) {
 
 
 function fetchUsersByNames(usernames, cb) {
+  // Keep BOTH exact strings and lowercased keys.
+  // This avoids breaking lookups for usernames containing emoji/symbols where LOWER() behavior can be inconsistent.
+  const exacts = [];
+  const lowers = [];
+  const seenExact = new Set();
+  const seenLower = new Set();
+
+  for (const u of (usernames || [])) {
+    const s = cleanUsernameForLookup(u);
+    if (!s) continue;
+    if (!seenExact.has(s)) { seenExact.add(s); exacts.push(s); }
+    const k = normKey(s);
+    if (!seenLower.has(k)) { seenLower.add(k); lowers.push(k); }
+  }
+
+  if (!exacts.length && !lowers.length) return cb(null, []);
+
+  const exPh = exacts.map(() => "?").join(",");
+  const loPh = lowers.map(() => "?").join(",");
+
+  // Build WHERE parts dynamically to avoid IN () invalid SQL.
+  const where = [];
+  const args = [];
+  if (exacts.length) { where.push(`username IN (${exPh})`); args.push(...exacts); }
+  if (lowers.length) { where.push(`lower(username) IN (${loPh})`); args.push(...lowers); }
+
+  db.all(
+    `SELECT id, username FROM users WHERE ${where.join(" OR ")}`,
+    args,
+    (err, rows) => cb(err, rows || [])
+  );
+}
+
+function fetchUsersByIds(ids, cb) {
   const cleaned = Array.from(
-    new Set(
-      (usernames || [])
-        .map((u) => cleanUsernameForLookup(u))
-        .filter(Boolean)
-        .map((u) => normKey(u))
-    )
+    new Set((ids || [])
+      .map((v) => Number(v))
+      .filter((n) => Number.isInteger(n) && n > 0))
   );
   if (!cleaned.length) return cb(null, []);
-
   const placeholders = cleaned.map(() => "?").join(",");
   db.all(
-    `SELECT id, username FROM users WHERE lower(username) IN (${placeholders})`,
+    `SELECT id, username FROM users WHERE id IN (${placeholders})`,
     cleaned,
     (err, rows) => cb(err, rows || [])
   );
 }
+
 function sanitizeRoomName(r) {
   r = String(r || "").trim();
   r = r.replace(/^#+/, "");      // drop leading '#'
@@ -2144,12 +2155,20 @@ app.post("/register", async (req, res) => {
 });
 app.post("/login", async (req, res) => {
   try {
-    const username = sanitizeUsername(req.body?.username);
+    const raw = String(req.body?.username || "").trim().slice(0, 64);
+    const cleaned = cleanUsernameForLookup(raw);
+    const legacy = sanitizeUsername(raw);
+    const candidates = Array.from(new Set([raw, cleaned, legacy].filter(Boolean)));
+
     const password = String(req.body?.password || "");
-    if (!username || !password) return res.status(400).send("Missing credentials");
+    if (!candidates.length || !password) return res.status(400).send("Missing credentials");
 
     // 1) Prefer Postgres users (new registrations land here)
-    const pgUser = await pgGetUserByUsername(username);
+    let pgUser = null;
+    for (const cand of candidates) {
+      pgUser = await pgGetUserByUsername(cand);
+      if (pgUser) break;
+    }
     if (pgUser && pgUser.password_hash) {
       const ok = await bcrypt.compare(password, String(pgUser.password_hash || ""));
       if (!ok) return res.status(401).send("Invalid username or password");
@@ -2187,7 +2206,14 @@ app.post("/login", async (req, res) => {
     }
 
     // 2) Fallback to SQLite (legacy accounts)
-    const row = await dbGetAsync("SELECT * FROM users WHERE lower(username) = lower(?)", [username]);
+    let row = null;
+    for (const cand of candidates) {
+      row = await dbGetAsync(
+        "SELECT * FROM users WHERE username = ? OR lower(username) = lower(?)",
+        [cand, cand]
+      ).catch(() => null);
+      if (row) break;
+    }
     if (!row) return res.status(401).send("Invalid username or password");
 
     // Handle legacy password column (if present)
@@ -2813,28 +2839,47 @@ app.get("/profile", requireLogin, async (req, res) => {
 });
 
 app.get("/profile/:username", requireLogin, async (req, res) => {
-  const u = sanitizeUsername(req.params.username);
-  if (!u) return res.status(400).send("Bad username");
+  const rawParam = String(req.params.username || "");
+  let decoded = rawParam;
+  try { decoded = decodeURIComponent(rawParam); } catch {}
+  const rawName = String(decoded || "").trim().slice(0, 64);
+  const cleaned = cleanUsernameForLookup(rawName);
+  const legacy = sanitizeUsername(rawName);
+
+  const candidates = Array.from(new Set([rawName, cleaned, legacy].filter(Boolean)));
+  if (!candidates.length) return res.status(400).send("Bad username");
 
   try {
     // Prefer Postgres first (Render/prod path). Some users may not exist in SQLite yet.
     let row = null;
     try {
-      const r = await pgPool.query(
-        `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp
-         FROM users WHERE lower(username) = lower($1) LIMIT 1`,
-        [u]
-      );
+      for (const cand of candidates) {
+        try {
+          const r = await pgPool.query(
+            `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp
+             FROM users
+             WHERE username = $1 OR lower(username) = lower($1)
+             LIMIT 1`,
+            [cand]
+          );
+          row = r.rows?.[0] || null;
+          if (row) break;
+        } catch {}
+      }
       row = r.rows?.[0] || null;
     } catch {}
 
     // Fallback to SQLite
     if (!row) {
-      row = await dbGet(
-        `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp
-         FROM users WHERE lower(username) = lower(?)`,
-        [u]
-      );
+      for (const cand of candidates) {
+        row = await dbGet(
+          `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp
+           FROM users
+           WHERE username = ? OR lower(username) = lower(?)`,
+          [cand, cand]
+        );
+        if (row) break;
+      }
     }
 
     if (!row) return res.status(404).send("Not found");
@@ -3205,7 +3250,27 @@ function handleCreateDmThread(req, res) {
   // { participants:["a"], kind:"direct" }
   // { participant:"a" } / { user:"a" } / { to:"a" } / { username:"a" }
   let participants = req.body?.participants;
-  if (!Array.isArray(participants)) {
+  let participantIds = req.body?.participantIds || req.body?.participantsIds;
+  if (!Array.isArray(participantIds)) {
+    const singleId =
+      req.body?.participantId ??
+      req.body?.toId ??
+      req.body?.userId ??
+      req.body?.targetId ??
+      null;
+    participantIds = singleId != null ? [singleId] : [];
+  }
+
+  // Normalize participants list (strings) and allow mixed arrays (ids or usernames)
+  if (Array.isArray(participants)) {
+    const nextNames = [];
+    for (const v of participants) {
+      const n = Number(v);
+      if (Number.isInteger(n) && n > 0) participantIds.push(n);
+      else nextNames.push(v);
+    }
+    participants = nextNames;
+  } else {
     const raw = String(
       participants ||
       req.body?.participant ||
@@ -3217,10 +3282,11 @@ function handleCreateDmThread(req, res) {
     participants = raw.split(",");
   }
 
-  const kindRaw = String(req.body?.kind || "").trim().toLowerCase();
-  let title = String(req.body?.title || "").trim().slice(0, 80);
+  // De-dupe ids
+  participantIds = Array.from(new Set(participantIds.map((v)=>Number(v)).filter((n)=>Number.isInteger(n) && n > 0)));
 
-  const cleaned = [];
+  const kindRaw = String(req.body?.kind || "").trim().toLowerCase();
+  let title = String(req.body?.title || "").trim().slice(0, 80);  const cleanedNames = [];
   const seen = new Set();
   for (const name of participants || []) {
     const s = cleanUsernameForLookup(name);
@@ -3228,61 +3294,84 @@ function handleCreateDmThread(req, res) {
     if (!s || seen.has(key)) continue;
     if (key === normKey(req.session.user.username)) continue;
     seen.add(key);
-    cleaned.push(s);
+    cleanedNames.push(s);
   }
 
-  if (!cleaned.length) return res.status(400).send("Add at least one other user");
-  if (cleaned.length > 9) return res.status(400).send("Too many participants");
-
-  // Enforce mode rules
-  if (kindRaw === "direct") {
-    title = ""; // no titles for direct DMs
-    if (cleaned.length !== 1) return res.status(400).send("Direct messages must have exactly 1 participant");
-  }
-  if (kindRaw === "group") {
-    if (cleaned.length < 2 && !title) return res.status(400).send("Group chats need 2+ participants (or a title)");
+  // If client passed ids, allow creating threads without relying on username matching.
+  if (!cleanedNames.length && !participantIds.length) {
+    return res.status(400).send("Pick someone to message");
   }
 
-  fetchUsersByNames(cleaned, (err, users) => {
+  // Determine kind: group if explicitly requested OR more than one recipient (by name or id) OR a title is provided.
+  const requestedCount = cleanedNames.length + participantIds.length;
+  const isGroup = kindRaw === "group" || requestedCount > 1 || !!title;
+
+  if (isGroup && requestedCount < 2) {
+    return res.status(400).send("Group chats need 2+ participants (or a title)");
+  }
+
+  // Resolve recipients by BOTH name and id, then merge (dedupe by id).
+  
+fetchUsersByNames(cleanedNames, (err, usersByName) => {
     if (err) return res.status(500).send("Failed to create thread");
-    if (users.length !== cleaned.length) {
-      const found = new Set((users||[]).map(u=>normKey(u.username)));
-      const missing = cleaned.filter(n => !found.has(normKey(n))).slice(0, 3);
+
+    if (usersByName.length !== cleanedNames.length) {
+      const found = new Set((usersByName || []).map(u => normKey(u.username)));
+      const missing = cleanedNames.filter(n => !found.has(normKey(n))).slice(0, 3);
       return res.status(404).send(missing.length ? `User not found: ${missing.join(", ")}` : "User not found");
     }
 
-    const now = Date.now();
-    const isGroup = kindRaw === "group"
-      ? true
-      : (kindRaw === "direct" ? false : (users.length + 1 > 2 || !!title));
-
-    // If it's a direct DM, reuse existing 1:1 thread (prevents duplicates)
     const myId = req.session.user.id;
-    if (!isGroup && users.length === 1) {
-      const otherId = users[0].id;
-      db.get(
-        `
-        SELECT t.id AS id
-        FROM dm_threads t
-        WHERE t.is_group = 0
-          AND (SELECT COUNT(*) FROM dm_participants dp WHERE dp.thread_id = t.id) = 2
-          AND EXISTS (SELECT 1 FROM dm_participants dp WHERE dp.thread_id = t.id AND dp.user_id = ?)
-          AND EXISTS (SELECT 1 FROM dm_participants dp WHERE dp.thread_id = t.id AND dp.user_id = ?)
-        LIMIT 1
-        `,
-        [myId, otherId],
-        (reuseErr, row) => {
-          if (reuseErr) return res.status(500).send("Failed to create thread");
-          if (row?.id) return res.json({ ok: true, threadId: row.id, reused: true });
-          return createNewThread();
-        }
-      );
-      return;
-    }
+    const now = Date.now();
+    let users = [];
 
-    return createNewThread();
+    fetchUsersByIds(participantIds, (err2, usersById) => {
+      if (err2) return res.status(500).send("Failed to create thread");
 
-    function createNewThread() {
+      if (usersById.length !== participantIds.length) {
+        const foundIds = new Set((usersById || []).map(u => Number(u.id)));
+        const missingIds = participantIds.filter(id => !foundIds.has(Number(id))).slice(0, 3);
+        return res.status(404).send(missingIds.length ? `User not found (id): ${missingIds.join(", ")}` : "User not found");
+      }
+
+      // Merge recipients (dedupe by id), and always exclude self.
+      const merged = new Map();
+      for (const u of (usersByName || [])) merged.set(Number(u.id), u);
+      for (const u of (usersById || [])) merged.set(Number(u.id), u);
+      merged.delete(Number(myId));
+      users = Array.from(merged.values());
+
+      // For direct DMs we expect exactly one other participant.
+      if (!isGroup && users.length !== 1) {
+        return res.status(400).send("Pick exactly one person for a direct DM");
+      }
+
+      // If it's a direct DM, reuse existing 1:1 thread (prevents duplicates)
+      if (!isGroup && users.length === 1) {
+        const otherId = users[0].id;
+        db.get(
+          `SELECT t.id FROM dm_threads t
+           JOIN dm_participants p1 ON p1.thread_id=t.id AND p1.user_id=?
+           JOIN dm_participants p2 ON p2.thread_id=t.id AND p2.user_id=?
+           WHERE t.is_group=0
+           ORDER BY t.id DESC LIMIT 1`,
+          [myId, otherId],
+          (getErr, row) => {
+            if (getErr) return res.status(500).send("Failed to create thread");
+            if (row && row.id) {
+              res.json({ ok: true, threadId: row.id, reused: true });
+              return;
+            }
+            return createNewThread();
+          }
+        );
+        return;
+      }
+
+      return createNewThread();
+    });
+
+function createNewThread() {
       db.run(
         `INSERT INTO dm_threads (title, is_group, created_by, created_at) VALUES (?, ?, ?, ?)`,
         [title || null, isGroup ? 1 : 0, myId, now],
