@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node server.js",
     "test": "echo \"No tests yet\" && exit 0",
-    "check": "node --check server.js && node --check public/app.js && node --check public/theme-init.js && node --check database.js"
+    "check": "node --check server.js && node --check public/app.js && node --check public/theme-init.js && node --check database.js",
+    "audit": "npm audit --audit-level=high",
+    "verify": "npm run check && npm run audit"
   },
   "keywords": [],
   "author": "",
@@ -24,5 +26,8 @@
     "pg": "^8.16.3",
     "socket.io": "^4.8.3",
     "sqlite3": "^5.1.7"
+  },
+  "overrides": {
+    "qs": "^6.14.1"
   }
 }
