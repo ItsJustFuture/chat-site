@@ -3344,7 +3344,7 @@ main.chat{ position: relative; }
 
   /* Give the scroll areas room so the fixed composer doesn't cover the last message */
   .msgs{
-    padding-bottom: calc(120px + env(safe-area-inset-bottom));
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
   }
 
   /* DM composer pinned to bottom on mobile */
@@ -3367,7 +3367,7 @@ main.chat{ position: relative; }
   #dmModal .dmMsgs,
   .dmPanel .dmMessages,
   .dmPanel .dmMsgs{
-    padding-bottom: calc(120px + env(safe-area-inset-bottom));
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
   }
 
   /* Ensure DM content uses the full black area and can scroll correctly */
