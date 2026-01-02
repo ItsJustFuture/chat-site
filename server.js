@@ -43,6 +43,14 @@ const bcrypt = require("bcrypt");
 const multer = require("multer");
 const { Pool } = require("pg");
 const http = require("http");
+
+// ---- Safety nets (prevents silent crashes in prod) ----
+process.on("unhandledRejection", (err) => {
+  console.error("[unhandledRejection]", err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err);
+});
 const { Server } = require("socket.io");
 const sqlite3 = require("sqlite3").verbose();
 
@@ -4142,7 +4150,7 @@ if (s?.user) {
     if (!requireMinRole(actorRole, "Moderator")) return;
 
     username = sanitizeUsername(username);
-    db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+    db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
       if (!target) return;
       if (!canModerate(actorRole, target.role)) return;
 
@@ -4165,7 +4173,7 @@ if (s?.user) {
     const mins = clamp(minutes, 1, 1440);
     const expiresAt = Date.now() + mins * 60 * 1000;
 
-    db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+    db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
       if (!target) return;
       if (!canModerate(actorRole, target.role)) return;
 
@@ -4285,7 +4293,7 @@ if (s?.user) {
     if (!requireMinRole(actorRole, "Moderator")) return;
 
     username = sanitizeUsername(username);
-    db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+	    db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
       if (!target) return;
       if (!canModerate(actorRole, target.role)) return;
 
@@ -4358,8 +4366,10 @@ if (s?.user) {
           }
         }
 
-        io.to(room).emit("system", `${username} role set to ${role}.`);
+        io.to(room).emit("system", `${target.username} role set to ${role}.`);
         emitUserList(room);
+      }).catch((e) => {
+        console.error("[mod set role]", e);
       });
     });
   });
