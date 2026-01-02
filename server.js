@@ -627,20 +627,23 @@ function normalizeUsername(u) {
   return String(u || "").trim();
 }
 function cleanUsernameForLookup(u) {
-  // For lookups (DMs, commands), do NOT strip emoji/symbols — just normalize & remove control chars.
-  let s = String(u || "").normalize("NFKC").trim();
-  s = s.replace(/[\u0000-\u001F\u007F]/g, ""); // drop control chars
-  // collapse internal whitespace
-  s = s.replace(/\s+/g, " ");
-  return s.slice(0, 64);
+  // Lookup-friendly normalization that won't break emoji/symbol usernames.
+  u = normalizeUsername(u);
+  // Remove ASCII control chars only (keeps emojis / unicode).
+  u = u.replace(/[\u0000-\u001F\u007F]/g, "");
+  // Collapse whitespace
+  u = u.replace(/\s+/g, " ").trim();
+  return u.slice(0, 64);
 }
 function normKey(u) {
   return normalizeUsername(u).toLowerCase();
 }
 function sanitizeUsername(u) {
+  // Registration-safe: normalize without unicode property escapes (older Node safe).
   u = normalizeUsername(u);
-  // allow spaces, letters, digits, some punctuation; trim length
-  u = u.replace(/[^\p{L}\p{N} _.'-]/gu, "").trim();
+  u = u.replace(/[\u0000-\u001F\u007F]/g, "");
+  u = u.replace(/\s+/g, " ").trim();
+  // Keep it short for UI/DB consistency
   return u.slice(0, 24);
 }
 function sanitizeThemeNameServer(name){
