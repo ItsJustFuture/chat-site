@@ -548,6 +548,10 @@ db.serialize(() => {
     ["is_group", "is_group INTEGER NOT NULL DEFAULT 0"],
     ["created_by", "created_by INTEGER NOT NULL DEFAULT 0"],
     ["created_at", "created_at INTEGER NOT NULL DEFAULT 0"],
+    ["user_low", "user_low INTEGER"],
+    ["user_high", "user_high INTEGER"],
+    ["last_message_id", "last_message_id INTEGER"],
+    ["last_message_at", "last_message_at INTEGER"],
   ]);
 
   ensureColumns("dm_participants", [
@@ -559,6 +563,11 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_dm_participants_user ON dm_participants(user_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_dm_participants_thread ON dm_participants(thread_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_dm_messages_thread_ts ON dm_messages(thread_id, ts)`);
+  db.run(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_dm_threads_pair
+       ON dm_threads(user_low, user_high)
+       WHERE is_group = 0 AND user_low IS NOT NULL AND user_high IS NOT NULL`
+  );
 
   // Ensure Iri is always Owner
   db.run("UPDATE users SET role='Owner' WHERE lower(username)='iri'");
@@ -1897,6 +1906,95 @@ function sanitizeRoomName(r) {
   r = r.replace(/[^a-z0-9_-]/g, "");
   return r.slice(0, 24);
 }
+function normalizeDmPair(a, b) {
+  const aId = Number(a);
+  const bId = Number(b);
+  if (!Number.isInteger(aId) || !Number.isInteger(bId) || aId <= 0 || bId <= 0 || aId === bId) {
+    return null;
+  }
+  return { low: Math.min(aId, bId), high: Math.max(aId, bId) };
+}
+
+function ensureDmParticipants(threadId, userIds, addedBy, joinedAt, cb) {
+  let pending = userIds.length;
+  if (!pending) return cb && cb();
+  for (const uid of userIds) {
+    db.run(
+      `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
+      [threadId, uid, addedBy, joinedAt],
+      () => {
+        pending -= 1;
+        if (pending === 0 && cb) cb();
+      }
+    );
+  }
+}
+
+function getOrCreateDirectThread({ userA, userB, createdBy }, cb) {
+  const pair = normalizeDmPair(userA, userB);
+  if (!pair) return cb(new Error("invalid participants"));
+  const now = Date.now();
+
+  const finish = (row, created) => {
+    ensureDmParticipants(row.id, [pair.low, pair.high], createdBy, now, () => {
+      cb(null, { id: row.id, created: !!created, user_low: pair.low, user_high: pair.high });
+    });
+  };
+
+  const lookup = () => {
+    db.get(
+      `SELECT id, user_low, user_high FROM dm_threads WHERE is_group=0 AND user_low=? AND user_high=?`,
+      [pair.low, pair.high],
+      (err, row) => {
+        if (row && row.id) {
+          if (!row.user_low || !row.user_high) {
+            db.run(`UPDATE dm_threads SET user_low=?, user_high=? WHERE id=?`, [pair.low, pair.high, row.id]);
+          }
+          return finish(row, false);
+        }
+
+        if (err) return cb(err);
+
+        // Fallback: legacy rows without user_low/user_high but with both participants.
+        db.get(
+          `SELECT t.id FROM dm_threads t
+             JOIN dm_participants p1 ON p1.thread_id=t.id AND p1.user_id=?
+             JOIN dm_participants p2 ON p2.thread_id=t.id AND p2.user_id=?
+           WHERE t.is_group=0
+           ORDER BY t.id DESC LIMIT 1`,
+          [pair.low, pair.high],
+          (legacyErr, legacyRow) => {
+            if (legacyRow && legacyRow.id) {
+              db.run(`UPDATE dm_threads SET user_low=?, user_high=? WHERE id=?`, [pair.low, pair.high, legacyRow.id]);
+              return finish({ ...legacyRow, user_low: pair.low, user_high: pair.high }, false);
+            }
+            if (legacyErr) return cb(legacyErr);
+            return insert();
+          }
+        );
+      }
+    );
+  };
+
+  const insert = () => {
+    db.run(
+      `INSERT INTO dm_threads (title, is_group, created_by, created_at, user_low, user_high) VALUES (?, 0, ?, ?, ?, ?)`,
+      [null, createdBy, now, pair.low, pair.high],
+      function (insertErr) {
+        if (insertErr) {
+          // Unique constraint race: try lookup again.
+          if (String(insertErr.message || "").toLowerCase().includes("unique")) return lookup();
+          return cb(insertErr);
+        }
+        console.log(`[dm:create] thread ${this.lastID} created for users ${pair.low}/${pair.high}`);
+        finish({ id: this.lastID, user_low: pair.low, user_high: pair.high }, true);
+      }
+    );
+  };
+
+  lookup();
+}
+
 function loadThreadForUser(threadId, userId, cb) {
   db.get(
     `SELECT id, title, is_group FROM dm_threads WHERE id = ?`,
@@ -1911,13 +2009,15 @@ function loadThreadForUser(threadId, userId, cb) {
           if (err2 || !member) return cb(err2 || new Error("forbidden"));
 
           db.all(
-            `SELECT u.username FROM dm_participants dp JOIN users u ON u.id = dp.user_id WHERE dp.thread_id = ?`,
+            `SELECT u.id, u.username, u.avatar FROM dm_participants dp JOIN users u ON u.id = dp.user_id WHERE dp.thread_id = ?`,
             [threadId],
             (err3, parts) => {
               if (err3) return cb(err3);
               cb(null, {
                 ...thread,
                 participants: (parts || []).map((p) => p.username),
+                participantIds: (parts || []).map((p) => p.id),
+                participantsDetail: (parts || []).map((p) => ({ id: p.id, username: p.username, avatar: p.avatar || null })),
               });
             }
           );
@@ -3184,13 +3284,13 @@ function handleListDmThreads(req, res) {
 
   db.all(
     `SELECT t.id, t.title, t.is_group, t.created_at,
+            COALESCE(t.last_message_id, (SELECT id FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1)) AS last_message_id,
             (SELECT text FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1) AS last_text,
-            (SELECT ts FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1) AS last_ts
+            COALESCE(t.last_message_at, (SELECT ts FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1)) AS last_ts
      FROM dm_threads t
      INNER JOIN dm_participants p ON p.thread_id = t.id
      WHERE p.user_id = ?
-       AND (t.is_group = 1 OR EXISTS (SELECT 1 FROM dm_messages WHERE thread_id = t.id))
-     ORDER BY COALESCE(last_ts, t.created_at) DESC`,
+     ORDER BY COALESCE(t.last_message_at, last_ts, t.created_at) DESC`,
     [userId],
     (err, threads) => {
       if (err) {
@@ -3203,7 +3303,7 @@ function handleListDmThreads(req, res) {
       const placeholders = ids.map(() => "?").join(",");
 
       db.all(
-        `SELECT dp.thread_id, u.username
+        `SELECT dp.thread_id, u.id as user_id, u.username, u.avatar
          FROM dm_participants dp
          JOIN users u ON u.id = dp.user_id
          WHERE dp.thread_id IN (${placeholders})`,
@@ -3212,13 +3312,23 @@ function handleListDmThreads(req, res) {
           const grouped = new Map();
           for (const p of parts || []) {
             if (!grouped.has(p.thread_id)) grouped.set(p.thread_id, []);
-            grouped.get(p.thread_id).push(p.username);
+            grouped.get(p.thread_id).push(p);
           }
 
-          const result = threads.map((t) => ({
-            ...t,
-            participants: grouped.get(t.id) || [],
-          }));
+          const result = threads.map((t) => {
+            const members = grouped.get(t.id) || [];
+            const other = members.find((m) => Number(m.user_id) !== Number(userId)) || members[0] || null;
+            return {
+              ...t,
+              participants: members.map((p) => p.username),
+              participantIds: members.map((p) => p.user_id),
+              participantsDetail: members.map((p) => ({ id: p.user_id, username: p.username, avatar: p.avatar || null })),
+              otherUser: other
+                ? { id: other.user_id, username: other.username, avatar: other.avatar || null }
+                : null,
+              unreadCount: 0,
+            };
+          });
           res.json(result);
         }
       );
@@ -3349,32 +3459,47 @@ fetchUsersByNames(cleanedNames, (err, usersByName) => {
         return res.status(400).send("Pick exactly one person for a direct DM");
       }
 
+      const participantIds = users.map((u) => u.id);
+      const participantNames = users.map((u) => u.username);
+
+      const finishThread = (threadId, reused, isGroupThread, threadTitle = title) => {
+        const allIds = Array.from(new Set([...participantIds, myId]));
+        const allNames = Array.from(new Set([...participantNames, req.session.user.username]));
+        ensureDmParticipants(threadId, allIds, myId, now, () => {
+          for (const uid of allIds) {
+            const sid = socketIdByUserId.get(uid);
+            if (sid) {
+              const sock = io.sockets.sockets.get(sid);
+              if (sock) sock.join(`dm:${threadId}`);
+              io.to(sid).emit("dm thread invited", {
+                threadId,
+                title: threadTitle,
+                isGroup: isGroupThread,
+                participants: allNames,
+              });
+            }
+          }
+
+          res.json({ ok: true, threadId, reused, isGroup: isGroupThread, participants: allNames });
+        });
+      };
+
       // If it's a direct DM, reuse existing 1:1 thread (prevents duplicates)
       if (!isGroup && users.length === 1) {
         const otherId = users[0].id;
-        db.get(
-          `SELECT t.id FROM dm_threads t
-           JOIN dm_participants p1 ON p1.thread_id=t.id AND p1.user_id=?
-           JOIN dm_participants p2 ON p2.thread_id=t.id AND p2.user_id=?
-           WHERE t.is_group=0
-           ORDER BY t.id DESC LIMIT 1`,
-          [myId, otherId],
-          (getErr, row) => {
-            if (getErr) return res.status(500).send("Failed to create thread");
-            if (row && row.id) {
-              res.json({ ok: true, threadId: row.id, reused: true });
-              return;
-            }
-            return createNewThread();
+        return getOrCreateDirectThread({ userA: myId, userB: otherId, createdBy: myId }, (err3, info) => {
+          if (err3) {
+            console.error("[dm:create] direct helper failed", err3);
+            return res.status(500).send("Failed to create thread");
           }
-        );
-        return;
+          finishThread(info.id, !info.created, false, null);
+        });
       }
 
-      return createNewThread();
+      return createNewThread(finishThread, participantIds, participantNames);
     });
 
-function createNewThread() {
+    function createNewThread(finishThread, participantIds, participantNames) {
       db.run(
         `INSERT INTO dm_threads (title, is_group, created_by, created_at) VALUES (?, ?, ?, ?)`,
         [title || null, isGroup ? 1 : 0, myId, now],
@@ -3382,35 +3507,7 @@ function createNewThread() {
           if (insertErr) return res.status(500).send("Failed to create thread");
           const threadId = this.lastID;
 
-          const participantIds = users.map((u) => u.id);
-          participantIds.push(myId);
-
-          for (const uid of participantIds) {
-            db.run(
-              `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
-              [threadId, uid, myId, now]
-            );
-          }
-
-          const allNames = users.map((u) => u.username);
-          allNames.push(req.session.user.username);
-
-          // join sockets + notify invited users
-          for (const uid of participantIds) {
-            const sid = socketIdByUserId.get(uid);
-            if (sid) {
-              const sock = io.sockets.sockets.get(sid);
-              if (sock) sock.join(`dm:${threadId}`);
-              io.to(sid).emit("dm thread invited", {
-                threadId,
-                title,
-                isGroup,
-                participants: allNames,
-              });
-            }
-          }
-
-          res.json({ ok: true, threadId });
+          finishThread(threadId, false, isGroup, title || null);
         }
       );
     }
@@ -4013,6 +4110,11 @@ if (!room) {
               replyToUser: replyUser || "",
               replyToText: replyText || "",
             };
+            db.run(
+              `UPDATE dm_threads SET last_message_id=?, last_message_at=? WHERE id=?`,
+              [this.lastID, ts, tid]
+            );
+            console.log(`[dm:send] thread ${tid} msg ${this.lastID} by user ${socket.user.id}`);
             io.to(`dm:${tid}`).emit("dm message", payload);
             if (Array.isArray(thread.participants)) {
               db.all(
