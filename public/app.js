@@ -207,6 +207,20 @@ const Sound = (() => {
 })();
 
 
+(function forceHideYouTubeStickyOnBoot(){
+  function hide(){
+    const el = document.getElementById("ytSticky");
+    if(!el) return;
+    el.classList.add("is-hidden");
+    el.classList.remove("is-minimized");
+  }
+  if(document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", hide, { once:true });
+  } else {
+    hide();
+  }
+})();
+
 
 let socket = null;
 let me = null;
@@ -826,12 +840,6 @@ const StickyYouTubePlayer = (()=>{
     qualitySelect?.addEventListener("change", applyQuality);
     minimizeBtn?.addEventListener("click", toggleMinimize);
     closeBtn?.addEventListener("click", close);
-
-    // Hard-hide on boot (prevents a "ghost" player when no video is active)
-    try{
-      container.classList.add("is-hidden");
-      container.classList.remove("is-minimized");
-    }catch{}
   }
 
   function ensurePlayer(){
@@ -1007,9 +1015,6 @@ const StickyYouTubePlayer = (()=>{
   }
 
   initDom();
-
-  // Defensive: start hidden/closed (prevents ghost player UI on load)
-  try { close(); } catch {}
 
   return { loadVideo, close, minimize: toggleMinimize };
 })();
@@ -3008,9 +3013,6 @@ function openDmThread(threadId){
   if (meta) setBadgeVisibility(meta.is_group ? "group" : "direct", false);
   setDmReplyTarget(null);
 
-  // Ensure the sticky YouTube player never shows in a thread unless a video is explicitly played
-  try { StickyYouTubePlayer?.close?.(); } catch {}
-
   dmMessagesEl.innerHTML = "<div class='dmEmpty'>Loading...</div>";
   socket?.emit("dm join", { threadId });
 }
@@ -3595,9 +3597,6 @@ function setActiveRoom(room){
   nowRoom.textContent = displayRoomName(room);
   roomTitle.textContent = displayRoomName(room);
   msgInput.placeholder = `Message ${displayRoomName(room)}`;
-
-  // Ensure the sticky YouTube player never lingers when switching rooms
-  try { StickyYouTubePlayer?.close?.(); } catch {}
 
   // Dice Room: swap upload button to dice roll
   if (pickFileBtn) {
