@@ -4492,3 +4492,42 @@ body.kb-open #typing{
 /* Hide typing overlay while keyboard is open (prevents large dark block on iOS) */
 body.kb-open .typing,
 body.kb-open #typing{ display:none !important; }
+
+
+/* === DM bubble sizing & alignment FIX === */
+.dmRow{
+  display:flex;
+  width:100%;
+}
+.dmRow.self{
+  justify-content:flex-end;
+}
+.dmRow:not(.self){
+  justify-content:flex-start;
+}
+.dmBubbleWrap{
+  max-width:66%;
+}
+.dmBubble{
+  width:fit-content;
+  max-width:100%;
+}
+
+/* Prevent sender bubbles from pushing off-screen */
+.dmRow.self .dmBubbleWrap{
+  margin-left:auto;
+  margin-right:0;
+}
+
+/* === Desktop DM composer restore === */
+@media (min-width: 900px){
+  .dmComposer,
+  #dmComposer,
+  .dmPanel .dmComposer,
+  #dmModal .dmComposer{
+    display:flex !important;
+    position:sticky;
+    bottom:0;
+    z-index:5;
+  }
+}
