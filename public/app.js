@@ -4200,7 +4200,7 @@ modSetRoleBtn.addEventListener("click", ()=>{
   if(!modSetRole.value){ modMsg.textContent="Choose a role first."; return; }
   if(!confirmModeration("role update", target)) return;
   socket?.emit("mod set role", { username: target, role: modSetRole.value, reason });
-  modMsg.textContent="Role change sent (Owner only).";
+  modMsg.textContent="Role change sent.";
 });
 
 // logs
