@@ -2760,7 +2760,7 @@ async function startDirectMessage(username, targetId){
 function openDmPanel(){
   dmPanel.classList.add("open");
   setDmNotice("");
-  clearDmBadges();
+  // Do not clear badges on open; only clear when a thread is actually read.
   syncDmTabUi();
 
   // load threads if we haven't yet
@@ -2771,7 +2771,14 @@ function openDmPanel(){
 function closeDmPanel(){
   dmPanel.classList.remove("open");
   closeDmSettingsMenu();
+
+  // Leaving the active DM prevents ongoing read receipts/badge suppression while the panel is closed.
+  if (activeDmId) {
+    try { socket?.emit("dm leave", { threadId: activeDmId }); } catch {}
+  }
+  activeDmId = null;
 }
+
 
 function renderDmMessages(threadId){
   if (!dmMessagesEl) return;
@@ -2979,6 +2986,10 @@ function setDmMeta(thread){
 }
 
 function openDmThread(threadId){
+  // Leave previous thread room before switching
+  if (activeDmId && String(activeDmId) !== String(threadId)) {
+    try { socket?.emit("dm leave", { threadId: activeDmId }); } catch {}
+  }
   activeDmId = threadId;
   const meta = dmThreads.find(t => String(t.id) === String(threadId));
   if (meta) setDmTab(meta.is_group ? "group" : "direct");
