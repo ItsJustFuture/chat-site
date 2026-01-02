@@ -828,19 +828,50 @@ const ROLE_DISPLAY = {
 };
 
 function findUserByMention(raw, cb) {
-  const name = sanitizeUsername(String(raw || "").replace(/^@+/, ""));
-  if (!name) return cb(new Error("User not found"));
+  const rawName = String(raw || "").replace(/^@+/, "").trim().slice(0, 64);
+  const sanitized = sanitizeUsername(rawName);
+
+  // First try an exact (case-insensitive) match on the raw trimmed name.
+  // This preserves usernames that include characters sanitizeUsername strips out (emoji, symbols, etc.).
+  if (rawName) {
+    db.get(
+      `SELECT id, username, role FROM users
+       WHERE lower(username)=lower(?)
+       ORDER BY CASE WHEN username=? THEN 0 ELSE 1 END LIMIT 1`,
+      [rawName, rawName],
+      (err, row) => {
+        if (!err && row) return cb(null, row);
+
+        // Fallback to sanitized variant for older usernames / mentions.
+        if (!sanitized) return cb(new Error("User not found"));
+        db.get(
+          `SELECT id, username, role FROM users
+           WHERE lower(username)=lower(?)
+           ORDER BY CASE WHEN username=? THEN 0 ELSE 1 END LIMIT 1`,
+          [sanitized, sanitized],
+          (err2, row2) => {
+            if (err2 || !row2) return cb(new Error("User not found"));
+            cb(null, row2);
+          }
+        );
+      }
+    );
+    return;
+  }
+
+  if (!sanitized) return cb(new Error("User not found"));
   db.get(
     `SELECT id, username, role FROM users
      WHERE lower(username)=lower(?)
      ORDER BY CASE WHEN username=? THEN 0 ELSE 1 END LIMIT 1`,
-    [name, name],
+    [sanitized, sanitized],
     (err, row) => {
       if (err || !row) return cb(new Error("User not found"));
       cb(null, row);
     }
   );
 }
+
 
 function logCommandAudit({ executor, commandName, args, targets, room, success, error }) {
   db.run(
@@ -988,7 +1019,55 @@ const commandRegistry = {
       await dbRunAsync(`DELETE FROM punishments WHERE user_id=? AND type='mute'`, [target.id]);
       return { ok: true, message: `Unmuted ${target.username}`, targets: target.id };
     },
+  },,
+  setrole: {
+    minRole: "Admin",
+    description: "Set a user's role (Admin+). Owners can set any role; Admins can only set roles below Admin.",
+    usage: "/setrole @user RoleName",
+    example: "/setrole @Sam Moderator",
+    handler: async ({ socket, args, actorRole }) => {
+      if (!args[0] || !args[1]) return { ok: false, message: "Usage: /setrole @user Role" };
+
+      const target = await new Promise((resolve, reject) =>
+        findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u)))
+      );
+
+      const newRoleRaw = args.slice(1).join(" ").trim();
+      const newRole = ROLES.find((r) => r.toLowerCase() === newRoleRaw.toLowerCase());
+      if (!newRole) return { ok: false, message: `Invalid role. Options: ${ROLES.join(", ")}` };
+
+      // Must be allowed to act on the target
+      if (!canModerate(actorRole, target.role) && actorRole !== "Owner") {
+        return { ok: false, message: "Permission denied" };
+      }
+
+      // Admins can only set roles strictly below Admin.
+      if (actorRole !== "Owner") {
+        if (roleRank(newRole) >= roleRank(actorRole)) {
+          return { ok: false, message: "You can't assign a role at or above your own." };
+        }
+        if (roleRank(newRole) >= roleRank("Admin")) {
+          return { ok: false, message: "Admins can only assign roles below Admin." };
+        }
+      }
+
+      await setRoleEverywhere(target.id, target.username, newRole);
+
+      // Live-update any connected sockets for that user
+      for (const s of io.sockets.sockets.values()) {
+        if (s.user?.id === target.id) {
+          s.user.role = newRole;
+          try {
+            if (s.request?.session?.user) s.request.session.user.role = newRole;
+          } catch {}
+        }
+      }
+
+      emitUserList(socket.currentRoom);
+      return { ok: true, message: `${target.username} is now ${newRole}`, targets: target.id };
+    },
   },
+
   warn: {
     minRole: "Moderator",
     description: "Send a private warning",
@@ -4071,7 +4150,7 @@ if (s?.user) {
       if (sid) io.sockets.sockets.get(sid)?.disconnect(true);
 
       io.to(room).emit("system", `${username} was kicked.`);
-      logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: username, room });
+      logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: target.username, room });
     });
   });
 
@@ -4100,7 +4179,7 @@ if (s?.user) {
             actor: socket.user,
             action: "MUTE",
             targetUserId: target.id,
-            targetUsername: username,
+            targetUsername: target.username,
             room,
             details: `minutes=${mins} reason=${String(reason || "").slice(0, 180)}`,
           });
@@ -4140,7 +4219,7 @@ if (s?.user) {
             actor: socket.user,
             action: "BAN",
             targetUserId: target.id,
-            targetUsername: username,
+            targetUsername: target.username,
             room,
             details: expiresAt ? `minutes=${mins}` : `permanent reason=${String(reason || "").slice(0, 180)}`,
           });
@@ -4166,7 +4245,7 @@ if (s?.user) {
           actor: socket.user,
           action: "UNMUTE",
           targetUserId: target.id,
-          targetUsername: username,
+          targetUsername: target.username,
           room,
           details: String(reason || "").slice(0, 180),
         });
@@ -4191,7 +4270,7 @@ if (s?.user) {
           actor: socket.user,
           action: "UNBAN",
           targetUserId: target.id,
-          targetUsername: username,
+          targetUsername: target.username,
           room,
           details: String(reason || "").slice(0, 180),
         });
@@ -4215,7 +4294,7 @@ if (s?.user) {
         actor: socket.user,
         action: "WARN",
         targetUserId: target.id,
-        targetUsername: username,
+        targetUsername: target.username,
         room,
         details: String(reason || "").slice(0, 180),
       });
@@ -4226,25 +4305,45 @@ if (s?.user) {
     const room = socket.currentRoom;
     if (!room) return;
 
-    const actorRole = socket.request.session.user.role;
-    if (actorRole !== "Owner") return;
+    const actor = socket.user;
+    const actorRole = godmodeUsers.has(actor.id)
+      ? "Owner"
+      : (socket.user?.role || socket.request?.session?.user?.role || "User");
 
-    username = sanitizeUsername(username);
+    // Admin+ can update roles via the moderation panel.
+    if (!requireMinRole(actorRole, "Admin")) return;
+
+    const rawName = String(username || "").trim().slice(0, 64);
+    const sanitized = sanitizeUsername(rawName);
     role = String(role || "").trim();
-    if (!ROLES.includes(role)) return;
 
-    db.get("SELECT id, role as oldRole FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+    const normalizedRole = ROLES.find((r) => r.toLowerCase() === role.toLowerCase());
+    if (!normalizedRole) return;
+    role = normalizedRole;
+
+    const lookupName = rawName || sanitized;
+    if (!lookupName) return;
+
+    db.get(
+      "SELECT id, username, role as oldRole FROM users WHERE lower(username)=lower(?) LIMIT 1",
+      [lookupName], (_e, target) => {
       if (!target) return;
 
-      // don't allow lowering Owner unless it's yourself (simple safety)
-      if (target.oldRole === "Owner" && target.id !== socket.user.id) return;
+      // Permission checks: you can only modify users below you.
+      if (actorRole !== "Owner" && !canModerate(actorRole, target.oldRole)) return;
 
-      setRoleEverywhere(target.id, username, role).then(() => {
+      // Prevent non-owners from assigning roles at/above themselves (or Admin+).
+      if (actorRole !== "Owner") {
+        if (roleRank(role) >= roleRank(actorRole)) return;
+        if (roleRank(role) >= roleRank("Admin")) return;
+      }
+
+      setRoleEverywhere(target.id, target.username, role).then(() => {
         logModAction({
           actor: socket.user,
           action: "SET_ROLE",
           targetUserId: target.id,
-          targetUsername: username,
+          targetUsername: target.username,
           room,
           details: `role=${role} reason=${String(reason || "").slice(0, 180)}`,
         });
