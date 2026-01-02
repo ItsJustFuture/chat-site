@@ -105,7 +105,20 @@ const Sound = (() => {
 
   function beep({ freq = 660, dur = 0.06, vol = 0.05, type = "sine" } = {}){
     if (!enabled()) return;
-    if (!ctx) return; // not unlocked yet (needs a user gesture)
+    // Try to lazily unlock audio (some browsers require a prior user gesture).
+    try {
+      if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx.state === "suspended") {
+        // Fire-and-forget resume; if it succeeds, we'll retry once shortly.
+        ctx.resume?.().then(() => {
+          // Retry once after resume (if this beep was attempted before unlock)
+          setTimeout(() => { try { beep({ freq, dur, vol, type }); } catch {} }, 30);
+        }).catch(() => {});
+        return;
+      }
+      if (ctx.state !== "running") return;
+    } catch { return; }
+
     try{
       const t0 = ctx.currentTime;
       const osc = ctx.createOscillator();
@@ -145,7 +158,21 @@ const Sound = (() => {
     cues,
     shouldRoom, shouldDm, shouldMention
   };
+})()
+
+/* ---- Sound unlock helper: attempt resume on first user gesture ---- */
+(function wireSoundUnlockOnce(){
+  let armed = true;
+  async function unlock(){
+    if (!armed) return;
+    armed = false;
+    try { await Sound.ensureUnlocked(); } catch {}
+  }
+  window.addEventListener("pointerdown", unlock, { passive:true, once:true });
+  window.addEventListener("touchstart", unlock, { passive:true, once:true });
+  window.addEventListener("keydown", unlock, { once:true });
 })();
+;
 ;
 
 /* ---- iOS Safari: prevent input-focus zoom (font-size must be >= 16px) */
@@ -4010,8 +4037,20 @@ function wireSoundPrefs(){
 
     // User gesture here: attempt to unlock + play a tiny confirmation
     if (prefSoundEnabled.checked) {
-      await Sound.ensureUnlocked();
-      Sound.cues.room();
+      const ok = await Sound.ensureUnlocked();
+      if (!ok && prefSoundStatus){
+        prefSoundStatus.textContent = "Audio is blocked by your browser until you tap the page once.";
+      } else if (prefSoundStatus){
+        prefSoundStatus.textContent = "";
+      }
+      // Tiny confirmation (room cue) if room cue is enabled, otherwise DM cue
+      try {
+        if (Sound.get.roomOn()) Sound.cues.room();
+        else if (Sound.get.dmOn()) Sound.cues.dm();
+        else if (Sound.get.mentionOn()) Sound.cues.mention();
+      } catch {}
+    } else if (prefSoundStatus) {
+      prefSoundStatus.textContent = "";
     }
   });
 
