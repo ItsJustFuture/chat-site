@@ -545,6 +545,9 @@ const dmMessagesEl = document.getElementById("dmMessages");
 const dmText = document.getElementById("dmText");
 const dmSendBtn = document.getElementById("dmSendBtn");
 
+// Ensure DM quick bars start closed on load (safety net in case markup defaults are changed)
+hideAllDmQuickBars();
+
 dmMessagesEl?.addEventListener("scroll", ()=>{ dmPinned = isNearBottom(dmMessagesEl, 160); });
 const dmUserBtn = document.getElementById("dmUserBtn");
 const dmInfoBtn = document.getElementById("dmInfoBtn");
@@ -2285,11 +2288,7 @@ function renderDirectThreads(){
   stripEl.innerHTML = "";
   if (list.length === 0) {
     stripEl.style.display = "none";
-    // Empty state for the quick bar (so users know the DM button works)
-    if (stripEl === dmQuickStrip) {
-      if (dmQuickEmpty) dmQuickEmpty.hidden = false;
-      if (dmQuickBar) dmQuickBar.hidden = false;
-    }
+    if (stripEl === dmQuickStrip && dmQuickEmpty) dmQuickEmpty.hidden = false;
     return;
   }
   if (stripEl === dmQuickStrip && dmQuickEmpty) dmQuickEmpty.hidden = true;
@@ -2355,11 +2354,7 @@ function renderGroupThreads(){
   stripEl.innerHTML = "";
   if (list.length === 0) {
     stripEl.style.display = "none";
-    // Empty state for the group quick bar
-    if (stripEl === groupQuickStrip) {
-      if (groupQuickEmpty) groupQuickEmpty.hidden = false;
-      if (groupQuickBar) groupQuickBar.hidden = false;
-    }
+    if (stripEl === groupQuickStrip && groupQuickEmpty) groupQuickEmpty.hidden = false;
     return;
   }
   if (stripEl === groupQuickStrip && groupQuickEmpty) groupQuickEmpty.hidden = true;
