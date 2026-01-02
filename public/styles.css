@@ -3336,7 +3336,7 @@ main.chat{ position: relative; }
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 0;
+    bottom: var(--kbOffset, 0px);
     width: 100%;
     z-index: 250;
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
@@ -3403,7 +3403,7 @@ body.drawer-right-open { --rightDrawerW: min(86vw, 340px); }
     position: fixed;
     left: var(--leftDrawerW);
     right: var(--rightDrawerW);
-    bottom: 0;
+    bottom: var(--kbOffset, 0px);
     width: auto;
     box-sizing: border-box;
     z-index: 140; /* below drawers (160), above chat */
@@ -4472,6 +4472,22 @@ body.kb-open #typing{
   display:none !important;
 }
 
+
+/* When iOS keyboard opens, the composer is lifted by --kbOffset.
+   Add matching scroll padding so messages still use the full area and never get covered. */
+body.kb-open .msgs{
+  padding-bottom: calc(72px + env(safe-area-inset-bottom) + var(--kbOffset, 0px)) !important;
+}
+body.kb-open #dmModal .dmMessages,
+body.kb-open #dmModal .dmMsgs,
+body.kb-open #dmModal .messages,
+body.kb-open .dmPanel .dmMessages,
+body.kb-open .dmPanel .dmMsgs,
+body.kb-open .dmPanel .messages{
+  padding-bottom: calc(72px + env(safe-area-inset-bottom) + var(--kbOffset, 0px)) !important;
+}
+
+
 /* Avoid double-padding empty "box" when keyboard opens */
 .chatPane, .dmPane, #chatPane, #dmPane{
   padding-bottom: calc(16px + env(safe-area-inset-bottom));
@@ -4479,7 +4495,7 @@ body.kb-open #typing{
 
 /* Keep composer above iOS home bar + keyboard */
 .messageComposer, .composer, #messageComposer, #composer, .dmComposer, #dmComposer, .dmInput{
-  padding-bottom: calc(env(safe-area-inset-bottom) + var(--kbOffset, 0px));
+  padding-bottom: calc(env(safe-area-inset-bottom));
 }
 
 /* Ensure typing area never grows huge */
