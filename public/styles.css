@@ -4799,3 +4799,14 @@ main.chatMain {
 .ytSticky.is-hidden{
   display:none !important;
 }
+
+
+/* === Main chat bottom spacing (prevents hidden last messages) === */
+.chat .msgs{
+  padding-bottom: calc(96px + var(--safeB)) !important;
+}
+@media (max-width: 900px){
+  .chat .msgs{
+    padding-bottom: calc(84px + var(--safeB)) !important;
+  }
+}
