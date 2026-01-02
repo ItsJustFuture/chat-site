@@ -4795,19 +4795,7 @@ main.chatMain {
 }
 
 
-/* === FIX: main room messages packing at bottom ===
-   The .msgs container being a flex column can cause bottom-packing / weird scroll anchoring.
-   Force it to be a normal block scroll container so messages start at the top reliably.
-*/
-.msgs{
-  display:block !important;
-  overflow-y:auto !important;
-}
-
-/* Preserve spacing between messages (replaces flex gap) */
-.msg{
-  margin: 0 0 10px 0;
-}
-.msgs .msg:last-child{
-  margin-bottom: 0;
+/* === FIX: hidden sticky bars should not reserve vertical space === */
+.ytSticky.is-hidden{
+  display:none !important;
 }
