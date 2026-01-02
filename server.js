@@ -3926,6 +3926,14 @@ if (!room) {
     });
   });
 
+
+  socket.on("dm leave", ({ threadId }) => {
+    const tid = Number(threadId);
+    if (!Number.isInteger(tid)) return;
+    try { socket.leave(`dm:${tid}`); } catch {}
+    try { socket.dmThreads?.delete(tid); } catch {}
+  });
+
 socket.on("dm message", ({ threadId, text, replyToId }) => {
     const tid = Number(threadId);
     const body = String(text || "").trim().slice(0, 800);
