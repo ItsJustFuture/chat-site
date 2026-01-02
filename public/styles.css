@@ -2492,14 +2492,15 @@ body.lockScroll{ overflow:hidden; }
 .drawerHeader h3{ margin:0; }
 /* DM panel */
 .dmPanel{
+  --dmPanelBottom: max(16px, var(--dmDockBottom));
   position:fixed;
   top:16px;
   /* Leave a little breathing room for the desktop composer and avoid covering the members list. */
-  bottom: var(--dmDockBottom);
+  bottom: var(--dmPanelBottom);
   right: calc(16px + var(--membersW));
   width:min(640px, 48vw);
   height:auto;
-  max-height:none;
+  max-height: calc((var(--vh, 1vh) * 100) - 16px - var(--dmPanelBottom));
   background:linear-gradient(135deg, rgba(255,255,255,.02), rgba(255,255,255,.04)), var(--panel2);
   border:1px solid var(--line);
   border-radius:20px;
@@ -2730,7 +2731,7 @@ body.lockScroll{ overflow:hidden; }
 
 /* --- DM message layout (Telegram-like) --- */
 .dmMessages{ padding:14px 16px; gap:12px; }
-.dmRow{ width:100%; display:flex; align-items:flex-start; gap:10px; }
+.dmRow{ width:100%; display:flex; align-items:flex-start; gap:10px; box-sizing:border-box; min-width:0; }
 .dmRow.self{ justify-content:flex-end; }
 
 /* Order DM action rails: outgoing buttons left, incoming buttons right */
@@ -2750,6 +2751,7 @@ body.lockScroll{ overflow:hidden; }
   opacity:0;
   pointer-events:none;
   transition: opacity .15s ease;
+  flex:0 0 auto;
 }
 @media (hover:hover){
   .dmRow:hover .dmActionsRail{
@@ -2765,7 +2767,9 @@ body.lockScroll{ overflow:hidden; }
 .dmBubbleWrap{
   display:flex;
   flex-direction:column;
-  max-width: min(78%, 560px);
+  flex: 1 1 auto;
+  min-width:0;
+  max-width: min(calc(100% - var(--dmActionsW)), 78%, 560px);
 }
 .dmBubble{
   display:inline-block;
@@ -2917,9 +2921,9 @@ body.lockScroll{ overflow:hidden; }
   box-sizing:border-box;
 }
 .dmBubbleWrap{
-  flex:0 1 auto;
+  flex:1 1 auto;
   min-width:0;
-  max-width: calc(100% - var(--dmActionsW));
+  max-width: min(calc(100% - var(--dmActionsW)), 78%, 560px);
 }
 .dmMetaRow{
   max-width:100%;
