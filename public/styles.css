@@ -2767,9 +2767,9 @@ body.lockScroll{ overflow:hidden; }
 .dmBubbleWrap{
   display:flex;
   flex-direction:column;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width:0;
-  max-width: min(calc(100% - var(--dmActionsW)), 78%, 560px);
+  max-width:66%;
 }
 .dmBubble{
   display:inline-block;
@@ -2791,6 +2791,7 @@ body.lockScroll{ overflow:hidden; }
   justify-content:flex-start;
   align-items:baseline;
   gap:6px;
+  flex-wrap:wrap;
   margin-top:4px;
   font-size:12px;
   color: var(--muted);
@@ -2921,13 +2922,12 @@ body.lockScroll{ overflow:hidden; }
   box-sizing:border-box;
 }
 .dmBubbleWrap{
-  flex:1 1 auto;
+  flex:0 1 auto;
   min-width:0;
-  max-width: min(calc(100% - var(--dmActionsW)), 78%, 560px);
+  max-width:66%;
 }
 .dmMetaRow{
   max-width:100%;
-  overflow:hidden;
 }
 .dmMetaUser, .dmMetaTime{
   max-width:100%;
@@ -4506,6 +4506,8 @@ body.kb-open #typing{ display:none !important; }
   justify-content:flex-start;
 }
 .dmBubbleWrap{
+  flex:0 1 auto;
+  min-width:0;
   max-width:66%;
 }
 .dmBubble{
@@ -4530,6 +4532,23 @@ body.kb-open #typing{ display:none !important; }
     bottom:0;
     z-index:5;
   }
+
+  /* Keep the main room composer pinned on desktop layouts */
+  .chat{
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+  }
+  .msgs{
+    flex:1 1 auto;
+    min-height:0;
+    overflow:auto;
+  }
+  .inputBar{
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+  }
 }
 
 
@@ -4549,6 +4568,13 @@ body.kb-open #typing{ display:none !important; }
 .dmMetaRow{
   display:flex;
   gap:8px;
+  align-items:baseline;
+  flex-wrap:wrap;
+}
+.dmMetaRow .reacts{
+  display:inline-flex;
+  gap:6px;
+  margin-left:8px;
   align-items:center;
   flex-wrap:wrap;
 }
