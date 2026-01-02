@@ -9,7 +9,8 @@
     "test": "echo \"No tests yet\" && exit 0",
     "check": "node --check server.js && node --check public/app.js && node --check public/theme-init.js && node --check database.js",
     "audit": "npm audit --audit-level=high",
-    "verify": "npm run check && npm run audit"
+    "fund": "npm fund",
+    "verify": "(npm run fund --if-present || true) && npm run check && npm run audit"
   },
   "keywords": [],
   "author": "",
