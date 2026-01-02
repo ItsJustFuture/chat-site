@@ -249,6 +249,46 @@
           </div>
         </div>
 
+        <div class="ytSticky is-hidden" id="ytSticky" aria-live="polite">
+          <div class="ytStickyInner">
+            <div class="ytStickyHeader">
+              <div class="ytStickyInfo">
+                <div class="ytStickyThumb" id="ytStickyThumb" aria-hidden="true"></div>
+                <div class="ytStickyText">
+                  <div class="ytStickyTitle" id="ytStickyTitle">YouTube player</div>
+                  <div class="ytStickyChannel" id="ytStickyChannel"></div>
+                </div>
+              </div>
+              <div class="ytStickyHeaderActions">
+                <button class="iconBtn" id="ytPlayPause" type="button" aria-label="Play">▶</button>
+                <button class="iconBtn" id="ytMinimize" type="button" aria-label="Minimize player">—</button>
+                <button class="iconBtn" id="ytClose" type="button" aria-label="Close player">✕</button>
+              </div>
+            </div>
+            <div class="ytStickyBody" id="ytBody">
+              <div class="ytStickyControls">
+                <div class="ytSeekRow">
+                  <span id="ytCurrentTime" class="ytTime">0:00</span>
+                  <input type="range" id="ytSeek" min="0" step="1" value="0" aria-label="Seek">
+                  <span id="ytDuration" class="ytTime">--:--</span>
+                </div>
+                <div class="ytControlRow">
+                  <div class="ytVolumeControls">
+                    <button class="iconBtn" id="ytMute" type="button" aria-label="Mute">🔊</button>
+                    <input type="range" id="ytVolume" min="0" max="100" step="1" value="60" aria-label="Volume">
+                  </div>
+                  <label class="ytSelectLabel">Quality
+                    <select id="ytQuality" aria-label="Quality"></select>
+                  </label>
+                </div>
+              </div>
+              <div class="ytPlayerHolder">
+                <div id="ytStickyFrame"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
 <div class="uiScalePanel" id="uiScalePanel" hidden>
   <div class="uiScaleHeader">
     <strong>UI size</strong>
@@ -882,5 +922,4 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="/app.js" defer></script>
 </body>
-</html>
-        </div>
+  </html>
