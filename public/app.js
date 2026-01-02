@@ -372,6 +372,7 @@ let currentTheme = document.body?.getAttribute("data-theme") || DEFAULT_THEME;
 let themeFilter = "all";
 
 let modalTargetUsername = null;
+let modalTargetUserId = null;
 let pendingFile = null;
 let uploadXhr = null;
 let memberMenuUser = null;
@@ -2388,7 +2389,7 @@ async function loadDmThreads(){
   }
 }
 
-async function startDirectMessage(username){
+async function startDirectMessage(username, targetId){
   if (!username) return;
   const target = String(username).trim();
   const meName = String(me?.username || "").trim();
@@ -2432,6 +2433,8 @@ async function startDirectMessage(username){
         user: target,
         to: target,
         username: target,
+        participantId: (Number.isInteger(Number(targetId)) && Number(targetId) > 0) ? Number(targetId) : undefined,
+        targetId: (Number.isInteger(Number(targetId)) && Number(targetId) > 0) ? Number(targetId) : undefined,
       })
     });
 
@@ -3067,7 +3070,7 @@ dmText?.addEventListener("input", ()=>renderMentionDropdown(dmMentionDropdown, d
 dmUserBtn?.addEventListener("click", () => {
   if (modalTargetUsername) {
     closeModal();
-    startDirectMessage(modalTargetUsername);
+    startDirectMessage(modalTargetUsername, modalTargetUserId);
   }
 });
 
@@ -3211,6 +3214,7 @@ function openModal(){ modal.style.display="flex"; }
 function closeModal(){
   modal.style.display="none";
   modalTargetUsername=null;
+  modalTargetUserId=null;
   quickModMsg.textContent="";
   modMsg.textContent="";
   logsMsg.textContent="";
@@ -3862,6 +3866,7 @@ async function loadMyProfile(){
   const res=await fetch("/profile");
   if(!res.ok) return;
   const p=await res.json();
+  modalTargetUserId = Number(p?.id) || null;
   me.username = p.username;
   me.role = p.role;
   me.level = p.level || me.level;
@@ -4171,6 +4176,7 @@ async function openMemberProfile(username){
   const res=await fetch("/profile/" + encodeURIComponent(username));
   if(!res.ok) return;
   const p=await res.json();
+  modalTargetUserId = Number(p?.id) || null;
   const isSelf = !!me && normKey(me.username) === normKey(p.username);
   if (isSelf) applyProgressionPayload(p);
 
