@@ -158,8 +158,7 @@ const Sound = (() => {
     cues,
     shouldRoom, shouldDm, shouldMention
   };
-})()
-
+})();
 /* ---- Sound unlock helper: attempt resume on first user gesture ---- */
 (function wireSoundUnlockOnce(){
   let armed = true;
