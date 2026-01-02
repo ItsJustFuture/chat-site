@@ -1880,7 +1880,14 @@ textarea{ min-height:90px; resize:vertical; }
 .iconBtn:hover{ filter:brightness(1.05); }
 
 /* Chat */
-.chat{ flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; }
+.chat{
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
 .topbar{
   position:relative;
   height:54px;
@@ -2026,7 +2033,15 @@ body.dice-room .sys .diceFace{
   border-radius:999px; padding:4px 8px; font-size:12px; font-weight:900;
 }
 
-.typing{ height:22px; padding:0 14px; color:var(--muted); font-size:12px; display:flex; align-items:center; }
+.typing{
+  height:22px;
+  padding:0 14px;
+  color:var(--muted);
+  font-size:12px;
+  display:flex;
+  align-items:center;
+  flex:0 0 auto;
+}
 
 .inputBar{
   padding:12px;
@@ -2036,7 +2051,8 @@ body.dice-room .sys .diceFace{
   gap:10px;
   align-items:center;
   flex-shrink:0;
-  position:relative;
+  position: sticky;
+  bottom: 0;
 }
 .inputBar input[type="text"]{
   flex:1;
