@@ -52,10 +52,9 @@ process.on("uncaughtException", (err) => {
   console.error("[uncaughtException]", err);
 });
 const { Server } = require("socket.io");
-const sqlite3 = require("sqlite3").verbose();
+const { db, migrationsReady } = require("./database");
 
 const PORT = Number(process.env.PORT || 3000);
-const DB_FILE = process.env.DB_FILE || path.join(__dirname, "chat.db");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 
@@ -80,20 +79,18 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
 }
 
 // ---- App + Server
-const app = express();
-const httpServer = http.createServer(app);
-const io = new Server(httpServer, {
-  // Render uses HTTPS -> allow websocket upgrade
-  cors: { origin: true, credentials: true },
+  const app = express();
+  const httpServer = http.createServer(app);
+  const io = new Server(httpServer, {
+    // Render uses HTTPS -> allow websocket upgrade
+    cors: { origin: true, credentials: true },
 
-  // More tolerant of mobile/background + Render sleep
-  pingInterval: 30_000,  // send pings every 30s
-  pingTimeout: 120_000,  // wait 120s for pong before disconnect
-  upgradeTimeout: 30_000,
-});
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true }));
-const pgPool = new Pool({
+    // More tolerant of mobile/background + Render sleep
+    pingInterval: 30_000,  // send pings every 30s
+    pingTimeout: 120_000,  // wait 120s for pong before disconnect
+    upgradeTimeout: 30_000,
+  });
+  const pgPool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === "production"
     ? { rejectUnauthorized: false }
@@ -297,281 +294,10 @@ try {
 // IMPORTANT for Render/any reverse proxy so secure cookies work
 app.set("trust proxy", 1);
 // ---- DB
-const db = new sqlite3.Database(DB_FILE);
-
-// ---- Basic migrations
-function addColumnIfMissing(table, column, definition) {
-  db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
-    if (err) return;
-    const exists = rows.some((r) => r.name === column);
-    if (!exists) db.run(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
-  });
-}
 async function pgUserExists(userId) {
   const { rows } = await pgPool.query("SELECT 1 FROM users WHERE id=$1 LIMIT 1", [userId]);
   return !!rows[0];
 }
-function migrateLegacyPasswords() {
-  db.all("PRAGMA table_info(users)", [], (err, rows) => {
-    if (err) return;
-    const hasPasswordHash = rows.some((r) => r.name === "password_hash");
-    const hasLegacyPassword = rows.some((r) => r.name === "password");
-    if (!hasPasswordHash) return;
-    if (!hasLegacyPassword) return;
-
-    db.all(
-      `SELECT id, password, password_hash FROM users
-       WHERE (password_hash IS NULL OR password_hash = '') AND password IS NOT NULL`,
-      [],
-      async (_e, legacyRows) => {
-        if (!legacyRows?.length) return;
-        for (const row of legacyRows) {
-          const legacy = String(row.password || "");
-          if (!legacy) continue;
-          const hash = legacy.startsWith("$2") ? legacy : await bcrypt.hash(legacy, 10);
-          db.run("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [hash, row.id]);
-        }
-      }
-    );
-  });
-}
-
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT UNIQUE NOT NULL,
-      password_hash TEXT,
-      role TEXT NOT NULL DEFAULT 'User',
-      created_at INTEGER NOT NULL,
-      avatar TEXT,
-      bio TEXT,
-      mood TEXT,
-      age INTEGER,
-      gender TEXT,
-      last_seen INTEGER,
-      last_room TEXT,
-      last_status TEXT
-    )
-  `);
-  db.run(`
-    CREATE TABLE IF NOT EXISTS rooms (
-      name TEXT PRIMARY KEY,
-      created_by INTEGER,
-      created_at INTEGER NOT NULL
-    )
-  `);
-
-  addColumnIfMissing("rooms", "slowmode_seconds", "slowmode_seconds INTEGER NOT NULL DEFAULT 0");
-  addColumnIfMissing("rooms", "is_locked", "is_locked INTEGER NOT NULL DEFAULT 0");
-  addColumnIfMissing("rooms", "pinned_message_ids", "pinned_message_ids TEXT");
-  addColumnIfMissing("rooms", "maintenance_mode", "maintenance_mode INTEGER NOT NULL DEFAULT 0");
-
-  // seed default rooms
-  const seedRooms = ["main", "nsfw", "music", "diceroom"];
-  for (const r of seedRooms) {
-    db.run(`INSERT OR IGNORE INTO rooms (name, created_by, created_at) VALUES (?, NULL, ?)`, [r, Date.now()]);
-  }
-  // ensure all expected columns exist even if DB was created by older code
-  const userColumns = [
-    ["password_hash", "password_hash TEXT"],
-    ["role", "role TEXT NOT NULL DEFAULT 'User'"],
-    ["created_at", "created_at INTEGER"],
-    ["avatar", "avatar TEXT"],
-    ["bio", "bio TEXT"],
-    ["mood", "mood TEXT"],
-    ["age", "age INTEGER"],
-    ["gender", "gender TEXT"],
-    ["last_seen", "last_seen INTEGER"],
-    ["last_room", "last_room TEXT"],
-    ["last_status", "last_status TEXT"],
-    ["theme", "theme TEXT NOT NULL DEFAULT 'Minimal Dark'"],
-    ["prefs_json", "prefs_json TEXT NOT NULL DEFAULT '{}'"],
-    ["gold", "gold INTEGER NOT NULL DEFAULT 0"],
-    ["xp", "xp INTEGER NOT NULL DEFAULT 0"],
-    ["lastXpMessageAt", "lastXpMessageAt INTEGER"],
-    ["lastDailyLoginAt", "lastDailyLoginAt INTEGER"],
-    ["lastGoldTickAt", "lastGoldTickAt INTEGER"],
-    ["lastMessageGoldAt", "lastMessageGoldAt INTEGER"],
-    ["lastDailyLoginGoldAt", "lastDailyLoginGoldAt INTEGER"],
-    ["lastDiceRollAt", "lastDiceRollAt INTEGER"],
-    ["dice_sixes", "dice_sixes INTEGER NOT NULL DEFAULT 0"],
-  ];
-  for (const [col, ddl] of userColumns) addColumnIfMissing("users", col, ddl);
-
-  migrateLegacyPasswords();
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      room TEXT NOT NULL,
-      user_id INTEGER NOT NULL,
-      username TEXT NOT NULL,
-      role TEXT NOT NULL,
-      avatar TEXT,
-      text TEXT,
-      ts INTEGER NOT NULL,
-      deleted INTEGER NOT NULL DEFAULT 0,
-      attachment_url TEXT,
-      attachment_type TEXT,
-      attachment_mime TEXT,
-      attachment_size INTEGER
-    )
-  `);
-
-  ensureColumns("messages", [
-    ["reply_to_id", "reply_to_id INTEGER"],
-    ["reply_to_user", "reply_to_user TEXT"],
-    ["reply_to_text", "reply_to_text TEXT"],
-  ]);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS reactions (
-      message_id INTEGER NOT NULL,
-      username TEXT NOT NULL,
-      emoji TEXT NOT NULL,
-      PRIMARY KEY (message_id, username)
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS punishments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      type TEXT NOT NULL,                 -- 'mute' | 'ban'
-      expires_at INTEGER,                 -- null => permanent
-      reason TEXT,
-      by_user_id INTEGER,
-      created_at INTEGER NOT NULL
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS mod_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      ts INTEGER NOT NULL,
-      actor_user_id INTEGER,
-      actor_username TEXT,
-      actor_role TEXT,
-      action TEXT NOT NULL,
-      target_user_id INTEGER,
-      target_username TEXT,
-      room TEXT,
-      details TEXT
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS profile_likes (
-      user_id INTEGER NOT NULL,
-      target_user_id INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY (user_id, target_user_id)
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS changelog_entries (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      seq INTEGER NOT NULL UNIQUE,
-      title TEXT NOT NULL,
-      body TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      author_id INTEGER NOT NULL
-    )
-  `);
-  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_changelog_seq ON changelog_entries(seq)`);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS command_audit (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      executor_id INTEGER NOT NULL,
-      executor_username TEXT NOT NULL,
-      executor_role TEXT NOT NULL,
-      command_name TEXT NOT NULL,
-      args_json TEXT,
-      target_ids TEXT,
-      room TEXT,
-      success INTEGER NOT NULL,
-      error TEXT,
-      ts INTEGER NOT NULL
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS config (
-      key TEXT PRIMARY KEY,
-      value TEXT
-    )
-  `);
-    // ---- DM tables (make sure these exist at startup)
-  db.run(`
-    CREATE TABLE IF NOT EXISTS dm_threads (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT,
-      is_group INTEGER NOT NULL DEFAULT 0,
-      created_by INTEGER NOT NULL,
-      created_at INTEGER NOT NULL
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS dm_participants (
-      thread_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      added_by INTEGER,
-      joined_at INTEGER NOT NULL,
-      UNIQUE(thread_id, user_id)
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS dm_messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      thread_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      username TEXT NOT NULL,
-      text TEXT,
-      ts INTEGER NOT NULL
-    )
-  `);
-
-  ensureColumns("dm_messages", [
-    ["reply_to_id", "reply_to_id INTEGER"],
-    ["reply_to_user", "reply_to_user TEXT"],
-    ["reply_to_text", "reply_to_text TEXT"],
-  ]);
-
-  ensureColumns("dm_threads", [
-    ["title", "title TEXT"],
-    ["is_group", "is_group INTEGER NOT NULL DEFAULT 0"],
-    ["created_by", "created_by INTEGER NOT NULL DEFAULT 0"],
-    ["created_at", "created_at INTEGER NOT NULL DEFAULT 0"],
-    ["user_low", "user_low INTEGER"],
-    ["user_high", "user_high INTEGER"],
-    ["last_message_id", "last_message_id INTEGER"],
-    ["last_message_at", "last_message_at INTEGER"],
-  ]);
-
-  ensureColumns("dm_participants", [
-    ["added_by", "added_by INTEGER"],
-    ["joined_at", "joined_at INTEGER NOT NULL DEFAULT 0"],
-  ]);
-
-  // Helpful indexes
-  db.run(`CREATE INDEX IF NOT EXISTS idx_dm_participants_user ON dm_participants(user_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_dm_participants_thread ON dm_participants(thread_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_dm_messages_thread_ts ON dm_messages(thread_id, ts)`);
-  db.run(
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_dm_threads_pair
-       ON dm_threads(user_low, user_high)
-       WHERE is_group = 0 AND user_low IS NOT NULL AND user_high IS NOT NULL`
-  );
-
-  // Ensure Iri is always Owner
-  db.run("UPDATE users SET role='Owner' WHERE lower(username)='iri'");
-});
 
 // ---- Security + parsing
 app.disable("x-powered-by");
@@ -813,18 +539,7 @@ async function pgUpsertFromSqliteRow(row) {
 
   return pgRowToUser(rows[0]);
 }
-function ensureColumns(table, cols) {
-  db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
-    if (err) return;
-    const existing = new Set((rows || []).map(r => r.name));
-    for (const [colName, ddl] of cols) {
-      if (!existing.has(colName)) {
-        db.run(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
-      }
-    }
-  });
-}
-const ROLES = ["Guest", "User", "VIP", "Moderator", "Admin", "Co-owner", "Owner"];
+  const ROLES = ["Guest", "User", "VIP", "Moderator", "Admin", "Co-owner", "Owner"];
 function roleRank(role) {
   const idx = ROLES.indexOf(role);
   return idx === -1 ? 1 : idx;
@@ -3457,183 +3172,161 @@ app.get("/api/dm/thread/:id", requireLogin, (req, res) => {
   });
 });
 
-// --- DM thread creation (shared by /dm and /api prefixes)
-async function handleCreateDmThread(req, res) {
-  // Accept multiple payload shapes for compatibility:
-  // { participants:["a"], kind:"direct" }
-  // { participant:"a" } / { user:"a" } / { to:"a" } / { username:"a" }
-  let participants = req.body?.participants;
-  let participantIds = req.body?.participantIds || req.body?.participantsIds;
-  if (!Array.isArray(participantIds)) {
-    const singleId =
-      req.body?.participantId ??
-      req.body?.toId ??
-      req.body?.userId ??
-      req.body?.targetId ??
-      null;
-    participantIds = singleId != null ? [singleId] : [];
-  }
-
-  // Normalize participants list (strings) and allow mixed arrays (ids or usernames)
-  if (Array.isArray(participants)) {
-    const nextNames = [];
-    for (const v of participants) {
-      const n = Number(v);
-      if (Number.isInteger(n) && n > 0) participantIds.push(n);
-      else nextNames.push(v);
+  // --- DM thread creation (shared by /dm and /api prefixes)
+  async function handleCreateDmThread(req, res) {
+    // Accept multiple payload shapes for compatibility:
+    // { participants:["a"], kind:"direct" }
+    // { participant:"a" } / { user:"a" } / { to:"a" } / { username:"a" }
+    let participantNames = req.body?.participants;
+    let participantIds = req.body?.participantIds || req.body?.participantsIds;
+    if (!Array.isArray(participantIds)) {
+      const singleId =
+        req.body?.participantId ??
+        req.body?.toId ??
+        req.body?.userId ??
+        req.body?.targetId ??
+        null;
+      participantIds = singleId != null ? [singleId] : [];
     }
-    participants = nextNames;
-  } else {
-    const raw = String(
-      participants ||
-      req.body?.participant ||
-      req.body?.user ||
-      req.body?.to ||
-      req.body?.username ||
-      ""
+
+    // Normalize participants list (strings) and allow mixed arrays (ids or usernames)
+    if (Array.isArray(participantNames)) {
+      const nextNames = [];
+      for (const v of participantNames) {
+        const n = Number(v);
+        if (Number.isInteger(n) && n > 0) participantIds.push(n);
+        else nextNames.push(v);
+      }
+      participantNames = nextNames;
+    } else {
+      const raw = String(
+        participantNames ||
+        req.body?.participant ||
+        req.body?.user ||
+        req.body?.to ||
+        req.body?.username ||
+        ""
+      );
+      participantNames = raw.split(",");
+    }
+
+    // De-dupe ids
+    participantIds = Array.from(
+      new Set(
+        participantIds
+          .map((v) => Number(v))
+          .filter((n) => Number.isInteger(n) && n > 0)
+      )
     );
-    participants = raw.split(",");
-  }
 
-  // De-dupe ids
-  participantIds = Array.from(new Set(participantIds.map((v)=>Number(v)).filter((n)=>Number.isInteger(n) && n > 0)));
-
-  const kindRaw = String(req.body?.kind || "").trim().toLowerCase();
-  let title = String(req.body?.title || "").trim().slice(0, 80);  const cleanedNames = [];
-  const seen = new Set();
-  for (const name of participants || []) {
-    const s = cleanUsernameForLookup(name);
-    const key = normKey(s);
-    if (!s || seen.has(key)) continue;
-    if (key === normKey(req.session.user.username)) continue;
-    seen.add(key);
-    cleanedNames.push(s);
-  }
-
-  // If client passed ids, allow creating threads without relying on username matching.
-  if (!cleanedNames.length && !participantIds.length) {
-    return res.status(400).send("Pick someone to message");
-  }
-
-  // Determine kind: group if explicitly requested OR more than one recipient (by name or id) OR a title is provided.
-  const requestedCount = cleanedNames.length + participantIds.length;
-  const isGroup = kindRaw === "group" || requestedCount > 1 || !!title;
-
-  if (isGroup && requestedCount < 2) {
-    return res.status(400).send("Group chats need 2+ participants (or a title)");
-  }
-
-  // Resolve recipients by BOTH name and id, then merge (dedupe by id).
-  try {
-    const usersByName = await fetchUsersByNames(cleanedNames);
-    if (usersByName.length !== cleanedNames.length) {
-      const found = new Set((usersByName || []).map((u) => normKey(u.username)));
-      const missing = cleanedNames.filter((n) => !found.has(normKey(n))).slice(0, 3);
-      return res.status(404).send(missing.length ? `User not found: ${missing.join(", ")}` : "User not found");
+    const kindRaw = String(req.body?.kind || "").trim().toLowerCase();
+    let title = String(req.body?.title || "").trim().slice(0, 80);
+    const cleanedNames = [];
+    const seen = new Set();
+    for (const name of participantNames || []) {
+      const s = cleanUsernameForLookup(name);
+      const key = normKey(s);
+      if (!s || seen.has(key)) continue;
+      if (key === normKey(req.session.user.username)) continue;
+      seen.add(key);
+      cleanedNames.push(s);
     }
 
-    const myId = req.session.user.id;
-    const now = Date.now();
-    let users = [];
-
-    const usersById = await fetchUsersByIds(participantIds);
-
-    if (usersById.length !== participantIds.length) {
-      const foundIds = new Set((usersById || []).map((u) => Number(u.id)));
-      const missingIds = participantIds.filter((id) => !foundIds.has(Number(id))).slice(0, 3);
-      return res.status(404).send(missingIds.length ? `User not found (id): ${missingIds.join(", ")}` : "User not found");
+    // If client passed ids, allow creating threads without relying on username matching.
+    if (!cleanedNames.length && !participantIds.length) {
+      return res.status(400).send("Pick someone to message");
     }
 
-    // Merge recipients (dedupe by id), and always exclude self.
-    const merged = new Map();
-    for (const u of usersByName || []) merged.set(Number(u.id), u);
-    for (const u of usersById || []) merged.set(Number(u.id), u);
-    merged.delete(Number(myId));
-    users = Array.from(merged.values());
+    // Determine kind: group if explicitly requested OR more than one recipient (by name or id) OR a title is provided.
+    const requestedCount = cleanedNames.length + participantIds.length;
+    const isGroup = kindRaw === "group" || requestedCount > 1 || !!title;
 
-    // For direct DMs we expect exactly one other participant.
-    if (!isGroup && users.length !== 1) {
-      return res.status(400).send("Pick exactly one person for a direct DM");
+    if (isGroup && requestedCount < 2) {
+      return res.status(400).send("Group chats need 2+ participants (or a title)");
     }
 
-      const participantIds = users.map((u) => u.id);
-      const participantNames = users.map((u) => u.username);
+    try {
+      const usersByName = await fetchUsersByNames(cleanedNames);
+      if (usersByName.length !== cleanedNames.length) {
+        const found = new Set((usersByName || []).map((u) => normKey(u.username)));
+        const missing = cleanedNames.filter((n) => !found.has(normKey(n))).slice(0, 3);
+        return res.status(404).send(missing.length ? `User not found: ${missing.join(", ")}` : "User not found");
+      }
 
-      const finishThread = (threadId, reused, isGroupThread, threadTitle = title) => {
-        const allIds = Array.from(new Set([...participantIds, myId]));
-        const allNames = Array.from(new Set([...participantNames, req.session.user.username]));
-        ensureDmParticipants(threadId, allIds, myId, now, () => {
-          for (const uid of allIds) {
-            const sid = socketIdByUserId.get(uid);
-            if (sid) {
-              const sock = io.sockets.sockets.get(sid);
-              if (sock) sock.join(`dm:${threadId}`);
-              io.to(sid).emit("dm thread invited", {
-                threadId,
-                title: threadTitle,
-                isGroup: isGroupThread,
-                participants: allNames,
-              });
-            }
+      const myId = req.session.user.id;
+      const myName = req.session.user.username;
+      const now = Date.now();
+
+      const usersById = await fetchUsersByIds(participantIds);
+      if (usersById.length !== participantIds.length) {
+        const foundIds = new Set((usersById || []).map((u) => Number(u.id)));
+        const missingIds = participantIds.filter((id) => !foundIds.has(Number(id))).slice(0, 3);
+        return res.status(404).send(missingIds.length ? `User not found (id): ${missingIds.join(", ")}` : "User not found");
+      }
+
+      const merged = new Map();
+      for (const u of usersByName || []) merged.set(Number(u.id), u);
+      for (const u of usersById || []) merged.set(Number(u.id), u);
+      merged.delete(Number(myId));
+
+      const recipients = Array.from(merged.values());
+      if (!isGroup && recipients.length !== 1) {
+        return res.status(400).send("Pick exactly one person for a direct DM");
+      }
+
+      const recipientIds = recipients.map((u) => Number(u.id));
+      const recipientNames = recipients.map((u) => u.username);
+      const allParticipantIds = Array.from(new Set([...recipientIds, myId]));
+      const allParticipantNames = Array.from(new Set([...recipientNames, myName]));
+
+      const notifyParticipants = (threadId, reused, isGroupThread, threadTitle = title || null) => {
+        for (const uid of allParticipantIds) {
+          const sid = socketIdByUserId.get(uid);
+          if (sid) {
+            const sock = io.sockets.sockets.get(sid);
+            if (sock) sock.join(`dm:${threadId}`);
+            io.to(sid).emit("dm thread invited", {
+              threadId,
+              title: threadTitle,
+              isGroup: isGroupThread,
+              participants: allParticipantNames,
+            });
           }
+        }
 
-          res.json({ ok: true, threadId, reused, isGroup: isGroupThread, participants: allNames });
-        });
+        return res.json({ ok: true, threadId, reused, isGroup: isGroupThread, participants: allParticipantNames });
       };
 
-      // If it's a direct DM, reuse existing 1:1 thread (prevents duplicates)
-      if (!isGroup && users.length === 1) {
-        const otherId = users[0].id;
+      if (!isGroup) {
+        const otherId = recipientIds[0];
         return getOrCreateDirectThread({ userA: myId, userB: otherId, createdBy: myId }, (err3, info) => {
           if (err3) {
             console.error("[dm:create] direct helper failed", err3);
             return res.status(500).send("Failed to create thread");
           }
-          finishThread(info.id, !info.created, false, null);
+          notifyParticipants(info.id, !info.created, false, null);
         });
       }
-    }
 
-      return createNewThread(finishThread, participantIds, participantNames);
-    });
-
-    function createNewThread(finishThread, participantIds, participantNames) {
       db.run(
         `INSERT INTO dm_threads (title, is_group, created_by, created_at) VALUES (?, ?, ?, ?)`,
-        [title || null, isGroup ? 1 : 0, myId, now],
+        [title || null, 1, myId, now],
         function (insertErr) {
-          if (insertErr) return res.status(500).send("Failed to create thread");
+          if (insertErr) {
+            console.error("[dm:create] failed to insert group", insertErr);
+            return res.status(500).send("Failed to create thread");
+          }
           const threadId = this.lastID;
-
-          finishThread(threadId, false, isGroup, title || null);
+          ensureDmParticipants(threadId, allParticipantIds, myId, now, () =>
+            notifyParticipants(threadId, false, true, title || null)
+          );
         }
       );
+    } catch (err) {
+      console.error("[dm:create] failed", err);
+      return res.status(500).send("Failed to create thread");
     }
-
-    const allNames = users.map((u) => u.username);
-    allNames.push(req.session.user.username);
-
-    // join sockets + notify invited users
-    for (const uid of newParticipantIds) {
-      const sid = socketIdByUserId.get(uid);
-      if (sid) {
-        const sock = io.sockets.sockets.get(sid);
-        if (sock) sock.join(`dm:${threadId}`);
-        io.to(sid).emit("dm thread invited", {
-          threadId,
-          title,
-          isGroup,
-          participants: allNames,
-        });
-      }
-    }
-
-    return res.json({ ok: true, threadId });
-  } catch (err) {
-    console.error("[dm:create] failed", err);
-    return res.status(500).send("Failed to create thread");
   }
-}
 
 app.post("/dm/thread", requireLogin, handleCreateDmThread);
 app.post("/api/dm/thread", requireLogin, handleCreateDmThread);
@@ -4236,32 +3929,15 @@ if (!room) {
               replyToUser: replyUser || "",
               replyToText: replyText || "",
             };
-            db.run(
-              `UPDATE dm_threads SET last_message_id=?, last_message_at=? WHERE id=?`,
-              [this.lastID, ts, tid]
-            );
-            console.log(`[dm:send] thread ${tid} msg ${this.lastID} by user ${socket.user.id}`);
-            io.to(`dm:${tid}`).emit("dm message", payload);
-            if (Array.isArray(thread.participants)) {
-              db.all(
-                `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
-                [tid],
-                (_e2, rows) => {
-                  for (const r of rows || []) {
-                    const sid = socketIdByUserId.get(userId);
-const s = sid ? io.sockets.sockets.get(sid) : null;
-if (s?.user) {
-  if (avatar) s.user.avatar = avatar;
-  s.user.mood = mood;
-  if (s.currentRoom) emitUserList(s.currentRoom);
-}
-                  }
-                }
+              db.run(
+                `UPDATE dm_threads SET last_message_id=?, last_message_at=? WHERE id=?`,
+                [this.lastID, ts, tid]
               );
+              console.log(`[dm:send] thread ${tid} msg ${this.lastID} by user ${socket.user.id}`);
+              io.to(`dm:${tid}`).emit("dm message", payload);
             }
-          }
-        );
-      };
+          );
+        };
 
       if (Number.isInteger(replyId)) {
         db.get(
@@ -4741,14 +4417,23 @@ if (s?.user) {
       emitUserList(room);
     }
   });
-});
-
-// ---- Start
-pgInitPromise.finally(() => {
-  httpServer.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
   });
-});
+
+  // ---- Start
+  Promise.allSettled([migrationsReady, pgInitPromise]).then((results) => {
+    const [sqliteResult, pgResult] = results;
+    if (sqliteResult.status === "rejected") {
+      console.error("[startup] SQLite migration failed", sqliteResult.reason);
+      process.exit(1);
+    }
+    if (pgResult.status === "rejected") {
+      console.error("[startup] Postgres init failed", pgResult.reason);
+    }
+
+    httpServer.listen(PORT, () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  });
 
 
 function areIrisAndLolaOnline() {
