@@ -2894,12 +2894,6 @@ function renderDmMessages(threadId){
     text.innerHTML = applyMentions(m.text || "");
     bubble.appendChild(text);
 
-    const reacts = document.createElement("div");
-    reacts.className = "reacts";
-    reacts.id = "dm-reacts-" + (m.messageId || m.id);
-    reacts.dataset.threadId = String(threadId);
-    bubble.appendChild(reacts);
-
     const meta = document.createElement("div");
     meta.className = "dmMetaRow";
     const u = document.createElement("span");
@@ -2915,6 +2909,12 @@ function renderDmMessages(threadId){
     t.textContent = m.ts ? new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) : "";
     meta.appendChild(u);
     meta.appendChild(t);
+
+    const reacts = document.createElement("div");
+    reacts.className = "reacts";
+    reacts.id = "dm-reacts-" + (m.messageId || m.id);
+    reacts.dataset.threadId = String(threadId);
+    meta.appendChild(reacts);
 
     // Read receipt: show "Seen" only on your latest message, when the other user has marked it read.
     const midForSeen = (m.messageId || m.id);
