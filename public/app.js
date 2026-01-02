@@ -217,6 +217,8 @@ function displayRoomName(room){ return room==="diceroom" ? "Dice Room" : room; }
 let lastUsers = [];
 const reactionsCache = Object.create(null);
 const dmReactionsCache = Object.create(null);
+const dmReadCache = Object.create(null); // threadId -> { userId, messageId, ts }
+
 const msgIndex = [];
 let dmThreads = [];
 let activeDmId = null;
@@ -2780,6 +2782,19 @@ function renderDmMessages(threadId){
   dmMessagesEl.innerHTML = "";
   const msgsArr = dmMessages.get(threadId) || [];
 
+  // For read receipts, we only show "Seen" under the latest message YOU sent.
+  let lastSelfMid = null;
+  for (let j = msgsArr.length - 1; j >= 0; j--) {
+    const mm = msgsArr[j];
+    if (String(mm.user) === String(me?.username) && (mm.messageId || mm.id)) {
+      lastSelfMid = (mm.messageId || mm.id);
+      break;
+    }
+  }
+  const rr = dmReadCache[String(threadId)] || null;
+  const otherReadMid = (rr && me && rr.userId && String(rr.userId) !== String(me.id)) ? Number(rr.messageId) : null;
+
+
   if (!msgsArr.length) {
     const empty = document.createElement("div");
     empty.className = "dmEmpty";
@@ -2789,11 +2804,25 @@ function renderDmMessages(threadId){
     return;
   }
 
-  for (const m of msgsArr) {
+  for (let i = 0; i < msgsArr.length; i++) {
+    const m = msgsArr[i];
     const isSelf = String(m.user) === String(me?.username);
 
+    const prev = i > 0 ? msgsArr[i - 1] : null;
+    const next = i < (msgsArr.length - 1) ? msgsArr[i + 1] : null;
+
+    const samePrev = prev && String(prev.user) === String(m.user) && Math.abs((Number(m.ts)||0) - (Number(prev.ts)||0)) <= 2*60*1000;
+    const sameNext = next && String(next.user) === String(m.user) && Math.abs((Number(next.ts)||0) - (Number(m.ts)||0)) <= 2*60*1000;
+
+    // Group classes: start/mid/end/solo (used for meta + bubble tail)
+    let gClass = " g-solo";
+    if (samePrev && sameNext) gClass = " g-mid";
+    else if (samePrev && !sameNext) gClass = " g-end";
+    else if (!samePrev && sameNext) gClass = " g-start";
+
+
     const row = document.createElement("div");
-    row.className = "dmRow" + (isSelf ? " self" : "");
+    row.className = "dmRow" + (isSelf ? " self" : "") + gClass;
     row.dataset.dmMid = m.messageId || m.id;
 
     // Actions rail (outside the bubble)
@@ -2876,11 +2905,25 @@ function renderDmMessages(threadId){
     const u = document.createElement("span");
     u.className = "dmMetaUser";
     u.textContent = m.user || "";
+
+    if (gClass !== " g-start" && gClass !== " g-solo") {
+      u.textContent = ""; // grouped: avoid repeating the username
+      u.style.display = "none";
+    }
     const t = document.createElement("span");
     t.className = "dmMetaTime";
     t.textContent = m.ts ? new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) : "";
     meta.appendChild(u);
     meta.appendChild(t);
+
+    // Read receipt: show "Seen" only on your latest message, when the other user has marked it read.
+    const midForSeen = (m.messageId || m.id);
+    if (isSelf && lastSelfMid && String(midForSeen) === String(lastSelfMid) && otherReadMid && Number(otherReadMid) >= Number(midForSeen)) {
+      const seen = document.createElement("span");
+      seen.className = "dmSeen";
+      seen.textContent = "Seen";
+      meta.appendChild(seen);
+    }
 
     bubbleWrap.appendChild(bubble);
     bubbleWrap.appendChild(meta);
@@ -4970,6 +5013,13 @@ socket.on("disconnect", (reason) => {
         ? messages[messages.length - 1].ts
         : Date.now();
       markDmRead(threadId, latest);
+      // Live read receipt (best-effort)
+      try {
+        const lastMsg = (Array.isArray(messages) && messages.length) ? messages[messages.length - 1] : null;
+        const mid = lastMsg ? (lastMsg.messageId || lastMsg.id) : null;
+        if (mid) socket?.emit("dm mark read", { threadId, messageId: mid, ts: lastMsg.ts || Date.now() });
+      } catch {}
+
       dmUnreadThreads.delete(threadId);
       renderDmThreads();
     }
@@ -5020,6 +5070,10 @@ socket.on("disconnect", (reason) => {
     if (String(activeDmId) === String(m.threadId)) {
       renderDmMessages(m.threadId);
       markDmRead(m.threadId, m.ts || Date.now());
+    // Live read receipt (best-effort)
+    if (String(activeDmId) === String(m.threadId) && (m.messageId || m.id)) {
+      socket?.emit("dm mark read", { threadId: m.threadId, messageId: (m.messageId || m.id), ts: m.ts || Date.now() });
+    }
       dmUnreadThreads.delete(m.threadId);
       renderDmThreads();
     }
@@ -5027,6 +5081,20 @@ socket.on("disconnect", (reason) => {
     console.error("dm message handler failed", err, m);
   }
 });
+
+  socket.on("dm read", (payload) => {
+    try {
+      const tid = String(payload.threadId);
+      if (!tid) return;
+      dmReadCache[tid] = payload;
+
+      // If the active thread matches, re-render to update "Seen" indicator
+      if (String(activeDmId) === tid) {
+        renderDmMessages(Number(tid));
+      }
+    } catch {}
+  });
+
 
   socket.on("dm reaction update", ({ threadId, messageId, reactions }) => {
     // Keep cache even if the thread isn't open yet.

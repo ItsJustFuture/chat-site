@@ -4531,3 +4531,81 @@ body.kb-open #typing{ display:none !important; }
     z-index:5;
   }
 }
+
+
+/* === DM polish: message grouping, tails, read receipts === */
+
+/* tighter spacing for grouped messages */
+.dmRow.g-mid,
+.dmRow.g-end{
+  margin-top: 2px;
+}
+.dmRow.g-start,
+.dmRow.g-solo{
+  margin-top: 10px;
+}
+
+/* Meta row spacing: align under bubble */
+.dmMetaRow{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+.dmSeen{
+  opacity: .75;
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+/* Bubble "tail" only on end/solo messages (g-end / g-solo) */
+.dmRow.g-solo .dmBubble,
+.dmRow.g-end .dmBubble{
+  position: relative;
+}
+
+/* left tail (incoming) */
+.dmRow:not(.self).g-solo .dmBubble::after,
+.dmRow:not(.self).g-end .dmBubble::after{
+  content:"";
+  position:absolute;
+  left:-6px;
+  bottom:10px;
+  width:12px;
+  height:12px;
+  background: inherit;
+  transform: rotate(45deg);
+  border-radius: 3px;
+}
+
+/* right tail (self) */
+.dmRow.self.g-solo .dmBubble::after,
+.dmRow.self.g-end .dmBubble::after{
+  content:"";
+  position:absolute;
+  right:-6px;
+  bottom:10px;
+  width:12px;
+  height:12px;
+  background: inherit;
+  transform: rotate(45deg);
+  border-radius: 3px;
+}
+
+/* When grouped, slightly flatten connecting corners */
+.dmRow.g-mid .dmBubble,
+.dmRow.g-end .dmBubble{
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+.dmRow.g-start .dmBubble,
+.dmRow.g-mid .dmBubble{
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+/* Don't show tails when grouped mid/start */
+.dmRow.g-start .dmBubble::after,
+.dmRow.g-mid .dmBubble::after{
+  content:none !important;
+}
