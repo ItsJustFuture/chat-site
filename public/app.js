@@ -1281,8 +1281,9 @@ const StickyYouTubePlayer = (()=>{
     closeBtn = document.getElementById("ytClose");
     playPauseBtn?.addEventListener("click", togglePlayPause);
     muteBtn?.addEventListener("click", toggleMute);
-    volumeSlider?.addEventListener("input", handleVolumeChange, { passive:true });
-    seekSlider?.addEventListener("input", handleSeek, { passive:true });
+    volumeSlider?.addEventListener("input", handleVolumeChange);
+    seekSlider?.addEventListener("input", handleSeek);
+    seekSlider?.addEventListener("change", handleSeek);
     qualitySelect?.addEventListener("change", applyQuality);
     minimizeBtn?.addEventListener("click", cycleState);
     closeBtn?.addEventListener("click", close);
@@ -1302,11 +1303,13 @@ const StickyYouTubePlayer = (()=>{
       player = new YT.Player(playerHolder, {
         height: "180",
         width: "320",
-        playerVars: { playsinline:1, controls:0, modestbranding:1, rel:0, autoplay:0 },
+        host: "https://www.youtube-nocookie.com",
+        playerVars: { playsinline:1, controls:0, modestbranding:1, rel:0, autoplay:0, enablejsapi:1, origin: window.location.origin },
         events: {
           onReady: handleReady,
           onStateChange: handleStateChange,
           onPlaybackQualityChange: refreshQualityOptions,
+          onError: handleError,
         }
       });
       return player;
@@ -1326,6 +1329,43 @@ const StickyYouTubePlayer = (()=>{
       updateProgress();
     }
     updatePlayPauseUi();
+  }
+
+
+  // YouTube sometimes surfaces a generic "An error occurred. Please try again later."
+  // on the first attempted load/play. We do a single lightweight retry to avoid
+  // showing the error to users.
+  let lastLoadId = null;
+  let didRetryForId = Object.create(null);
+
+  function handleError(e){
+    try{
+      const code = e?.data;
+      const vid = lastLoadId || currentVideoId;
+      if(!vid) return;
+
+      // Retry only once per video id per session.
+      if(didRetryForId[vid]) return;
+      didRetryForId[vid] = true;
+
+      // Small delay to let the iframe settle, then re-cue and play (if requested).
+      setTimeout(()=>{
+        if(!player || currentVideoId !== vid) return;
+        try{
+          // Re-cue then play. Using cue first tends to be more reliable than a direct load+play.
+          player.cueVideoById?.(vid);
+          if(pendingAutoplay){
+            // playVideo requires a user gesture in some environments; this is typically
+            // invoked from a click on the preview card.
+            player.playVideo?.();
+          }
+        }catch(err){
+          console.warn("[YouTube] retry failed", err, code);
+        }
+      }, 250);
+    }catch(err){
+      console.warn("[YouTube] onError handler failed", err);
+    }
   }
 
   function startProgress(){
@@ -1450,15 +1490,26 @@ const StickyYouTubePlayer = (()=>{
     reveal(true);
     ensurePlayer().then(()=>{
       if(!player) return;
+      lastLoadId = videoId;
+      // allow a fresh single retry for this load
+      if(didRetryForId[videoId]) delete didRetryForId[videoId];
       if(!pendingAutoplay){
         player.cueVideoById?.(videoId);
       }else{
-        player.loadVideoById(videoId);
-        try{
-          player.playVideo?.();
-        }catch{
-          try { player.mute?.(); player.playVideo?.(); } catch{}
-        }
+        // Prefer cue + play; it tends to avoid the initial generic playback error
+        // some users see on the very first click.
+        player.cueVideoById?.(videoId);
+
+        // Defer play until the cue has settled.
+        setTimeout(()=>{
+          if(!player || currentVideoId !== videoId) return;
+          try{
+            player.playVideo?.();
+          }catch{
+            try { player.mute?.(); player.playVideo?.(); } catch{}
+          }
+        }, 0);
+}
       }
       updatePlayPauseUi();
       refreshQualityOptions();
