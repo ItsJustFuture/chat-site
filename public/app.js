@@ -95,7 +95,7 @@ const THEMES = [
   document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) scheduleSetVh(); });
 
   scheduleSetVh();
-})()
+})();
 
 /* ---- iOS: keep menu/changelog inputs visible when keyboard opens ---- */
 (function wireMenuKeyboardScrollAssist(){
