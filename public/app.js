@@ -52,31 +52,22 @@ const THEMES = [
     h = Math.max(200, Math.min(h, window.screen?.height ? window.screen.height : h));
     root.style.setProperty("--vh", (h * 0.01) + "px");
 
-    // Keyboard detection on iOS:
-    // - We use visualViewport.height to drive --vh (so the layout shrinks correctly when the keyboard opens).
-    // - Some CSS also lifts the composer using --kbOffset. If we ALSO add kbOffset when vv is reliable,
-    //   that becomes *double compensation* and produces a big blank "block" in the message area.
-    // Strategy:
-    // - Compute a *raw* keyboard offset for state (kb-open class).
-    // - If visualViewport data is reliable, zero out --kbOffset so layout does NOT get extra padding/lift.
+    // Keyboard offset handling:
+    // - We still compute the raw keyboard inset from visualViewport so we can toggle UI state (kb-open).
+    // - BUT if visualViewport.height is reliable (iOS), we avoid double-compensation by zeroing --kbOffset,
+    //   since --vh already shrinks the layout when the keyboard opens.
     let rawKbOffset = 0;
-    let offsetTop = 0;
     const vvReliable = !!(vv && typeof vv.height === "number" && vv.height > 100);
-
     if(vv){
-      offsetTop = Number(vv.offsetTop || 0);
+      const offsetTop = Number(vv.offsetTop || 0);
       rawKbOffset = Math.max(0, Math.round(window.innerHeight - vv.height - offsetTop));
       root.style.setProperty("--vv-offset-top", offsetTop + "px");
     }else{
       root.style.setProperty("--vv-offset-top", "0px");
     }
 
-    // When vv is reliable, zero kbOffset to prevent lifting/padding from fighting the vv-based --vh resize.
-    // When vv is not available/reliable, fall back to applying the computed offset.
-    const kbOffsetForLayout = vvReliable ? 0 : rawKbOffset;
-    root.style.setProperty("--kbOffset", kbOffsetForLayout + "px");
-
-    // Keep UI state based on the raw offset (so kb-open toggles correctly even though layout spacing is zeroed).
+    const kbOffset = (vvReliable ? 0 : rawKbOffset);
+    root.style.setProperty("--kbOffset", kbOffset + "px");
     if (document.body) document.body.classList.toggle("kb-open", rawKbOffset > 80);
     measureComposer();
   }
