@@ -4494,11 +4494,12 @@ body.kb-open #typing{
 }
 
 
-/* When iOS keyboard opens, the layout already shrinks via --vh (visualViewport).
-   Do NOT add keyboard-height padding here (it creates the "black box"). */
+/* When iOS keyboard opens, the composer is lifted by --kbOffset.
+   Add matching scroll padding so messages still use the full area and never get covered. */
 body.kb-open .msgs{
   padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)) !important;
 }
+body.kb-open .msgs{ justify-content:flex-end; }
 body.kb-open #dmModal .dmMessages,
 body.kb-open #dmModal .dmMsgs,
 body.kb-open #dmModal .messages,
@@ -4507,19 +4508,12 @@ body.kb-open .dmPanel .dmMsgs,
 body.kb-open .dmPanel .messages{
   padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)) !important;
 }
-
-/* Menu / Changelog panels live inside the left drawer and do NOT have a fixed composer.
-   On iOS, focused inputs can end up behind the keyboard unless we add scroll room.
-   Use the RAW inset (always real) without affecting chat layout. */
-body.kb-open .menuContent{
-  padding-bottom: calc(16px + env(safe-area-inset-bottom) + var(--rawKbOffset, 0px));
-}
-body.kb-open .menuContent textarea,
-body.kb-open .menuContent input,
-body.kb-open .menuContent select,
-body.kb-open .menuContent button{
-  scroll-margin-bottom: calc(24px + var(--rawKbOffset, 0px));
-}
+body.kb-open #dmModal .dmMessages,
+body.kb-open #dmModal .dmMsgs,
+body.kb-open #dmModal .messages,
+body.kb-open .dmPanel .dmMessages,
+body.kb-open .dmPanel .dmMsgs,
+body.kb-open .dmPanel .messages{ justify-content:flex-end; }
 
 
 /* Avoid double-padding empty "box" when keyboard opens */
