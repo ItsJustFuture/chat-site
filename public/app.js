@@ -939,6 +939,25 @@ const uiScaleRange = document.getElementById("uiScaleRange");
 const uiScaleValue = document.getElementById("uiScaleValue");
 const uiScaleResetBtn = document.getElementById("uiScaleResetBtn");
 
+/*
+  iOS Safari can occasionally fail to deliver a "click" to small topbar buttons
+  when capture listeners / overlays are in play. Add a touch/pen pointerdown path
+  that directly invokes the intended handler.
+
+  Important: this does not touch the viewport/keyboard sizing code (so it should
+  not reintroduce the previous iOS "black box" issue).
+*/
+function bindTap(el, handler){
+  if(!el || typeof handler !== "function") return;
+  el.addEventListener("pointerdown", (e)=>{
+    if(e.pointerType === "mouse") return; // keep normal click for desktop
+    // Prevent delayed/ghost clicks and ensure handler runs.
+    e.preventDefault();
+    e.stopPropagation();
+    handler(e);
+  }, { passive:false });
+}
+
 // member quick mod
 const memberModTools = document.getElementById("memberModTools");
 const quickReason = document.getElementById("quickReason");
@@ -2707,6 +2726,10 @@ function openMembers(){
 openChannelsBtn?.addEventListener("click", openChannels);
 openMembersBtn?.addEventListener("click", openMembers);
 
+// iOS tap fallback
+bindTap(openChannelsBtn, openChannels);
+bindTap(openMembersBtn, openMembers);
+
 /* Outside tap close: use pointerdown (better on mobile) */
 /* Outside tap close: only when the user taps the overlay itself (never the drawers). */
 drawerOverlay?.addEventListener("pointerdown", (e) => {
@@ -3597,6 +3620,10 @@ async function toggleDmQuickBar(kind){
 
 dmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("direct"); });
 groupDmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("group"); });
+
+// iOS tap fallback (see bindTap helper)
+bindTap(dmToggleBtn, () => toggleDmQuickBar("direct"));
+bindTap(groupDmToggleBtn, () => toggleDmQuickBar("group"));
 
 groupQuickStartBtn?.addEventListener("click", (e) => {
   e.stopPropagation();
@@ -4490,6 +4517,10 @@ logoutBtn.addEventListener("click", doLogout);
 
   uiScaleBtn?.addEventListener("click", (e)=>{ e.stopPropagation(); togglePanel(); });
   uiScaleCloseBtn?.addEventListener("click", (e)=>{ e.stopPropagation(); closePanel(); });
+
+  // iOS tap fallback
+  bindTap(uiScaleBtn, () => togglePanel());
+  bindTap(uiScaleCloseBtn, () => closePanel());
 
   document.addEventListener("click", (e)=>{
     if(!uiScalePanel || uiScalePanel.hidden) return;

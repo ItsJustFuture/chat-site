@@ -1913,6 +1913,8 @@ main.chat{
   font-size:16px; font-weight:900; cursor:pointer; user-select:none;
   position:relative;
   color:var(--btnSecondaryText);
+  /* Improve tap reliability on iOS (avoid 300ms delay / gesture heuristics) */
+  touch-action: manipulation;
 }
 .iconBtn.withBadge{ padding:0 2px; }
 .notifDot{
