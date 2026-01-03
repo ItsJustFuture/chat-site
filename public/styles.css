@@ -2032,16 +2032,22 @@ body.dice-room .sys .diceFace{
 .msgGroupBody{ display:flex; flex-direction:column; gap:1px; min-width:0; }
 .msgItem{ position:relative; display:flex; flex-direction:row; align-items:flex-start; gap:8px; min-width:0; }
 .msgItem.self{ flex-direction:row-reverse; }
-/* Make grouped bubbles visually merge into one */
-.msgGroupBody .msgItem:not(:first-child) .bubble{
-  margin-top:-4px;
-  border-top:none;
-  border-top-left-radius:12px;
-  border-top-right-radius:12px;
-}
-.msgGroupBody .msgItem:not(:last-child) .bubble{
+/* Make grouped bubbles visually merge into one (main chat) */
+.msgGroupBody{ gap:1px; }
+.msgItem.gCont .bubble{ margin-top:-8px; border-top:none; }
+.msgItem.gMid .bubble{ margin-top:-8px; border-top:none; }
+
+/* Corner shaping so grouped messages look like one continuous bubble */
+.msgItem.gFirst:not(.gLast) .bubble{
   border-bottom-left-radius:12px;
   border-bottom-right-radius:12px;
+}
+.msgItem.gMid .bubble{
+  border-radius:12px;
+}
+.msgItem.gLast:not(.gFirst) .bubble{
+  border-top-left-radius:12px;
+  border-top-right-radius:12px;
 }
 /* If a message has reactions, give it a little breathing room (splits by reaction space) */
 .msgItem.hasReacts{ margin-bottom:6px; }
@@ -2062,6 +2068,27 @@ body.dice-room .sys .diceFace{
   overflow:hidden;
 }
 .self .bubble{ background:var(--messageSelfBg); color:var(--messageSelfText); }
+
+/* Message meta (name/time) */
+.msgItem .meta{
+  display:flex;
+  gap:8px;
+  align-items:baseline;
+  flex-wrap:wrap;
+}
+.msgItem .name{ font-weight:700; }
+.msgItem .time{
+  font-size: 11px;
+  opacity: .65;
+}
+
+/* Reactions sit beside the bubble in main chat */
+.msgItem > .reacts{
+  align-self:flex-end;
+  margin:0 2px 2px 2px;
+}
+.msgItem > .reacts:empty{ display:none; }
+.msgItem.self > .reacts{ margin:0 2px 2px 2px; }
 .metaLine{ display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
 .uName{ font-weight:900; font-size:13px; }
 .badge{
@@ -4685,7 +4712,7 @@ body.kb-open #typing{ display:none !important; }
 .dmMetaRow .reacts{
   display:inline-flex;
   gap:6px;
-  margin-left:8px;
+  margin-left:0px;
   align-items:center;
   flex-wrap:wrap;
 }

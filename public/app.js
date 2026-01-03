@@ -2381,6 +2381,18 @@ function addMessage(m){
   const senderRole = String(m.role ?? m.userRole ?? "");
   const isSelf = !!(senderName && me && (senderName === me.username));
 
+
+// Hydrate reply context client-side (server may only send replyToId)
+try{
+  if(m && m.replyToId && (!m.replyToUser || !m.replyToText)){
+    const hit = msgIndex.find((x)=> String(x.id) === String(m.replyToId));
+    if(hit){
+      m.replyToUser = m.replyToUser || hit.user;
+      m.replyToText = m.replyToText || hit.text;
+    }
+  }
+}catch{}
+
   // Decide whether we can append into the previous group
   const lastEl = msgs?.lastElementChild;
   const canGroup =
@@ -2430,6 +2442,31 @@ function addMessage(m){
   });
 
   body.appendChild(item);
+
+
+// Mark grouped messages so bubbles visually merge into one
+try{
+  if(!canGroup){
+    item.classList.add("gFirst","gLast");
+  }else{
+    item.classList.add("gCont","gLast");
+    const prev = item.previousElementSibling;
+    if(prev){
+      // prev was the last; it becomes mid (or first if it was the first in the group)
+      prev.classList.remove("gLast");
+      if(!prev.classList.contains("gFirst")) prev.classList.add("gMid");
+    }
+    // ensure the first child is flagged as first
+    const first = body.firstElementChild;
+    if(first) first.classList.add("gFirst");
+  }
+}catch{}
+
+// Update rolling index for reply lookups
+try{
+  msgIndex.push({ id: mid, user: senderName, text: String(m.text||""), ts: Number(m.ts||Date.now()) });
+  if(msgIndex.length > 500) msgIndex.splice(0, msgIndex.length - 500);
+}catch{}
 
   if(shouldStick){
     requestAnimationFrame(()=> msgs.scrollTop = msgs.scrollHeight);
@@ -2558,11 +2595,10 @@ function buildMainMsgItem(m, opts){
   }
 
 
-  // Reactions container
+  // Reactions container (kept outside bubble so it can sit beside it)
   const reacts = document.createElement("div");
   reacts.className = "reacts";
   reacts.id = "reacts-" + mid;
-  bubble.appendChild(reacts);
 
   // Actions rail
   const actions = document.createElement("div");
@@ -2579,6 +2615,23 @@ function buildMainMsgItem(m, opts){
     else openReactionMenu(mid, reactToggle, item);
   };
   actions.appendChild(reactToggle);
+
+const replyBtn = document.createElement("button");
+replyBtn.className = "actBtn";
+replyBtn.type = "button";
+replyBtn.textContent = "↩️";
+replyBtn.title = "Reply";
+replyBtn.onclick = (e)=>{
+  e.stopPropagation();
+  setReplyTarget({
+    id: mid,
+    user: String(m.user || ""),
+    text: String(m.text || "")
+  });
+  try { msgInput && msgInput.focus(); } catch(_) {}
+};
+actions.appendChild(replyBtn);
+
 
   // Edit (self, within window)
   const now = Date.now();
@@ -2611,6 +2664,7 @@ function buildMainMsgItem(m, opts){
 
   item.appendChild(actions);
   item.appendChild(bubble);
+  item.appendChild(reacts);
 
   // Mobile tap-to-toggle actions (per message item)
   const toggleActions = (e) => {
