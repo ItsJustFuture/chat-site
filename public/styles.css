@@ -3172,6 +3172,7 @@ body.lockScroll{ overflow:hidden; }
 }
 .reactionMenu button:hover{ background:color-mix(in srgb, var(--panel) 90%, transparent); }
 
+/* ✅ Fix: prevent the hidden level toast from blocking taps on mobile */
 #levelToast{
   position:fixed;
   top:14px;
@@ -3190,8 +3191,20 @@ body.lockScroll{ overflow:hidden; }
   display:flex;
   align-items:center;
   gap:8px;
+
+  /* ⬇️ ADD THESE */
+  pointer-events: none;
+  visibility: hidden;
 }
-#levelToast.show{ opacity:1; transform: translateY(0); }
+
+#levelToast.show{
+  opacity:1;
+  transform: translateY(0);
+
+  /* ⬇️ ADD THESE */
+  pointer-events: auto;
+  visibility: visible;
+}
 
 @media (max-width: 760px){
   #modal{
