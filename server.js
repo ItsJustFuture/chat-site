@@ -3104,12 +3104,16 @@ function handleListDmThreads(req, res) {
     `SELECT t.id, t.title, t.is_group, t.created_at,
             COALESCE(t.last_message_id, (SELECT id FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1)) AS last_message_id,
             (SELECT text FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1) AS last_text,
-            COALESCE(t.last_message_at, (SELECT ts FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1)) AS last_ts
+            COALESCE(t.last_message_at, (SELECT ts FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1)) AS last_ts,
+            (SELECT COUNT(*) FROM dm_messages m
+              WHERE m.thread_id = t.id
+                AND m.user_id != ?
+                AND m.ts > COALESCE(pself.last_read_at, 0)
+            ) AS unreadCount
      FROM dm_threads t
-     INNER JOIN dm_participants p ON p.thread_id = t.id
-     WHERE p.user_id = ?
+     INNER JOIN dm_participants pself ON pself.thread_id = t.id AND pself.user_id = ?
      ORDER BY COALESCE(t.last_message_at, last_ts, t.created_at) DESC`,
-    [userId],
+    [userId, userId],
     (err, threads) => {
       if (err) {
         console.error("[dm/threads]", err);
@@ -3144,7 +3148,7 @@ function handleListDmThreads(req, res) {
               otherUser: other
                 ? { id: other.user_id, username: other.username, avatar: other.avatar || null }
                 : null,
-              unreadCount: 0,
+              unreadCount: Number(t.unreadCount || 0),
             };
           });
           res.json(result);
@@ -3810,6 +3814,10 @@ function doJoin(room, status) {
         replyToId: r.reply_to_id || null,
         replyToUser: r.reply_to_user || "",
         replyToText: r.reply_to_text || "",
+            attachmentUrl: r.attachment_url || null,
+            attachmentMime: r.attachment_mime || null,
+            attachmentType: r.attachment_type || null,
+            attachmentSize: r.attachment_size || null,
       }));
       socket.emit("history", history);
 
@@ -3873,7 +3881,7 @@ if (!room) {
       socket.join(`dm:${tid}`);
 
       db.all(
-        `SELECT id, thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text FROM dm_messages WHERE thread_id=? ORDER BY ts DESC LIMIT 50`,
+        `SELECT id, thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_mime, attachment_type, attachment_size FROM dm_messages WHERE thread_id=? ORDER BY ts DESC LIMIT 50`,
         [tid],
         (_e, rows) => {
           const msgs = (rows || []).reverse().map((r) => ({
@@ -3887,6 +3895,10 @@ if (!room) {
             replyToId: r.reply_to_id || null,
             replyToUser: r.reply_to_user || "",
             replyToText: r.reply_to_text || "",
+            attachmentUrl: r.attachment_url || null,
+            attachmentMime: r.attachment_mime || null,
+            attachmentType: r.attachment_type || null,
+            attachmentSize: r.attachment_size || null,
           }));
           socket.emit("dm history", {
             threadId: tid,
@@ -3916,6 +3928,15 @@ if (!room) {
       if (!perThread) dmReadState.set(tid, (perThread = new Map()));
       perThread.set(socket.user.id, { messageId: mid, ts: tms });
 
+      // Persist last-read so unread counts/badges survive reloads/devices
+      db.run(
+        `UPDATE dm_participants
+           SET last_read_at = CASE WHEN COALESCE(last_read_at,0) < ? THEN ? ELSE COALESCE(last_read_at,0) END
+         WHERE thread_id = ? AND user_id = ?`,
+        [tms, tms, tid, socket.user.id],
+        () => {}
+      );
+
       // Broadcast to everyone in the dm room (clients can ignore self)
       io.to(`dm:${tid}`).emit("dm read", {
         threadId: tid,
@@ -3934,10 +3955,27 @@ if (!room) {
     try { socket.dmThreads?.delete(tid); } catch {}
   });
 
-socket.on("dm message", ({ threadId, text, replyToId }) => {
+socket.on("dm message", ({ threadId, text, replyToId, attachment }) => {
     const tid = Number(threadId);
     const body = String(text || "").trim().slice(0, 800);
-    if (!Number.isInteger(tid) || !body) return;
+    const att = attachment && typeof attachment === "object" ? attachment : null;
+
+    // Allow messages with either text or an image attachment
+    if (!Number.isInteger(tid) || (!body && !att)) return;
+
+    // Basic attachment validation (DMs: images only)
+    let attUrl = null, attMime = null, attType = null, attSize = null;
+    if (att) {
+      attUrl = String(att.url || "").trim();
+      attMime = String(att.mime || "").trim();
+      attType = String(att.type || "").trim();
+      attSize = Number(att.size || 0) || 0;
+
+      const okUrl = attUrl.startsWith("/uploads/");
+      const okImg = attType === "image" && /^image\//i.test(attMime);
+      if (!okUrl || !okImg) return;
+      if (attSize > (10 * 1024 * 1024)) return; // 10MB
+    }
 
     loadThreadForUser(tid, socket.user.id, (err, thread) => {
       if (err) return;
@@ -3950,8 +3988,8 @@ socket.on("dm message", ({ threadId, text, replyToId }) => {
         const replyPk = Number.isInteger(replyMeta.id) ? replyMeta.id : null;
 
         db.run(
-          `INSERT INTO dm_messages (thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO dm_messages (thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_mime, attachment_type, attachment_size)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [tid, socket.user.id, socket.user.username, body, ts, replyPk, replyUser, replyText],
           function (insertErr) {
             if (insertErr) return;
@@ -3962,7 +4000,11 @@ socket.on("dm message", ({ threadId, text, replyToId }) => {
               user: socket.user.username,
               text: body,
               ts,
-              replyToId: replyPk,
+                          attachmentUrl: attUrl,
+            attachmentMime: attMime,
+            attachmentType: attType,
+            attachmentSize: attSize,
+replyToId: replyPk,
               replyToUser: replyUser || "",
               replyToText: replyText || "",
             };

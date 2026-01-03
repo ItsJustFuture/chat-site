@@ -277,7 +277,11 @@ async function runSqliteMigrations() {
     ["reply_to_id", "reply_to_id INTEGER"],
     ["reply_to_user", "reply_to_user TEXT"],
     ["reply_to_text", "reply_to_text TEXT"],
-  ]);
+    ["attachment_url", "attachment_url TEXT"],
+    ["attachment_mime", "attachment_mime TEXT"],
+    ["attachment_type", "attachment_type TEXT"],
+    ["attachment_size", "attachment_size INTEGER"],
+]);
 
   await ensureColumns("dm_threads", [
     ["title", "title TEXT"],
@@ -293,6 +297,7 @@ async function runSqliteMigrations() {
   await ensureColumns("dm_participants", [
     ["added_by", "added_by INTEGER"],
     ["joined_at", "joined_at INTEGER NOT NULL DEFAULT 0"],
+    ["last_read_at", "last_read_at INTEGER NOT NULL DEFAULT 0"],
   ]);
 
   await run(`CREATE INDEX IF NOT EXISTS idx_dm_participants_user ON dm_participants(user_id)`);
