@@ -1496,8 +1496,11 @@ body[data-theme="420 Friendly (Light)"]{
 
 
 :root{
-  /* Mobile viewport height fix (JS updates --vh) */
-  --vh: 1vh;
+  /* Visual viewport height (set by JS); use px string so it can be injected directly. */
+  --vvh: 100;
+  --vvhPx: 100vh;
+  --vvTop: 0px;
+  --kbInset: 0px;
 
   /* UI scaling (auto for very small screens; user override via JS sets --uiScale) */
   --uiScaleAuto: 1;
@@ -1511,6 +1514,9 @@ body[data-theme="420 Friendly (Light)"]{
 
   /* Dynamic: set by JS for the composer + keyboard safe padding */
   --composerH: 72px;
+  --headerH: 54px;
+  --playerH: 0px;
+  --menuHeaderH: 0px;
 }
 @media (max-width: 360px){
   :root{ --uiScaleAuto: 0.92; }
@@ -1527,7 +1533,7 @@ body{
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   background:var(--bg);
   color:var(--text);
-  height: calc(var(--vh, 1vh) * 100);
+  height: var(--vvhPx);
   overflow:hidden;
 }
 .msgs,
@@ -1542,7 +1548,7 @@ button{ font-family:inherit; }
 
 /* AUTH */
 #authWrap{
-  height: calc(var(--vh, 1vh) * 100);
+  height: var(--vvhPx);
   display:flex;
   align-items:center;
   justify-content:center;
@@ -1700,7 +1706,7 @@ textarea{ min-height:90px; resize:vertical; }
 
 
 /* APP LAYOUT */
-#app{ height: calc(var(--vh, 1vh) * 100); display:none; }
+#app{ height: var(--vvhPx); display:none; }
 .layout{ height:100%; display:flex; min-height:0; }
 
 /* Channels */
@@ -1713,6 +1719,8 @@ textarea{ min-height:90px; resize:vertical; }
   flex-direction:column;
   gap:10px;
   min-width: 220px;
+  height: 100%;
+  min-height: 0;
 }
 /* Brand neon glow in the room panel */
 .neonBrand{
@@ -1948,8 +1956,7 @@ textarea{ min-height:90px; resize:vertical; }
 .msgs{
   flex:1;
   overflow:auto;
-  padding:14px;
-  padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom));
+  padding:14px 14px 12px;
   display:flex;
   flex-direction:column;
   gap:10px;
@@ -1965,7 +1972,7 @@ textarea{ min-height:90px; resize:vertical; }
 .dmMessages,
 .dmMsgs,
 .messages{
-  padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom));
+  padding-bottom: 12px;
 }
 
 /* Dice Room: scale system messages + dice faces ONLY in that room */
@@ -2074,8 +2081,8 @@ body.dice-room .sys .diceFace{
   gap:10px;
   align-items:center;
   flex-shrink:0;
-  position: sticky;
-  bottom: 0;
+  position: relative;
+  bottom: auto;
 }
 .inputBar input[type="text"]{
   flex:1;
@@ -2219,7 +2226,7 @@ padding: 18px;
 .modalCard{
   display: flex;
   flex-direction: column;
-  max-height: calc((var(--vh, 1vh) * 100) - 20px);
+  max-height: calc(var(--vvhPx) - 20px);
   overflow: hidden;
   background: var(--panel);
   border-radius: 14px;
@@ -2509,7 +2516,7 @@ padding: 18px;
 /* Mobile drawers */
 .overlay{ position:fixed; inset:0; background:color-mix(in srgb, var(--shadowColor) 70%, transparent); display:none; z-index: 70; }
   .overlay{
-    top: var(--topbarH);
+    top: var(--headerH, 54px);
     bottom: 0;
     left: 0;
     right: 0;
@@ -2539,7 +2546,7 @@ body.lockScroll{ overflow:hidden; }
   right: calc(16px + var(--membersW));
   width:min(640px, 48vw);
   height:auto;
-  max-height: calc((var(--vh, 1vh) * 100) - 16px - var(--dmPanelBottom));
+  max-height: calc(var(--vvhPx) - 16px - var(--dmPanelBottom));
   background:linear-gradient(135deg, rgba(255,255,255,.02), rgba(255,255,255,.04)), var(--panel2);
   border:1px solid var(--line);
   border-radius:20px;
@@ -2893,19 +2900,13 @@ body.lockScroll{ overflow:hidden; }
   .dmPanel{ right: calc(16px + var(--membersW)); width:min(640px, 70vw); }
 }
 @media (max-width: 980px){
-    :root{ --topbarH: 54px; }
-  .topbar .row{
-    flex-wrap: nowrap;
-  }
-}
-@media (max-width: 980px){
   .mobOnly{ display:flex; }
   .mobOnly.goldPill{ display:none; }
   .mobOnly.goldPill.show{ display:flex; }
   .members{ display:none; }
-  
+
   .topbar{ position: sticky; top: 0; z-index: 200; padding:0 10px; gap:8px; }
-  .msgs{ padding:10px; gap:8px; padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)); }
+  .msgs{ padding:10px; gap:8px; padding-bottom: 12px; }
   .msg{ gap:8px; }
   .msgAvatar{ width:34px; height:34px; }
   .bubble{
@@ -2914,12 +2915,12 @@ body.lockScroll{ overflow:hidden; }
   overflow:hidden;          /* ✅ prevents bleed */
 }
   .typing{ padding:0 10px; height:18px; font-size:11px; }
-  .inputBar{ padding:10px; gap:8px; position: sticky; bottom:0; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .inputBar{ padding:10px; gap:8px; position: static; bottom:auto; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
 
   .dmPanel{
     inset:0;
     width:100vw;
-    height: calc(var(--vh, 1vh) * 100);
+    height: var(--vvhPx);
     max-height:none;
     border-radius:0;
     border:0;
@@ -2927,17 +2928,17 @@ body.lockScroll{ overflow:hidden; }
   }
   .dmHeader{ position:sticky; top:0; background:var(--panel2); z-index:2; }
   .dmInput{
-    position: sticky;
-    bottom: 0;
+    position: static;
+    bottom: auto;
     padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
   /* DM is single-pane on mobile as well; keep full-height conversation */
   .dmContent{ display:flex; flex-direction:column; }
   .dmThreads{ display:none; }
-  .dmMessages{ padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)); }
+  .dmMessages{ padding-bottom: 12px; }
 
  .channels{
-  position:fixed; top: var(--topbarH); left:0; height: calc((var(--vh, 1vh) * 100) - var(--topbarH));
+  position:fixed; top: var(--headerH, 54px); left:0; height: calc(var(--vvhPx) - var(--headerH, 54px));
   width:min(86vw, 320px);
   transform:translateX(-105%);
   transition:transform .18s ease;
@@ -3022,7 +3023,7 @@ body.lockScroll{ overflow:hidden; }
 
   .members.drawer{
   display:block;
-  position:fixed; top: var(--topbarH); right:0; height: calc((var(--vh, 1vh) * 100) - var(--topbarH));
+  position:fixed; top: var(--headerH, 54px); right:0; height: calc(var(--vvhPx) - var(--headerH, 54px));
   width:min(86vw, 320px);
   transform:translateX(105%);
   transition:transform .18s ease;
@@ -3141,7 +3142,7 @@ body.lockScroll{ overflow:hidden; }
   .modalCard{
     width: 100vw;
     max-width: 100vw;
-    max-height: calc((var(--vh, 1vh) * 100) - 20px);
+    max-height: calc(var(--vvhPx) - 20px);
     border-radius: 16px;
   }
   @supports (height: 100svh){
@@ -3354,52 +3355,9 @@ main.chat{ position: relative; }
 .dmPanel .dmInputRow {
   flex: 0 0 auto;
   width: 100%;
-  position: sticky;
-  bottom: 0;
+  position: static;
+  bottom: auto;
   z-index: 5;
-}
-@media (max-width: 980px){
-  /* Keep composers visible above iOS Safari address bar + safe area */
-  .inputBar{
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: var(--kbOffset, 0px);
-    width: 100%;
-    z-index: 250;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom));
-  }
-
-  /* DM composer pinned to bottom on mobile */
-  #dmModal .dmInputRow,
-  #dmModal .dmComposer,
-  #dmModal .composer,
-  .dmPanel .dmComposer,
-  .dmPanel .composer,
-  .dmPanel .dmInputRow{
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    width: 100%;
-    z-index: 260;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom));
-  }
-
-  #dmModal .dmMessages,
-  #dmModal .dmMsgs,
-  .dmPanel .dmMessages,
-  .dmPanel .dmMsgs{
-    padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom));
-  }
-
-  /* Ensure DM content uses the full black area and can scroll correctly */
-  #dmModal .dmPanel,
-  #dmModal .dmContent,
-  #dmModal .dmConversation{
-    height: 100%;
-    min-height: 0;
-  }
 }
 :root{
   --leftDrawerW: 0px;
@@ -3423,10 +3381,10 @@ body.drawer-right-open { --rightDrawerW: min(86vw, 340px); }
     so `width` must be `auto`.
   */
   .inputBar{
-    position: fixed;
-    left: var(--leftDrawerW);
-    right: var(--rightDrawerW);
-    bottom: var(--kbOffset, 0px);
+    position: static;
+    left: auto;
+    right: auto;
+    bottom: auto;
     width: auto;
     box-sizing: border-box;
     z-index: 140; /* below drawers (160), above chat */
@@ -3459,7 +3417,7 @@ body.drawer-right-open { --rightDrawerW: min(86vw, 340px); }
   min-height: 0;
 }
 .modalCard{
-  max-height: calc((var(--vh, 1vh) * 100) - 20px);
+  max-height: calc(var(--vvhPx) - 20px);
 }
 .bottomBar{
   padding-bottom: calc(10px + env(safe-area-inset-bottom));
@@ -3545,18 +3503,20 @@ html {
   }
 }
 /* =========================================================
-   iOS keyboard: keep chat visible while typing
+   Viewport shells + scroll invariants
    ========================================================= */
 
-:root { --vh: 1vh; }
+/* One scroll container per shell: chat (.msgs) and menu (.menuContent).
+   Heights are anchored to --vvhPx (visualViewport height) so we don't double
+   compensate for the iOS keyboard. */
 
-/* Your main app wrapper should be a vertical flex column */
+/* Your main app wrapper should be a vertical flex column sized to the visual viewport. */
 #app,
 .app,
 .mainLayout {
   display: flex;
   flex-direction: column;
-  height: calc(var(--vh, 1vh) * 100);
+  height: var(--vvhPx);
   min-height: 0; /* critical */
 }
 
@@ -4487,51 +4447,6 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 }
 
 
-/* --- Keyboard + typing indicator (override/fix) --- */
-body.kb-open .typing,
-body.kb-open #typing{
-  display:none !important;
-}
-
-
-/* When iOS keyboard opens, the composer is lifted by --kbOffset.
-   Add matching scroll padding so messages still use the full area and never get covered. */
-body.kb-open .msgs{
-  padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)) !important;
-}
-body.kb-open #dmModal .dmMessages,
-body.kb-open #dmModal .dmMsgs,
-body.kb-open #dmModal .messages,
-body.kb-open .dmPanel .dmMessages,
-body.kb-open .dmPanel .dmMsgs,
-body.kb-open .dmPanel .messages{
-  padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)) !important;
-}
-
-
-/* Menu / Changelog panel: allow scrolling fields above iOS keyboard */
-body.kb-open .channels .menuContent{
-  padding-bottom: calc(16px + env(safe-area-inset-bottom) + var(--rawKbOffset, 0px)) !important;
-  scroll-padding-bottom: calc(16px + var(--rawKbOffset, 0px));
-  -webkit-overflow-scrolling: touch;
-}
-body.kb-open .channels .menuContent input,
-body.kb-open .channels .menuContent textarea,
-body.kb-open .channels .menuContent select{
-  scroll-margin-bottom: calc(16px + var(--rawKbOffset, 0px));
-}
-
-
-/* Avoid double-padding empty "box" when keyboard opens */
-.chatPane, .dmPane, #chatPane, #dmPane{
-  padding-bottom: calc(16px + env(safe-area-inset-bottom));
-}
-
-/* Keep composer above iOS home bar + keyboard */
-.messageComposer, .composer, #messageComposer, #composer, .dmComposer, #dmComposer, .dmInput{
-  padding-bottom: calc(env(safe-area-inset-bottom));
-}
-
 /* Ensure typing area never grows huge */
 .typing, #typing{
   max-height: 22px;
@@ -4594,8 +4509,8 @@ body.kb-open #typing{ display:none !important; }
   .dmPanel .dmComposer,
   #dmModal .dmComposer{
     display:flex !important;
-    position:sticky;
-    bottom:0;
+    position:relative;
+    bottom:auto;
     z-index:5;
   }
 
@@ -4611,8 +4526,8 @@ body.kb-open #typing{ display:none !important; }
     overflow:auto;
   }
   .inputBar{
-    position: sticky;
-    bottom: 0;
+    position: relative;
+    bottom: auto;
     z-index: 10;
   }
 }
@@ -4769,10 +4684,10 @@ body.kb-open #typing{ display:none !important; }
 @media (min-width: 900px){
   .inputBar{
     display:flex !important;
-    position: sticky !important;
+    position: relative !important;
     left: auto !important;
     right: auto !important;
-    bottom: 0 !important;
+    bottom: auto !important;
     width: 100% !important;
     z-index: 140 !important;
     box-sizing: border-box;
@@ -4827,25 +4742,11 @@ main.chatMain {
 
 /* The message list is the scrollable region and should fill the available space */
 .msgs {
-  flex: 1 1 auto !important;
-  min-height: 0 !important;
-  overflow-y: auto !important;
-
-  /* IMPORTANT: don’t “bottom-pack” messages into a tiny strip */
-  justify-content: flex-start !important;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  justify-content: flex-start;
 }
-
-/* iOS keyboard: keep latest messages near the composer (prevents huge empty 'black box' under short chats) */
-body.kb-open .msgs{
-  justify-content: flex-end !important;
-}
-
-
-/* Composer stays at bottom, doesn't steal layout height */
-.inputBar {
-  flex: 0 0 auto;
-}
-
 
 /* === FIX: hidden sticky bars should not reserve vertical space === */
 .ytSticky.is-hidden{
@@ -4855,44 +4756,3 @@ body.kb-open .msgs{
 
 /* === Fix: upload preview should not reserve space when not in use === */
 #uploadPreview{ display:none; }
-
-
-
-/* === iOS keyboard hardening (prevents "black box" blank space) ===
-   When the iOS keyboard opens, flex + sticky layouts can leave a large empty region
-   inside the chat panes. We pin the scrollable message area to the visual viewport
-   while kb-open so the visible content always reaches the composer.
-*/
-@media (max-width: 900px){
-  body.kb-open main.chat .msgs{
-    position: fixed !important;
-    left: var(--leftDrawerW, 0px) !important;
-    right: var(--rightDrawerW, 0px) !important;
-    top: var(--topbarH, 54px) !important;
-    bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)) !important;
-    height: auto !important;
-    max-height: none !important;
-    overflow: auto !important;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  body.kb-open main.chat #typing{
-    position: fixed !important;
-    left: var(--leftDrawerW, 0px) !important;
-    right: var(--rightDrawerW, 0px) !important;
-    bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)) !important;
-    margin: 0 !important;
-  }
-
-  /* Channels/Menu drawer (Changelog) needs extra scroll room above keyboard */
-  body.kb-open .channels.open .menuContent{
-    padding-bottom: calc(24px + env(safe-area-inset-bottom) + var(--rawKbOffset, 0px)) !important;
-    scroll-padding-bottom: calc(24px + env(safe-area-inset-bottom) + var(--rawKbOffset, 0px)) !important;
-    -webkit-overflow-scrolling: touch;
-  }
-  body.kb-open .channels.open .menuContent input,
-  body.kb-open .channels.open .menuContent textarea,
-  body.kb-open .channels.open .menuContent button{
-    scroll-margin-bottom: calc(24px + env(safe-area-inset-bottom) + var(--rawKbOffset, 0px)) !important;
-  }
-}
