@@ -22,35 +22,49 @@ const THEMES = [
 /* ---- Mobile viewport height fix (prevents input bars being hidden by browser UI) */
 (function initViewportHeightVar(){
   let raf = 0;
+  let lastComposerH = 0;
+
+  function measureComposer(){
+    const root = document.documentElement;
+    const composer = document.querySelector(".inputBar");
+    let h = 0;
+
+    if(composer){
+      const rect = composer.getBoundingClientRect?.();
+      h = Math.round(rect?.height || composer.offsetHeight || 0);
+    }
+
+    if(!Number.isFinite(h) || h <= 0) h = 72;
+
+    if(h !== lastComposerH){
+      lastComposerH = h;
+      root.style.setProperty("--composerH", `${h}px`);
+    }
+  }
 
   function setVhNow(){
+    const root = document.documentElement;
     const vv = window.visualViewport;
     // visualViewport.height is the most accurate on iOS when the keyboard opens,
     // but it can briefly report 0 during transitions. Guard + fallback.
     let h = (vv && typeof vv.height === "number" && vv.height > 100) ? vv.height : window.innerHeight;
     // Clamp to avoid negative/near-zero layouts during keyboard transitions.
     h = Math.max(200, Math.min(h, window.screen?.height ? window.screen.height : h));
-    document.documentElement.style.setProperty("--vh", (h * 0.01) + "px");
+    root.style.setProperty("--vh", (h * 0.01) + "px");
 
-    // Helpful extra vars for iOS keyboard-safe layouts (optional use in CSS)
+    let kbOffset = 0;
     if(vv){
       const offsetTop = Number(vv.offsetTop || 0);
-      const inset = Math.max(0, (window.innerHeight - vv.height - offsetTop));
-      document.documentElement.style.setProperty("--vv-offset-top", offsetTop + "px");
-      document.documentElement.style.setProperty("--kb-inset", inset + "px");
+      kbOffset = Math.max(0, Math.round(window.innerHeight - vv.height - offsetTop));
+      root.style.setProperty("--vv-offset-top", offsetTop + "px");
     }else{
-      document.documentElement.style.setProperty("--vv-offset-top", "0px");
-      document.documentElement.style.setProperty("--kb-inset", "0px");
+      root.style.setProperty("--vv-offset-top", "0px");
     }
-  }
 
-    // Toggle keyboard-open state for iOS Safari layouts (used by CSS to hide typing overlay)
-    try {
-      const kbInsetStr = getComputedStyle(document.documentElement).getPropertyValue("--kb-inset") || "0px";
-      const kbInset = Math.max(0, Math.round(parseFloat(kbInsetStr) || 0));
-      document.documentElement.style.setProperty("--kbOffset", kbInset + "px");
-      if (document.body) document.body.classList.toggle("kb-open", kbInset > 80);
-    } catch (e) { /* no-op */ }
+    root.style.setProperty("--kbOffset", kbOffset + "px");
+    if (document.body) document.body.classList.toggle("kb-open", kbOffset > 80);
+    measureComposer();
+  }
 
   function scheduleSetVh(){
     if(raf) cancelAnimationFrame(raf);
@@ -63,6 +77,8 @@ const THEMES = [
     window.visualViewport.addEventListener("resize", scheduleSetVh, { passive:true });
     window.visualViewport.addEventListener("scroll", scheduleSetVh, { passive:true });
   }
+
+  window.addEventListener("load", scheduleSetVh, { passive:true, once:true });
 
   // When the page becomes visible again (Safari sometimes restores wrong values)
   document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) scheduleSetVh(); });
@@ -212,7 +228,8 @@ const Sound = (() => {
     const el = document.getElementById("ytSticky");
     if(!el) return;
     el.classList.add("is-hidden");
-    el.classList.remove("is-minimized");
+    el.classList.remove("yt-compact", "yt-collapsed");
+    el.classList.add("yt-expanded");
   }
   if(document.readyState === "loading"){
     document.addEventListener("DOMContentLoaded", hide, { once:true });
@@ -801,6 +818,7 @@ const StickyYouTubePlayer = (()=>{
   let progressTimer = null;
   let currentVideoId = null;
   let pendingAutoplay = false;
+  let state = "expanded";
 
   function loadApi(){
     if(window.YT?.Player) return Promise.resolve(window.YT);
@@ -838,8 +856,16 @@ const StickyYouTubePlayer = (()=>{
     volumeSlider?.addEventListener("input", handleVolumeChange, { passive:true });
     seekSlider?.addEventListener("input", handleSeek, { passive:true });
     qualitySelect?.addEventListener("change", applyQuality);
-    minimizeBtn?.addEventListener("click", toggleMinimize);
+    minimizeBtn?.addEventListener("click", cycleState);
     closeBtn?.addEventListener("click", close);
+    applyState("expanded");
+  }
+
+  function applyState(next){
+    state = next || "expanded";
+    if(!container) return;
+    container.classList.remove("yt-expanded", "yt-compact", "yt-collapsed");
+    container.classList.add(`yt-${state}`);
   }
 
   function ensurePlayer(){
@@ -962,12 +988,14 @@ const StickyYouTubePlayer = (()=>{
   function reveal(expanded=true){
     if(!container) return;
     container.classList.remove("is-hidden");
-    container.classList.toggle("is-minimized", !expanded);
+    applyState(expanded ? "expanded" : state);
   }
-  function toggleMinimize(){
+  function cycleState(){
     if(!container) return;
-    const willMinimize = !container.classList.contains("is-minimized");
-    container.classList.toggle("is-minimized", willMinimize);
+    const order = ["expanded", "compact", "collapsed"];
+    const idx = Math.max(0, order.indexOf(state));
+    const next = order[(idx + 1) % order.length];
+    applyState(next);
   }
   function close(){
     stopProgress();
@@ -979,7 +1007,7 @@ const StickyYouTubePlayer = (()=>{
     currentVideoId = null;
     if(container){
       container.classList.add("is-hidden");
-      container.classList.remove("is-minimized");
+      applyState("expanded");
     }
     if(titleEl) titleEl.textContent = "YouTube player";
     if(channelEl) channelEl.textContent = "";
@@ -1016,7 +1044,7 @@ const StickyYouTubePlayer = (()=>{
 
   initDom();
 
-  return { loadVideo, close, minimize: toggleMinimize };
+  return { loadVideo, close, minimize: cycleState };
 })();
 
 function buildYouTubePreview(videoId){
