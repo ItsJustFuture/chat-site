@@ -4499,7 +4499,6 @@ body.kb-open #typing{
 body.kb-open .msgs{
   padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)) !important;
 }
-body.kb-open .msgs{ justify-content:flex-end; }
 body.kb-open #dmModal .dmMessages,
 body.kb-open #dmModal .dmMsgs,
 body.kb-open #dmModal .messages,
@@ -4508,12 +4507,19 @@ body.kb-open .dmPanel .dmMsgs,
 body.kb-open .dmPanel .messages{
   padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)) !important;
 }
-body.kb-open #dmModal .dmMessages,
-body.kb-open #dmModal .dmMsgs,
-body.kb-open #dmModal .messages,
-body.kb-open .dmPanel .dmMessages,
-body.kb-open .dmPanel .dmMsgs,
-body.kb-open .dmPanel .messages{ justify-content:flex-end; }
+
+
+/* Menu / Changelog panel: allow scrolling fields above iOS keyboard */
+body.kb-open .channels .menuContent{
+  padding-bottom: calc(16px + env(safe-area-inset-bottom) + var(--rawKbOffset, 0px)) !important;
+  scroll-padding-bottom: calc(16px + var(--rawKbOffset, 0px));
+  -webkit-overflow-scrolling: touch;
+}
+body.kb-open .channels .menuContent input,
+body.kb-open .channels .menuContent textarea,
+body.kb-open .channels .menuContent select{
+  scroll-margin-bottom: calc(16px + var(--rawKbOffset, 0px));
+}
 
 
 /* Avoid double-padding empty "box" when keyboard opens */
@@ -4828,6 +4834,12 @@ main.chatMain {
   /* IMPORTANT: don’t “bottom-pack” messages into a tiny strip */
   justify-content: flex-start !important;
 }
+
+/* iOS keyboard: keep latest messages near the composer (prevents huge empty 'black box' under short chats) */
+body.kb-open .msgs{
+  justify-content: flex-end !important;
+}
+
 
 /* Composer stays at bottom, doesn't steal layout height */
 .inputBar {

@@ -52,29 +52,24 @@ const THEMES = [
     h = Math.max(200, Math.min(h, window.screen?.height ? window.screen.height : h));
     root.style.setProperty("--vh", (h * 0.01) + "px");
 
-    // Keyboard inset (iOS): keep a *raw* reading for state toggles,
-    // but avoid double-compensation when visualViewport is reliable.
+    // Keyboard offset handling:
+    // - We still compute the raw keyboard inset from visualViewport so we can toggle UI state (kb-open).
+    // - BUT if visualViewport.height is reliable (iOS), we avoid double-compensation by zeroing --kbOffset,
+    //   since --vh already shrinks the layout when the keyboard opens.
     let rawKbOffset = 0;
-    let offsetTop = 0;
     const vvReliable = !!(vv && typeof vv.height === "number" && vv.height > 100);
-
     if(vv){
-      offsetTop = Number(vv.offsetTop || 0);
+      const offsetTop = Number(vv.offsetTop || 0);
       rawKbOffset = Math.max(0, Math.round(window.innerHeight - vv.height - offsetTop));
       root.style.setProperty("--vv-offset-top", offsetTop + "px");
     }else{
       root.style.setProperty("--vv-offset-top", "0px");
     }
 
-    // Always expose the raw value (useful for non-chat panels like menus).
-    root.style.setProperty("--rawKbOffset", rawKbOffset + "px");
+        root.style.setProperty("--rawKbOffset", rawKbOffset + "px");
 
-    // Layout offset: if visualViewport is reliable, the layout already shrinks
-    // via --vh, so we must NOT also lift by kbOffset (causes the "black box").
-    const layoutKbOffset = vvReliable ? 0 : rawKbOffset;
-    root.style.setProperty("--kbOffset", layoutKbOffset + "px");
-
-    // Keep kb-open detection based on RAW inset so UI state still toggles.
+const kbOffset = (vvReliable ? 0 : rawKbOffset);
+    root.style.setProperty("--kbOffset", kbOffset + "px");
     if (document.body) document.body.classList.toggle("kb-open", rawKbOffset > 80);
     measureComposer();
   }
@@ -97,7 +92,7 @@ const THEMES = [
   document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) scheduleSetVh(); });
 
   scheduleSetVh();
-})();
+})()
 
 /* ---- Quiet sound cues (optional) ---- */
 const Sound = (() => {
