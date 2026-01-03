@@ -4855,3 +4855,44 @@ body.kb-open .msgs{
 
 /* === Fix: upload preview should not reserve space when not in use === */
 #uploadPreview{ display:none; }
+
+
+
+/* === iOS keyboard hardening (prevents "black box" blank space) ===
+   When the iOS keyboard opens, flex + sticky layouts can leave a large empty region
+   inside the chat panes. We pin the scrollable message area to the visual viewport
+   while kb-open so the visible content always reaches the composer.
+*/
+@media (max-width: 900px){
+  body.kb-open main.chat .msgs{
+    position: fixed !important;
+    left: var(--leftDrawerW, 0px) !important;
+    right: var(--rightDrawerW, 0px) !important;
+    top: var(--topbarH, 54px) !important;
+    bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)) !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.kb-open main.chat #typing{
+    position: fixed !important;
+    left: var(--leftDrawerW, 0px) !important;
+    right: var(--rightDrawerW, 0px) !important;
+    bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)) !important;
+    margin: 0 !important;
+  }
+
+  /* Channels/Menu drawer (Changelog) needs extra scroll room above keyboard */
+  body.kb-open .channels.open .menuContent{
+    padding-bottom: calc(24px + env(safe-area-inset-bottom) + var(--rawKbOffset, 0px)) !important;
+    scroll-padding-bottom: calc(24px + env(safe-area-inset-bottom) + var(--rawKbOffset, 0px)) !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  body.kb-open .channels.open .menuContent input,
+  body.kb-open .channels.open .menuContent textarea,
+  body.kb-open .channels.open .menuContent button{
+    scroll-margin-bottom: calc(24px + env(safe-area-inset-bottom) + var(--rawKbOffset, 0px)) !important;
+  }
+}
