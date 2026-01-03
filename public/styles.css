@@ -1772,7 +1772,7 @@ textarea{ min-height:90px; resize:vertical; }
   color:var(--text);
 }
 .menuTab.active{ background:var(--panel2); box-shadow:var(--shadowSm); }
-.menuContent{ flex:1; display:flex; flex-direction:column; gap:10px; min-height:0; overflow:auto; padding:2px; }
+.menuContent{ flex:1; display:flex; flex-direction:column; gap:10px; min-height:0; overflow:auto; padding:2px; -webkit-overflow-scrolling: touch; }
 .menuSection{ display:none; flex-direction:column; gap:10px; }
 .menuSection.active{ display:flex; }
 .menuSectionHeader{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
@@ -3400,23 +3400,6 @@ main.chat{ position: relative; }
     height: 100%;
     min-height: 0;
   }
-
-  /* iOS keyboard: the chat composer uses visualViewport-driven --vh, so we zero --kbOffset
-     to avoid double-compensation. However, non-chat editors (e.g. Menu > Changelog)
-     still need extra scroll room so focused inputs don't hide behind the keyboard.
-     Use --rawKbOffset for menu content padding only. */
-  body.kb-open .menuContent{
-    padding-bottom: calc(12px + env(safe-area-inset-bottom) + var(--rawKbOffset, 0px));
-    scroll-padding-bottom: calc(12px + env(safe-area-inset-bottom) + var(--rawKbOffset, 0px));
-  }
-  body.kb-open .menuSection{
-    padding-bottom: calc(8px + var(--rawKbOffset, 0px));
-  }
-  /* Help Safari scroll the textarea fully above the keyboard */
-  #changelogTitleInput,
-  #changelogBodyInput{
-    scroll-margin-bottom: calc(24px + var(--rawKbOffset, 0px));
-  }
 }
 :root{
   --leftDrawerW: 0px;
@@ -4523,6 +4506,20 @@ body.kb-open .dmPanel .dmMessages,
 body.kb-open .dmPanel .dmMsgs,
 body.kb-open .dmPanel .messages{
   padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)) !important;
+}
+
+/* Menu / Changelog editor lives inside the channels drawer, not the main chat scroller.
+   When the iOS keyboard opens we intentionally zero --kbOffset (to avoid double-compensation
+   with --vh). However the menu scroll container still needs extra bottom scroll room so
+   inputs/textarea are not trapped behind the keyboard. Use --rawKbOffset for this surface only. */
+@media (max-width: 980px){
+  body.kb-open .channels .menuContent{
+    padding-bottom: calc(16px + var(--rawKbOffset, 0px) + env(safe-area-inset-bottom)) !important;
+  }
+  #changelogTitleInput,
+  #changelogBodyInput{
+    scroll-margin-bottom: calc(16px + var(--rawKbOffset, 0px) + env(safe-area-inset-bottom));
+  }
 }
 
 
