@@ -2027,19 +2027,11 @@ body.dice-room .sys .diceFace{
   margin:0 2px;
 }
 /* ---- Main chat message grouping (consecutive messages) ---- */
-/* Keep groups snug to content (prevents “floating in the middle” on wide screens) */
-.msgGroup{
-  display:flex;
-  gap:10px;
-  align-items:flex-start;
-  align-self:flex-start;
-  width:fit-content;
-  max-width:min(900px, 100%);
-}
+.msgGroup{ display:flex; gap:10px; align-items:flex-start; max-width:900px; }
 .msgGroup.self{ align-self:flex-end; flex-direction:row-reverse; }
-.msgGroupBody{ display:flex; flex-direction:column; gap:0px; min-width:0; }
-.msgItem{ position:relative; display:flex; flex-direction:column; min-width:0; }
-.msgItem.self{ align-items:flex-end; }
+.msgGroupBody{ display:flex; flex-direction:column; gap:1px; min-width:0; }
+.msgItem{ position:relative; display:flex; flex-direction:row; align-items:flex-start; gap:8px; min-width:0; }
+.msgItem.self{ flex-direction:row-reverse; }
 /* Make grouped bubbles visually merge into one */
 .msgGroupBody .msgItem:not(:first-child) .bubble{
   margin-top:-4px;
@@ -2052,9 +2044,9 @@ body.dice-room .sys .diceFace{
   border-bottom-right-radius:12px;
 }
 /* If a message has reactions, give it a little breathing room (splits by reaction space) */
-.msgItem.hasReacts{ margin-bottom:8px; }
+.msgItem.hasReacts{ margin-bottom:6px; }
 
-.msg{ display:flex; gap:10px; align-items:flex-start; align-self:flex-start; width:fit-content; max-width:min(900px, 100%); }
+.msg{ display:flex; gap:10px; align-items:flex-start; max-width:900px; }
 .msg.self{ align-self:flex-end; flex-direction:row-reverse; }
 .msgAvatar{ width:38px; height:38px; border-radius:50%; background:var(--avatar-bg); overflow:hidden; flex:0 0 auto; border:1px solid var(--border); }
 .msgAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
@@ -2131,7 +2123,9 @@ body.dice-room .sys .diceFace{
   flex-direction:column;
   gap:6px;
   padding-top:2px;
+  flex:0 0 auto;
 }
+
 
 .attachment{
   margin-top:6px; border-radius:var(--radiusLg); overflow:hidden;

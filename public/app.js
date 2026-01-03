@@ -2377,7 +2377,9 @@ function addMessage(m){
   const shouldStick = isNearBottom(msgs, 160);
 
   const mid = m.messageId;
-  const isSelf = (m.user === (me && me.username));
+  const senderName = String(m.user ?? m.username ?? m.from ?? m.sender ?? "");
+  const senderRole = String(m.role ?? m.userRole ?? "");
+  const isSelf = !!(senderName && me && (senderName === me.username));
 
   // Decide whether we can append into the previous group
   const lastEl = msgs?.lastElementChild;
@@ -2385,8 +2387,8 @@ function addMessage(m){
     lastEl &&
     lastEl.classList &&
     lastEl.classList.contains("msgGroup") &&
-    String(lastEl.dataset.user||"") === String(m.user||"") &&
-    String(lastEl.dataset.role||"") === String(m.role||"") &&
+    String(lastEl.dataset.user||"") === String(senderName||"") &&
+    String(lastEl.dataset.role||"") === String(senderRole||"") &&
     String(lastEl.dataset.self||"") === String(isSelf ? "1" : "0") &&
     // Optional time window to avoid grouping across long pauses
     (Number(m.ts||0) - Number(lastEl.dataset.lastTs||0) <= 2 * 60 * 1000);
@@ -2394,18 +2396,18 @@ function addMessage(m){
   let group = lastEl;
   if(!canGroup){
     group = document.createElement("div");
-    group.className = "msg msgGroup" + (isSelf ? " self" : "");
-    group.dataset.user = m.user || "";
-    group.dataset.role = m.role || "";
+    group.className = "msgGroup" + (isSelf ? " self" : "");
+    group.dataset.user = senderName || "";
+    group.dataset.role = senderRole || "";
     group.dataset.self = isSelf ? "1" : "0";
     group.dataset.lastTs = String(Number(m.ts||0) || Date.now());
 
     const av = document.createElement("div");
     av.className = "msgAvatar";
-    av.appendChild(avatarNode(m.avatar, m.user, m.role));
-    av.title = `View ${m.user} profile`;
+    av.appendChild(avatarNode(m.avatar, senderName, senderRole));
+    av.title = `View ${senderName} profile`;
     av.tabIndex = 0;
-    const openProfile = (e) => { e.stopPropagation(); openMemberProfile(m.user); };
+    const openProfile = (e) => { e.stopPropagation(); openMemberProfile(senderName); };
     av.addEventListener("click", openProfile);
     av.addEventListener("keydown", (e)=>{ if(e.key==="Enter"||e.key===" "){ openProfile(e); }});
     group.appendChild(av);
