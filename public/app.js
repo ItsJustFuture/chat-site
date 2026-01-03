@@ -2356,7 +2356,7 @@ function addMessage(m){
   const shouldStick = isNearBottom(msgs, 160);
 
   const mid = m.messageId;
-  const isSelf = (m.user === me.username);
+  const isSelf = (m.user === (me && me.username));
 
   // Decide whether we can append into the previous group
   const lastEl = msgs?.lastElementChild;
@@ -2450,7 +2450,7 @@ function buildMainMsgItem(m, opts){
   bubble.appendChild(meta);
 
   // Body text + youtube stripping
-  const rawText = String(m.text || "");
+  const rawText = String((m.text ?? m.message ?? m.msg ?? "") || "");
   let ytIds = [];
   let displayText = rawText;
   try {
@@ -2508,18 +2508,32 @@ function buildMainMsgItem(m, opts){
     }
   }
 
-  // Reply preview if present (existing fields)
+  // Reply preview (inline) if present
   if(m.replyToId && m.replyToUser){
     const rp = document.createElement("div");
-    rp.className = "replyPreview";
-    rp.innerHTML = `<div class="replyLine"><span class="rpUser">${escapeHtml(m.replyToUser)}</span> ${escapeHtml(String(m.replyToText||"").slice(0,120))}</div>`;
+    rp.className = "replyContext";
+
+    const u = document.createElement("div");
+    u.className = "replyUser";
+    u.textContent = String(m.replyToUser || "");
+
+    const sn = document.createElement("div");
+    sn.className = "replySnippet";
+    sn.textContent = String(m.replyToText || "").slice(0, 140);
+
+    rp.appendChild(u);
+    rp.appendChild(sn);
+
     rp.addEventListener("click", (e)=>{
       e.stopPropagation();
       const target = document.querySelector(`[data-mid="${m.replyToId}"]`);
       if(target) target.scrollIntoView({ behavior:"smooth", block:"center" });
     });
+
+    // Place just under meta, above text/media
     bubble.insertBefore(rp, meta.nextSibling);
   }
+
 
   // Reactions container
   const reacts = document.createElement("div");
@@ -2554,12 +2568,12 @@ function buildMainMsgItem(m, opts){
     editBtn.title = "Edit";
     editBtn.onclick = (e)=>{
       e.stopPropagation();
-      startMainEdit(mid, m.text || "", item, bubble);
+      startMainEdit(mid, String((m.text ?? m.message ?? m.msg ?? "") || ""), item, bubble);
     };
     actions.appendChild(editBtn);
   }
 
-  if(roleRank(me.role) >= roleRank("Moderator")){
+  if(roleRank((me && me.role) ? me.role : "member") >= roleRank("Moderator")){
     const del = document.createElement("button");
     del.type="button";
     del.className="delBtn";
