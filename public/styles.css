@@ -2027,9 +2027,17 @@ body.dice-room .sys .diceFace{
   margin:0 2px;
 }
 /* ---- Main chat message grouping (consecutive messages) ---- */
-.msgGroup{ display:flex; gap:10px; align-items:flex-start; max-width:900px; }
+/* Keep groups snug to content (prevents “floating in the middle” on wide screens) */
+.msgGroup{
+  display:flex;
+  gap:10px;
+  align-items:flex-start;
+  align-self:flex-start;
+  width:fit-content;
+  max-width:min(900px, 100%);
+}
 .msgGroup.self{ align-self:flex-end; flex-direction:row-reverse; }
-.msgGroupBody{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+.msgGroupBody{ display:flex; flex-direction:column; gap:0px; min-width:0; }
 .msgItem{ position:relative; display:flex; flex-direction:column; min-width:0; }
 .msgItem.self{ align-items:flex-end; }
 /* Make grouped bubbles visually merge into one */
@@ -2046,7 +2054,7 @@ body.dice-room .sys .diceFace{
 /* If a message has reactions, give it a little breathing room (splits by reaction space) */
 .msgItem.hasReacts{ margin-bottom:8px; }
 
-.msg{ display:flex; gap:10px; align-items:flex-start; max-width:900px; }
+.msg{ display:flex; gap:10px; align-items:flex-start; align-self:flex-start; width:fit-content; max-width:min(900px, 100%); }
 .msg.self{ align-self:flex-end; flex-direction:row-reverse; }
 .msgAvatar{ width:38px; height:38px; border-radius:50%; background:var(--avatar-bg); overflow:hidden; flex:0 0 auto; border:1px solid var(--border); }
 .msgAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
