@@ -2625,22 +2625,6 @@ searchInput.addEventListener("input", applySearch);
 function anyDrawerOpen(){
   return channelsPane?.classList.contains("open") || membersPane?.classList.contains("open");
 }
-
-// Keep overlay + body classes in sync with actual drawer state.
-// If a close handler is interrupted (runtime error, navigation, etc.), the
-// overlay can remain and swallow taps (sometimes looking almost invisible).
-function syncDrawerOverlayState(){
-  const leftOpen = !!channelsPane?.classList.contains("open");
-  const rightOpen = !!membersPane?.classList.contains("open");
-  const anyOpen = leftOpen || rightOpen;
-
-  drawerOverlay?.classList.toggle("show", anyOpen);
-  document.body.classList.toggle("drawer-left-open", leftOpen);
-  document.body.classList.toggle("drawer-right-open", rightOpen);
-
-  // Keep the DM panel spacing logic current.
-  syncDesktopMembersWidth();
-}
 function setLeftDrawerOpen(isOpen){
   document.body.classList.toggle("drawer-left-open", !!isOpen);
 }
@@ -2669,45 +2653,82 @@ function syncDesktopMembersWidth(){
   }catch{}
 }
 window.addEventListener("resize", syncDesktopMembersWidth);
+
+// Drawer mode helper: only use the full-screen overlay on mobile/tablet.
+function isMobileDrawerMode(){
+  return window.matchMedia('(max-width: 980px)').matches;
+}
+
 function closeDrawers(){
   channelsPane?.classList.remove("open");
   membersPane?.classList.remove("open");
+  drawerOverlay?.classList.remove("show");
+  // When drawers close, let the mobile composer span full width again.
+  document.body.classList.remove("drawer-left-open", "drawer-right-open");
   closeMemberMenu();
-  syncDrawerOverlayState();
+  syncDesktopMembersWidth();
 }
 function openChannels(){
+  // Desktop layouts render channels as a normal panel (not an off-canvas drawer).
+  // If we show the mobile overlay on desktop, it will eat all taps and make UI feel “dead”.
+  if(!isMobileDrawerMode()){
+    closeDrawers();
+    return;
+  }
   // toggle
-  if (channelsPane?.classList.contains("open")) { closeDrawers(); return; }
+  if (channelsPane?.classList.contains('open')) { closeDrawers(); return; }
 
-  membersPane?.classList.remove("open");
-  channelsPane?.classList.add("open");
-  syncDrawerOverlayState();
+  membersPane?.classList.remove('open');
+  channelsPane?.classList.add('open');
+  drawerOverlay?.classList.add('show');
+  // Mobile: shift the fixed composer so it doesn't overlap the left drawer.
+  document.body.classList.add('drawer-left-open');
+  document.body.classList.remove('drawer-right-open');
+  syncDesktopMembersWidth();
 }
 
 function openMembers(){
+  if(!isMobileDrawerMode()){
+    closeDrawers();
+    return;
+  }
   // toggle
-  if (membersPane?.classList.contains("open")) { closeDrawers(); return; }
+  if (membersPane?.classList.contains('open')) { closeDrawers(); return; }
 
-  channelsPane?.classList.remove("open");
-  membersPane?.classList.add("open");
-  syncDrawerOverlayState();
+  channelsPane?.classList.remove('open');
+  membersPane?.classList.add('open');
+  drawerOverlay?.classList.add('show');
+  // Mobile: shift the fixed composer so it doesn't overlap the right drawer.
+  document.body.classList.add('drawer-right-open');
+  document.body.classList.remove('drawer-left-open');
+  syncDesktopMembersWidth();
 }
 
 openChannelsBtn?.addEventListener("click", openChannels);
 openMembersBtn?.addEventListener("click", openMembers);
 
-// Initial sync (prevents "ghost" overlay swallowing taps if the page was
-// restored from BFCache with stale classes).
-try{ syncDrawerOverlayState(); }catch{}
-
 /* Outside tap close: use pointerdown (better on mobile) */
+/* Outside tap close: only when the user taps the overlay itself (never the drawers). */
 drawerOverlay?.addEventListener("pointerdown", (e) => {
-  e.preventDefault();
+  if(e.target !== drawerOverlay) return;
   closeDrawers();
-}, { capture:true });
+}, { passive:true });
 document.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeDrawers(); });
 channelsCloseBtn?.addEventListener("click", closeDrawers);
 membersCloseBtn?.addEventListener("click", closeDrawers);
+
+// Safety: if the viewport crosses the desktop/mobile breakpoint, never leave the overlay active.
+window.addEventListener('resize', () => {
+  try{
+    if(!isMobileDrawerMode()) closeDrawers();
+  }catch{}
+}, { passive:true });
+window.addEventListener('pageshow', () => {
+  try{
+    if(!isMobileDrawerMode()) closeDrawers();
+  }catch{}
+});
+
 // dms (rebuilt)
 let dmSettingsOpen = false;
 function closeDmSettingsMenu(){
@@ -5118,17 +5139,6 @@ async function startApp(){
 
     authWrap.style.display="none";
     app.style.display="flex";
-
-  // --- UI safety reset ---
-  // If any overlay/panel state was left inconsistent (e.g., after an error or
-  // mobile Safari back/forward cache restore), ensure taps aren't swallowed.
-  try{
-    closeDrawers();
-    hideAllDmQuickBars();
-    if(uiScalePanel) uiScalePanel.hidden = true;
-    closeDmSettingsMenu();
-    closeReactionMenu();
-  }catch{}
 
   await loadMyProfile();
   await loadUserPrefs();

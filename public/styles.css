@@ -2553,31 +2553,15 @@ padding: 18px;
 }
 
 /* Mobile drawers */
-/*
-  IMPORTANT (iOS + visualViewport):
-  If the drawer overlay ever gets stuck "on" (e.g., state mismatch after a crash),
-  it can silently swallow taps. We therefore keep the overlay mounted but make it
-  non-interactive unless .show is present.
-*/
-.overlay{
-  position:fixed;
-  left:0;
-  right:0;
-  bottom:0;
-  top: var(--headerH, 54px);
-  background: color-mix(in srgb, var(--shadowColor) 70%, transparent);
-  z-index:150;
-
-  /* default: visually + interactively off */
-  display:block;
-  opacity:0;
-  pointer-events:none;
-  transition: opacity .14s ease;
-}
-.overlay.show{
-  opacity:1;
-  pointer-events:auto;
-}
+.overlay{ position:fixed; inset:0; background:color-mix(in srgb, var(--shadowColor) 70%, transparent); display:none; pointer-events:none; z-index: 70; }
+  .overlay{
+    top: var(--headerH, 54px);
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 150;
+  }
+.overlay.show{ display:block; pointer-events:auto; }
 .mediaLightbox{ position:fixed; inset:0; background:rgba(0,0,0,.75); display:none; align-items:center; justify-content:center; z-index:500; padding:20px; }
 .mediaLightbox.show{ display:flex; }
 .mediaLightbox img, .mediaLightbox video{ max-width:90vw; max-height:80vh; border-radius:16px; box-shadow:var(--shadowLg); background:#000; }
