@@ -1,6 +1,9 @@
 // public/app.js
 "use strict";
 
+// Debug hook: enable tap hit-testing logs by setting `window.__TAP_DEBUG__ = true` in the console.
+window.__TAP_DEBUG__ = window.__TAP_DEBUG__ ?? false;
+
 // ---- Theme registry with tiers
 const THEMES = [
   // Public themes (everyone)
@@ -265,6 +268,68 @@ const THEMES = [
   });
 
   schedule("init");
+})();
+
+/* ---- Tap interceptor debug (iOS topbar hit-test) ---- */
+(function initTapInterceptorDebug(){
+  if(!window.__TAP_DEBUG__) return;
+
+  const highlight = (el) => {
+    if(!el || !el.style) return;
+    const prevOutline = el.style.outline;
+    const prevOffset = el.style.outlineOffset;
+    el.style.outline = "3px solid red";
+    el.style.outlineOffset = "-3px";
+    setTimeout(() => {
+      el.style.outline = prevOutline;
+      el.style.outlineOffset = prevOffset;
+    }, 300);
+  };
+
+  const logTap = (e) => {
+    const topbar = document.querySelector(".topbar");
+    if(!topbar) return;
+
+    const touch = (e.touches && e.touches[0]) ? e.touches[0] : e;
+    if(!touch || typeof touch.clientX !== "number" || typeof touch.clientY !== "number") return;
+
+    const rect = topbar.getBoundingClientRect();
+    const withinTopbar = touch.clientX >= rect.left && touch.clientX <= rect.right && touch.clientY >= rect.top && touch.clientY <= rect.bottom;
+    if(!withinTopbar) return;
+
+    const topMost = document.elementFromPoint(touch.clientX, touch.clientY);
+    const path = (typeof e.composedPath === "function") ? e.composedPath().slice(0, 10) : [];
+
+    const topMostInfo = topMost ? (() => {
+      const r = topMost.getBoundingClientRect();
+      const cs = getComputedStyle(topMost);
+      return {
+        rect: { top: Math.round(r.top), left: Math.round(r.left), width: Math.round(r.width), height: Math.round(r.height) },
+        styles: {
+          position: cs.position,
+          zIndex: cs.zIndex,
+          pointerEvents: cs.pointerEvents,
+          opacity: cs.opacity,
+          visibility: cs.visibility,
+          transform: cs.transform
+        }
+      };
+    })() : null;
+
+    console.log("[tap-debug]", {
+      target: e.target,
+      topMost,
+      point: { x: touch.clientX, y: touch.clientY },
+      path,
+      topMostInfo
+    });
+
+    highlight(topMost);
+  };
+
+  ["pointerdown", "touchstart"].forEach(evt => {
+    document.addEventListener(evt, logTap, { capture:true, passive:true });
+  });
 })();
 
 /* ---- Focus visibility helper (keep inputs inside their scroll shells) ---- */
@@ -2632,6 +2697,11 @@ function setRightDrawerOpen(isOpen){
   document.body.classList.toggle("drawer-right-open", !!isOpen);
 }
 
+function ensureDrawerOverlayClosed(){
+  if(anyDrawerOpen()) return;
+  drawerOverlay?.classList.remove("show");
+}
+
 // Keep CSS vars in sync so the DM panel can avoid covering the members pane on desktop.
 function syncDesktopMembersWidth(){
   try{
@@ -2721,10 +2791,12 @@ membersCloseBtn?.addEventListener("click", closeDrawers);
 window.addEventListener('resize', () => {
   try{
     if(!isMobileDrawerMode()) closeDrawers();
+    else ensureDrawerOverlayClosed();
   }catch{}
 }, { passive:true });
 window.addEventListener('pageshow', () => {
   try{
+    ensureDrawerOverlayClosed();
     if(!isMobileDrawerMode()) closeDrawers();
   }catch{}
 });
