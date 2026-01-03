@@ -776,6 +776,7 @@ let themeFilter = "all";
 let modalTargetUsername = null;
 let modalTargetUserId = null;
 let pendingFile = null;
+let dmPendingAttachment = null;
 let uploadXhr = null;
 let memberMenuUser = null;
 let memberMenuUsername = "";
@@ -919,10 +920,39 @@ const dmMetaTitle = document.getElementById("dmMetaTitle");
 const dmMetaPeople = document.getElementById("dmMetaPeople");
 const dmMessagesEl = document.getElementById("dmMessages");
 const dmText = document.getElementById("dmText");
+const dmFileInput = document.getElementById("dmFileInput");
+const dmPickFileBtn = document.getElementById("dmPickFileBtn");
 const dmSendBtn = document.getElementById("dmSendBtn");
 
 // Ensure DM quick bars start closed on load (safety net in case markup defaults are changed)
 hideAllDmQuickBars();
+
+// DM image upload (images only)
+dmPickFileBtn?.addEventListener("click", () => { dmFileInput?.click(); });
+dmFileInput?.addEventListener("change", async () => {
+  const file = dmFileInput.files && dmFileInput.files[0] ? dmFileInput.files[0] : null;
+  if(!file) return;
+  // reset input so the same file can be re-selected
+  try{ dmFileInput.value = ""; }catch{}
+  if(!/^image\//i.test(String(file.type||""))){
+    setDmNotice("Images only for DMs.");
+    return;
+  }
+  if(file.size > (10*1024*1024)){
+    setDmNotice("Image too large (max 10MB).");
+    return;
+  }
+  try{
+    setDmNotice("Uploading image…");
+    const up = await uploadChatFileWithProgress(file);
+    dmPendingAttachment = { url: up.url, mime: up.mime, type: up.type, size: up.size };
+    setDmNotice("Image ready. Press Send.");
+  }catch(e){
+    dmPendingAttachment = null;
+    setDmNotice(String(e?.message || "Upload failed."));
+  }
+});
+
 
 dmMessagesEl?.addEventListener("scroll", ()=>{ dmPinned = isNearBottom(dmMessagesEl, 160); });
 const dmUserBtn = document.getElementById("dmUserBtn");
@@ -2088,6 +2118,23 @@ function applyBadgePrefs(){
   if(dmBadgeDot) dmBadgeDot.style.backgroundColor = badgePrefs.direct;
   if(groupDmBadgeDot) groupDmBadgeDot.style.backgroundColor = badgePrefs.group;
 }
+function refreshDmBadgesFromThreads(){
+  let hasDirect = false;
+  let hasGroup = false;
+  for(const th of (dmThreads || [])){
+    const tid = String(th.id);
+    const unread = Number(th.unreadCount || 0);
+    if(unread > 0) dmUnreadThreads.add(tid);
+    const isGroup = !!th.is_group;
+    const pending = dmUnreadThreads.has(tid);
+    if(pending){
+      if(isGroup) hasGroup = true; else hasDirect = true;
+    }
+  }
+  setBadgeVisibility("direct", hasDirect);
+  setBadgeVisibility("group", hasGroup);
+}
+
 function setBadgeVisibility(kind, visible){
   const el = kind === "group" ? groupDmBadgeDot : dmBadgeDot;
   if(kind === "group") groupBadgePending = visible; else directBadgePending = visible;
@@ -3104,6 +3151,7 @@ async function loadDmThreads(){
     }
     const raw = await res.json();
     dmThreads = (raw || []).map((t) => ({ ...t, is_group: !!t.is_group }));
+    refreshDmBadgesFromThreads();
     syncDmTabUi();
     renderDmThreads();
   } catch {
@@ -3323,6 +3371,33 @@ function renderDmMessages(threadId){
     text.innerHTML = applyMentions(m.text || "");
     bubble.appendChild(text);
 
+    if(m.attachmentUrl && m.attachmentType){
+      const att=document.createElement("div");
+      att.className="attachment";
+      if(m.attachmentType==="image"){
+        const img=document.createElement("img");
+        img.src=m.attachmentUrl;
+        img.alt="image";
+        img.addEventListener("click", ()=>openMediaLightbox(m.attachmentUrl, "image"));
+        att.appendChild(img);
+      }else if(m.attachmentType==="video"){
+        const v=document.createElement("video");
+        v.src=m.attachmentUrl;
+        v.controls=true;
+        v.playsInline=true;
+        v.addEventListener("click", ()=>openMediaLightbox(m.attachmentUrl, "video"));
+        att.appendChild(v);
+      }else{
+        const a=document.createElement("a");
+        a.href=m.attachmentUrl;
+        a.textContent="Download file";
+        a.target="_blank";
+        a.rel="noopener";
+        att.appendChild(a);
+      }
+      bubble.appendChild(att);
+    }
+
     const meta = document.createElement("div");
     meta.className = "dmMetaRow";
     const u = document.createElement("span");
@@ -3469,11 +3544,22 @@ function upsertThreadMeta(tid, updater){
 
 function sendDmMessage(){
   if (!activeDmId) return;
-  const txt = dmText.value.trim();
-  if (!txt) return;
-  socket?.emit("dm message", { threadId: activeDmId, text: txt, replyToId: dmReplyTarget?.id || null });
+  const txt = (dmText?.value || "").trim();
+  const att = dmPendingAttachment;
+  if (!txt && !att) return;
+
+  socket?.emit("dm message", {
+    threadId: activeDmId,
+    text: txt,
+    replyToId: dmReplyTarget?.id || null,
+    attachment: att ? { url: att.url, mime: att.mime, type: att.type, size: att.size } : null
+  });
+
   dmText.value = "";
+  dmPendingAttachment = null;
   setDmReplyTarget(null);
+  // Clear any "ready" notice
+  setDmNotice("");
 }
 
 function filteredDmCandidates(term, excludeList){
@@ -5453,7 +5539,8 @@ socket.on("disconnect", (reason) => {
         if (mid) socket?.emit("dm mark read", { threadId, messageId: mid, ts: lastMsg.ts || Date.now() });
       } catch {}
 
-      dmUnreadThreads.delete(threadId);
+      dmUnreadThreads.delete(String(threadId));
+      refreshDmBadgesFromThreads();
       renderDmThreads();
     }
   });
@@ -5500,11 +5587,11 @@ socket.on("disconnect", (reason) => {
       markDmNotification(m.threadId, isGroupThread(m.threadId));
     }
 
-    if (String(activeDmId) === String(m.threadId)) {
+    if (dmPanel?.classList.contains("open") && String(activeDmId) === String(m.threadId)) {
       renderDmMessages(m.threadId);
       markDmRead(m.threadId, m.ts || Date.now());
     // Live read receipt (best-effort)
-    if (String(activeDmId) === String(m.threadId) && (m.messageId || m.id)) {
+    if (dmPanel?.classList.contains("open") && String(activeDmId) === String(m.threadId) && (m.messageId || m.id)) {
       socket?.emit("dm mark read", { threadId: m.threadId, messageId: (m.messageId || m.id), ts: m.ts || Date.now() });
     }
       dmUnreadThreads.delete(m.threadId);
