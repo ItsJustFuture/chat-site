@@ -2157,6 +2157,10 @@ function applyBadgePrefs(){
   if(groupDmBadgeDot) groupDmBadgeDot.style.backgroundColor = badgePrefs.group;
 }
 function refreshDmBadgesFromThreads(){
+  // Rebuild unread state from authoritative thread metadata (unreadCount).
+  // IMPORTANT: clear first; otherwise badges can "stick" forever.
+  dmUnreadThreads.clear();
+
   let hasDirect = false;
   let hasGroup = false;
   for(const th of (dmThreads || [])){
@@ -3204,10 +3208,10 @@ function renderDirectThreads(){
   stripEl.innerHTML = "";
   if (list.length === 0) {
     stripEl.style.display = "none";
-    if (stripEl === dmQuickStrip && dmQuickEmpty) dmQuickEmpty.hidden = false;
+    if (dmQuickEmpty) dmQuickEmpty.hidden = false;
     return;
   }
-  if (stripEl === dmQuickStrip && dmQuickEmpty) dmQuickEmpty.hidden = true;
+  if (dmQuickEmpty) dmQuickEmpty.hidden = true;
   stripEl.style.display = "flex";
 
   list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
@@ -3270,10 +3274,10 @@ function renderGroupThreads(){
   stripEl.innerHTML = "";
   if (list.length === 0) {
     stripEl.style.display = "none";
-    if (stripEl === groupQuickStrip && groupQuickEmpty) groupQuickEmpty.hidden = false;
+    if (groupQuickEmpty) groupQuickEmpty.hidden = false;
     return;
   }
-  if (stripEl === groupQuickStrip && groupQuickEmpty) groupQuickEmpty.hidden = true;
+  if (groupQuickEmpty) groupQuickEmpty.hidden = true;
   stripEl.style.display = "flex";
   list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
 
@@ -5828,6 +5832,9 @@ socket.on("dm history", (payload) => {
         if (mid) socket?.emit("dm mark read", { threadId, messageId: mid, ts: lastMsg.ts || Date.now() });
       } catch {}
 
+      // Optimistically clear unread count for this thread so badges update immediately.
+      const meta = dmThreads.find(t => String(t.id) === String(threadId));
+      if (meta) meta.unreadCount = 0;
       dmUnreadThreads.delete(String(threadId));
       refreshDmBadgesFromThreads();
       renderDmThreads();
@@ -5883,7 +5890,11 @@ socket.on("dm history", (payload) => {
     if (dmPanel?.classList.contains("open") && String(activeDmId) === String(m.threadId) && (m.messageId || m.id)) {
       socket?.emit("dm mark read", { threadId: m.threadId, messageId: (m.messageId || m.id), ts: m.ts || Date.now() });
     }
-      dmUnreadThreads.delete(m.threadId);
+      // Optimistically clear unread count for this thread so badges update immediately.
+      const meta = dmThreads.find(t => String(t.id) === String(m.threadId));
+      if (meta) meta.unreadCount = 0;
+      dmUnreadThreads.delete(String(m.threadId));
+      refreshDmBadgesFromThreads();
       renderDmThreads();
     }
   } catch (err) {
