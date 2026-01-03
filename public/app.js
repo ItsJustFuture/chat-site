@@ -19,80 +19,188 @@ const THEMES = [
 ];
 
 
-/* ---- Mobile viewport height fix (prevents input bars being hidden by browser UI) */
-(function initViewportHeightVar(){
+/* ---- Visual viewport + layout shell metrics (single source of truth) ---- */
+(function initLayoutMetrics(){
+  const root = document.documentElement;
+  const body = document.body;
+  const selectors = {
+    chatScroller: ".msgs",
+    composer: ".inputBar",
+    menuScroller: ".channels .menuContent",
+    header: ".topbar",
+    player: "#ytSticky",
+    menuHeader: ".menuNav"
+  };
+
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if(body) body.classList.toggle("ios", isIOS);
+
   let raf = 0;
-  let lastComposerH = 0;
+  let overlay = null;
 
-  function measureComposer(){
-    const root = document.documentElement;
-    const composer = document.querySelector(".inputBar");
-    let h = 0;
+  const debugEnabled = () => localStorage.getItem("debugKB") === "1";
 
-    if(composer){
-      const rect = composer.getBoundingClientRect?.();
-      h = Math.round(rect?.height || composer.offsetHeight || 0);
+  function ensureOverlay(){
+    if(!debugEnabled()){
+      if(overlay){ overlay.remove(); overlay = null; }
+      return;
     }
-
-    if(!Number.isFinite(h) || h <= 0) h = 72;
-
-    if(h !== lastComposerH){
-      lastComposerH = h;
-      root.style.setProperty("--composerH", `${h}px`);
-    }
+    if(overlay) return;
+    overlay = document.createElement("div");
+    overlay.id = "kbDebugOverlay";
+    Object.assign(overlay.style, {
+      position: "fixed",
+      right: "8px",
+      bottom: "8px",
+      zIndex: "9999",
+      background: "rgba(0,0,0,0.78)",
+      color: "#fff",
+      fontSize: "11px",
+      padding: "10px",
+      borderRadius: "10px",
+      maxWidth: "340px",
+      lineHeight: "1.4",
+      pointerEvents: "none",
+      fontFamily: "Menlo, Consolas, monospace",
+      boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+      backdropFilter: "blur(6px)"
+    });
+    document.body.appendChild(overlay);
   }
 
-  function setVhNow(){
-    const root = document.documentElement;
+  function measureRect(sel){
+    const el = typeof sel === "string" ? document.querySelector(sel) : sel;
+    if(!el || !el.getBoundingClientRect) return null;
+    const r = el.getBoundingClientRect();
+    return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: Math.round(r.height) };
+  }
+
+  function measureHeight(sel){
+    const rect = measureRect(sel);
+    return rect ? rect.height : 0;
+  }
+
+  function isVisible(el){
+    if(!el) return false;
+    const style = getComputedStyle(el);
+    if(style.display === "none" || style.visibility === "hidden") return false;
+    return el.offsetHeight > 0;
+  }
+
+  function renderOverlay(metrics){
+    ensureOverlay();
+    if(!overlay) return;
+    const cs = getComputedStyle(root);
+    const val = (name) => cs.getPropertyValue(name).trim();
+    const lines = [
+      `innerHeight: ${window.innerHeight}`,
+      `vv.height: ${metrics.vvHeight} | vv.offsetTop: ${metrics.vvTop}`,
+      `kbInset: ${metrics.kbInset}`,
+      `vars --vvh:${val("--vvh")} --vvhPx:${val("--vvhPx")} --vvTop:${val("--vvTop")} --kbInset:${val("--kbInset")}`,
+      `header:${val("--headerH")} composer:${val("--composerH")} player:${val("--playerH")} menuHeader:${val("--menuHeaderH")}`,
+      `chatRect: ${metrics.chatRect ? JSON.stringify(metrics.chatRect) : "n/a"}`,
+      `composerRect: ${metrics.composerRect ? JSON.stringify(metrics.composerRect) : "n/a"}`,
+      `menuRect: ${metrics.menuRect ? JSON.stringify(metrics.menuRect) : "n/a"}`
+    ];
+    overlay.innerHTML = lines.join("<br>");
+  }
+
+  function collectMetrics(){
     const vv = window.visualViewport;
-    // visualViewport.height is the most accurate on iOS when the keyboard opens,
-    // but it can briefly report 0 during transitions. Guard + fallback.
-    let h = (vv && typeof vv.height === "number" && vv.height > 100) ? vv.height : window.innerHeight;
-    // Clamp to avoid negative/near-zero layouts during keyboard transitions.
-    h = Math.max(200, Math.min(h, window.screen?.height ? window.screen.height : h));
-    root.style.setProperty("--vh", (h * 0.01) + "px");
+    const vvReliable = vv && typeof vv.height === "number" && vv.height > 120;
+    const vvHeight = vvReliable ? vv.height : window.innerHeight;
+    const vvTop = vvReliable ? Number(vv.offsetTop || 0) : 0;
+    const kbInset = Math.max(0, Math.round(window.innerHeight - vvHeight - vvTop));
 
-    // Keyboard offset handling:
-    // - We still compute the raw keyboard inset from visualViewport so we can toggle UI state (kb-open).
-    // - BUT if visualViewport.height is reliable (iOS), we avoid double-compensation by zeroing --kbOffset,
-    //   since --vh already shrinks the layout when the keyboard opens.
-    let rawKbOffset = 0;
-    const vvReliable = !!(vv && typeof vv.height === "number" && vv.height > 100);
-    if(vv){
-      const offsetTop = Number(vv.offsetTop || 0);
-      rawKbOffset = Math.max(0, Math.round(window.innerHeight - vv.height - offsetTop));
-      root.style.setProperty("--vv-offset-top", offsetTop + "px");
-    }else{
-      root.style.setProperty("--vv-offset-top", "0px");
+    const composer = document.querySelector(selectors.composer);
+    const player = document.querySelector(selectors.player);
+
+    const headerH = measureHeight(selectors.header) || 54;
+    const composerH = measureHeight(composer) || 72;
+    const menuHeaderH = measureHeight(selectors.menuHeader) || 0;
+
+    const metrics = {
+      vvHeight: Math.round(vvHeight),
+      vvTop,
+      kbInset,
+      headerH,
+      composerH,
+      playerH: (isVisible(player) && !player?.classList.contains("is-hidden")) ? measureHeight(player) : 0,
+      menuHeaderH,
+      chatRect: measureRect(selectors.chatScroller),
+      composerRect: measureRect(selectors.composer),
+      menuRect: measureRect(selectors.menuScroller)
+    };
+
+    root.style.setProperty("--vvh", String(metrics.vvHeight));
+    root.style.setProperty("--vvhPx", `${metrics.vvHeight}px`);
+    root.style.setProperty("--vvTop", `${metrics.vvTop}px`);
+    root.style.setProperty("--kbInset", `${metrics.kbInset}px`);
+    root.style.setProperty("--headerH", `${metrics.headerH}px`);
+    root.style.setProperty("--composerH", `${metrics.composerH}px`);
+    root.style.setProperty("--playerH", `${metrics.playerH}px`);
+    root.style.setProperty("--menuHeaderH", `${metrics.menuHeaderH}px`);
+
+    if(body) body.classList.toggle("kb-open", metrics.kbInset > 40);
+    renderOverlay(metrics);
+    return metrics;
+  }
+
+  function schedule(label){
+    if(debugEnabled() && label) console.log("[layout]", label);
+    if(raf) cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(()=>{ raf = 0; collectMetrics(); });
+  }
+
+  window.addEventListener("resize", () => schedule("resize"), { passive:true });
+  window.addEventListener("orientationchange", () => schedule("orientationchange"), { passive:true });
+  if(window.visualViewport){
+    window.visualViewport.addEventListener("resize", () => schedule("vv-resize"), { passive:true });
+    window.visualViewport.addEventListener("scroll", () => schedule("vv-scroll"), { passive:true });
+  }
+
+  window.addEventListener("load", () => schedule("load"), { passive:true, once:true });
+  document.addEventListener("visibilitychange", () => { if(!document.hidden) schedule("visible"); });
+  document.addEventListener("focusin", () => schedule("focusin"));
+  document.addEventListener("focusout", () => schedule("focusout"));
+
+  schedule("init");
+})();
+
+/* ---- Focus visibility helper (keep inputs inside their scroll shells) ---- */
+(function initFocusVisibility(){
+  function scrollNearest(target){
+    if(!target || !(target instanceof HTMLElement)) return;
+    const isFormEl = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target.isContentEditable;
+    if(!isFormEl) return;
+
+    const menuContainer = target.closest(".channels .menuContent");
+    if(menuContainer){
+      target.scrollIntoView({ block: "nearest" });
+      return;
     }
 
-        root.style.setProperty("--rawKbOffset", rawKbOffset + "px");
+    const chatShell = target.closest("main.chat, .chat");
+    if(chatShell){
+      const scroller = chatShell.querySelector(".msgs");
+      if(scroller){
+        scroller.scrollTop = scroller.scrollHeight;
+        scroller.scrollIntoView({ block: "nearest" });
+      }
+      return;
+    }
 
-const kbOffset = (vvReliable ? 0 : rawKbOffset);
-    root.style.setProperty("--kbOffset", kbOffset + "px");
-    if (document.body) document.body.classList.toggle("kb-open", rawKbOffset > 80);
-    measureComposer();
+    const dmShell = target.closest(".dmPanel, #dmModal");
+    if(dmShell){
+      const dmScroller = dmShell.querySelector(".dmMessages, .dmMsgs, .messages");
+      dmScroller?.scrollIntoView({ block: "nearest" });
+    }
   }
 
-  function scheduleSetVh(){
-    if(raf) cancelAnimationFrame(raf);
-    raf = requestAnimationFrame(()=>{ raf = 0; setVhNow(); });
-  }
-
-  window.addEventListener("resize", scheduleSetVh, { passive:true });
-  window.addEventListener("orientationchange", scheduleSetVh, { passive:true });
-  if(window.visualViewport){
-    window.visualViewport.addEventListener("resize", scheduleSetVh, { passive:true });
-    window.visualViewport.addEventListener("scroll", scheduleSetVh, { passive:true });
-  }
-
-  window.addEventListener("load", scheduleSetVh, { passive:true, once:true });
-
-  // When the page becomes visible again (Safari sometimes restores wrong values)
-  document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) scheduleSetVh(); });
-
-  scheduleSetVh();
-})()
+  document.addEventListener("focusin", (e) => {
+    scrollNearest(e.target);
+  }, { passive:true });
+})();
 
 /* ---- Quiet sound cues (optional) ---- */
 const Sound = (() => {
