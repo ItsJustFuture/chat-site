@@ -4032,7 +4032,48 @@ replyToId: replyPk,
     });
   });
 
-  socket.on("status change", ({ status }) => {
+    // ---- DM edit message (self-only, short window)
+  socket.on("dm edit message", ({ threadId, messageId, text }) => {
+    const tid = Number(threadId);
+    const mid = Number(messageId);
+    const body = String(text || "").trim().slice(0, 2000);
+    if (!socket.user) return;
+    if (!Number.isInteger(tid) || !Number.isInteger(mid) || !body) return;
+
+    loadThreadForUser(tid, socket.user.id, (err, thread) => {
+      if (err || !thread) return;
+
+      db.get(
+        `SELECT id, thread_id, user_id, ts FROM dm_messages WHERE id = ? AND thread_id = ?`,
+        [mid, tid],
+        (e2, row) => {
+          if (e2 || !row) return;
+
+          const isOwner = Number(row.user_id) === Number(socket.user.id);
+          if (!isOwner) return;
+
+          const now = Date.now();
+          const ts = Number(row.ts) || 0;
+          if (now - ts > 5 * 60 * 1000) return;
+
+          db.run(
+            `UPDATE dm_messages SET text = ?, edited_at = ? WHERE id = ?`,
+            [body, now, mid],
+            () => {
+              io.to(`dm:${tid}`).emit("dm message edited", {
+                threadId: tid,
+                messageId: mid,
+                text: body,
+                editedAt: now
+              });
+            }
+          );
+        }
+      );
+    });
+  });
+
+socket.on("status change", ({ status }) => {
     status = normalizeStatus(status, "Online");
     socket.user.status = status;
 
@@ -4174,6 +4215,42 @@ replyToId: replyPk,
       });
     });
   });
+
+  // ---- Edit message (self-only, short window)
+  socket.on("edit message", ({ messageId, text }) => {
+    const mid = Number(messageId);
+    const body = String(text || "").trim().slice(0, 2000);
+    if (!socket.user) return;
+    if (!Number.isInteger(mid) || !body) return;
+
+    db.get(
+      `SELECT id, room, user_id, ts, deleted FROM messages WHERE id = ?`,
+      [mid],
+      (err, row) => {
+        if (err || !row || Number(row.deleted || 0) === 1) return;
+
+        const isOwner = Number(row.user_id) === Number(socket.user.id);
+        if (!isOwner) return;
+
+        const now = Date.now();
+        const ts = Number(row.ts) || 0;
+        if (now - ts > 5 * 60 * 1000) return;
+
+        db.run(
+          `UPDATE messages SET text = ?, edited_at = ? WHERE id = ?`,
+          [body, now, mid],
+          () => {
+            io.to(String(row.room)).emit("message edited", {
+              messageId: mid,
+              text: body,
+              editedAt: now
+            });
+          }
+        );
+      }
+    );
+  });
+
 
   // Reactions: 1 reaction per user per message (enforced by PRIMARY KEY)
   socket.on("reaction", ({ messageId, emoji }) => {

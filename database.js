@@ -159,6 +159,7 @@ async function runSqliteMigrations() {
     ["reply_to_id", "reply_to_id INTEGER"],
     ["reply_to_user", "reply_to_user TEXT"],
     ["reply_to_text", "reply_to_text TEXT"],
+    ["edited_at", "edited_at INTEGER"],
   ]);
 
   await run(`
@@ -277,6 +278,7 @@ async function runSqliteMigrations() {
     ["reply_to_id", "reply_to_id INTEGER"],
     ["reply_to_user", "reply_to_user TEXT"],
     ["reply_to_text", "reply_to_text TEXT"],
+    ["edited_at", "edited_at INTEGER"],
     ["attachment_url", "attachment_url TEXT"],
     ["attachment_mime", "attachment_mime TEXT"],
     ["attachment_type", "attachment_type TEXT"],
