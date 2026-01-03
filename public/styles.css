@@ -4497,7 +4497,7 @@ body.kb-open #typing{
 /* When iOS keyboard opens, the composer is lifted by --kbOffset.
    Add matching scroll padding so messages still use the full area and never get covered. */
 body.kb-open .msgs{
-  padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom) + var(--kbOffset, 0px)) !important;
+  padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)) !important;
 }
 body.kb-open #dmModal .dmMessages,
 body.kb-open #dmModal .dmMsgs,
@@ -4505,7 +4505,7 @@ body.kb-open #dmModal .messages,
 body.kb-open .dmPanel .dmMessages,
 body.kb-open .dmPanel .dmMsgs,
 body.kb-open .dmPanel .messages{
-  padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom) + var(--kbOffset, 0px)) !important;
+  padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)) !important;
 }
 
 
