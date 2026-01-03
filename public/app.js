@@ -2625,6 +2625,22 @@ searchInput.addEventListener("input", applySearch);
 function anyDrawerOpen(){
   return channelsPane?.classList.contains("open") || membersPane?.classList.contains("open");
 }
+
+// Keep overlay + body classes in sync with actual drawer state.
+// If a close handler is interrupted (runtime error, navigation, etc.), the
+// overlay can remain and swallow taps (sometimes looking almost invisible).
+function syncDrawerOverlayState(){
+  const leftOpen = !!channelsPane?.classList.contains("open");
+  const rightOpen = !!membersPane?.classList.contains("open");
+  const anyOpen = leftOpen || rightOpen;
+
+  drawerOverlay?.classList.toggle("show", anyOpen);
+  document.body.classList.toggle("drawer-left-open", leftOpen);
+  document.body.classList.toggle("drawer-right-open", rightOpen);
+
+  // Keep the DM panel spacing logic current.
+  syncDesktopMembersWidth();
+}
 function setLeftDrawerOpen(isOpen){
   document.body.classList.toggle("drawer-left-open", !!isOpen);
 }
@@ -2656,11 +2672,8 @@ window.addEventListener("resize", syncDesktopMembersWidth);
 function closeDrawers(){
   channelsPane?.classList.remove("open");
   membersPane?.classList.remove("open");
-  drawerOverlay?.classList.remove("show");
-  // When drawers close, let the mobile composer span full width again.
-  document.body.classList.remove("drawer-left-open", "drawer-right-open");
   closeMemberMenu();
-  syncDesktopMembersWidth();
+  syncDrawerOverlayState();
 }
 function openChannels(){
   // toggle
@@ -2668,11 +2681,7 @@ function openChannels(){
 
   membersPane?.classList.remove("open");
   channelsPane?.classList.add("open");
-  drawerOverlay?.classList.add("show");
-  // Mobile: shift the fixed composer so it doesn't overlap the left drawer.
-  document.body.classList.add("drawer-left-open");
-  document.body.classList.remove("drawer-right-open");
-  syncDesktopMembersWidth();
+  syncDrawerOverlayState();
 }
 
 function openMembers(){
@@ -2681,15 +2690,15 @@ function openMembers(){
 
   channelsPane?.classList.remove("open");
   membersPane?.classList.add("open");
-  drawerOverlay?.classList.add("show");
-  // Mobile: shift the fixed composer so it doesn't overlap the right drawer.
-  document.body.classList.add("drawer-right-open");
-  document.body.classList.remove("drawer-left-open");
-  syncDesktopMembersWidth();
+  syncDrawerOverlayState();
 }
 
 openChannelsBtn?.addEventListener("click", openChannels);
 openMembersBtn?.addEventListener("click", openMembers);
+
+// Initial sync (prevents "ghost" overlay swallowing taps if the page was
+// restored from BFCache with stale classes).
+try{ syncDrawerOverlayState(); }catch{}
 
 /* Outside tap close: use pointerdown (better on mobile) */
 drawerOverlay?.addEventListener("pointerdown", (e) => {
@@ -5109,6 +5118,17 @@ async function startApp(){
 
     authWrap.style.display="none";
     app.style.display="flex";
+
+  // --- UI safety reset ---
+  // If any overlay/panel state was left inconsistent (e.g., after an error or
+  // mobile Safari back/forward cache restore), ensure taps aren't swallowed.
+  try{
+    closeDrawers();
+    hideAllDmQuickBars();
+    if(uiScalePanel) uiScalePanel.hidden = true;
+    closeDmSettingsMenu();
+    closeReactionMenu();
+  }catch{}
 
   await loadMyProfile();
   await loadUserPrefs();
