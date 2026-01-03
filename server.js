@@ -310,16 +310,16 @@ app.use((req, res, next) => {
     "Content-Security-Policy",
     [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
-      "script-src-elem 'self' 'unsafe-eval' 'unsafe-inline'",
+      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com",
+      "script-src-elem 'self' 'unsafe-eval' 'unsafe-inline' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com",
       // Inline style attributes are set by the client JS (e.g. show/hide panels),
       // so allow them alongside our external stylesheet.
       "style-src 'self' 'unsafe-inline'",
       // allow avatars/uploads + blob previews on client
-      "img-src 'self' data: blob:",
+      "img-src 'self' data: blob: https://i.ytimg.com",
       "media-src 'self' blob:",
       // socket.io
-      "connect-src 'self' ws: wss:",
+      "connect-src 'self' ws: wss: https://noembed.com",
       "object-src 'none'",
       "base-uri 'self'",
       "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com",

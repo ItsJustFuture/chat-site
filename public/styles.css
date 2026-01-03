@@ -1508,6 +1508,9 @@ body[data-theme="420 Friendly (Light)"]{
 
   /* Desktop DM dock offset (prevents the DM composer falling off-screen on shorter viewports) */
   --dmDockBottom: 72px;
+
+  /* Dynamic: set by JS for the composer + keyboard safe padding */
+  --composerH: 72px;
 }
 @media (max-width: 360px){
   :root{ --uiScaleAuto: 0.92; }
@@ -1942,11 +1945,27 @@ textarea{ min-height:90px; resize:vertical; }
 }
 .goldPill.show{ display:inline-flex; }
 
-.msgs{ flex:1; overflow:auto; padding:14px; display:flex; flex-direction:column; gap:10px; min-height:0; }
+.msgs{
+  flex:1;
+  overflow:auto;
+  padding:14px;
+  padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom));
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  min-height:0;
+  justify-content:flex-start;
+}
 .sys{
   align-self:center; color:var(--messageSystemText); font-size:12px;
   padding:6px 10px; border-radius:999px;
   background:var(--messageSystemBg); border:1px solid var(--border);
+}
+
+.dmMessages,
+.dmMsgs,
+.messages{
+  padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom));
 }
 
 /* Dice Room: scale system messages + dice faces ONLY in that room */
@@ -2041,6 +2060,10 @@ body.dice-room .sys .diceFace{
   display:flex;
   align-items:center;
   flex:0 0 auto;
+}
+.typing:empty{
+  height:0;
+  padding:0;
 }
 
 .inputBar{
@@ -2882,7 +2905,7 @@ body.lockScroll{ overflow:hidden; }
   .members{ display:none; }
   
   .topbar{ position: sticky; top: 0; z-index: 200; padding:0 10px; gap:8px; }
-  .msgs{ padding:10px; gap:8px; }
+  .msgs{ padding:10px; gap:8px; padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)); }
   .msg{ gap:8px; }
   .msgAvatar{ width:34px; height:34px; }
   .bubble{
@@ -2911,7 +2934,7 @@ body.lockScroll{ overflow:hidden; }
   /* DM is single-pane on mobile as well; keep full-height conversation */
   .dmContent{ display:flex; flex-direction:column; }
   .dmThreads{ display:none; }
-  .dmMessages{ padding-bottom:14px; }
+  .dmMessages{ padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)); }
 
  .channels{
   position:fixed; top: var(--topbarH); left:0; height: calc((var(--vh, 1vh) * 100) - var(--topbarH));
@@ -2978,7 +3001,7 @@ body.lockScroll{ overflow:hidden; }
     position:fixed;
     left:0;
     right:0;
-    bottom: calc(62px + env(safe-area-inset-bottom));
+    bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom));
     height:auto;
     padding:6px 12px;
     display:none;
@@ -3254,7 +3277,8 @@ main.chat{ position: relative; }
 .ytStickyChannel{ color:var(--muted, #9aa3b1); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .ytStickyHeaderActions{ display:flex; align-items:center; gap:6px; }
 .ytStickyBody{ padding:0 12px 12px; display:flex; flex-direction:column; gap:10px; }
-.ytSticky.is-minimized .ytStickyBody{ display:none; }
+.ytSticky.yt-collapsed .ytStickyBody{ display:none; }
+.ytSticky.yt-compact .ytStickyControls{ display:none; }
 .ytStickyControls{ display:flex; flex-direction:column; gap:10px; }
 .ytSeekRow{ display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:8px; }
 .ytControlRow{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:space-between; }
@@ -3271,11 +3295,15 @@ main.chat{ position: relative; }
 .ytMiniTitle{ font-weight:700; font-size:15px; color:var(--text, #fff); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .ytMiniChannel{ font-size:12px; color:var(--muted, #9aa3b1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .ytMiniAction{ font-weight:700; color:var(--accent, #ff4f6d); }
-.ytSticky.is-minimized .ytStickyInner{ border-radius:12px; }
-.ytSticky.is-minimized .ytStickyHeader{ padding-bottom:10px; }
-.ytSticky.is-minimized .ytStickyThumb{ width:52px; height:40px; }
-.ytSticky.is-minimized .ytStickyTitle{ font-size:14px; }
-.ytSticky.is-minimized .ytStickyChannel{ display:none; }
+.ytSticky.yt-compact .ytStickyInner,
+.ytSticky.yt-collapsed .ytStickyInner{ border-radius:12px; }
+.ytSticky.yt-compact .ytStickyHeader,
+.ytSticky.yt-collapsed .ytStickyHeader{ padding-bottom:10px; }
+.ytSticky.yt-compact .ytStickyThumb,
+.ytSticky.yt-collapsed .ytStickyThumb{ width:52px; height:40px; }
+.ytSticky.yt-compact .ytStickyTitle,
+.ytSticky.yt-collapsed .ytStickyTitle{ font-size:14px; }
+.ytSticky.yt-compact .ytStickyChannel{ display:none; }
 
 .ytSticky .iconBtn{ min-width:34px; height:34px; }
 
@@ -3342,11 +3370,6 @@ main.chat{ position: relative; }
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
   }
 
-  /* Give the scroll areas room so the fixed composer doesn't cover the last message */
-  .msgs{
-    padding-bottom: calc(72px + env(safe-area-inset-bottom));
-  }
-
   /* DM composer pinned to bottom on mobile */
   #dmModal .dmInputRow,
   #dmModal .dmComposer,
@@ -3367,7 +3390,7 @@ main.chat{ position: relative; }
   #dmModal .dmMsgs,
   .dmPanel .dmMessages,
   .dmPanel .dmMsgs{
-    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+    padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom));
   }
 
   /* Ensure DM content uses the full black area and can scroll correctly */
@@ -3411,8 +3434,6 @@ body.drawer-right-open { --rightDrawerW: min(86vw, 340px); }
     padding-left: calc(12px + env(safe-area-inset-left, 0px));
     padding-right: calc(12px + env(safe-area-inset-right, 0px));
   }
-  /* Ensure the chat list never tucks under the fixed composer */
-  .msgs{ padding-bottom: calc(96px + var(--safeB)); }
 }
 
 
@@ -4476,7 +4497,7 @@ body.kb-open #typing{
 /* When iOS keyboard opens, the composer is lifted by --kbOffset.
    Add matching scroll padding so messages still use the full area and never get covered. */
 body.kb-open .msgs{
-  padding-bottom: calc(72px + env(safe-area-inset-bottom) + var(--kbOffset, 0px)) !important;
+  padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom) + var(--kbOffset, 0px)) !important;
 }
 body.kb-open #dmModal .dmMessages,
 body.kb-open #dmModal .dmMsgs,
@@ -4484,7 +4505,7 @@ body.kb-open #dmModal .messages,
 body.kb-open .dmPanel .dmMessages,
 body.kb-open .dmPanel .dmMsgs,
 body.kb-open .dmPanel .messages{
-  padding-bottom: calc(72px + env(safe-area-inset-bottom) + var(--kbOffset, 0px)) !important;
+  padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom) + var(--kbOffset, 0px)) !important;
 }
 
 
@@ -4773,10 +4794,6 @@ body.kb-open #typing{ display:none !important; }
   }
 }
 
-/* === Main chat messages were getting visually cut off: ensure scroll area accounts for composer height === */
-.msgs{
-  padding-bottom: calc(160px + var(--safeB)) !important;
-}
 /* === MAIN CHAT: fix message area being constrained/cut off === */
 /* Ensure the center chat column can actually give height to the scroll area */
 .chat,
