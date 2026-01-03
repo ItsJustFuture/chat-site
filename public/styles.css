@@ -2026,6 +2026,26 @@ body.dice-room .sys .diceFace{
   vertical-align:middle;
   margin:0 2px;
 }
+/* ---- Main chat message grouping (consecutive messages) ---- */
+.msgGroup{ display:flex; gap:10px; align-items:flex-start; max-width:900px; }
+.msgGroup.self{ align-self:flex-end; flex-direction:row-reverse; }
+.msgGroupBody{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+.msgItem{ position:relative; display:flex; flex-direction:column; min-width:0; }
+.msgItem.self{ align-items:flex-end; }
+/* Make grouped bubbles visually merge into one */
+.msgGroupBody .msgItem:not(:first-child) .bubble{
+  margin-top:-4px;
+  border-top:none;
+  border-top-left-radius:12px;
+  border-top-right-radius:12px;
+}
+.msgGroupBody .msgItem:not(:last-child) .bubble{
+  border-bottom-left-radius:12px;
+  border-bottom-right-radius:12px;
+}
+/* If a message has reactions, give it a little breathing room (splits by reaction space) */
+.msgItem.hasReacts{ margin-bottom:8px; }
+
 .msg{ display:flex; gap:10px; align-items:flex-start; max-width:900px; }
 .msg.self{ align-self:flex-end; flex-direction:row-reverse; }
 .msgAvatar{ width:38px; height:38px; border-radius:50%; background:var(--avatar-bg); overflow:hidden; flex:0 0 auto; border:1px solid var(--border); }
@@ -2049,6 +2069,37 @@ body.dice-room .sys .diceFace{
   padding:3px 7px; border-radius:999px;
   border:1px solid var(--border); background:color-mix(in srgb, var(--panel) 80%, transparent);
 }
+.editedTag{ font-size:11px; color:var(--muted); opacity:.9; }
+.self .editedTag{ color:var(--messageSelfText); opacity:.85; }
+
+/* Inline edit box */
+.editBox{ margin-top:8px; display:flex; flex-direction:column; gap:8px; }
+.editBox textarea{
+  width:100%;
+  min-height:72px;
+  resize:vertical;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background:color-mix(in srgb, var(--panel) 85%, transparent);
+  color:var(--text);
+  padding:10px;
+  outline:none;
+}
+.editRow{ display:flex; gap:8px; justify-content:flex-end; }
+.editRow button{
+  padding:8px 10px;
+  border-radius:10px;
+  border:1px solid var(--border);
+  background:var(--panel2);
+  color:var(--text);
+  font-weight:800;
+}
+.editRow button.primary{
+  background:var(--accent);
+  color:#0b0b0c;
+  border-color:color-mix(in srgb, var(--accent) 60%, var(--border));
+}
+
 .ts{ font-size:11px; color:var(--muted); }
 .self .ts{ color:var(--messageSelfText); opacity:.85; }
 .text{
@@ -3138,7 +3189,7 @@ body.lockScroll{ overflow:hidden; }
 }
 
 /* JS can force show on mobile (long press) */
-.msg.showActions .msgActions{
+.msgItem.showActions .msgActions{
   opacity:1;
   pointer-events:auto;
 }

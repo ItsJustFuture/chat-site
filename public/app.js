@@ -866,9 +866,46 @@ const commandPopupTitle = document.getElementById("commandPopupTitle");
 const commandPopupBody = document.getElementById("commandPopupBody");
 const commandPopupClose = document.getElementById("commandPopupClose");
 
+// --- Draft persistence (per room & per DM) ---
+function roomDraftKey(room){ return `draft:room:${sanitizeRoomClient(room||"main")}`; }
+function dmDraftKey(threadId){ return `draft:dm:${String(threadId||"")}`; }
+
+function saveRoomDraft(){
+  try { localStorage.setItem(roomDraftKey(currentRoom), String(msgInput?.value||"")); } catch {}
+}
+function loadRoomDraft(){
+  try {
+    const v = localStorage.getItem(roomDraftKey(currentRoom));
+    if (v != null && msgInput) msgInput.value = v;
+  } catch {}
+}
+
+function saveDmDraft(){
+  try {
+    if (!activeDmId) return;
+    localStorage.setItem(dmDraftKey(activeDmId), String(dmText?.value||""));
+  } catch {}
+}
+function loadDmDraft(){
+  try {
+    if (!activeDmId || !dmText) return;
+    const v = localStorage.getItem(dmDraftKey(activeDmId));
+    if (v != null) dmText.value = v;
+  } catch {}
+}
+
+const draftDebounce = (()=> {
+  let t=null;
+  return (fn)=>{
+    clearTimeout(t);
+    t=setTimeout(fn, 150);
+  };
+})();
+
 const msgInput = document.getElementById("msgInput");
 const sendBtn = document.getElementById("sendBtn");
 const searchInput = document.getElementById("searchInput");
+msgInput?.addEventListener("input", ()=>draftDebounce(saveRoomDraft));
 
 msgs?.addEventListener("scroll", ()=>{ chatPinned = isNearBottom(msgs, 160); });
 
@@ -923,6 +960,7 @@ const dmText = document.getElementById("dmText");
 const dmFileInput = document.getElementById("dmFileInput");
 const dmPickFileBtn = document.getElementById("dmPickFileBtn");
 const dmSendBtn = document.getElementById("dmSendBtn");
+dmText?.addEventListener("input", ()=>draftDebounce(saveDmDraft));
 
 // Ensure DM quick bars start closed on load (safety net in case markup defaults are changed)
 hideAllDmQuickBars();
@@ -2271,9 +2309,9 @@ function closeReactionMenu(){
 // Tap outside to hide message action buttons (mobile-friendly).
 // Use pointerdown so it works reliably on iOS Safari.
 document.addEventListener("pointerdown", (e) => {
-  if (e?.target?.closest(".msg")) return;
+  if (e?.target?.closest(".msgItem")) return;
   if (e?.target?.closest(".reactionMenu")) return;
-  document.querySelectorAll(".msg.showActions").forEach((el) => el.classList.remove("showActions"));
+  document.querySelectorAll(".msgItem.showActions").forEach((el) => el.classList.remove("showActions"));
   closeReactionMenu();
 }, { capture: true });
 
@@ -2281,8 +2319,8 @@ document.addEventListener("pointerdown", (e) => {
 document.addEventListener("click", (e)=>{
   const isTouch = window.matchMedia && window.matchMedia("(hover: none)").matches;
   if (!isTouch && window.innerWidth > 980) return;
-  if (e.target && e.target.closest && e.target.closest(".msg")) return;
-  document.querySelectorAll(".msg.showActions").forEach((el)=>el.classList.remove("showActions"));
+  if (e.target && e.target.closest && e.target.closest(".msgItem")) return;
+  document.querySelectorAll(".msgItem.showActions").forEach((el)=>el.classList.remove("showActions"));
 });
 function openMediaLightbox(src, kind){
   if (!mediaLightbox || !mediaLightboxImg || !mediaLightboxVideo) return;
@@ -2314,56 +2352,104 @@ mediaLightboxClose?.addEventListener("click", closeMediaLightbox);
 mediaLightbox?.addEventListener("click", (e) => { if (e.target === mediaLightbox) closeMediaLightbox(); });
 
 function addMessage(m){
-  const row = document.createElement("div");
-  row.className = "msg" + (m.user === me.username ? " self" : "");
-  row.dataset.mid = m.messageId;
-
+  // --- Main chat grouping: consecutive messages from same user are visually grouped ---
   const shouldStick = isNearBottom(msgs, 160);
 
-  const av = document.createElement("div");
-  av.className = "msgAvatar";
-  av.appendChild(avatarNode(m.avatar, m.user, m.role));
-  av.title = `View ${m.user} profile`;
-  av.tabIndex = 0;
-  const openProfile = (e) => {
-    e.stopPropagation();
-    openMemberProfile(m.user);
-  };
-  av.addEventListener("click", openProfile);
-  av.addEventListener("keydown", (e) => { if(e.key === "Enter" || e.key === " ") openProfile(e); });
+  const mid = m.messageId;
+  const isSelf = (m.user === me.username);
 
-  const main = document.createElement("div");
-  main.className = "msgMain";
+  // Decide whether we can append into the previous group
+  const lastEl = msgs?.lastElementChild;
+  const canGroup =
+    lastEl &&
+    lastEl.classList &&
+    lastEl.classList.contains("msgGroup") &&
+    String(lastEl.dataset.user||"") === String(m.user||"") &&
+    String(lastEl.dataset.role||"") === String(m.role||"") &&
+    String(lastEl.dataset.self||"") === String(isSelf ? "1" : "0") &&
+    // Optional time window to avoid grouping across long pauses
+    (Number(m.ts||0) - Number(lastEl.dataset.lastTs||0) <= 2 * 60 * 1000);
+
+  let group = lastEl;
+  if(!canGroup){
+    group = document.createElement("div");
+    group.className = "msgGroup" + (isSelf ? " self" : "");
+    group.dataset.user = m.user || "";
+    group.dataset.role = m.role || "";
+    group.dataset.self = isSelf ? "1" : "0";
+    group.dataset.lastTs = String(Number(m.ts||0) || Date.now());
+
+    const av = document.createElement("div");
+    av.className = "msgAvatar";
+    av.appendChild(avatarNode(m.avatar, m.user, m.role));
+    av.title = `View ${m.user} profile`;
+    av.tabIndex = 0;
+    const openProfile = (e) => { e.stopPropagation(); openMemberProfile(m.user); };
+    av.addEventListener("click", openProfile);
+    av.addEventListener("keydown", (e)=>{ if(e.key==="Enter"||e.key===" "){ openProfile(e); }});
+    group.appendChild(av);
+
+    const body = document.createElement("div");
+    body.className = "msgGroupBody";
+    group.appendChild(body);
+
+    msgs.appendChild(group);
+  }else{
+    group.dataset.lastTs = String(Number(m.ts||0) || Date.now());
+  }
+
+  const body = group.querySelector(".msgGroupBody");
+  if(!body) return;
+
+  const item = buildMainMsgItem(m, {
+    showHeader: !canGroup, // show username/role only on first in group
+    isSelf
+  });
+
+  body.appendChild(item);
+
+  if(shouldStick){
+    requestAnimationFrame(()=> msgs.scrollTop = msgs.scrollHeight);
+  }
+}
+
+function buildMainMsgItem(m, opts){
+  const { showHeader, isSelf } = opts || {};
+  const mid = m.messageId;
+
+  const item = document.createElement("div");
+  item.className = "msgItem" + (isSelf ? " self" : "");
+  item.dataset.mid = mid;
 
   const bubble = document.createElement("div");
   bubble.className = "bubble";
 
-  if (m.replyToId && (m.replyToUser || m.replyToText)) {
-    const replyLink = document.createElement("button");
-    replyLink.type = "button";
-    replyLink.className = "replyContext";
-    replyLink.innerHTML = `
-      <div class="replyUser">@${escapeHtml(m.replyToUser || "")}</div>
-      <div class="replySnippet">${escapeHtml((m.replyToText || "").slice(0, 120))}</div>
-    `;
-    replyLink.onclick = (e) => {
-      e.stopPropagation();
-      const target = document.querySelector(`[data-mid="${m.replyToId}"]`);
-      if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
-    };
-    bubble.appendChild(replyLink);
+  // Header/meta
+  const meta = document.createElement("div");
+  meta.className = "meta";
+
+  const name = document.createElement("div");
+  name.className = "name";
+  name.textContent = showHeader ? `${roleIcon(m.role)} ${m.user}` : "";
+
+  const time = document.createElement("div");
+  time.className = "time";
+  time.textContent = formatTime(m.ts);
+
+  // Edited indicator
+  const editedAt = m.editedAt || m.edited_at || 0;
+  if (editedAt) {
+    const ed = document.createElement("span");
+    ed.className = "editedTag";
+    ed.textContent = " (edited)";
+    time.appendChild(ed);
   }
 
-  const meta = document.createElement("div");
-  meta.className = "metaLine";
-  meta.innerHTML = `
-    <span class="uName">${escapeHtml(roleIcon(m.role))} ${escapeHtml(m.user)}</span>
-    <span class="badge" style="color:${roleBadgeColor(m.role)}">${escapeHtml(m.role)}</span>
-    <span class="ts">${new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span>
-  `;
-
+  meta.appendChild(name);
+  meta.appendChild(time);
   bubble.appendChild(meta);
 
+  // Body text + youtube stripping
   const rawText = String(m.text || "");
   let ytIds = [];
   let displayText = rawText;
@@ -2376,15 +2462,10 @@ function addMessage(m){
     displayText = rawText;
   }
 
-  if(displayText){
+  if(displayText.trim()){
     const text = document.createElement("div");
     text.className = "text";
-    try {
-      text.innerHTML = linkify(escapeHtml(displayText));
-    } catch (err) {
-      console.error("[addMessage] render failed:", err);
-      text.textContent = displayText;
-    }
+    text.innerHTML = linkify(escapeHtml(displayText)).replace(/\n/g, "<br/>");
     bubble.appendChild(text);
   }
 
@@ -2392,42 +2473,61 @@ function addMessage(m){
     ytIds.forEach(id => bubble.appendChild(buildYouTubePreview(id)));
   }
 
+  // Legacy attachment fields (room chat)
   if(m.attachmentUrl && m.attachmentType){
     const att=document.createElement("div");
     att.className="attachment";
     if(m.attachmentType==="image"){
       const img=document.createElement("img");
+      img.loading="lazy";
       img.src=m.attachmentUrl;
       img.alt="image";
       img.addEventListener("click", ()=>openMediaLightbox(m.attachmentUrl, "image"));
       att.appendChild(img);
-    }else if(m.attachmentType==="video"){
-      const v=document.createElement("video");
-      v.src=m.attachmentUrl;
-      v.controls=true;
-      v.playsInline=true;
-      v.addEventListener("click", ()=>openMediaLightbox(m.attachmentUrl, "video"));
-      att.appendChild(v);
     }else{
       const a=document.createElement("a");
       a.href=m.attachmentUrl;
-      a.textContent="Download file";
       a.target="_blank";
-      a.rel="noreferrer";
+      a.rel="noopener";
+      a.textContent="Download attachment";
       att.appendChild(a);
     }
     bubble.appendChild(att);
   }
 
-  // reactions display (below bubble, not inside it)
+  // New attachment object support (parity with DMs)
+  if(m.attachment && (m.attachment.url || m.attachmentUrl)){
+    try {
+      const url = m.attachment.url || m.attachmentUrl;
+      const type = m.attachment.type || m.attachmentType || "";
+      const mime = m.attachment.mime || m.attachmentMime || "";
+      const node = renderAnyAttachment({ url, type, mime }, { mode:"main" });
+      if(node) bubble.appendChild(node);
+    } catch (e) {
+      console.warn("Attachment render failed", e);
+    }
+  }
+
+  // Reply preview if present (existing fields)
+  if(m.replyToId && m.replyToUser){
+    const rp = document.createElement("div");
+    rp.className = "replyPreview";
+    rp.innerHTML = `<div class="replyLine"><span class="rpUser">${escapeHtml(m.replyToUser)}</span> ${escapeHtml(String(m.replyToText||"").slice(0,120))}</div>`;
+    rp.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      const target = document.querySelector(`[data-mid="${m.replyToId}"]`);
+      if(target) target.scrollIntoView({ behavior:"smooth", block:"center" });
+    });
+    bubble.insertBefore(rp, meta.nextSibling);
+  }
+
+  // Reactions container
   const reacts = document.createElement("div");
-  reacts.className = "reactions";
-  reacts.id = "reacts-" + m.messageId;
+  reacts.className = "reacts";
+  reacts.id = "reacts-" + mid;
+  bubble.appendChild(reacts);
 
-  main.appendChild(bubble);
-  main.appendChild(reacts);
-
-  // actions rail: ONE reaction button (+ delete for mods)
+  // Actions rail
   const actions = document.createElement("div");
   actions.className = "msgActions";
 
@@ -2438,66 +2538,114 @@ function addMessage(m){
   reactToggle.title = "React";
   reactToggle.onclick = (e)=>{
     e.stopPropagation();
-    if(reactionMenuFor === m.messageId) closeReactionMenu();
-    else openReactionMenu(m.messageId, reactToggle, row);
+    if(reactionMenuFor === mid) closeReactionMenu();
+    else openReactionMenu(mid, reactToggle, item);
   };
   actions.appendChild(reactToggle);
 
+  // Edit (self, within window)
+  const now = Date.now();
+  const canEdit = isSelf && Number(m.ts||0) && (now - Number(m.ts||0) <= 5*60*1000);
+  if(canEdit){
+    const editBtn = document.createElement("button");
+    editBtn.className = "editBtn";
+    editBtn.type = "button";
+    editBtn.textContent = "✏️";
+    editBtn.title = "Edit";
+    editBtn.onclick = (e)=>{
+      e.stopPropagation();
+      startMainEdit(mid, m.text || "", item, bubble);
+    };
+    actions.appendChild(editBtn);
+  }
+
   if(roleRank(me.role) >= roleRank("Moderator")){
     const del = document.createElement("button");
-    del.className = "reactBtn";
-    del.type = "button";
-    del.textContent = "🗑️";
-    del.title = "Delete message";
-    del.onclick = (e)=>{
+    del.type="button";
+    del.className="delBtn";
+    del.textContent="🗑️";
+    del.title="Delete";
+    del.onclick=(e)=>{
       e.stopPropagation();
-      socket?.emit("mod delete message", { messageId: m.messageId });
+      if(confirm("Delete this message?")) socket?.emit("delete message", { messageId: mid });
     };
     actions.appendChild(del);
   }
 
-  const replyBtn = document.createElement("button");
-  replyBtn.className = "reactBtn";
-  replyBtn.type = "button";
-  replyBtn.textContent = "↩️";
-  replyBtn.title = "Reply";
-  replyBtn.onclick = (e)=>{
-    e.stopPropagation();
-    setReplyTarget({ id: m.messageId, user: m.user, text: m.text });
-    row.classList.remove("showActions");
-    focusMainComposer();
+  item.appendChild(actions);
+  item.appendChild(bubble);
+
+  // Mobile tap-to-toggle actions (per message item)
+  const toggleActions = (e) => {
+    if (e?.target?.closest("button, a, input, textarea, select, label")) return;
+    if (e?.stopPropagation) e.stopPropagation();
+
+    document.querySelectorAll(".msgItem.showActions").forEach((el) => {
+      if (el !== item) el.classList.remove("showActions");
+    });
+
+    const on = item.classList.toggle("showActions");
+    if (!on) closeReactionMenu();
   };
-  actions.prepend(replyBtn);
 
+  bubble.addEventListener("click", toggleActions);
+  bubble.addEventListener("touchstart", toggleActions, { passive:false });
 
+  // Initial reactions render if present
+  if(m.reactions) renderReactions(mid, m.reactions);
 
-  // mobile: tap message to toggle actions (reply/react/delete)
-const toggleActions = (e) => {
-  // Ignore taps on interactive elements inside the message
-  if (e?.target?.closest("button, a, input, textarea, select, label")) return;
-  if (e?.stopPropagation) e.stopPropagation();
+  return item;
+}
 
-  // Close any other open action rails
-  document.querySelectorAll(".msg.showActions").forEach((el) => {
-    if (el !== row) el.classList.remove("showActions");
-  });
+function startMainEdit(messageId, currentText, itemEl, bubbleEl){
+  if(!bubbleEl) return;
+  const existing = bubbleEl.querySelector(".editBox");
+  if(existing) return;
 
-  const on = row.classList.toggle("showActions");
-  if (!on) closeReactionMenu();
-};
+  // Remove current text node display (but keep meta/reply/attachments)
+  const textEl = bubbleEl.querySelector(".text");
+  if(textEl) textEl.style.display = "none";
 
-bubble.addEventListener("pointerdown", toggleActions);
+  const box = document.createElement("div");
+  box.className = "editBox";
+  const ta = document.createElement("textarea");
+  ta.value = String(currentText || "");
+  ta.maxLength = 2000;
+  ta.rows = 3;
 
-  row.appendChild(av);
-  row.appendChild(main);
-  row.appendChild(actions);
+  const row = document.createElement("div");
+  row.className = "editRow";
 
-  msgs.appendChild(row);
-  if (shouldStick || isNearBottom(msgs, 160)) {
-    msgs.scrollTop = msgs.scrollHeight;
-  }
+  const cancel = document.createElement("button");
+  cancel.type="button";
+  cancel.textContent="Cancel";
+  cancel.onclick=()=>{
+    box.remove();
+    if(textEl) textEl.style.display = "";
+  };
 
-  msgIndex.push({ id: m.messageId, el: row, textLower: (m.user+" "+m.text).toLowerCase() });
+  const save = document.createElement("button");
+  save.type="button";
+  save.textContent="Save";
+  save.className="primary";
+  save.onclick=()=>{
+    const next = String(ta.value||"").trim();
+    if(!next) return;
+    socket?.emit("edit message", { messageId, text: next });
+    box.remove();
+    if(textEl){
+      textEl.innerHTML = linkify(escapeHtml(next)).replace(/\n/g, "<br/>");
+      textEl.style.display = "";
+    }
+  };
+
+  row.appendChild(cancel);
+  row.appendChild(save);
+  box.appendChild(ta);
+  box.appendChild(row);
+  bubbleEl.appendChild(box);
+
+  setTimeout(()=>ta.focus(), 0);
 }
 
 function safeAddMessage(m){
@@ -2534,6 +2682,9 @@ function renderReactions(messageId, reactionsMap){
     });
     container.appendChild(pill);
   });
+
+  const host = container.closest(".msgItem");
+  if(host) host.classList.toggle("hasReacts", Object.keys(counts).length > 0);
 }
 
 function renderDmReactions(messageId, reactionsMap){
@@ -2561,6 +2712,9 @@ function renderDmReactions(messageId, reactionsMap){
     });
     container.appendChild(pill);
   });
+
+  const host = container.closest(".dmRow");
+  if(host) host.classList.toggle("hasReacts", Object.keys(counts).length > 0);
 }
 
 function closeMemberMenu(){
@@ -3341,6 +3495,20 @@ function renderDmMessages(threadId){
 
     actions.appendChild(reactBtn);
     actions.appendChild(replyBtn);
+    // Edit (self, within 5 minutes)
+    const canEdit = isSelf && Number(m.ts||0) && (Date.now() - Number(m.ts||0) <= 5*60*1000);
+    if (canEdit) {
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "iconBtn smallIcon";
+      editBtn.title = "Edit";
+      editBtn.textContent = "✏️";
+      editBtn.onclick = (e) => {
+        e.stopPropagation();
+        startDmEdit(threadId, (m.messageId || m.id), m.text || "");
+      };
+      actions.appendChild(editBtn);
+    }
     actions.appendChild(delBtn);
 
     // Bubble + meta
@@ -3411,6 +3579,14 @@ function renderDmMessages(threadId){
     const t = document.createElement("span");
     t.className = "dmMetaTime";
     t.textContent = m.ts ? new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) : "";
+
+    const dmEditedAt = m.editedAt || m.edited_at || 0;
+    if (dmEditedAt) {
+      const ed = document.createElement("span");
+      ed.className = "editedTag";
+      ed.textContent = " (edited)";
+      t.appendChild(ed);
+    }
     meta.appendChild(u);
     meta.appendChild(t);
 
@@ -3469,6 +3645,60 @@ function renderDmMessages(threadId){
   });
 }
 
+function startDmEdit(threadId, messageId, currentText){
+  const tid = String(threadId);
+  const mid = String(messageId);
+  // Find the row and bubble text
+  const row = document.querySelector(`.dmRow[data-dm-mid="${mid}"]`);
+  const textEl = row?.querySelector(".dmText");
+  if (!row || !textEl) return;
+  if (row.querySelector(".editBox")) return;
+
+  textEl.style.display = "none";
+
+  const box = document.createElement("div");
+  box.className = "editBox";
+
+  const ta = document.createElement("textarea");
+  ta.value = String(currentText || "");
+  ta.maxLength = 2000;
+  ta.rows = 3;
+
+  const r = document.createElement("div");
+  r.className = "editRow";
+
+  const cancel = document.createElement("button");
+  cancel.type="button";
+  cancel.textContent="Cancel";
+  cancel.onclick=()=>{
+    box.remove();
+    textEl.style.display = "";
+  };
+
+  const save = document.createElement("button");
+  save.type="button";
+  save.textContent="Save";
+  save.className="primary";
+  save.onclick=()=>{
+    const next = String(ta.value||"").trim();
+    if(!next) return;
+    socket?.emit("dm edit message", { threadId: tid, messageId: mid, text: next });
+    box.remove();
+    textEl.innerHTML = linkify(escapeHtml(next)).replace(/\n/g, "<br/>");
+    textEl.style.display = "";
+  };
+
+  r.appendChild(cancel);
+  r.appendChild(save);
+  box.appendChild(ta);
+  box.appendChild(r);
+
+  const bubble = row.querySelector(".dmBubble");
+  bubble?.appendChild(box);
+  setTimeout(()=>ta.focus(), 0);
+}
+
+
 function setDmMeta(thread){
   if (!thread) {
     dmMetaTitle.textContent = "Pick a thread";
@@ -3483,11 +3713,16 @@ function setDmMeta(thread){
 }
 
 function openDmThread(threadId){
+  // persist draft for previous thread before switching
+  saveDmDraft();
+
   // Leave previous thread room before switching
   if (activeDmId && String(activeDmId) !== String(threadId)) {
     try { socket?.emit("dm leave", { threadId: activeDmId }); } catch {}
   }
   activeDmId = threadId;
+  loadDmDraft();
+
   const meta = dmThreads.find(t => String(t.id) === String(threadId));
   if (meta) setDmTab(meta.is_group ? "group" : "direct");
   dmUnreadThreads.delete(threadId);
@@ -4091,6 +4326,8 @@ function setActiveRoom(room){
   nowRoom.textContent = displayRoomName(room);
   roomTitle.textContent = displayRoomName(room);
   msgInput.placeholder = `Message ${displayRoomName(room)}`;
+  loadRoomDraft();
+
 
   // Dice Room: swap upload button to dice roll
   if (pickFileBtn) {
@@ -4108,6 +4345,8 @@ function setActiveRoom(room){
 }
 function joinRoom(room){
   room = sanitizeRoomClient(room) || "main";
+  saveRoomDraft();
+
   setActiveRoom(room);
   clearMsgs();
   socket?.emit("join room", { room, status: normalizeStatusLabel(statusSelect.value, "Online") });
@@ -5503,7 +5742,43 @@ socket.on("disconnect", (reason) => {
     closeReactionMenu();
   });
 
-  socket.on("dm history", (payload) => {
+    socket.on("dm message edited", ({ threadId, messageId, text, editedAt }) => {
+    const tid = String(threadId);
+    const mid = String(messageId);
+    const arr = dmMessages.get(tid) || [];
+    const i = arr.findIndex(mm => String(mm.messageId || mm.id) === mid);
+    if (i !== -1) {
+      arr[i].text = text;
+      arr[i].editedAt = editedAt || Date.now();
+    }
+    if (String(activeDmId) === tid) renderDmMessages(tid);
+  });
+
+  socket.on("message edited", ({ messageId, text, editedAt }) => {
+    const mid = String(messageId);
+    // update index cache if present
+    const idx = msgIndex.findIndex((x) => String(x.id) === mid);
+    if (idx !== -1) {
+      msgIndex[idx].text = text;
+      msgIndex[idx].editedAt = editedAt || Date.now();
+    }
+
+    const item = document.querySelector(`.msgItem[data-mid="${mid}"]`);
+    if (item) {
+      const bubble = item.querySelector(".bubble");
+      const textEl = bubble?.querySelector(".text");
+      if (textEl) textEl.innerHTML = linkify(escapeHtml(String(text||""))).replace(/\n/g, "<br/>");
+      const timeEl = bubble?.querySelector(".time");
+      if (timeEl && !timeEl.querySelector(".editedTag")) {
+        const ed = document.createElement("span");
+        ed.className = "editedTag";
+        ed.textContent = " (edited)";
+        timeEl.appendChild(ed);
+      }
+    }
+  });
+
+socket.on("dm history", (payload) => {
     const { threadId, messages = [], participants = [], title = "" } = payload || {};
     const lastText = messages.length
       ? messages[messages.length - 1].text || ""
