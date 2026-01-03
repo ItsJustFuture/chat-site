@@ -2976,14 +2976,27 @@ body.lockScroll{ overflow:hidden; }
   .dmThreads{ display:none; }
   .dmMessages{ padding-bottom: 12px; }
 
- .channels{
-  position:fixed; top: var(--headerH, 54px); left:0; height: calc(var(--vvhPx) - var(--headerH, 54px));
-  width:min(86vw, 320px);
-  transform:translateX(-105%);
-  transition:transform .18s ease;
-  z-index:160;
-  box-shadow: 12px 0 30px rgba(0,0,0,.55);
-}
+  .channels{
+    position:fixed;
+    top: var(--headerH, 54px);
+    left:0;
+    height: calc(var(--vvhPx) - var(--headerH, 54px));
+    width:min(86vw, 320px);
+    transform:translateX(-105%);
+    transition:transform .18s ease;
+    z-index:160;
+    box-shadow: 12px 0 30px rgba(0,0,0,.55);
+  }
+
+  /* When drawers are closed keep them out of the hit-test chain (iOS was letting the off-canvas pane eat topbar taps). */
+  .channels,
+  .members.drawer{
+    pointer-events:none;
+  }
+  .channels.open,
+  .members.drawer.open{
+    pointer-events:auto;
+  }
 
 /* If members panel is hidden (mobile/tablet), don't reserve space on the right */
 @media (max-width: 980px){
