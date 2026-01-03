@@ -66,6 +66,10 @@ const THEMES = [
       root.style.setProperty("--vv-offset-top", "0px");
     }
 
+    // Always expose the raw keyboard inset for non-chat UI (e.g. the menu/changelog editor)
+    // that needs to scroll inputs above the on-screen keyboard.
+    root.style.setProperty("--rawKbOffset", rawKbOffset + "px");
+
     const kbOffset = (vvReliable ? 0 : rawKbOffset);
     root.style.setProperty("--kbOffset", kbOffset + "px");
     if (document.body) document.body.classList.toggle("kb-open", rawKbOffset > 80);

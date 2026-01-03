@@ -2905,24 +2905,7 @@ body.lockScroll{ overflow:hidden; }
   .members{ display:none; }
   
   .topbar{ position: sticky; top: 0; z-index: 200; padding:0 10px; gap:8px; }
-  /*
-    iOS keyboard gap fix:
-    On iOS, `--vh` is driven by `visualViewport.height` while the composer may also be fixed/sticky.
-    In some cases the flex layout + padding-bottom leaves a large empty "block" when the keyboard opens.
-    Make the messages scroller a fixed viewport region between the topbar and the composer.
-    This removes any dependency on flex sizing during keyboard transitions.
-  */
-  .msgs{
-    position: fixed;
-    top: var(--topbarH, 54px);
-    left: var(--leftDrawerW, 0px);
-    right: var(--rightDrawerW, 0px);
-    bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom));
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    padding: 10px;
-    gap: 8px;
-  }
+  .msgs{ padding:10px; gap:8px; padding-bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom)); }
   .msg{ gap:8px; }
   .msgAvatar{ width:34px; height:34px; }
   .bubble{
@@ -2930,19 +2913,8 @@ body.lockScroll{ overflow:hidden; }
   min-width:0;              /* ✅ allow flex child to shrink */
   overflow:hidden;          /* ✅ prevents bleed */
 }
-  .typing{
-    position: fixed;
-    left: var(--leftDrawerW, 0px);
-    right: var(--rightDrawerW, 0px);
-    bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom));
-    padding: 0 10px;
-    height: 18px;
-    font-size: 11px;
-    z-index: 120;
-    pointer-events: none;
-  }
-  /* inputBar positioning is handled by the later mobile drawer + keyboard rules */
-  .inputBar{ padding:10px; gap:8px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .typing{ padding:0 10px; height:18px; font-size:11px; }
+  .inputBar{ padding:10px; gap:8px; position: sticky; bottom:0; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
 
   .dmPanel{
     inset:0;
@@ -3427,6 +3399,23 @@ main.chat{ position: relative; }
   #dmModal .dmConversation{
     height: 100%;
     min-height: 0;
+  }
+
+  /* iOS keyboard: the chat composer uses visualViewport-driven --vh, so we zero --kbOffset
+     to avoid double-compensation. However, non-chat editors (e.g. Menu > Changelog)
+     still need extra scroll room so focused inputs don't hide behind the keyboard.
+     Use --rawKbOffset for menu content padding only. */
+  body.kb-open .menuContent{
+    padding-bottom: calc(12px + env(safe-area-inset-bottom) + var(--rawKbOffset, 0px));
+    scroll-padding-bottom: calc(12px + env(safe-area-inset-bottom) + var(--rawKbOffset, 0px));
+  }
+  body.kb-open .menuSection{
+    padding-bottom: calc(8px + var(--rawKbOffset, 0px));
+  }
+  /* Help Safari scroll the textarea fully above the keyboard */
+  #changelogTitleInput,
+  #changelogBodyInput{
+    scroll-margin-bottom: calc(24px + var(--rawKbOffset, 0px));
   }
 }
 :root{
