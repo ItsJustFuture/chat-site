@@ -360,10 +360,11 @@
         </div>
       </aside>
     </div>
-  </div>
 
-  <!-- Mobile overlay -->
-  <div id="drawerOverlay" class="overlay"></div>
+    <!-- Mobile overlay (MUST live inside #app because #app is transformed, which creates a stacking context).
+         If this sits outside #app it can render above the drawers and steal taps on iOS. -->
+    <div id="drawerOverlay" class="overlay"></div>
+  </div>
 
   <!-- DM PANEL -->
   <div id="dmPanel" class="dmPanel">
