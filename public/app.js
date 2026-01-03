@@ -1222,6 +1222,23 @@ function formatTimeShort(sec){
   const rem = s % 60;
   return `${m}:${rem.toString().padStart(2,"0")}`;
 }
+
+// Main chat timestamp helper (HH:MM).
+// NOTE: `buildMainMsgItem()` expects `formatTime(ts)` to exist. A prior refactor
+// left only `formatTimeShort()` (used by the YouTube player), which caused
+// main-room messages to throw during render (avatar would appear but message
+// text would not).
+function formatTime(ts){
+  const d = new Date(Number(ts || Date.now()));
+  // Use locale time but keep it compact.
+  try{
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }catch{
+    const hh = String(d.getHours()).padStart(2,"0");
+    const mm = String(d.getMinutes()).padStart(2,"0");
+    return `${hh}:${mm}`;
+  }
+}
 const StickyYouTubePlayer = (()=>{
   let container, playerHolder, titleEl, channelEl, thumbEl, playPauseBtn, muteBtn, volumeSlider, seekSlider, currentTimeEl, durationEl, qualitySelect, minimizeBtn, closeBtn;
   let player = null;
