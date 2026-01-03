@@ -24,12 +24,18 @@ const THEMES = [
   const root = document.documentElement;
   const body = document.body;
   const selectors = {
+    appRoot: "#app",
+    chatShell: "main.chat",
     chatScroller: ".msgs",
     composer: ".inputBar",
+    menuShell: ".menuPanel",
     menuScroller: ".channels .menuContent",
     header: ".topbar",
     player: "#ytSticky",
-    menuHeader: ".menuNav"
+    menuHeader: ".menuNav",
+    changelog: "#changelogEditor",
+    changelogInput: "#changelogBodyInput, #changelogTitleInput",
+    dmScroller: ".dmPanel .dmMessages, #dmModal .dmMessages, .dmMsgs, .messages"
   };
 
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -37,13 +43,49 @@ const THEMES = [
 
   let raf = 0;
   let overlay = null;
+  let outlineSheet = null;
 
   const debugEnabled = () => localStorage.getItem("debugKB") === "1";
 
+  function toggleDebugClass(on){
+    if(!body) return;
+    body.classList.toggle("debug-kb", !!on);
+  }
+
   function ensureOverlay(){
-    if(!debugEnabled()){
+    const on = debugEnabled();
+    toggleDebugClass(on);
+    if(!on){
       if(overlay){ overlay.remove(); overlay = null; }
+      if(outlineSheet){ outlineSheet.remove(); outlineSheet = null; }
       return;
+    }
+    if(!outlineSheet){
+      outlineSheet = document.createElement("style");
+      outlineSheet.id = "kbDebugOutlines";
+      const outlineTargets = [
+        selectors.appRoot,
+        selectors.chatShell,
+        selectors.chatScroller,
+        selectors.composer,
+        selectors.header,
+        selectors.menuShell,
+        selectors.menuScroller,
+        selectors.player,
+        selectors.changelog
+      ].map(sel => `body.debug-kb ${sel}`).join(",\n");
+      const changelogInputs = selectors.changelogInput.split(",").map(s => `body.debug-kb ${s.trim()}`).join(",\n");
+      outlineSheet.textContent = `
+        ${outlineTargets} {
+          outline: 2px solid rgba(0, 200, 255, 0.45);
+          outline-offset: -2px;
+        }
+        ${changelogInputs} {
+          outline: 2px dashed rgba(255, 150, 0, 0.55);
+          outline-offset: 2px;
+        }
+      `;
+      document.head.appendChild(outlineSheet);
     }
     if(overlay) return;
     overlay = document.createElement("div");
@@ -58,7 +100,7 @@ const THEMES = [
       fontSize: "11px",
       padding: "10px",
       borderRadius: "10px",
-      maxWidth: "340px",
+      maxWidth: "360px",
       lineHeight: "1.4",
       pointerEvents: "none",
       fontFamily: "Menlo, Consolas, monospace",
@@ -92,15 +134,28 @@ const THEMES = [
     if(!overlay) return;
     const cs = getComputedStyle(root);
     const val = (name) => cs.getPropertyValue(name).trim();
+    const describeScroll = (obj) => {
+      if(!obj || !obj.el) return "n/a";
+      return `${obj.name} [h:${obj.el.clientHeight} sh:${obj.el.scrollHeight} top:${Math.round(obj.el.scrollTop)}]`;
+    };
     const lines = [
-      `innerHeight: ${window.innerHeight}`,
-      `vv.height: ${metrics.vvHeight} | vv.offsetTop: ${metrics.vvTop}`,
+      `innerHeight: ${window.innerHeight} | doc.clientHeight: ${document.documentElement.clientHeight}`,
+      `vv.height: ${metrics.vvHeight} | vv.offsetTop: ${metrics.vvTop} | vv.pageTop: ${metrics.vvPageTop}`,
       `kbInset: ${metrics.kbInset}`,
       `vars --vvh:${val("--vvh")} --vvhPx:${val("--vvhPx")} --vvTop:${val("--vvTop")} --kbInset:${val("--kbInset")}`,
       `header:${val("--headerH")} composer:${val("--composerH")} player:${val("--playerH")} menuHeader:${val("--menuHeaderH")}`,
-      `chatRect: ${metrics.chatRect ? JSON.stringify(metrics.chatRect) : "n/a"}`,
-      `composerRect: ${metrics.composerRect ? JSON.stringify(metrics.composerRect) : "n/a"}`,
-      `menuRect: ${metrics.menuRect ? JSON.stringify(metrics.menuRect) : "n/a"}`
+      `chat scroll: ${describeScroll(metrics.chatScroll)}`,
+      `dm scroll: ${describeScroll(metrics.dmScroll)}`,
+      `menu scroll: ${describeScroll(metrics.menuScroll)}`,
+      `Rect app: ${metrics.appRect ? JSON.stringify(metrics.appRect) : "n/a"}`,
+      `Rect topbar: ${metrics.headerRect ? JSON.stringify(metrics.headerRect) : "n/a"}`,
+      `Rect chat shell: ${metrics.chatShellRect ? JSON.stringify(metrics.chatShellRect) : "n/a"}`,
+      `Rect msgs: ${metrics.chatRect ? JSON.stringify(metrics.chatRect) : "n/a"}`,
+      `Rect composer: ${metrics.composerRect ? JSON.stringify(metrics.composerRect) : "n/a"}`,
+      `Rect menu shell: ${metrics.menuShellRect ? JSON.stringify(metrics.menuShellRect) : "n/a"}`,
+      `Rect menuContent: ${metrics.menuRect ? JSON.stringify(metrics.menuRect) : "n/a"}`,
+      `Rect changelog form: ${metrics.changelogRect ? JSON.stringify(metrics.changelogRect) : "n/a"}`,
+      `Active input: ${metrics.activeInput || "none"}`
     ];
     overlay.innerHTML = lines.join("<br>");
   }
@@ -110,6 +165,7 @@ const THEMES = [
     const vvReliable = vv && typeof vv.height === "number" && vv.height > 120;
     const vvHeight = vvReliable ? vv.height : window.innerHeight;
     const vvTop = vvReliable ? Number(vv.offsetTop || 0) : 0;
+    const vvPageTop = vvReliable && typeof vv.pageTop === "number" ? vv.pageTop : "";
     const kbInset = Math.max(0, Math.round(window.innerHeight - vvHeight - vvTop));
 
     const composer = document.querySelector(selectors.composer);
@@ -122,14 +178,24 @@ const THEMES = [
     const metrics = {
       vvHeight: Math.round(vvHeight),
       vvTop,
+      vvPageTop,
       kbInset,
       headerH,
       composerH,
       playerH: (isVisible(player) && !player?.classList.contains("is-hidden")) ? measureHeight(player) : 0,
       menuHeaderH,
+      appRect: measureRect(selectors.appRoot),
+      chatShellRect: measureRect(selectors.chatShell),
+      headerRect: measureRect(selectors.header),
       chatRect: measureRect(selectors.chatScroller),
       composerRect: measureRect(selectors.composer),
-      menuRect: measureRect(selectors.menuScroller)
+      menuShellRect: measureRect(selectors.menuShell),
+      menuRect: measureRect(selectors.menuScroller),
+      changelogRect: measureRect(selectors.changelog),
+      chatScroll: describeScroller("main.chat .msgs"),
+      dmScroll: describeScroller(selectors.dmScroller),
+      menuScroll: describeScroller(selectors.menuScroller),
+      activeInput: document.activeElement && document.activeElement.tagName ? document.activeElement.tagName.toLowerCase() : ""
     };
 
     root.style.setProperty("--vvh", String(metrics.vvHeight));
@@ -143,7 +209,37 @@ const THEMES = [
 
     if(body) body.classList.toggle("kb-open", metrics.kbInset > 40);
     renderOverlay(metrics);
+    runInvariants(metrics);
     return metrics;
+  }
+
+  function describeScroller(sel){
+    const el = typeof sel === "string" ? document.querySelector(sel) : sel;
+    if(!el) return null;
+    const style = getComputedStyle(el);
+    const isScroll = /(auto|scroll)/.test(style.overflowY || "") || el.classList.contains("msgs");
+    return { el, name: sel, isScroll };
+  }
+
+  function runInvariants(metrics){
+    if(!debugEnabled()) return;
+    const appEl = document.querySelector(selectors.appRoot);
+    const msgs = document.querySelector(selectors.chatScroller);
+    const composer = document.querySelector(selectors.composer);
+    if(!appEl || !msgs || !composer) return;
+    const appRect = appEl.getBoundingClientRect();
+    const msgsRect = msgs.getBoundingClientRect();
+    const composerRect = composer.getBoundingClientRect();
+    const vv = window.visualViewport;
+    const expectedBottom = (vv?.height || window.innerHeight) + (vv?.offsetTop || 0);
+    const tolerance = 3;
+    const failures = [];
+    if(Math.abs(appRect.bottom - expectedBottom) > tolerance){ failures.push("app shell not bound to visualViewport"); }
+    if(composerRect.bottom - appRect.bottom > tolerance){ failures.push("composer exceeds shell"); }
+    if(Math.abs(msgsRect.bottom - composerRect.top) > tolerance){ failures.push("msgs not meeting composer"); }
+    if(failures.length){
+      console.warn("[layout invariant FAIL]", failures.join("; "), { appRect, msgsRect, composerRect, metrics });
+    }
   }
 
   function schedule(label){
@@ -163,38 +259,54 @@ const THEMES = [
   document.addEventListener("visibilitychange", () => { if(!document.hidden) schedule("visible"); });
   document.addEventListener("focusin", () => schedule("focusin"));
   document.addEventListener("focusout", () => schedule("focusout"));
+  const scrollWatch = () => schedule("scroll container");
+  [selectors.chatScroller, selectors.menuScroller, selectors.dmScroller].forEach(sel => {
+    document.querySelector(sel)?.addEventListener("scroll", scrollWatch, { passive:true });
+  });
 
   schedule("init");
 })();
 
 /* ---- Focus visibility helper (keep inputs inside their scroll shells) ---- */
 (function initFocusVisibility(){
+  const scrollSelectors = [
+    ".msgs",
+    ".channels .menuContent",
+    ".menuContent",
+    ".modalBody",
+    ".dmMessages",
+    ".dmMsgs",
+    ".messages"
+  ];
+
+  function findScrollContainer(el){
+    let node = el;
+    while(node && node !== document.body){
+      if(node.matches && scrollSelectors.some(sel => node.matches(sel))) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
   function scrollNearest(target){
     if(!target || !(target instanceof HTMLElement)) return;
     const isFormEl = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target.isContentEditable;
     if(!isFormEl) return;
 
-    const menuContainer = target.closest(".channels .menuContent");
-    if(menuContainer){
-      target.scrollIntoView({ block: "nearest" });
+    let container = findScrollContainer(target);
+    if(!container){
+      const chatShell = target.closest("main.chat, .chat");
+      if(chatShell) container = chatShell.querySelector(".msgs");
+    }
+    if(!container) return;
+
+    if(container.classList.contains("msgs")){
+      container.scrollTop = container.scrollHeight;
       return;
     }
 
-    const chatShell = target.closest("main.chat, .chat");
-    if(chatShell){
-      const scroller = chatShell.querySelector(".msgs");
-      if(scroller){
-        scroller.scrollTop = scroller.scrollHeight;
-        scroller.scrollIntoView({ block: "nearest" });
-      }
-      return;
-    }
-
-    const dmShell = target.closest(".dmPanel, #dmModal");
-    if(dmShell){
-      const dmScroller = dmShell.querySelector(".dmMessages, .dmMsgs, .messages");
-      dmScroller?.scrollIntoView({ block: "nearest" });
-    }
+    container.scrollIntoView({ block: "nearest", inline: "nearest" });
+    container.scrollTop = Math.max(0, container.scrollTop - 12);
   }
 
   document.addEventListener("focusin", (e) => {
@@ -4995,8 +5107,8 @@ async function startApp(){
 
   await loadThemePreference();
 
-  authWrap.style.display="none";
-  app.style.display="block";
+    authWrap.style.display="none";
+    app.style.display="flex";
 
   await loadMyProfile();
   await loadUserPrefs();
@@ -5324,7 +5436,7 @@ socket.on("disconnect", (reason) => {
     me = await res.json();
     if(me){
       authWrap.style.display="none";
-      app.style.display="block";
+      app.style.display="flex";
       await startApp();
     }
   }catch(err){

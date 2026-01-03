@@ -1706,8 +1706,47 @@ textarea{ min-height:90px; resize:vertical; }
 
 
 /* APP LAYOUT */
-#app{ height: var(--vvhPx); display:none; }
-.layout{ height:100%; display:flex; min-height:0; }
+/* iOS keyboard layout invariants: single scroll container, min-height:0, app shell bound to visualViewport + offsetTop */
+#app{
+  position:fixed;
+  top:0;
+  left:0;
+  width:100%;
+  height: var(--vvhPx);
+  transform: translateY(var(--vvTop));
+  overflow:hidden;
+  display:none;
+  flex-direction: column;
+}
+.layout{ height:100%; display:flex; min-height:0; overflow:hidden; }
+
+main.chat{
+  display:flex;
+  flex-direction:column;
+  height:100%;
+  min-height:0;
+}
+
+.chatMain,
+.chat{
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+  height:100%;
+}
+
+.msgs{
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.inputBar{
+  flex:0 0 auto;
+  position: static;
+  width:100%;
+}
 
 /* Channels */
 .channels{
