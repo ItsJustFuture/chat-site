@@ -3881,7 +3881,7 @@ if (!room) {
       socket.join(`dm:${tid}`);
 
       db.all(
-        `SELECT id, thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_mime, attachment_type, attachment_size FROM dm_messages WHERE thread_id=? ORDER BY ts DESC LIMIT 50`,
+        `SELECT id, thread_id, user_id, username, text, ts, edited_at, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_mime, attachment_type, attachment_size FROM dm_messages WHERE thread_id=? ORDER BY ts DESC LIMIT 50`,
         [tid],
         (_e, rows) => {
           const msgs = (rows || []).reverse().map((r) => ({
@@ -3892,6 +3892,7 @@ if (!room) {
             user: r.username,
             text: r.text,
             ts: r.ts,
+            editedAt: r.edited_at || 0,
             replyToId: r.reply_to_id || null,
             replyToUser: r.reply_to_user || "",
             replyToText: r.reply_to_text || "",
@@ -3907,6 +3908,34 @@ if (!room) {
             participants: thread.participants || [],
             messages: msgs,
           });
+
+          // Send initial DM reactions for these messages (so the client can render immediately)
+          try {
+            const mids = (msgs || []).map(m => Number(m.messageId || m.id)).filter(n => Number.isInteger(n));
+            if (mids.length) {
+              const placeholders = mids.map(() => "?").join(",");
+              db.all(
+                `SELECT message_id, username, emoji
+                   FROM dm_reactions
+                  WHERE thread_id = ?
+                    AND message_id IN (${placeholders})`,
+                [tid, ...mids],
+                (_re, rrows) => {
+                  const byMid = new Map();
+                  for (const rr of (rrows || [])) {
+                    const k = String(rr.message_id);
+                    if (!byMid.has(k)) byMid.set(k, {});
+                    byMid.get(k)[rr.username] = rr.emoji;
+                  }
+                  for (const mid of mids) {
+                    const reactions = byMid.get(String(mid)) || {};
+                    socket.emit("dm reaction update", { threadId: tid, messageId: mid, reactions });
+                  }
+                }
+              );
+            }
+          } catch {}
+
         }
       );
     });
@@ -4072,6 +4101,38 @@ replyToId: replyPk,
       );
     });
   });
+
+  // ---- DM reactions (1 reaction per user per DM message)
+  socket.on("dm reaction", ({ threadId, messageId, emoji }) => {
+    const tid = Number(threadId);
+    const mid = Number(messageId);
+    const em = String(emoji || "").slice(0, 8);
+    if (!socket.user) return;
+    if (!Number.isInteger(tid) || !Number.isInteger(mid) || !em) return;
+
+    loadThreadForUser(tid, socket.user.id, (err, thread) => {
+      if (err || !thread) return;
+
+      db.run(
+        `INSERT INTO dm_reactions (thread_id, message_id, username, emoji)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(thread_id, message_id, username) DO UPDATE SET emoji=excluded.emoji`,
+        [tid, mid, socket.user.username, em],
+        () => {
+          db.all(
+            `SELECT username, emoji FROM dm_reactions WHERE thread_id=? AND message_id=?`,
+            [tid, mid],
+            (_e, rows) => {
+              const reactions = {};
+              for (const r of rows || []) reactions[r.username] = r.emoji;
+              io.to(`dm:${tid}`).emit("dm reaction update", { threadId: tid, messageId: mid, reactions });
+            }
+          );
+        }
+      );
+    });
+  });
+
 
 socket.on("status change", ({ status }) => {
     status = normalizeStatus(status, "Online");

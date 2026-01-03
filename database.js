@@ -284,6 +284,17 @@ async function runSqliteMigrations() {
     ["attachment_type", "attachment_type TEXT"],
     ["attachment_size", "attachment_size INTEGER"],
 ]);
+  // DM reactions (1 reaction per user per DM message)
+  await run(`
+    CREATE TABLE IF NOT EXISTS dm_reactions (
+      thread_id INTEGER NOT NULL,
+      message_id INTEGER NOT NULL,
+      username TEXT NOT NULL,
+      emoji TEXT NOT NULL,
+      PRIMARY KEY (thread_id, message_id, username)
+    )
+  `);
+
 
   await ensureColumns("dm_threads", [
     ["title", "title TEXT"],
