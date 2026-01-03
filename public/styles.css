@@ -2945,6 +2945,12 @@ body.lockScroll{ overflow:hidden; }
   .members{ display:none; }
 
   .topbar{ position: sticky; top: 0; z-index: 200; padding:0 10px; gap:8px; }
+  /* --- iOS topbar tap fix: prevent wrapping causing buttons to overflow into content layer --- */
+  .topbar .row{ flex-wrap: nowrap; }
+  .topbar .row{ min-width: 0; }
+  .topbar .searchWrap{ min-width: 0; }
+  .topbar .searchWrap input{ width: 160px; max-width: 34vw; }
+  .topbar .iconBtn{ flex: 0 0 auto; }
   .msgs{ padding:10px; gap:8px; padding-bottom: 12px; }
   .msg{ gap:8px; }
   .msgAvatar{ width:34px; height:34px; }
