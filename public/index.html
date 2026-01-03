@@ -229,6 +229,7 @@
               <input id="searchInput" placeholder="Search messages...">
             </div>
             <div class="goldPill mobOnly" id="goldPill" aria-live="polite"></div>
+            <div id="levelToast" class="levelToastInline" aria-live="polite">🎉 <span id="levelToastText">Level up!</span></div>
             <button class="iconBtn withBadge" id="dmToggleBtn" type="button" title="Direct messages">💬<span class="notifDot" id="dmBadgeDot" title="New DMs"></span></button>
             <button class="iconBtn withBadge" id="groupDmToggleBtn" type="button" title="Group DMs">👥<span class="notifDot" id="groupDmBadgeDot" title="New group DMs"></span></button>
             <button class="iconBtn" id="uiScaleBtn" type="button" title="UI size">⚙️</button>
@@ -912,8 +913,6 @@
       </div>
     </div>
   </div>
-  <div id="levelToast">🎉 <span id="levelToastText">Level up!</span></div>
-
   <div class="mediaLightbox" id="mediaLightbox">
     <button class="iconBtn largeClose" id="mediaLightboxClose" type="button" aria-label="Close media">✕</button>
     <img id="mediaLightboxImg" alt="Expanded media">

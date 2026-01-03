@@ -3174,36 +3174,42 @@ body.lockScroll{ overflow:hidden; }
 
 /* ✅ Fix: prevent the hidden level toast from blocking taps on mobile */
 #levelToast{
-  position:fixed;
-  top:14px;
-  right:14px;
-  background:var(--panel2);
-  color:var(--text);
-  border:2px solid var(--accent);
-  border-radius:12px;
-  padding:10px 14px;
-  font-weight:900;
-  box-shadow: var(--shadow);
-  opacity:0;
-  transform: translateY(-10px);
-  transition: opacity .25s ease, transform .25s ease;
-  z-index: 120;
-  display:flex;
-  align-items:center;
-  gap:8px;
+  /* Inline toast near topbar controls (prevents covering tap targets) */
+  position: relative;
+  inset: auto;
+  top: auto;
+  right: auto;
 
-  /* ⬇️ ADD THESE */
+  background: var(--panel2);
+  color: var(--text);
+  border: 2px solid var(--accent);
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-weight: 900;
+  box-shadow: var(--shadow);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity .25s ease, transform .25s ease;
+
+  /* Hidden state MUST NOT block taps */
   pointer-events: none;
   visibility: hidden;
 }
 
 #levelToast.show{
-  opacity:1;
+  opacity: 1;
   transform: translateY(0);
-
-  /* ⬇️ ADD THESE */
   pointer-events: auto;
   visibility: visible;
+}
+
+/* keep it compact on narrow screens */
+@media (max-width: 420px){
+  #levelToast{ padding: 6px 10px; font-size: 13px; }
 }
 
 @media (max-width: 760px){

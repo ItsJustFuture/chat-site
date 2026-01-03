@@ -640,6 +640,56 @@ let dmPickerSelection = new Set();
 let dmPickerThreadId = null;
 let dmPickerExisting = [];
 let levelToastTimer = null;
+
+/* ---- Tap-blocker regression guard (mobile & touch) ----
+   Prevent hidden overlays (opacity:0 / visibility:hidden) from stealing taps on top-right buttons.
+   This is defensive: if something regresses, we auto-disable pointer events on the hidden blocker. */
+function initTapBlockerGuard(){
+  const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
+  if(!isTouch) return;
+
+  const ids = ["dmToggleBtn","groupDmToggleBtn","uiScaleBtn","openMembersBtn"];
+  const testOnce = () => {
+    for(const id of ids){
+      const btn = document.getElementById(id);
+      if(!btn) continue;
+
+      const r = btn.getBoundingClientRect();
+      if(r.width <= 0 || r.height <= 0) continue;
+
+      const x = Math.floor(r.left + r.width/2);
+      const y = Math.floor(r.top  + r.height/2);
+      let el = document.elementFromPoint(x, y);
+      if(!el) continue;
+
+      // if click would hit the button (or its child), we're good
+      if(el === btn || btn.contains(el)) continue;
+
+      // walk up to find a likely overlay that is hidden but still intercepting taps
+      let cur = el;
+      for(let hop = 0; hop < 6 && cur; hop++){
+        const cs = window.getComputedStyle(cur);
+        const hidden = (cs.visibility === "hidden") || (parseFloat(cs.opacity || "1") === 0);
+        if(hidden && cs.pointerEvents !== "none"){
+          cur.style.pointerEvents = "none";
+          cur.dataset.tapGuard = "1";
+          break;
+        }
+        cur = cur.parentElement;
+      }
+    }
+  };
+
+  const run = () => requestAnimationFrame(() => requestAnimationFrame(testOnce));
+  if(document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", run, { once:true });
+  } else {
+    run();
+  }
+  window.addEventListener("resize", run, { passive:true });
+}
+
+initTapBlockerGuard();
 let rightPanelMode = "rooms";
 let activeMenuTab = "changelog";
 let changelogEntries = [];
