@@ -1509,7 +1509,6 @@ const StickyYouTubePlayer = (()=>{
             try { player.mute?.(); player.playVideo?.(); } catch{}
           }
         }, 0);
-}
       }
       updatePlayPauseUi();
       refreshQualityOptions();
