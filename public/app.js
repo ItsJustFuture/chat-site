@@ -66,11 +66,13 @@ const THEMES = [
       root.style.setProperty("--vv-offset-top", "0px");
     }
 
+    // Always expose the raw keyboard inset for UI regions that need extra scroll room
+    // (e.g. the Menu/Changelog drawer). Main chat layout should rely on --vh and avoid
+    // double-compensation by using --kbOffset below.
+    root.style.setProperty("--rawKbOffset", rawKbOffset + "px");
+
     const kbOffset = (vvReliable ? 0 : rawKbOffset);
     root.style.setProperty("--kbOffset", kbOffset + "px");
-    // Expose the raw inset for UI surfaces that need extra scroll room (e.g., menu/changelog editor)
-    // without re-introducing the double-compensation issue in the main chat layout.
-    root.style.setProperty("--rawKbOffset", rawKbOffset + "px");
     if (document.body) document.body.classList.toggle("kb-open", rawKbOffset > 80);
     measureComposer();
   }
@@ -94,6 +96,27 @@ const THEMES = [
 
   scheduleSetVh();
 })()
+
+/* ---- iOS: keep menu/changelog inputs visible when keyboard opens ---- */
+(function wireMenuKeyboardScrollAssist(){
+  // On iOS, focusing an input inside a nested scroller often won't auto-scroll the field into view.
+  // We nudge it into view within the Menu panel without affecting main chat layout.
+  document.addEventListener("focusin", (e)=>{
+    const t = e.target;
+    if(!t || !(t instanceof HTMLElement)) return;
+    if(!(t.matches("input, textarea, select"))) return;
+
+    const menuPanel = t.closest?.("#menuPanel");
+    if(!menuPanel) return;
+
+    // Use a short timeout so visualViewport has time to update.
+    setTimeout(()=>{
+      try{
+        t.scrollIntoView({ block: "center", inline: "nearest" });
+      }catch{}
+    }, 80);
+  }, true);
+})();
 
 /* ---- Quiet sound cues (optional) ---- */
 const Sound = (() => {
