@@ -2380,8 +2380,10 @@ function closeReactionMenu(){
 // Use pointerdown so it works reliably on iOS Safari.
 document.addEventListener("pointerdown", (e) => {
   if (e?.target?.closest(".msgItem")) return;
+  if (e?.target?.closest(".dmRow")) return;
   if (e?.target?.closest(".reactionMenu")) return;
   document.querySelectorAll(".msgItem.showActions").forEach((el) => el.classList.remove("showActions"));
+  document.querySelectorAll(".dmRow.showActions").forEach((el) => el.classList.remove("showActions"));
   closeReactionMenu();
 }, { capture: true });
 
@@ -3759,15 +3761,21 @@ function renderDmMessages(threadId){
     // Only the bubble stack goes into the row (actions are inside bubbleWrap).
     row.appendChild(bubbleWrap);
 
-    // Mobile/desktop: tap/click the row to toggle actions
+    // Mobile/desktop: tap/click the bubble to toggle actions (parity with main chat)
     const toggleActions = (e) => {
       if (e?.target?.closest("button, a, input, textarea, select, label")) return;
+      if (e?.stopPropagation) e.stopPropagation();
+
       document.querySelectorAll(".dmRow.showActions").forEach((el) => {
         if (el !== row) el.classList.remove("showActions");
       });
-      row.classList.toggle("showActions");
+
+      const on = row.classList.toggle("showActions");
+      if (!on) closeReactionMenu();
     };
-    row.addEventListener("pointerdown", toggleActions);
+
+    bubble.addEventListener("click", toggleActions);
+    bubble.addEventListener("touchstart", toggleActions, { passive:false });
 
     dmMessagesEl.appendChild(row);
   }

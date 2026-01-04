@@ -4772,14 +4772,19 @@ body.kb-open #typing{ display:none !important; }
 
 /* === DM polish: message grouping, tails, read receipts === */
 
-/* tighter spacing for grouped messages */
+/* tighter spacing for grouped messages (match main chat's compact feel)
+   - remove container gap (which stacks with per-row margins)
+   - use small per-row top margins so groups read cleanly without huge whitespace
+*/
+.dmMessages{ gap:0 !important; }
+
 .dmRow.g-mid,
 .dmRow.g-end{
-  margin-top: 2px;
+  margin-top: 1px;
 }
 .dmRow.g-start,
 .dmRow.g-solo{
-  margin-top: 10px;
+  margin-top: 6px;
 }
 
 /* Meta row spacing: align under bubble */
