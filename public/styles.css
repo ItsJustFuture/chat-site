@@ -2784,7 +2784,8 @@ body.lockScroll{ overflow:hidden; }
   transition: opacity .18s ease, transform .18s ease;
  }
 .dmHeader{
-  padding:12px 14px;
+  /* Keep the DM panel header compact (closer to desktop DM header style). */
+  padding:6px 10px;
   display:flex;
   align-items:center;
   gap:12px;
@@ -2792,6 +2793,8 @@ body.lockScroll{ overflow:hidden; }
   border-bottom:1px solid var(--line);
 }
 .dmHeader .title{ font-weight:900; letter-spacing:.01em; }
+.dmHeader .small{ font-size:11px; }
+.dmHeader .iconBtn{ width:32px; height:32px; }
 .dmNotice{
   /* Compact bar: holds the DM tabs; avoids wasting vertical space on mobile */
   padding:8px 12px;
@@ -2976,10 +2979,15 @@ body.lockScroll{ overflow:hidden; }
   border-radius:50%;
 }
 
-.dmMeta{ padding:6px 8px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.dmMeta{ padding:4px 8px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .dmMeta .title{ font-weight:900; }
 .dmMetaText{ display:flex; flex-direction:column; gap:4px; min-width:0; }
-.dmMetaActions{ position:relative; }
+.dmMetaTop{ display:flex; align-items:center; gap:8px; min-width:0; }
+.dmMetaAvatar{ display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+.dmMetaAvatar .avatar{ border-radius:50%; overflow:hidden; }
+.dmMetaActions{ position:relative; display:flex; align-items:center; gap:8px; }
+.dmMetaActions .iconBtn{ width:32px; height:32px; }
+.dmMetaActions .iconBtn{ width:32px; height:32px; }
 .dmSettingsMenu{ display:none; position:absolute; right:0; top:110%; background:var(--panel); border:1px solid var(--line); border-radius:14px; min-width:220px; padding:10px; box-shadow: var(--shadow); z-index:4; gap:10px; flex-direction:column; }
 .dmSettingsMenu.open{ display:flex; }
 .dmSettingsRow{ display:flex; flex-direction:column; gap:6px; padding:6px 0; border-bottom:1px solid var(--line); }

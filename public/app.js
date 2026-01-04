@@ -955,6 +955,7 @@ function setDmNotice(text){
 }
 const dmMetaTitle = document.getElementById("dmMetaTitle");
 const dmMetaPeople = document.getElementById("dmMetaPeople");
+const dmMetaAvatar = document.getElementById("dmMetaAvatar");
 const dmMessagesEl = document.getElementById("dmMessages");
 const dmText = document.getElementById("dmText");
 const dmFileInput = document.getElementById("dmFileInput");
@@ -3848,6 +3849,7 @@ function setDmMeta(thread){
   if (!thread) {
     dmMetaTitle.textContent = "Pick a thread";
     dmMetaPeople.textContent = "";
+    if (dmMetaAvatar) dmMetaAvatar.innerHTML = "";
     return;
   }
   dmMetaTitle.textContent = threadLabel(thread);
@@ -3855,6 +3857,34 @@ function setDmMeta(thread){
   dmMetaPeople.textContent = thread.is_group
     ? `${names.length} member${names.length === 1 ? "" : "s"}`
     : names.join(", ");
+
+  // Show the active thread participant avatar in the DM header.
+  // For direct DMs: show the other person's avatar.
+  // For group DMs: show a fallback avatar derived from the thread label.
+  if (dmMetaAvatar) {
+    dmMetaAvatar.innerHTML = "";
+    try{
+      if (!thread.is_group) {
+        const parts = (thread.participants || []);
+        const other = parts.find(p => String(p||"").toLowerCase() !== String(me?.username||"").toLowerCase());
+        const meta = getUserMeta(other);
+        dmMetaAvatar.appendChild(makeAvatarEl({
+          username: meta.username || other,
+          role: meta.role || "member",
+          avatarUrl: meta.avatarUrl || null,
+          size: 32
+        }));
+      } else {
+        // group: use a stable fallback avatar based on thread label
+        dmMetaAvatar.appendChild(makeAvatarEl({
+          username: threadLabel(thread),
+          role: "member",
+          avatarUrl: null,
+          size: 32
+        }));
+      }
+    }catch{}
+  }
 }
 
 function openDmThread(threadId){
