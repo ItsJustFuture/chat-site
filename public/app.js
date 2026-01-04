@@ -2711,9 +2711,15 @@ actions.appendChild(replyBtn);
     actions.appendChild(del);
   }
 
+  // Wrap bubble + reactions so reactions remain OUTSIDE the bubble, and
+  // the actions rail can overlay without reserving layout space.
+  const main = document.createElement("div");
+  main.className = "msgMain";
+  main.appendChild(bubble);
+  main.appendChild(reacts);
+
   item.appendChild(actions);
-  item.appendChild(bubble);
-  item.appendChild(reacts);
+  item.appendChild(main);
 
   // Mobile tap-to-toggle actions (per message item)
   const toggleActions = (e) => {

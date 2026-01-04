@@ -2019,6 +2019,86 @@ body.dice-room .sys .diceFace{
 .msgGroupBody{ display:flex; flex-direction:column; gap:1px; min-width:0; }
 .msgItem{ position:relative; display:flex; flex-direction:row; align-items:flex-start; gap:8px; min-width:0; }
 .msgItem.self{ flex-direction:row-reverse; }
+
+/* ---- Main chat actions rail: do NOT reserve space unless opened ----
+   We keep the actions rail absolutely positioned (out of flow), and when a
+   message is toggled open we translate the bubble stack to make room with a
+   small animation.
+*/
+:root{
+  --msgActionsW: 56px;      /* visual width of the vertical action rail */
+  --msgActionsGap: 10px;    /* breathing room between rail and bubble */
+  --msgActionsShift: calc(var(--msgActionsW) + var(--msgActionsGap));
+}
+
+/* Message layout container: bubble + reacts (outside bubble) */
+.msgMain{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  min-width:0;
+  transition: transform .18s ease;
+  will-change: transform;
+}
+
+/* Actions rail overlays; hidden by default but doesn't consume width */
+.msgItem .msgActions{
+  position:absolute;
+  top:0;
+  left:0;
+  width:var(--msgActionsW);
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  padding-top:2px;
+  opacity:0;
+  pointer-events:none;
+  transform: translateX(-4px);
+  transition: opacity .15s ease, transform .18s ease;
+}
+
+/* Self messages: rail on the right side */
+.msgItem.self .msgActions{
+  left:auto;
+  right:0;
+  transform: translateX(4px);
+}
+
+/* Show actions on hover (desktop) */
+@media (hover:hover){
+  .msgItem:hover .msgActions{
+    opacity:1;
+    pointer-events:auto;
+    transform: translateX(0);
+  }
+  .msgItem:hover .msgMain:not(.noShift){
+    transform: translateX(var(--msgActionsShift));
+  }
+  .msgItem.self:hover .msgMain:not(.noShift){
+    transform: translateX(calc(-1 * var(--msgActionsShift)));
+  }
+}
+
+/* Show actions when toggled open (mobile + reaction menu) */
+.msgItem.showActions .msgActions{
+  opacity:1;
+  pointer-events:auto;
+  transform: translateX(0);
+}
+.msgItem.showActions .msgMain{
+  transform: translateX(var(--msgActionsShift));
+}
+.msgItem.self.showActions .msgMain{
+  transform: translateX(calc(-1 * var(--msgActionsShift)));
+}
+
+/* On very small screens, reduce the shift so we don't push bubbles off-screen */
+@media (max-width: 520px){
+  :root{
+    --msgActionsW: 50px;
+    --msgActionsGap: 8px;
+  }
+}
 /* Make grouped bubbles visually merge into one (main chat) */
 .msgGroupBody{ gap:1px; }
 .msgItem.gCont .bubble{ margin-top:-8px; border-top:none; }
@@ -2069,13 +2149,12 @@ body.dice-room .sys .diceFace{
   opacity: .65;
 }
 
-/* Reactions sit beside the bubble in main chat */
-.msgItem > .reacts{
+/* Reactions are OUTSIDE the bubble (inside .msgMain) */
+.msgMain > .reacts{
   align-self:flex-end;
   margin:0 2px 2px 2px;
 }
-.msgItem > .reacts:empty{ display:none; }
-.msgItem.self > .reacts{ margin:0 2px 2px 2px; }
+.msgMain > .reacts:empty{ display:none; }
 .metaLine{ display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
 .uName{ font-weight:900; font-size:13px; }
 .badge{
@@ -2124,20 +2203,81 @@ body.dice-room .sys .diceFace{
   word-break:break-word;    /* ✅ backup */
 }
 .mention{ background:var(--mentionBg); color:var(--mentionText); border:1px solid var(--border); padding:0 4px; border-radius:6px; }
-/* message layout: bubble + reactions + side action rail */
-.msgBody{
+/* ===== Message actions: do NOT reserve space until opened =====
+   - Default: actions rail is absolutely positioned and hidden.
+   - When .showActions is set (tap on mobile) or hover (desktop), we reveal it
+     and shift the message content out of the way with a small animation.
+*/
+:root{
+  --msgActionsW: 56px;
+  --msgActionsGap: 10px;
+}
+
+/* The message content (bubble + reactions) lives in .msgMain */
+.msgMain{
   display:flex;
   flex-direction:column;
   gap:6px;
   min-width:0;
+  transition: transform .16s ease;
 }
 
 .msgActions{
+  position:absolute;
+  top:0;
+  left:0;
+  width:var(--msgActionsW);
   display:flex;
   flex-direction:column;
   gap:6px;
   padding-top:2px;
-  flex:0 0 auto;
+  opacity:0;
+  pointer-events:none;
+  transform: translateX(-4px);
+  transition: opacity .15s ease, transform .15s ease;
+}
+
+/* If the message is self (right-aligned), anchor the actions to the right */
+.msgItem.self .msgActions{
+  left:auto;
+  right:0;
+  transform: translateX(4px);
+}
+
+/* Desktop hover reveals actions */
+@media (hover:hover){
+  .msgItem:hover .msgActions{
+    opacity:1;
+    pointer-events:auto;
+    transform: translateX(0);
+  }
+  .msgItem:hover .msgMain{
+    transform: translateX(calc(var(--msgActionsW) + var(--msgActionsGap)));
+  }
+  .msgItem.self:hover .msgMain{
+    transform: translateX(calc(-1 * (var(--msgActionsW) + var(--msgActionsGap))));
+  }
+}
+
+/* Mobile/JS toggled open */
+.msgItem.showActions .msgActions{
+  opacity:1;
+  pointer-events:auto;
+  transform: translateX(0);
+}
+.msgItem.showActions .msgMain{
+  transform: translateX(calc(var(--msgActionsW) + var(--msgActionsGap)));
+}
+.msgItem.self.showActions .msgMain{
+  transform: translateX(calc(-1 * (var(--msgActionsW) + var(--msgActionsGap))));
+}
+
+/* On narrow screens, shift less so we never push bubbles off-screen */
+@media (max-width: 520px){
+  :root{
+    --msgActionsW: 48px;
+    --msgActionsGap: 8px;
+  }
 }
 
 
@@ -2900,19 +3040,27 @@ body.lockScroll{ overflow:hidden; }
   flex-direction:column;
   gap:6px;
   padding-top:2px;
+  /* Don't reserve horizontal space until opened */
+  width:0;
+  max-width:0;
+  overflow:hidden;
   opacity:0;
   pointer-events:none;
-  transition: opacity .15s ease;
+  transition: max-width .18s ease, width .18s ease, opacity .15s ease;
   flex:0 0 auto;
 }
 @media (hover:hover){
   .dmRow:hover .dmActionsRail{
+    width: var(--dmActionsW, 104px);
+    max-width: var(--dmActionsW, 104px);
     opacity:1;
     pointer-events:auto;
   }
 }
 /* JS can force show on tap */
 .dmRow.showActions .dmActionsRail{
+  width: var(--dmActionsW, 104px);
+  max-width: var(--dmActionsW, 104px);
   opacity:1;
   pointer-events:auto;
 }
@@ -3183,37 +3331,9 @@ body.lockScroll{ overflow:hidden; }
   border-radius:10px;
 }
 
-/* Message layout: avatar | main | actions */
-.msgMain{
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-  min-width:0;
-}
-
-/* Actions rail (hidden unless hover on desktop, or forced open on mobile via JS) */
-.msgActions{
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-  padding-top:2px;
-  opacity:0;
-  pointer-events:none;
-  transition: opacity .15s ease;
-}
-
-@media (hover:hover){
-  .msg:hover .msgActions{
-    opacity:1;
-    pointer-events:auto;
-  }
-}
-
-/* JS can force show on mobile (long press) */
-.msgItem.showActions .msgActions{
-  opacity:1;
-  pointer-events:auto;
-}
+/* Main chat .msgMain/.msgActions behavior is defined up near the grouping
+   section (absolute overlay + animated shift). Keep this block empty so
+   later CSS doesn't override that behavior. */
 
 /* Reaction picker popover */
 .reactionMenu{
