@@ -188,7 +188,8 @@ const pgInitPromise = (async () => {
         lastMessageGoldAt BIGINT,
         lastDailyLoginGoldAt BIGINT,
         lastDiceRollAt BIGINT,
-        dice_sixes INTEGER NOT NULL DEFAULT 0
+        dice_sixes INTEGER NOT NULL DEFAULT 0,
+        vibe_tags JSONB NOT NULL DEFAULT '[]'::jsonb
       );
 
       CREATE TABLE IF NOT EXISTS session (
@@ -246,6 +247,7 @@ try {
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastDailyLoginGoldAt BIGINT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastDiceRollAt BIGINT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS dice_sixes INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS vibe_tags JSONB NOT NULL DEFAULT '[]'::jsonb`,
     ];
     for (const q of addCols) {
       try { await pgPool.query(q); } catch (_) {}
@@ -390,6 +392,28 @@ function clamp(n, a, b) {
   if (!Number.isFinite(n)) return a;
   return Math.max(a, Math.min(b, n));
 }
+
+const VIBE_TAG_OPTIONS = [
+  "Chill", "Chaotic", "Night Owl", "Cozy", "Loud", "Quiet", "Curious", "Unhinged", "Friendly", "Competitive"
+];
+
+function sanitizeVibeTags(raw) {
+  const arr = Array.isArray(raw)
+    ? raw
+    : (typeof raw === "string"
+      ? (() => { try { return JSON.parse(raw); } catch { return []; } })()
+      : []);
+
+  const out = [];
+  for (const v of arr) {
+    if (out.length >= 3) break;
+    const val = String(v || "").trim();
+    if (!val) continue;
+    const hit = VIBE_TAG_OPTIONS.find((opt) => opt.toLowerCase() === val.toLowerCase());
+    if (hit && !out.includes(hit)) out.push(hit);
+  }
+  return out;
+}
 function pgRowToUser(row) {
   if (!row) return null;
   return {
@@ -416,6 +440,7 @@ function pgRowToUser(row) {
     lastMessageGoldAt: row.lastMessageGoldAt ?? null,
     lastDailyLoginGoldAt: row.lastDailyLoginGoldAt ?? null,
     lastDiceRollAt: row.lastDiceRollAt ?? null,
+    vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
   };
 }
 function dbGet(sql, params = []) {
@@ -468,7 +493,7 @@ async function pgGetUserRowById(id, columns) {
     "id","username","password_hash","role","created_at","avatar","bio","mood","age","gender",
     "last_seen","last_room","last_status","theme","gold","xp",
     "lastXpMessageAt","lastDailyLoginAt","lastGoldTickAt","lastMessageGoldAt","lastDailyLoginGoldAt",
-    "lastDiceRollAt","dice_sixes"
+    "lastDiceRollAt","dice_sixes","vibe_tags"
   ]);
   const cols = (Array.isArray(columns) && columns.length)
     ? columns.filter((c) => allow.has(String(c)))
@@ -2389,6 +2414,13 @@ function sanitizePrefsInput(p) {
   if (p && typeof p === "object") {
     if (p.dmBadgePrefs && typeof p.dmBadgePrefs === "object") out.dmBadgePrefs = p.dmBadgePrefs;
     if (p.dmThemePrefs && typeof p.dmThemePrefs === "object") out.dmThemePrefs = p.dmThemePrefs;
+    if (p.sound && typeof p.sound === "object") {
+      const sound = {};
+      for (const key of ["enabled", "room", "dm", "mention", "sent", "receive", "reaction"]) {
+        if (typeof p.sound[key] === "boolean") sound[key] = p.sound[key];
+      }
+      out.sound = sound;
+    }
   }
   return out;
 }
@@ -2677,6 +2709,7 @@ app.get("/profile", requireLogin, async (req, res) => {
         "last_status",
         "gold",
         "xp",
+        "vibe_tags",
       ]);
       if (!row) return res.status(404).send("Not found");
 
@@ -2707,6 +2740,7 @@ app.get("/profile", requireLogin, async (req, res) => {
             current_room: live?.room || null,
             likes: Number(likesRow?.likes || 0),
             likedByMe: !!Number(likesRow?.liked || 0),
+            vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
             ...progressionFromRow(row, true),
           };
 	          return res.json(payload);
@@ -2720,7 +2754,7 @@ app.get("/profile", requireLogin, async (req, res) => {
 
   // SQLite fallback (original behavior)
   db.get(
-    `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp
+    `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp, vibe_tags
      FROM users WHERE id = ?`,
     [userId],
     (err, row) => {
@@ -2750,6 +2784,7 @@ app.get("/profile", requireLogin, async (req, res) => {
             current_room: live?.room || null,
             likes: Number(likesRow?.likes || 0),
             likedByMe: !!Number(likesRow?.liked || 0),
+            vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
             ...progressionFromRow(row, true),
           };
           return res.json(payload);
@@ -2777,7 +2812,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
       for (const cand of candidates) {
         try {
           const r = await pgPool.query(
-            `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp
+            `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp, vibe_tags
              FROM users
              WHERE username = $1 OR lower(username) = lower($1)
              LIMIT 1`,
@@ -2794,7 +2829,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
     if (!row) {
       for (const cand of candidates) {
         row = await dbGet(
-          `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp
+          `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp, vibe_tags
            FROM users
            WHERE username = ? OR lower(username) = lower(?)`,
           [cand, cand]
@@ -2832,6 +2867,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
           current_room: live?.room || null,
           likes: Number(likesRow?.likes || 0),
           likedByMe: !!Number(likesRow?.liked || 0),
+          vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
           ...progressionFromRow(row, includePrivate),
         };
         return res.json(payload);
@@ -2920,6 +2956,7 @@ app.post("/profile", requireLogin, (req, res) => {
     const bio = String(req.body?.bio || "").slice(0, 2000);
     const age = req.body?.age === "" || req.body?.age == null ? null : clamp(req.body.age, 18, 120);
     const gender = String(req.body?.gender || "").slice(0, 40);
+    const vibeTags = sanitizeVibeTags(req.body?.vibeTags);
     const avatar = req.file ? `/avatars/${req.file.filename}` : null;
 
     // Best-effort: push updated profile bits into the currently-connected socket (so members list/chat updates immediately)
@@ -2929,6 +2966,7 @@ app.post("/profile", requireLogin, (req, res) => {
       if (!s?.user) return;
       if (avatar) s.user.avatar = avatar;
       s.user.mood = mood;
+      s.user.vibe_tags = vibeTags;
       if (s.currentRoom) emitUserList(s.currentRoom);
     };
 
@@ -2941,9 +2979,10 @@ app.post("/profile", requireLogin, (req, res) => {
                  bio = $2,
                  age = $3,
                  gender = $4,
-                 avatar = COALESCE($5, avatar)
-           WHERE id = $6`,
-          [mood, bio, age, gender, avatar, userId]
+                 avatar = COALESCE($5, avatar),
+                 vibe_tags = $6
+           WHERE id = $7`,
+          [mood, bio, age, gender, avatar, vibeTags, userId]
         );
         if (avatar) req.session.user.avatar = avatar;
         refreshLivePresence();
@@ -2954,12 +2993,14 @@ app.post("/profile", requireLogin, (req, res) => {
     }
 
     // SQLite fallback (original behavior)
-    db.get("SELECT avatar FROM users WHERE id = ?", [userId], (_e, old) => {
+    db.get("SELECT avatar, vibe_tags FROM users WHERE id = ?", [userId], (_e, old) => {
       const newAvatar = avatar || old?.avatar || null;
+      const oldVibes = sanitizeVibeTags(old?.vibe_tags || []);
+      const vibeJson = JSON.stringify(vibeTags.length ? vibeTags : oldVibes);
 
       db.run(
-        `UPDATE users SET mood=?, bio=?, age=?, gender=?, avatar=? WHERE id=?`,
-        [mood, bio, age, gender, newAvatar, userId],
+        `UPDATE users SET mood=?, bio=?, age=?, gender=?, avatar=?, vibe_tags=? WHERE id=?`,
+        [mood, bio, age, gender, newAvatar, vibeJson, userId],
         (err2) => {
           if (err2) return res.status(500).send("Save failed");
           if (avatar) req.session.user.avatar = avatar;
@@ -3525,6 +3566,7 @@ function emitUserList(room) {
         status,
         mood: s.user.mood || "",
         avatar: s.user.avatar || "",
+        vibe_tags: sanitizeVibeTags(s.user.vibe_tags || []),
       });
     }
   }
@@ -3558,6 +3600,7 @@ io.on("connection", (socket) => {
     status: "Online",
     mood: "",
     avatar: "",
+    vibe_tags: [],
   };
 
   // Track global online usernames (for private theme "together online" effects)
@@ -3580,13 +3623,14 @@ if (existingSid && existingSid !== socket.id) {
   try {
     if (await pgUserExists(socket.user.id)) {
       const { rows } = await pgPool.query(
-        "SELECT avatar, mood FROM users WHERE id=$1 LIMIT 1",
+        "SELECT avatar, mood, vibe_tags FROM users WHERE id=$1 LIMIT 1",
         [socket.user.id]
       );
       const r = rows?.[0];
       if (r) {
         socket.user.avatar = r.avatar || "";
         socket.user.mood = r.mood || "";
+        socket.user.vibe_tags = sanitizeVibeTags(r.vibe_tags || []);
         if (socket.currentRoom) emitUserList(socket.currentRoom);
       }
       return;
@@ -3596,12 +3640,13 @@ if (existingSid && existingSid !== socket.id) {
   }
 
   db.get(
-    "SELECT avatar, mood FROM users WHERE id = ?",
+    "SELECT avatar, mood, vibe_tags FROM users WHERE id = ?",
     [socket.user.id],
     (_e, row) => {
       if (row) {
         socket.user.avatar = row.avatar || "";
         socket.user.mood = row.mood || "";
+        socket.user.vibe_tags = sanitizeVibeTags(row.vibe_tags || []);
         if (socket.currentRoom) emitUserList(socket.currentRoom);
       }
     }
@@ -3665,8 +3710,8 @@ socket.on("join room", ({ room, status }) => {
           }
 
           const last = Number(row.lastDiceRollAt || 0);
-          if (now - last < 2000) {
-            socket.emit("dice:error", `Slow down! Try again in ${Math.ceil((2000 - (now - last)) / 100) / 10}s.`);
+          if (now - last < 3000) {
+            socket.emit("dice:error", `Roll available in ${Math.ceil((3000 - (now - last)) / 1000)}s.`);
             return;
           }
 
@@ -3715,8 +3760,8 @@ socket.on("join room", ({ room, status }) => {
         }
 
         const last = Number(row.lastDiceRollAt || 0);
-        if (now - last < 2000) {
-          socket.emit("dice:error", `Slow down! Try again in ${Math.ceil((2000 - (now - last)) / 100) / 10}s.`);
+        if (now - last < 3000) {
+          socket.emit("dice:error", `Roll available in ${Math.ceil((3000 - (now - last)) / 1000)}s.`);
           return;
         }
 

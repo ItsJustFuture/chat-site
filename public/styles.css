@@ -4562,6 +4562,19 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
   font-size: 14px;
   color: #fff;
 }
+.presenceAura{
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
+  transition: box-shadow 140ms ease, transform 140ms ease;
+}
+.presenceAura.isOnline{ box-shadow: 0 0 0 2px rgba(0, 220, 130, 0.28); }
+.presenceAura.isIdle{ box-shadow: 0 0 0 2px rgba(255, 200, 80, 0.24); }
+.presenceAura.isActiveDm{ box-shadow: 0 0 0 2px rgba(120, 180, 255, 0.32); }
+@keyframes auraPulse{
+  0%{ box-shadow: 0 0 0 2px rgba(140, 200, 255, 0.25); }
+  50%{ box-shadow: 0 0 0 3px rgba(140, 200, 255, 0.16); }
+  100%{ box-shadow: 0 0 0 2px rgba(140, 200, 255, 0.25); }
+}
+.presenceAura.isTyping{ animation: auraPulse 1.2s ease-in-out infinite; }
 
 
 /* ==== Profile sheet modal (custom, not a clone) ==== */
@@ -4632,6 +4645,9 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 }
 .iconPill .ico{ width: 18px; height: 18px; display: inline-block; }
 .iconPill svg{ width: 18px; height: 18px; display:block; }
+.vibeRow{ display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
+.vibeChip{ background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.08); padding:2px 8px; border-radius:999px; font-size:11px; line-height:1.2; color:var(--text,#fff); }
+.vibeChip.mini{ font-size:10px; opacity:0.85; }
 .profileSheetMeta{ color: #fff; padding-bottom: 6px; }
 .profileSheetNameRow{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 .profileSheetName{ font-size: 22px; font-weight: 800; letter-spacing: .2px; }
@@ -4760,6 +4776,10 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 /* Hide typing overlay while keyboard is open (prevents large dark block on iOS) */
 body.kb-open .typing,
 body.kb-open #typing{ display:none !important; }
+
+@keyframes msgPop{ from{ opacity:0; transform: translateY(4px) scale(.98); } to{ opacity:1; transform:none; } }
+.msg-appear{ animation: msgPop 160ms ease; }
+.msg-appear .bubble, .msg-appear .dmBubble{ animation: msgPop 160ms ease; }
 
 
 /* === DM bubble sizing & alignment FIX === */
