@@ -2030,13 +2030,19 @@ body.dice-room .sys .diceFace{
 .msgMain{
   display:flex;
   flex-direction:column;
-  gap:6px;
-  min-width:0;
-  /* Don't stretch children to row width; let bubbles hug their content */
+  /* Don't use flex gap here.
+     Flex gap reserves spacing even when .msgActions is collapsed, which
+     makes it look like the UI is "reserving" space.
+     Use margins on .reacts and the opened actions row instead. */
+  gap:0;
+  /* Keep bubbles content-sized (avoid stretching to the width of other
+     rows like reactions). */
   align-items:flex-start;
+  min-width:0;
 }
 
-/* Self messages: keep bubble/meta aligned to the right without stretching */
+/* Self messages: keep the stack aligned to the right, while still allowing
+   the bubble itself to stay content-sized. */
 .msgItem.self .msgMain{ align-items:flex-end; }
 
 /* Collapsed by default: no height, no interaction */
@@ -2051,8 +2057,7 @@ body.dice-room .sys .diceFace{
   overflow:hidden;
   max-height:0;
   opacity:0;
-  /* Cancel the .msgMain gap so NO space is reserved while collapsed */
-  margin-top:-6px;
+  margin-top:0;
   pointer-events:none;
   transform: translateY(-4px);
   transition: max-height .18s ease, opacity .15s ease, transform .18s ease, margin-top .18s ease;
@@ -2111,15 +2116,22 @@ body.dice-room .sys .diceFace{
   background:var(--messageOtherBg);
   color:var(--messageOtherText);
   padding:10px 12px; border-radius:var(--radiusLg);
-  display:inline-flex; flex-direction:column; gap:6px;
+  /* Content-sized bubble: tiny messages stay tiny, long messages wrap. */
+  display:inline-flex;
+  flex-direction:column;
+  gap:6px;
   width:fit-content;
-  min-width:0;
   max-width:min(70vw, 720px);
+  flex:0 0 auto;
+  align-self:flex-start;
   word-wrap:break-word;
   border:1px solid var(--border);
   overflow:hidden;
 }
 .self .bubble{ background:var(--messageSelfBg); color:var(--messageSelfText); }
+
+/* Right-align self bubbles without forcing them to stretch. */
+.msgItem.self .bubble{ align-self:flex-end; }
 
 /* Message meta (name/time) */
 .msgItem .meta{
@@ -2205,8 +2217,7 @@ body.dice-room .sys .diceFace{
   overflow:hidden;
   max-height:0;
   opacity:0;
-  /* Cancel the .msgMain gap when collapsed so ZERO space is reserved */
-  margin-top:-6px;
+  margin-top:0;
   pointer-events:none;
   transform: translateY(-4px);
   transition: max-height .18s ease, opacity .15s ease, transform .18s ease, margin-top .18s ease;
