@@ -3034,37 +3034,79 @@ body.lockScroll{ overflow:hidden; }
 .dmMetaUser{ font-weight:800; }
 .dmMetaTime{ opacity:.85; }
 
-/* DM actions: horizontal bar below meta; collapsed = zero reserved space */
+/* DM actions: overlay beside the bubble (never reserves vertical space) */
+.dmBubbleWrap{ position:relative; }
+
 .dmActionsBar{
-  display:flex;
+  /* horizontal, like main chat */
+  display:flex !important;
+  flex-direction:row !important;
+  flex-wrap:nowrap !important;
+  align-items:center;
   gap:8px;
-  justify-content:flex-start;
-  /* collapsed state */
-  max-height:0;
+  white-space:nowrap;
+
+  /* overlay: do NOT participate in layout */
+  position:absolute;
+  top:50%;
+  left: calc(100% + 10px);
+  transform: translateY(-50%) scale(.98);
+  z-index: 50;
+
+  /* hidden by default */
   opacity:0;
-  overflow:hidden;
   pointer-events:none;
-  transform: translateY(-4px);
-  margin-top:0;
-  transition: max-height .18s ease, opacity .15s ease, transform .18s ease, margin-top .18s ease;
+
+  /* small visual container to match your UI */
+  padding:6px;
+  border-radius:14px;
+  background: rgba(0,0,0,.22);
+  border: 1px solid rgba(255,255,255,.08);
+  backdrop-filter: blur(10px);
+
+  transition: opacity .15s ease, transform .18s ease;
 }
-.dmRow.self .dmActionsBar{ justify-content:flex-end; }
+
+/* Ensure buttons never force a new line in the flex row */
+.dmActionsBar > *{ flex: 0 0 auto; }
+
+/* Self messages are on the right: put actions on the left of the bubble */
+.dmRow.self .dmActionsBar{
+  left:auto;
+  right: calc(100% + 10px);
+}
 
 @media (hover:hover){
   .dmRow:hover .dmActionsBar{
-    max-height:48px;
     opacity:1;
     pointer-events:auto;
-    transform: translateY(0);
-    margin-top:6px;
+    transform: translateY(-50%) scale(1);
   }
 }
+
 .dmRow.showActions .dmActionsBar{
-  max-height:48px;
   opacity:1;
   pointer-events:auto;
-  transform: translateY(0);
-  margin-top:6px;
+  transform: translateY(-50%) scale(1);
+}
+
+/* Mobile: keep the bar horizontal and tighter so it fits nicely */
+@media (max-width: 520px){
+  .dmActionsBar{
+    gap:6px;
+    padding:5px;
+    left: calc(100% + 8px);
+    max-width: min(92vw, 360px);
+    overflow-x:auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .dmRow.self .dmActionsBar{ right: calc(100% + 8px); }
+  .dmActionsBar .iconBtn.smallIcon{
+    width:30px;
+    height:30px;
+    border-radius:11px;
+    font-size:14px;
+  }
 }
 
 .dmReplyContext{
