@@ -2010,7 +2010,7 @@ function renderBBCode(input){
   });
   s = s.replace(/\[img\](.*?)\[\/img\]/gi, (m,url)=>{
     url = String(url||"").trim();
-    const ok = /^https?:\/\//i.test(url) || /^\/(uploads|avatars)\//i.test(url);
+  const ok = /^https?:\/\//i.test(url) || /^\/(uploads|avatars|avatar)\//i.test(url);
     if(!ok) return "";
     return `<img src="${escapeHtml(url)}" alt="img" style="max-width:100%; border-radius:14px; border:1px solid rgba(0,0,0,.2);">`;
   });

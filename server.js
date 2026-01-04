@@ -248,6 +248,9 @@ try {
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastDiceRollAt BIGINT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS dice_sixes INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS vibe_tags JSONB NOT NULL DEFAULT '[]'::jsonb`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_bytes BYTEA`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_mime TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_updated BIGINT`,
     ];
     for (const q of addCols) {
       try { await pgPool.query(q); } catch (_) {}
@@ -263,6 +266,7 @@ try {
       "lastMessageGoldAt",
       "lastDailyLoginGoldAt",
       "lastDiceRollAt",
+      "avatar_updated",
     ];
     for (const col of epochMsCols) {
       try {
@@ -359,6 +363,34 @@ app.use("/uploads", express.static(UPLOADS_DIR));
 app.use("/avatars", express.static(AVATARS_DIR));
 app.use(express.static(PUBLIC_DIR));
 
+// Serve avatars stored in Postgres
+app.get("/avatar/:id", async (req, res) => {
+  const id = Number(req.params?.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).send("Invalid id");
+
+  try {
+    const { rows } = await pgPool.query(
+      `SELECT avatar_bytes, avatar_mime, avatar_updated FROM users WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    const row = rows?.[0];
+    if (!row?.avatar_bytes) return res.status(404).send("Not found");
+
+    const etag = `"av-${id}-${Number(row.avatar_updated || 0)}"`;
+    const weakEtag = `W/${etag}`;
+    const inm = String(req.headers["if-none-match"] || "");
+    if (inm === etag || inm === weakEtag) return res.status(304).end();
+
+    res.setHeader("Content-Type", row.avatar_mime || "image/png");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("ETag", etag);
+    return res.send(row.avatar_bytes);
+  } catch (e) {
+    console.error("[/avatar] failed:", e?.message || e);
+    return res.status(500).send("Failed to load avatar");
+  }
+});
+
 // ---- Helpers
 function normalizeUsername(u) {
   return String(u || "").trim();
@@ -414,6 +446,19 @@ function sanitizeVibeTags(raw) {
   }
   return out;
 }
+function avatarUrlFromRow(row) {
+  if (!row) return null;
+  const id = row.id ?? row.user_id ?? row.userId;
+  const avatarUpdated = Number(row.avatar_updated ?? row.avatarUpdated ?? 0);
+  const hasBytes = (row.avatar_bytes && row.avatar_bytes.length) || avatarUpdated > 0;
+
+  if (Number.isInteger(Number(id)) && hasBytes) {
+    return `/avatar/${Number(id)}?v=${avatarUpdated || 1}`;
+  }
+
+  const legacy = row.avatar || row.avatar_url || row.avatarUrl || null;
+  return legacy || null;
+}
 function pgRowToUser(row) {
   if (!row) return null;
   return {
@@ -423,7 +468,8 @@ function pgRowToUser(row) {
     password_hash: row.password_hash || null,
     role: row.role || "User",
     theme: sanitizeThemeNameServer(row.theme),
-    avatar: row.avatar || null,
+    avatar: avatarUrlFromRow(row),
+    avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? null,
     bio: row.bio || "",
     mood: row.mood || "",
     age: row.age ?? null,
@@ -470,7 +516,10 @@ async function syncGoldXpThemeToPg(uid) {
 
 async function pgGetUserByUsername(username) {
   const { rows } = await pgPool.query(
-    "SELECT * FROM users WHERE lower(username) = lower($1) LIMIT 1",
+    `SELECT id, username, password_hash, role, created_at, avatar, avatar_updated, bio, mood, age, gender, last_seen, last_room, last_status,
+            theme, gold, xp, "lastXpMessageAt", "lastDailyLoginAt", "lastGoldTickAt", "lastMessageGoldAt", "lastDailyLoginGoldAt",
+            "lastDiceRollAt", dice_sixes, vibe_tags
+       FROM users WHERE lower(username) = lower($1) LIMIT 1`,
     [username]
   );
   return pgRowToUser(rows[0]);
@@ -478,7 +527,10 @@ async function pgGetUserByUsername(username) {
 
 async function pgGetUserById(id) {
   const { rows } = await pgPool.query(
-    "SELECT * FROM users WHERE id = $1 LIMIT 1",
+    `SELECT id, username, password_hash, role, created_at, avatar, avatar_updated, bio, mood, age, gender, last_seen, last_room, last_status,
+            theme, gold, xp, "lastXpMessageAt", "lastDailyLoginAt", "lastGoldTickAt", "lastMessageGoldAt", "lastDailyLoginGoldAt",
+            "lastDiceRollAt", dice_sixes, vibe_tags
+       FROM users WHERE id = $1 LIMIT 1`,
     [id]
   );
   return pgRowToUser(rows[0]);
@@ -490,7 +542,7 @@ async function pgGetUserById(id) {
 // NOTE: This returns the raw row object (snake_case keys), not the mapped pgRowToUser().
 async function pgGetUserRowById(id, columns) {
   const allow = new Set([
-    "id","username","password_hash","role","created_at","avatar","bio","mood","age","gender",
+    "id","username","password_hash","role","created_at","avatar","avatar_bytes","avatar_mime","avatar_updated","bio","mood","age","gender",
     "last_seen","last_room","last_status","theme","gold","xp",
     "lastXpMessageAt","lastDailyLoginAt","lastGoldTickAt","lastMessageGoldAt","lastDailyLoginGoldAt",
     "lastDiceRollAt","dice_sixes","vibe_tags"
@@ -1860,7 +1912,7 @@ function loadThreadForUser(threadId, userId, cb) {
                 ...thread,
                 participants: (parts || []).map((p) => p.username),
                 participantIds: (parts || []).map((p) => p.id),
-                participantsDetail: (parts || []).map((p) => ({ id: p.id, username: p.username, avatar: p.avatar || null })),
+                participantsDetail: (parts || []).map((p) => ({ id: p.id, username: p.username, avatar: avatarUrlFromRow(p) })),
               });
             }
           );
@@ -2699,6 +2751,7 @@ app.get("/profile", requireLogin, async (req, res) => {
         "username",
         "role",
         "avatar",
+        "avatar_updated",
         "bio",
         "mood",
         "age",
@@ -2728,7 +2781,7 @@ app.get("/profile", requireLogin, async (req, res) => {
             id: row.id,
             username: row.username,
             role: row.role,
-            avatar: row.avatar,
+            avatar: avatarUrlFromRow(row),
             bio: row.bio,
             mood: row.mood,
             age: row.age,
@@ -2772,7 +2825,7 @@ app.get("/profile", requireLogin, async (req, res) => {
             id: row.id,
             username: row.username,
             role: row.role,
-            avatar: row.avatar,
+            avatar: avatarUrlFromRow(row),
             bio: row.bio,
             mood: row.mood,
             age: row.age,
@@ -2855,7 +2908,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
           id: row.id,
           username: row.username,
           role: row.role,
-          avatar: row.avatar,
+          avatar: avatarUrlFromRow(row),
           bio: row.bio,
           mood: live?.mood ?? row.mood,
           age: row.age,
@@ -2922,17 +2975,10 @@ app.post("/profile/:username/like", requireLogin, (req, res) => {
   });
 });
 
-// Avatar upload for profile edits (5MB max)
+// Avatar upload for profile edits (2MB max, in-memory only)
 const avatarUpload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, AVATARS_DIR),
-    filename: (_req, file, cb) => {
-      // keep extension short + safe (prevents weird names like ".png.exe")
-      const ext = path.extname(file.originalname || "").slice(0, 10) || ".png";
-      cb(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`);
-    },
-  }),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ok = /^image\/(png|jpeg|jpg|webp|gif)$/i.test(file.mimetype || "");
     cb(ok ? null : new Error("Invalid avatar type"), ok);
@@ -2946,9 +2992,9 @@ app.post("/profile", requireLogin, (req, res) => {
     if (err) {
       const msg =
         err.code === "LIMIT_FILE_SIZE"
-          ? "Avatar too large (max 5MB)."
+          ? "Avatar too large (max 2MB)."
           : (err.message || "Avatar upload failed.");
-      return res.status(400).send(msg);
+      return res.status(400).json({ ok: false, message: msg });
     }
 
     const userId = req.session.user.id;
@@ -2957,14 +3003,16 @@ app.post("/profile", requireLogin, (req, res) => {
     const age = req.body?.age === "" || req.body?.age == null ? null : clamp(req.body.age, 18, 120);
     const gender = String(req.body?.gender || "").slice(0, 40);
     const vibeTags = sanitizeVibeTags(req.body?.vibeTags);
-    const avatar = req.file ? `/avatars/${req.file.filename}` : null;
+    const file = req.file || null;
+    const avatarUpdated = file ? Date.now() : null;
+    const avatarUrl = file ? `/avatar/${userId}?v=${avatarUpdated}` : null;
 
     // Best-effort: push updated profile bits into the currently-connected socket (so members list/chat updates immediately)
     const refreshLivePresence = () => {
       const sid = socketIdByUserId.get(userId);
       const s = sid ? io.sockets.sockets.get(sid) : null;
       if (!s?.user) return;
-      if (avatar) s.user.avatar = avatar;
+      if (avatarUrl) s.user.avatar = avatarUrl;
       s.user.mood = mood;
       s.user.vibe_tags = vibeTags;
       if (s.currentRoom) emitUserList(s.currentRoom);
@@ -2973,28 +3021,48 @@ app.post("/profile", requireLogin, (req, res) => {
     try {
       // Prefer Postgres if this user exists there (Render prod path)
       if (await pgUserExists(userId)) {
-        await pgPool.query(
-          `UPDATE users
-             SET mood = $1,
-                 bio = $2,
-                 age = $3,
-                 gender = $4,
-                 avatar = COALESCE($5, avatar),
-                 vibe_tags = $6
-           WHERE id = $7`,
-          [mood, bio, age, gender, avatar, vibeTags, userId]
-        );
-        if (avatar) req.session.user.avatar = avatar;
+        if (file) {
+          await pgPool.query(
+            `UPDATE users
+               SET mood = $1,
+                   bio = $2,
+                   age = $3,
+                   gender = $4,
+                   avatar_bytes = $5,
+                   avatar_mime = $6,
+                   avatar_updated = $7,
+                   avatar = NULL,
+                   vibe_tags = $8
+             WHERE id = $9`,
+            [mood, bio, age, gender, file.buffer, file.mimetype, avatarUpdated, vibeTags, userId]
+          );
+        } else {
+          await pgPool.query(
+            `UPDATE users
+               SET mood = $1,
+                   bio = $2,
+                   age = $3,
+                   gender = $4,
+                   vibe_tags = $5
+             WHERE id = $6`,
+            [mood, bio, age, gender, vibeTags, userId]
+          );
+        }
+        if (avatarUrl) req.session.user.avatar = avatarUrl;
         refreshLivePresence();
-        return res.json({ ok: true });
+        return res.json({ ok: true, avatar: avatarUrl });
       }
     } catch (e) {
       console.warn("[/profile][pg] update failed, falling back to sqlite:", e?.message || e);
     }
 
+    if (file) {
+      return res.status(500).json({ ok: false, message: "Avatar storage unavailable right now." });
+    }
+
     // SQLite fallback (original behavior)
     db.get("SELECT avatar, vibe_tags FROM users WHERE id = ?", [userId], (_e, old) => {
-      const newAvatar = avatar || old?.avatar || null;
+      const newAvatar = old?.avatar || null;
       const oldVibes = sanitizeVibeTags(old?.vibe_tags || []);
       const vibeJson = JSON.stringify(vibeTags.length ? vibeTags : oldVibes);
 
@@ -3003,9 +3071,9 @@ app.post("/profile", requireLogin, (req, res) => {
         [mood, bio, age, gender, newAvatar, vibeJson, userId],
         (err2) => {
           if (err2) return res.status(500).send("Save failed");
-          if (avatar) req.session.user.avatar = avatar;
+          if (avatarUrl) req.session.user.avatar = avatarUrl;
           refreshLivePresence();
-          return res.json({ ok: true });
+          return res.json({ ok: true, avatar: avatarUrl });
         }
       );
     });
@@ -3041,7 +3109,15 @@ app.delete("/profile/avatar", requireLogin, async (req, res) => {
       const { rows } = await pgPool.query(`SELECT avatar FROM users WHERE id = $1`, [userId]);
       const oldAvatar = rows?.[0]?.avatar || null;
 
-      await pgPool.query(`UPDATE users SET avatar = NULL WHERE id = $1`, [userId]);
+      await pgPool.query(
+        `UPDATE users
+            SET avatar = NULL,
+                avatar_bytes = NULL,
+                avatar_mime = NULL,
+                avatar_updated = NULL
+          WHERE id = $1`,
+        [userId]
+      );
       req.session.user.avatar = null;
       clearAvatarInLivePresence();
       tryDeleteLocalAvatarFile(oldAvatar);
@@ -3185,9 +3261,9 @@ function handleListDmThreads(req, res) {
               ...t,
               participants: members.map((p) => p.username),
               participantIds: members.map((p) => p.user_id),
-              participantsDetail: members.map((p) => ({ id: p.user_id, username: p.username, avatar: p.avatar || null })),
+              participantsDetail: members.map((p) => ({ id: p.user_id, username: p.username, avatar: avatarUrlFromRow(p) })),
               otherUser: other
-                ? { id: other.user_id, username: other.username, avatar: other.avatar || null }
+                ? { id: other.user_id, username: other.username, avatar: avatarUrlFromRow(other) }
                 : null,
               unreadCount: Number(t.unreadCount || 0),
             };
@@ -3623,12 +3699,12 @@ if (existingSid && existingSid !== socket.id) {
   try {
     if (await pgUserExists(socket.user.id)) {
       const { rows } = await pgPool.query(
-        "SELECT avatar, mood, vibe_tags FROM users WHERE id=$1 LIMIT 1",
+        "SELECT avatar, avatar_updated, mood, vibe_tags FROM users WHERE id=$1 LIMIT 1",
         [socket.user.id]
       );
       const r = rows?.[0];
       if (r) {
-        socket.user.avatar = r.avatar || "";
+        socket.user.avatar = avatarUrlFromRow(r) || "";
         socket.user.mood = r.mood || "";
         socket.user.vibe_tags = sanitizeVibeTags(r.vibe_tags || []);
         if (socket.currentRoom) emitUserList(socket.currentRoom);
@@ -3644,7 +3720,7 @@ if (existingSid && existingSid !== socket.id) {
     [socket.user.id],
     (_e, row) => {
       if (row) {
-        socket.user.avatar = row.avatar || "";
+        socket.user.avatar = avatarUrlFromRow(row) || "";
         socket.user.mood = row.mood || "";
         socket.user.vibe_tags = sanitizeVibeTags(row.vibe_tags || []);
         if (socket.currentRoom) emitUserList(socket.currentRoom);
