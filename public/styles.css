@@ -2020,84 +2020,62 @@ body.dice-room .sys .diceFace{
 .msgItem{ position:relative; display:flex; flex-direction:row; align-items:flex-start; gap:8px; min-width:0; }
 .msgItem.self{ flex-direction:row-reverse; }
 
-/* ---- Main chat actions rail: do NOT reserve space unless opened ----
-   We keep the actions rail absolutely positioned (out of flow), and when a
-   message is toggled open we translate the bubble stack to make room with a
-   small animation.
+/* ---- Main chat actions: no reserved space + horizontal bar below message ----
+   Actions live inside .msgMain (after bubble + reactions) and are collapsed
+   by default so they consume ZERO space. When opened (tap/hover), they expand
+   downward with a small animation.
 */
-:root{
-  --msgActionsW: 56px;      /* visual width of the vertical action rail */
-  --msgActionsGap: 10px;    /* breathing room between rail and bubble */
-  --msgActionsShift: calc(var(--msgActionsW) + var(--msgActionsGap));
-}
 
-/* Message layout container: bubble + reacts (outside bubble) */
+/* Message layout container: bubble + reacts + actions */
 .msgMain{
   display:flex;
   flex-direction:column;
   gap:6px;
   min-width:0;
-  transition: transform .18s ease;
-  will-change: transform;
 }
 
-/* Actions rail overlays; hidden by default but doesn't consume width */
-.msgItem .msgActions{
-  position:absolute;
-  top:0;
-  left:0;
-  width:var(--msgActionsW);
+/* Collapsed by default: no height, no interaction */
+.msgMain .msgActions{
   display:flex;
-  flex-direction:column;
+  flex-direction:row;
   gap:6px;
-  padding-top:2px;
+  justify-content:flex-start;
+  align-items:center;
+  width:fit-content;
+  max-width:100%;
+  overflow:hidden;
+  max-height:0;
   opacity:0;
+  margin-top:0;
   pointer-events:none;
-  transform: translateX(-4px);
-  transition: opacity .15s ease, transform .18s ease;
+  transform: translateY(-4px);
+  transition: max-height .18s ease, opacity .15s ease, transform .18s ease, margin-top .18s ease;
 }
 
-/* Self messages: rail on the right side */
-.msgItem.self .msgActions{
-  left:auto;
-  right:0;
-  transform: translateX(4px);
+/* Self messages: align the action row to the right */
+.msgItem.self .msgMain .msgActions{
+  justify-content:flex-end;
+  align-self:flex-end;
 }
 
-/* Show actions on hover (desktop) */
+/* Reveal actions on hover (desktop) */
 @media (hover:hover){
-  .msgItem:hover .msgActions{
+  .msgItem:hover .msgMain .msgActions{
+    max-height:72px;
     opacity:1;
+    margin-top:6px;
     pointer-events:auto;
-    transform: translateX(0);
-  }
-  .msgItem:hover .msgMain:not(.noShift){
-    transform: translateX(var(--msgActionsShift));
-  }
-  .msgItem.self:hover .msgMain:not(.noShift){
-    transform: translateX(calc(-1 * var(--msgActionsShift)));
+    transform: translateY(0);
   }
 }
 
-/* Show actions when toggled open (mobile + reaction menu) */
-.msgItem.showActions .msgActions{
+/* Reveal actions when toggled open (mobile) */
+.msgItem.showActions .msgMain .msgActions{
+  max-height:72px;
   opacity:1;
+  margin-top:6px;
   pointer-events:auto;
-  transform: translateX(0);
-}
-.msgItem.showActions .msgMain{
-  transform: translateX(var(--msgActionsShift));
-}
-.msgItem.self.showActions .msgMain{
-  transform: translateX(calc(-1 * var(--msgActionsShift)));
-}
-
-/* On very small screens, reduce the shift so we don't push bubbles off-screen */
-@media (max-width: 520px){
-  :root{
-    --msgActionsW: 50px;
-    --msgActionsGap: 8px;
-  }
+  transform: translateY(0);
 }
 /* Make grouped bubbles visually merge into one (main chat) */
 .msgGroupBody{ gap:1px; }
@@ -2203,81 +2181,51 @@ body.dice-room .sys .diceFace{
   word-break:break-word;    /* ✅ backup */
 }
 .mention{ background:var(--mentionBg); color:var(--mentionText); border:1px solid var(--border); padding:0 4px; border-radius:6px; }
-/* ===== Message actions: do NOT reserve space until opened =====
-   - Default: actions rail is absolutely positioned and hidden.
-   - When .showActions is set (tap on mobile) or hover (desktop), we reveal it
-     and shift the message content out of the way with a small animation.
+/* ===== Message actions (horizontal bar below message) =====
+   Actions live inside .msgMain and are collapsed by default so they reserve
+   ZERO space. When opened (tap/hover), they expand downward.
 */
-:root{
-  --msgActionsW: 56px;
-  --msgActionsGap: 10px;
-}
 
-/* The message content (bubble + reactions) lives in .msgMain */
-.msgMain{
+/* Collapsed by default: no height, no interaction */
+.msgMain .msgActions{
   display:flex;
-  flex-direction:column;
+  flex-direction:row;
   gap:6px;
-  min-width:0;
-  transition: transform .16s ease;
-}
-
-.msgActions{
-  position:absolute;
-  top:0;
-  left:0;
-  width:var(--msgActionsW);
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-  padding-top:2px;
+  justify-content:flex-start;
+  align-items:center;
+  width:fit-content;
+  max-width:100%;
+  overflow:hidden;
+  max-height:0;
   opacity:0;
+  margin-top:0;
   pointer-events:none;
-  transform: translateX(-4px);
-  transition: opacity .15s ease, transform .15s ease;
+  transform: translateY(-4px);
+  transition: max-height .18s ease, opacity .15s ease, transform .18s ease, margin-top .18s ease;
 }
 
-/* If the message is self (right-aligned), anchor the actions to the right */
-.msgItem.self .msgActions{
-  left:auto;
-  right:0;
-  transform: translateX(4px);
+/* Self messages: align action row right */
+.msgItem.self .msgMain .msgActions{
+  justify-content:flex-end;
+  align-self:flex-end;
 }
 
-/* Desktop hover reveals actions */
 @media (hover:hover){
-  .msgItem:hover .msgActions{
+  .msgItem:hover .msgMain .msgActions{
+    max-height:72px;
     opacity:1;
+    margin-top:6px;
     pointer-events:auto;
-    transform: translateX(0);
-  }
-  .msgItem:hover .msgMain{
-    transform: translateX(calc(var(--msgActionsW) + var(--msgActionsGap)));
-  }
-  .msgItem.self:hover .msgMain{
-    transform: translateX(calc(-1 * (var(--msgActionsW) + var(--msgActionsGap))));
+    transform: translateY(0);
   }
 }
 
-/* Mobile/JS toggled open */
-.msgItem.showActions .msgActions{
+.msgItem.showActions .msgMain .msgActions{
+  max-height:72px;
   opacity:1;
+  margin-top:6px;
   pointer-events:auto;
-  transform: translateX(0);
-}
-.msgItem.showActions .msgMain{
-  transform: translateX(calc(var(--msgActionsW) + var(--msgActionsGap)));
-}
-.msgItem.self.showActions .msgMain{
-  transform: translateX(calc(-1 * (var(--msgActionsW) + var(--msgActionsGap))));
-}
-
-/* On narrow screens, shift less so we never push bubbles off-screen */
-@media (max-width: 520px){
-  :root{
-    --msgActionsW: 48px;
-    --msgActionsGap: 8px;
-  }
+  transform: translateY(0);
 }
 
 

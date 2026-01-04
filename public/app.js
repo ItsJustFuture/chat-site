@@ -2711,14 +2711,15 @@ actions.appendChild(replyBtn);
     actions.appendChild(del);
   }
 
-  // Wrap bubble + reactions so reactions remain OUTSIDE the bubble, and
-  // the actions rail can overlay without reserving layout space.
+  // Wrap bubble + reactions so reactions remain OUTSIDE the bubble.
+  // Actions are rendered as a horizontal bar BELOW the message, and only
+  // expand when opened. This avoids reserving space and keeps groups aligned.
   const main = document.createElement("div");
   main.className = "msgMain";
   main.appendChild(bubble);
   main.appendChild(reacts);
+  main.appendChild(actions);
 
-  item.appendChild(actions);
   item.appendChild(main);
 
   // Mobile tap-to-toggle actions (per message item)
