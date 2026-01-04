@@ -2988,75 +2988,27 @@ body.lockScroll{ overflow:hidden; }
 .colorInputRow.tight input[type="text"]{ min-width:120px; }
 .dmMessages{ flex:1; overflow:auto; padding:10px 12px; display:flex; flex-direction:column; gap:8px; min-height:0; }
 
-/* --- DM message layout (Telegram-like) --- */
-.dmMessages{ padding:14px 16px; gap:12px; }
-.dmRow{ width:100%; display:flex; align-items:flex-start; gap:10px; box-sizing:border-box; min-width:0; }
+/* --- DM message layout (bubble hugs content; actions appear BELOW bubble, no reserved space) --- */
+.dmMessages{ padding:14px 16px; gap:8px; }
+.dmRow{ width:100%; display:flex; align-items:flex-start; box-sizing:border-box; min-width:0; }
 .dmRow.self{ justify-content:flex-end; }
 
-/* Order DM action rails: outgoing buttons left, incoming buttons right */
-.dmRow.self .dmActionsRail{ order:1; }
-.dmRow.self .dmBubbleWrap{ order:2; }
-.dmRow:not(.self) .dmBubbleWrap{ order:1; }
-.dmRow:not(.self) .dmActionsRail{ order:2; }
-
-/* Reduce reserved space between bubbles and action rails */
-.dmRow{ gap:0px; }
-
-.dmActionsRail{
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-  padding-top:2px;
-  /* Don't reserve horizontal space until opened */
-  width:0;
-  max-width:0;
-  overflow:hidden;
-  opacity:0;
-  pointer-events:none;
-  transition: max-width .18s ease, width .18s ease, opacity .15s ease;
-  flex:0 0 auto;
-}
-@media (hover:hover){
-  .dmRow:hover .dmActionsRail{
-    width: var(--dmActionsW, 104px);
-    max-width: var(--dmActionsW, 104px);
-    opacity:1;
-    pointer-events:auto;
-  }
-}
-/* JS can force show on tap */
-.dmRow.showActions .dmActionsRail{
-  width: var(--dmActionsW, 104px);
-  max-width: var(--dmActionsW, 104px);
-  opacity:1;
-  pointer-events:auto;
-}
-
-/* Remove the "always-on" gap: only add spacing when the actions rail is actually open */
-@media (hover:hover){
-  .dmRow:hover.self .dmActionsRail{ margin-right:6px; }
-  .dmRow:hover:not(.self) .dmActionsRail{ margin-left:6px; }
-}
-.dmRow.showActions.self .dmActionsRail{ margin-right:6px; }
-.dmRow.showActions:not(.self) .dmActionsRail{ margin-left:6px; }
 .dmBubbleWrap{
   display:flex;
   flex-direction:column;
-  /* Prevent flex-column from stretching bubbles to full width */
-  align-items:flex-start;
   flex: 0 1 auto;
   min-width:0;
   max-width:66%;
+  /* Prevent bubbles from stretching to the width of meta/reactions/actions */
+  align-items:flex-start;
 }
-.dmRow.self .dmBubbleWrap{
-  align-items:flex-end;
-}
+.dmRow.self .dmBubbleWrap{ align-items:flex-end; }
 
 .dmBubble{
   display:inline-flex;
-  flex:0 0 auto;
-  width:fit-content;
+  width: fit-content;
   max-width:100%;
+  flex: 0 0 auto;
   padding:10px 12px;
   border-radius:14px;
   background: var(--panel);
@@ -3064,7 +3016,6 @@ body.lockScroll{ overflow:hidden; }
   overflow-wrap:anywhere;
   word-break:break-word;
 }
-
 .dmBubble.self{
   background: var(--bubbleSelf);
   color:#fff;
@@ -3082,6 +3033,39 @@ body.lockScroll{ overflow:hidden; }
 }
 .dmMetaUser{ font-weight:800; }
 .dmMetaTime{ opacity:.85; }
+
+/* DM actions: horizontal bar below meta; collapsed = zero reserved space */
+.dmActionsBar{
+  display:flex;
+  gap:8px;
+  justify-content:flex-start;
+  /* collapsed state */
+  max-height:0;
+  opacity:0;
+  overflow:hidden;
+  pointer-events:none;
+  transform: translateY(-4px);
+  margin-top:0;
+  transition: max-height .18s ease, opacity .15s ease, transform .18s ease, margin-top .18s ease;
+}
+.dmRow.self .dmActionsBar{ justify-content:flex-end; }
+
+@media (hover:hover){
+  .dmRow:hover .dmActionsBar{
+    max-height:48px;
+    opacity:1;
+    pointer-events:auto;
+    transform: translateY(0);
+    margin-top:6px;
+  }
+}
+.dmRow.showActions .dmActionsBar{
+  max-height:48px;
+  opacity:1;
+  pointer-events:auto;
+  transform: translateY(0);
+  margin-top:6px;
+}
 
 .dmReplyContext{
   width:100%;

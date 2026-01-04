@@ -3598,9 +3598,9 @@ function renderDmMessages(threadId){
     row.className = "dmRow" + (isSelf ? " self" : "") + gClass;
     row.dataset.dmMid = m.messageId || m.id;
 
-    // Actions rail (outside the bubble)
+    // Actions bar (reveals below the bubble; does NOT reserve horizontal space)
     const actions = document.createElement("div");
-    actions.className = "dmActionsRail";
+    actions.className = "dmActionsBar";
 
     const reactBtn = document.createElement("button");
     reactBtn.type = "button";
@@ -3749,20 +3749,15 @@ function renderDmMessages(threadId){
 
     bubbleWrap.appendChild(bubble);
     bubbleWrap.appendChild(meta);
+    // Actions live below the meta (and do not affect horizontal alignment/width when closed)
+    bubbleWrap.appendChild(actions);
 
     // If we already have reactions cached for this message, render them now.
     const midKey = String(m.messageId || m.id);
     if (dmReactionsCache[midKey]) renderDmReactions(midKey, dmReactionsCache[midKey]);
 
-    // Order: for self messages, actions on the LEFT of the bubble;
-    // for incoming messages, actions on the RIGHT.
-    if (isSelf) {
-      row.appendChild(actions);
-      row.appendChild(bubbleWrap);
-    } else {
-      row.appendChild(bubbleWrap);
-      row.appendChild(actions);
-    }
+    // Only the bubble stack goes into the row (actions are inside bubbleWrap).
+    row.appendChild(bubbleWrap);
 
     // Mobile/desktop: tap/click the row to toggle actions
     const toggleActions = (e) => {
