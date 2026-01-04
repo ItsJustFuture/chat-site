@@ -3000,7 +3000,7 @@ body.lockScroll{ overflow:hidden; }
 .dmRow:not(.self) .dmActionsRail{ order:2; }
 
 /* Reduce reserved space between bubbles and action rails */
-.dmRow{ gap:6px; }
+.dmRow{ gap:0px; }
 
 .dmActionsRail{
   display:flex;
@@ -3031,23 +3031,40 @@ body.lockScroll{ overflow:hidden; }
   opacity:1;
   pointer-events:auto;
 }
+
+/* Remove the "always-on" gap: only add spacing when the actions rail is actually open */
+@media (hover:hover){
+  .dmRow:hover.self .dmActionsRail{ margin-right:6px; }
+  .dmRow:hover:not(.self) .dmActionsRail{ margin-left:6px; }
+}
+.dmRow.showActions.self .dmActionsRail{ margin-right:6px; }
+.dmRow.showActions:not(.self) .dmActionsRail{ margin-left:6px; }
 .dmBubbleWrap{
   display:flex;
   flex-direction:column;
+  /* Prevent flex-column from stretching bubbles to full width */
+  align-items:flex-start;
   flex: 0 1 auto;
   min-width:0;
   max-width:66%;
 }
+.dmRow.self .dmBubbleWrap{
+  align-items:flex-end;
+}
+
 .dmBubble{
-  display:inline-block;
+  display:inline-flex;
+  flex:0 0 auto;
+  width:fit-content;
+  max-width:100%;
   padding:10px 12px;
   border-radius:14px;
   background: var(--panel);
   border:1px solid var(--line);
-  max-width:100%;
   overflow-wrap:anywhere;
   word-break:break-word;
 }
+
 .dmBubble.self{
   background: var(--bubbleSelf);
   color:#fff;
