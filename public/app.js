@@ -386,6 +386,9 @@ const Sound = (() => {
   const KEY_ROOM = "soundRoom";
   const KEY_DM = "soundDm";
   const KEY_MENTION = "soundMention";
+  const KEY_SENT = "soundSent";
+  const KEY_RECEIVE = "soundReceive";
+  const KEY_REACTION = "soundReaction";
 
   let ctx = null;
 
@@ -402,6 +405,9 @@ const Sound = (() => {
   function roomOn(){ return getBool(KEY_ROOM, true); }
   function dmOn(){ return getBool(KEY_DM, true); }
   function mentionOn(){ return getBool(KEY_MENTION, true); }
+  function sentOn(){ return getBool(KEY_SENT, false); }
+  function receiveOn(){ return getBool(KEY_RECEIVE, false); }
+  function reactionOn(){ return getBool(KEY_REACTION, false); }
 
   async function ensureUnlocked(){
     if (!enabled()) return false;
@@ -453,19 +459,46 @@ const Sound = (() => {
     room: () => beep({ freq: 520, dur: 0.05, vol: 0.045 }),
     dm: () => { beep({ freq: 740, dur: 0.05, vol: 0.05 }); setTimeout(()=>beep({ freq: 980, dur: 0.05, vol: 0.04 }), 70); },
     mention: () => beep({ freq: 880, dur: 0.06, vol: 0.05, type: "triangle" }),
+    sent: () => beep({ freq: 600, dur: 0.05, vol: 0.04, type: "sine" }),
+    receive: () => beep({ freq: 460, dur: 0.06, vol: 0.045, type: "sine" }),
+    reaction: () => beep({ freq: 760, dur: 0.05, vol: 0.035, type: "triangle" }),
   };
 
   function shouldRoom(){ return enabled() && roomOn(); }
   function shouldDm(){ return enabled() && dmOn(); }
   function shouldMention(){ return enabled() && mentionOn(); }
+  function shouldSent(){ return enabled() && sentOn(); }
+  function shouldReceive(){ return enabled() && receiveOn(); }
+  function shouldReaction(){ return enabled() && reactionOn(); }
+
+  function exportPrefs(){
+    return {
+      enabled: enabled(),
+      room: roomOn(),
+      dm: dmOn(),
+      mention: mentionOn(),
+      sent: sentOn(),
+      receive: receiveOn(),
+      reaction: reactionOn(),
+    };
+  }
+
+  function importPrefs(p = {}){
+    if (!p || typeof p !== "object") return;
+    for (const [key, store] of [["enabled", KEY_ENABLED], ["room", KEY_ROOM], ["dm", KEY_DM], ["mention", KEY_MENTION], ["sent", KEY_SENT], ["receive", KEY_RECEIVE], ["reaction", KEY_REACTION]]) {
+      if (typeof p[key] === "boolean") setBool(store, p[key]);
+    }
+  }
 
   return {
-    keys: { KEY_ENABLED, KEY_ROOM, KEY_DM, KEY_MENTION },
-    get: { enabled, roomOn, dmOn, mentionOn },
+    keys: { KEY_ENABLED, KEY_ROOM, KEY_DM, KEY_MENTION, KEY_SENT, KEY_RECEIVE, KEY_REACTION },
+    get: { enabled, roomOn, dmOn, mentionOn, sentOn, receiveOn, reactionOn },
     set: { setBool },
     ensureUnlocked,
     cues,
-    shouldRoom, shouldDm, shouldMention
+    exportPrefs,
+    importPrefs,
+    shouldRoom, shouldDm, shouldMention, shouldSent, shouldReceive, shouldReaction
   };
 })();
 /* ---- Sound unlock helper: attempt resume on first user gesture ---- */
@@ -701,6 +734,10 @@ let leaderboardsLoaded = false;
 let leaderboardsLoading = false;
 const recentDiceRolls = new Map();
 const diceRollTimers = new Map();
+let typingUsers = new Set();
+const typingPhraseCache = new Map();
+let activeDmUsers = new Set();
+let diceCooldownUntil = 0;
 const DICE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
 
 const THEME_LIST = [
@@ -827,6 +864,9 @@ const prefSoundEnabled = document.getElementById("prefSoundEnabled");
 const prefSoundRoom = document.getElementById("prefSoundRoom");
 const prefSoundDm = document.getElementById("prefSoundDm");
 const prefSoundMention = document.getElementById("prefSoundMention");
+const prefSoundSent = document.getElementById("prefSoundSent");
+const prefSoundReceive = document.getElementById("prefSoundReceive");
+const prefSoundReaction = document.getElementById("prefSoundReaction");
 const prefSoundStatus = document.getElementById("prefSoundStatus");
 
 
@@ -1061,6 +1101,7 @@ const modalAvatar = document.getElementById("modalAvatar");
 const modalName = document.getElementById("modalName");
 const modalRole = document.getElementById("modalRole");
 const modalMood = document.getElementById("modalMood");
+const profileVibes = document.getElementById("profileVibes");
 const mediaLightbox = document.getElementById("mediaLightbox");
 const mediaLightboxImg = document.getElementById("mediaLightboxImg");
 const mediaLightboxVideo = document.getElementById("mediaLightboxVideo");
@@ -1095,6 +1136,7 @@ const xpProgress = document.getElementById("xpProgress");
 const xpNote = document.getElementById("xpNote");
 const levelToast = document.getElementById("levelToast");
 const levelToastText = document.getElementById("levelToastText");
+const profileSheetVibes = document.getElementById("profileSheetVibes");
 
 const directBadgeColor = document.getElementById("directBadgeColor");
 const groupBadgeColor = document.getElementById("groupBadgeColor");
@@ -1109,6 +1151,7 @@ const avatarFile = document.getElementById("avatarFile");
 const editMood = document.getElementById("editMood");
 const editAge = document.getElementById("editAge");
 const editGender = document.getElementById("editGender");
+const vibeTagOptions = document.getElementById("vibeTagOptions");
 const editBio = document.getElementById("editBio");
 const saveProfileBtn = document.getElementById("saveProfileBtn");
 const refreshProfileBtn = document.getElementById("refreshProfileBtn");
@@ -1606,6 +1649,7 @@ const STATUS_ALIASES = {
   "Looking to Chat": "Chatting",
   "Invisible": "Lurking",
 };
+const VIBE_TAG_OPTIONS = ["Chill", "Chaotic", "Night Owl", "Cozy", "Loud", "Quiet", "Curious", "Unhinged", "Friendly", "Competitive"];
 function normalizeStatusLabel(status, fallback=""){
   const raw = String(status || "").trim();
   if(!raw) return fallback;
@@ -1623,6 +1667,19 @@ function statusDotColor(status){
     case "Lurking": return "var(--gray)";
     default: return "var(--accent)";
   }
+}
+
+function sanitizeVibeTagsClient(raw){
+  const arr = Array.isArray(raw) ? raw : [];
+  const out = [];
+  arr.forEach((v) => {
+    if (out.length >= 3) return;
+    const val = String(v || "").trim();
+    if (!val) return;
+    const hit = VIBE_TAG_OPTIONS.find((opt) => opt.toLowerCase() === val.toLowerCase());
+    if (hit && !out.includes(hit)) out.push(hit);
+  });
+  return out;
 }
 function roleBadgeColor(role){
   switch(role){
@@ -1683,13 +1740,56 @@ function roleKey(role){
   return "member";
 }
 
-function avatarNode(url, fallbackText, role){
+function presenceFlags(username, explicitStatus){
+  const key = normKey(username);
+  const u = (lastUsers || []).find((user) => normKey(user?.name) === key || normKey(user?.username) === key);
+  const status = normalizeStatusLabel(explicitStatus || u?.status || "Online", "Online");
+  const isIdle = status === "Idle" || status === "Away";
+  const isTyping = key && typingUsers.has(key);
+  const isActiveDm = key && activeDmUsers.has(key);
+  return { status, isIdle, isTyping, isActiveDm };
+}
+
+function applyPresenceAura(el, username, opts = {}){
+  if (!el || !el.classList) return;
+  const key = normKey(username || opts.username || "");
+  if (key) el.dataset.username = key;
+  const { status, isIdle, isTyping, isActiveDm } = presenceFlags(key, opts.status);
+  el.classList.add("presenceAura");
+  el.classList.toggle("isTyping", !!isTyping);
+  el.classList.toggle("isActiveDm", !!isActiveDm);
+  el.classList.toggle("isIdle", !!isIdle);
+  el.classList.toggle("isOnline", !isIdle);
+  if (status) el.dataset.status = status;
+}
+
+function updatePresenceAuras(){
+  document.querySelectorAll(".presenceAura").forEach((el)=>{
+    const name = el.dataset.username || el.getAttribute("data-username") || el.getAttribute("alt") || "";
+    applyPresenceAura(el, name);
+  });
+}
+
+function typingPhraseFor(name){
+  const key = normKey(name);
+  const now = Date.now();
+  const existing = typingPhraseCache.get(key);
+  if (existing && now - existing.ts < 3500) return existing.text;
+  const base = TYPING_PHRASES[Math.floor(Math.random()*TYPING_PHRASES.length)] || "{name} is typing…";
+  const text = base.replace("{name}", name);
+  typingPhraseCache.set(key, { text, ts: now });
+  return text;
+}
+
+function avatarNode(url, fallbackText, role, presenceName){
   const rKey = roleKey(role);
+  const pName = presenceName || fallbackText;
 
   const buildFallback = () => {
     const wrap=document.createElement("div");
     wrap.className = `avatarFallback role-${rKey}` + (rKey === "vip" ? " vipDiamond" : "");
     wrap.textContent=(fallbackText||"?").slice(0,1).toUpperCase();
+    applyPresenceAura(wrap, pName);
     return wrap;
   };
 
@@ -1702,6 +1802,7 @@ function avatarNode(url, fallbackText, role){
     img.onerror = () => {
       img.replaceWith(buildFallback());
     };
+    applyPresenceAura(img, pName);
     return img;
   }
   return buildFallback();
@@ -1737,12 +1838,14 @@ function makeAvatarEl({ username, role, avatarUrl, size = 34 }) {
     };
 
     el.appendChild(img);
+    applyPresenceAura(el, username);
     return el;
   }
 
   // No avatar URL -> default gradient fallback
   el.classList.add("avatarFallback", `role-${roleKey(role)}`);
   el.textContent = (username || "?").slice(0, 1).toUpperCase();
+  applyPresenceAura(el, username);
   return el;
 }
 
@@ -1751,10 +1854,10 @@ function getUserMeta(username){
   const name = String(username || "");
   const meName = String(me?.username || "");
   if (name && meName && name.toLowerCase() === meName.toLowerCase()) {
-    return { role: me?.role || "member", avatarUrl: me?.avatar || me?.avatarUrl || null, username: meName };
+    return { role: me?.role || "member", avatarUrl: me?.avatar || me?.avatarUrl || null, username: meName, status: me?.status || "Online", vibe_tags: sanitizeVibeTagsClient(me?.vibe_tags) };
   }
   const u = (lastUsers || []).find(x => String((x.username||x.name||"")).toLowerCase() === name.toLowerCase());
-  return { role: u?.role || "member", avatarUrl: u?.avatar || u?.avatarUrl || null, username: u?.username || u?.name || name };
+  return { role: u?.role || "member", avatarUrl: u?.avatar || u?.avatarUrl || null, username: u?.username || u?.name || name, status: u?.status, vibe_tags: sanitizeVibeTagsClient(u?.vibe_tags) };
 }
 
 
@@ -1762,6 +1865,8 @@ function clearMsgs(){
   msgs.innerHTML="";
   typingEl.textContent="";
   msgIndex.length=0;
+  typingUsers = new Set();
+  updatePresenceAuras();
 }
 function addSystem(text){
   const div=document.createElement("div");
@@ -1782,6 +1887,7 @@ function addSystem(text){
 }
 
 let commandPopupDismissed=false;
+let selectedVibeTags = [];
 function hideCommandPopup(){
   commandPopup.classList.remove("show");
 }
@@ -2050,6 +2156,10 @@ async function loadUserPrefs(){
       dmThemePrefs = { ...dmThemeDefaults, ...prefs.dmThemePrefs };
       applyDmThemePrefs();
       saveDmThemePrefsToStorage();
+    }
+    if (prefs.sound && typeof prefs.sound === "object") {
+      Sound.importPrefs(prefs.sound);
+      syncSoundPrefsUI(false);
     }
   }catch{}
 }
@@ -2494,6 +2604,12 @@ try{
   });
 
   body.appendChild(item);
+
+  if (m.__fresh) {
+    item.classList.add("msg-appear");
+    setTimeout(() => item.classList.remove("msg-appear"), 220);
+    delete m.__fresh;
+  }
 
 
 // Mark grouped messages so bubbles visually merge into one
@@ -3017,6 +3133,19 @@ function renderMembers(users){
     meta.appendChild(name);
     meta.appendChild(sub);
 
+    const vibes = sanitizeVibeTagsClient(u.vibe_tags);
+    if (vibes.length) {
+      const vibeRow = document.createElement("div");
+      vibeRow.className = "vibeRow";
+      vibes.forEach((v)=>{
+        const chip = document.createElement("span");
+        chip.className = "vibeChip mini";
+        chip.textContent = v;
+        vibeRow.appendChild(chip);
+      });
+      meta.appendChild(vibeRow);
+    }
+
     const roll = recentDiceRolls.get(normKey(u.name));
     if (roll && Date.now() - (roll.ts || 0) < 7000) {
       const rollRow = document.createElement("div");
@@ -3035,6 +3164,7 @@ function renderMembers(users){
     };
     memberList.appendChild(row);
   });
+  updatePresenceAuras();
 }
 
 function cleanupRecentDiceRolls(maxAge = 7000){
@@ -3546,6 +3676,8 @@ function closeDmPanel(){
     try { socket?.emit("dm leave", { threadId: activeDmId }); } catch {}
   }
   activeDmId = null;
+  activeDmUsers = new Set();
+  updatePresenceAuras();
 }
 
 
@@ -3778,6 +3910,11 @@ function renderDmMessages(threadId){
     bubble.addEventListener("click", toggleActions);
     bubble.addEventListener("touchstart", toggleActions, { passive:false });
 
+    if (m.__fresh) {
+      row.classList.add("msg-appear");
+      setTimeout(() => row.classList.remove("msg-appear"), 220);
+      delete m.__fresh;
+    }
     dmMessagesEl.appendChild(row);
   }
 
@@ -3850,10 +3987,14 @@ function setDmMeta(thread){
     dmMetaTitle.textContent = "Pick a thread";
     dmMetaPeople.textContent = "";
     if (dmMetaAvatar) dmMetaAvatar.innerHTML = "";
+    activeDmUsers = new Set();
+    updatePresenceAuras();
     return;
   }
   dmMetaTitle.textContent = threadLabel(thread);
   const names = thread.participants || [];
+  activeDmUsers = new Set(names.map(normKey));
+  activeDmUsers.delete(normKey(me?.username));
   dmMetaPeople.textContent = thread.is_group
     ? `${names.length} member${names.length === 1 ? "" : "s"}`
     : names.join(", ");
@@ -3885,6 +4026,7 @@ function setDmMeta(thread){
       }
     }catch{}
   }
+  updatePresenceAuras();
 }
 
 function openDmThread(threadId){
@@ -3964,6 +4106,8 @@ function sendDmMessage(){
     replyToId: dmReplyTarget?.id || null,
     attachment: att ? { url: att.url, mime: att.mime, type: att.type, size: att.size } : null
   });
+
+  if (Sound.shouldSent()) Sound.cues.sent();
 
   dmText.value = "";
   dmPendingAttachment = null;
@@ -4347,6 +4491,13 @@ dmUserBtn?.addEventListener("click", () => {
 // upload button icon -> open file picker
 pickFileBtn?.addEventListener("click", () => {
   if (currentRoom === "diceroom") {
+    const now = Date.now();
+    if (now < diceCooldownUntil) {
+      const left = Math.max(1, Math.ceil((diceCooldownUntil - now) / 1000));
+      addSystem(`Roll available in ${left}s`);
+      return;
+    }
+    diceCooldownUntil = now + 3000;
     socket?.emit("dice:roll");
   } else {
     fileInput.click();
@@ -4952,6 +5103,14 @@ function setDmReplyTarget(target){
 
 // typing/send
 let typingDebounce=null;
+const TYPING_PHRASES = [
+  "{name} is thinking…",
+  "{name} is typing aggressively…",
+  "{name} is composing a message…",
+  "{name} is pondering their words…",
+  "{name} is mashing keys softly…",
+  "{name} is crafting a reply…"
+];
 function emitTyping(){
   if(!socket) return;
   socket.emit("typing");
@@ -4993,6 +5152,8 @@ async function sendMessage(){
       attachmentMime: attachment?.mime || "",
       attachmentSize: attachment?.size || 0
     });
+
+    if (Sound.shouldSent()) Sound.cues.sent();
 
     msgInput.value="";
     setReplyTarget(null);
@@ -5144,6 +5305,7 @@ async function loadMyProfile(){
   me.username = p.username;
   me.role = p.role;
   me.level = p.level || me.level;
+  me.vibe_tags = sanitizeVibeTagsClient(p.vibe_tags);
 
   applyProgressionPayload(p);
 
@@ -5152,6 +5314,45 @@ async function loadMyProfile(){
   meAvatar.innerHTML="";
   meAvatar.appendChild(avatarNode(p.avatar, p.username, p.role));
   renderLevelProgress(progression, true);
+  renderVibeOptions(me.vibe_tags || []);
+}
+
+function renderVibeChips(targetEl, tags){
+  if(!targetEl) return;
+  const vibes = sanitizeVibeTagsClient(tags);
+  targetEl.innerHTML = "";
+  if(!vibes.length){ targetEl.style.display = "none"; return; }
+  targetEl.style.display = "flex";
+  vibes.forEach((tag)=>{
+    const chip = document.createElement("span");
+    chip.className = "vibeChip";
+    chip.textContent = tag;
+    targetEl.appendChild(chip);
+  });
+}
+
+function renderVibeOptions(selected = []){
+  if(!vibeTagOptions) return;
+  selectedVibeTags = sanitizeVibeTagsClient(selected);
+  vibeTagOptions.innerHTML = "";
+  VIBE_TAG_OPTIONS.forEach((tag)=>{
+    const btn = document.createElement("button");
+    btn.type = "button";
+    const active = selectedVibeTags.includes(tag);
+    btn.className = "pillBtn" + (active ? " active" : "");
+    btn.textContent = tag;
+    btn.addEventListener("click", ()=>{
+      const on = selectedVibeTags.includes(tag);
+      if(on){
+        selectedVibeTags = selectedVibeTags.filter((t)=>t!==tag);
+      } else {
+        if(selectedVibeTags.length >= 3) return;
+        selectedVibeTags = [...selectedVibeTags, tag];
+      }
+      renderVibeOptions(selectedVibeTags);
+    });
+    vibeTagOptions.appendChild(btn);
+  });
 }
 
 function fillProfileUI(p, isSelf){
@@ -5174,6 +5375,7 @@ function fillProfileUI(p, isSelf){
   renderLevelProgress(p, isSelf);
   syncProfileLikes(p, isSelf);
   if (profileLikeMsg) profileLikeMsg.textContent = "";
+  renderVibeChips(profileVibes, p.vibe_tags);
 }
 
 
@@ -5199,6 +5401,7 @@ function fillProfileSheetHeader(p, isSelf){
   const statusLabel = normalizeStatusLabel(p.last_status, "");
   const status = statusLabel ? `• ${statusLabel}` : "";
   if (profileSheetSub) profileSheetSub.textContent = `${mood} ${status} ${room}`.trim();
+  renderVibeChips(profileSheetVibes, p.vibe_tags);
 
   // Stats (likes are real; "stars" is a placeholder hook you can wire later)
   if (profileSheetStats){
@@ -5232,22 +5435,29 @@ function applyProfileMenuVisibility(){
 function syncSoundPrefsUI(tryUnlock = false){
   if (!prefSoundEnabled) return;
 
-  // Defaults: master off, individual on (so enabling master immediately works)
-  const k = Sound.keys;
-  const enabled = (localStorage.getItem(k.KEY_ENABLED) === "1");
-  const roomOn = (localStorage.getItem(k.KEY_ROOM) !== "0");      // default true
-  const dmOn = (localStorage.getItem(k.KEY_DM) !== "0");          // default true
-  const mentionOn = (localStorage.getItem(k.KEY_MENTION) !== "0");// default true
+  const enabled = Sound.get.enabled();
+  const roomOn = Sound.get.roomOn();
+  const dmOn = Sound.get.dmOn();
+  const mentionOn = Sound.get.mentionOn();
+  const sentOn = Sound.get.sentOn();
+  const receiveOn = Sound.get.receiveOn();
+  const reactionOn = Sound.get.reactionOn();
 
   prefSoundEnabled.checked = enabled;
   if (prefSoundRoom) prefSoundRoom.checked = roomOn;
   if (prefSoundDm) prefSoundDm.checked = dmOn;
   if (prefSoundMention) prefSoundMention.checked = mentionOn;
+  if (prefSoundSent) prefSoundSent.checked = sentOn;
+  if (prefSoundReceive) prefSoundReceive.checked = receiveOn;
+  if (prefSoundReaction) prefSoundReaction.checked = reactionOn;
 
   const subDisabled = !enabled;
   if (prefSoundRoom) prefSoundRoom.disabled = subDisabled;
   if (prefSoundDm) prefSoundDm.disabled = subDisabled;
   if (prefSoundMention) prefSoundMention.disabled = subDisabled;
+  if (prefSoundSent) prefSoundSent.disabled = subDisabled;
+  if (prefSoundReceive) prefSoundReceive.disabled = subDisabled;
+  if (prefSoundReaction) prefSoundReaction.disabled = subDisabled;
 
   if (prefSoundStatus){
     prefSoundStatus.textContent = enabled
@@ -5275,12 +5485,16 @@ function wireSoundPrefs(){
   if (localStorage.getItem(k.KEY_ROOM) === null) localStorage.setItem(k.KEY_ROOM, "1");
   if (localStorage.getItem(k.KEY_DM) === null) localStorage.setItem(k.KEY_DM, "1");
   if (localStorage.getItem(k.KEY_MENTION) === null) localStorage.setItem(k.KEY_MENTION, "1");
+  if (localStorage.getItem(k.KEY_SENT) === null) localStorage.setItem(k.KEY_SENT, "0");
+  if (localStorage.getItem(k.KEY_RECEIVE) === null) localStorage.setItem(k.KEY_RECEIVE, "0");
+  if (localStorage.getItem(k.KEY_REACTION) === null) localStorage.setItem(k.KEY_REACTION, "0");
 
   syncSoundPrefsUI(false);
 
   prefSoundEnabled.addEventListener("change", async () => {
     Sound.set.setBool(k.KEY_ENABLED, prefSoundEnabled.checked);
     syncSoundPrefsUI(true);
+    queuePersistPrefs({ sound: Sound.exportPrefs() });
 
     // User gesture here: attempt to unlock + play a tiny confirmation
     if (prefSoundEnabled.checked) {
@@ -5304,16 +5518,37 @@ function wireSoundPrefs(){
   prefSoundRoom?.addEventListener("change", () => {
     Sound.set.setBool(k.KEY_ROOM, prefSoundRoom.checked);
     syncSoundPrefsUI(false);
+    queuePersistPrefs({ sound: Sound.exportPrefs() });
   });
 
   prefSoundDm?.addEventListener("change", () => {
     Sound.set.setBool(k.KEY_DM, prefSoundDm.checked);
     syncSoundPrefsUI(false);
+    queuePersistPrefs({ sound: Sound.exportPrefs() });
   });
 
   prefSoundMention?.addEventListener("change", () => {
     Sound.set.setBool(k.KEY_MENTION, prefSoundMention.checked);
     syncSoundPrefsUI(false);
+    queuePersistPrefs({ sound: Sound.exportPrefs() });
+  });
+
+  prefSoundSent?.addEventListener("change", () => {
+    Sound.set.setBool(k.KEY_SENT, prefSoundSent.checked);
+    syncSoundPrefsUI(false);
+    queuePersistPrefs({ sound: Sound.exportPrefs() });
+  });
+
+  prefSoundReceive?.addEventListener("change", () => {
+    Sound.set.setBool(k.KEY_RECEIVE, prefSoundReceive.checked);
+    syncSoundPrefsUI(false);
+    queuePersistPrefs({ sound: Sound.exportPrefs() });
+  });
+
+  prefSoundReaction?.addEventListener("change", () => {
+    Sound.set.setBool(k.KEY_REACTION, prefSoundReaction.checked);
+    syncSoundPrefsUI(false);
+    queuePersistPrefs({ sound: Sound.exportPrefs() });
   });
 }
 
@@ -5424,6 +5659,8 @@ modalTargetUsername = p.username;
   editAge.value=(p.age ?? "");
   editGender.value=p.gender||"";
   editBio.value=p.bio||"";
+  selectedVibeTags = sanitizeVibeTagsClient(p.vibe_tags);
+  renderVibeOptions(selectedVibeTags);
   avatarFile.value="";
   profileMsg.textContent="";
 
@@ -5440,6 +5677,7 @@ saveProfileBtn.addEventListener("click", async ()=>{
   form.append("age", editAge.value);
   form.append("gender", editGender.value);
   form.append("bio", editBio.value);
+  form.append("vibeTags", JSON.stringify(selectedVibeTags || []));
   if(avatarFile.files[0]) form.append("avatar", avatarFile.files[0]);
 
   const res=await fetch("/profile", {method:"POST", body:form});
@@ -5853,11 +6091,20 @@ socket.on("disconnect", (reason) => {
   }
 
   socket.on("dice:result", ({value, won}) => {
+    diceCooldownUntil = Date.now() + 3000;
     showDiceAnimation(value, won);
     // refresh gold display if you already have a refresh_toggle function
     if (typeof refreshMe === "function") refreshMe();
   });
-  socket.on("dice:error", (msg)=> addSystem(msg));
+  socket.on("dice:error", (msg)=> {
+    const m = String(msg||"");
+    const match = m.match(/in (\d+(?:\.\d+)?)s/i);
+    if (match) {
+      const waitMs = Math.max(0, Number(match[1]) * 1000);
+      diceCooldownUntil = Date.now() + waitMs;
+    }
+    addSystem(msg);
+  });
   socket.on("dice:rolled", ({value, won, username}) => {
     // show animation for other rollers too (nice-to-have)
     showDiceAnimation(value, won);
@@ -5867,10 +6114,17 @@ socket.on("disconnect", (reason) => {
   socket.on("command response", handleCommandResponse);
   socket.on("user list", (users)=>renderMembers(users));
   socket.on("typing update", (names)=>{
-    const others=(names||[]).filter(n=>n!==me.username);
-    typingEl.textContent = others.length
-      ? (others.length===1 ? `${others[0]} is typing...` : `${others.join(", ")} are typing...`)
-      : "";
+    typingUsers = new Set((names || []).map(normKey));
+    const others=(names||[]).filter(n=>normKey(n)!==normKey(me.username));
+    let text="";
+    if(others.length===1) text = typingPhraseFor(others[0]);
+    else if(others.length>1){
+      const parts = others.slice(0,2).map(typingPhraseFor);
+      text = parts.join(" • ");
+      if(others.length>2) text += ` (+${others.length-2})`;
+    }
+    typingEl.textContent = text;
+    updatePresenceAuras();
   });
   socket.on("level up", ({ level }) => {
     if(level) progression.level = level;
@@ -5888,6 +6142,7 @@ socket.on("disconnect", (reason) => {
     applySearch();
   });
   socket.on("chat message", (m)=>{
+    m.__fresh = true;
     safeAddMessage(m);
     applySearch();
 
@@ -5898,13 +6153,16 @@ socket.on("disconnect", (reason) => {
       if (from && self && from !== self) {
         const txt = String(m?.text || "");
         const mentioned = self && txt.toLowerCase().includes("@"+self.toLowerCase());
+        let played = false;
+        if (Sound.shouldReceive()) { Sound.cues.receive(); played = true; }
         if (mentioned && Sound.shouldMention()) Sound.cues.mention();
-        else if (Sound.shouldRoom()) Sound.cues.room();
+        else if (!played && Sound.shouldRoom()) Sound.cues.room();
       }
     }catch{}
   });
-    socket.on("reaction update", ({ messageId, reactions }) => {
+  socket.on("reaction update", ({ messageId, reactions }) => {
     renderReactions(messageId, reactions);
+    if (Sound.shouldReaction()) Sound.cues.reaction();
   });
 
   socket.on("message deleted", ({ messageId }) => {
@@ -6015,6 +6273,7 @@ socket.on("dm history", (payload) => {
 
   socket.on("dm message", (m) => {
   try {
+    m.__fresh = true;
     const arr = dmMessages.get(m.threadId) || [];
     arr.push(m);
     dmMessages.set(m.threadId, arr);
@@ -6028,8 +6287,10 @@ socket.on("dm history", (payload) => {
       if (self && from && from !== self) {
         const txt = String(m?.text || "");
         const mentioned = self && txt.toLowerCase().includes("@"+self.toLowerCase());
+        let played = false;
+        if (Sound.shouldReceive()) { Sound.cues.receive(); played = true; }
         if (mentioned && Sound.shouldMention()) Sound.cues.mention();
-        else if (Sound.shouldDm()) Sound.cues.dm();
+        else if (!played && Sound.shouldDm()) Sound.cues.dm();
       }
     }catch{}
 
@@ -6079,6 +6340,7 @@ socket.on("dm history", (payload) => {
     dmReactionsCache[midKey] = reactions || {};
     // Only render if the message is currently in the DOM.
     renderDmReactions(midKey, dmReactionsCache[midKey]);
+    if (Sound.shouldReaction()) Sound.cues.reaction();
   });
 
   socket.on("dm message deleted", ({ threadId, messageId }) => {

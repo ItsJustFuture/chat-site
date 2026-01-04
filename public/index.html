@@ -502,6 +502,7 @@
                 <span class="statPill" id="profileSheetLikes">♡ 0</span>
               </div>
               <div class="profileSheetSub" id="profileSheetSub"></div>
+              <div class="vibeRow" id="profileSheetVibes"></div>
             </div>
           </div>
         </div>
@@ -590,6 +591,21 @@
         <input id="prefSoundMention" type="checkbox">
       </div>
 
+      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <label style="margin:0;">Message sent</label>
+        <input id="prefSoundSent" type="checkbox">
+      </div>
+
+      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <label style="margin:0;">Message received</label>
+        <input id="prefSoundReceive" type="checkbox">
+      </div>
+
+      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <label style="margin:0;">Reaction added</label>
+        <input id="prefSoundReaction" type="checkbox">
+      </div>
+
       <div class="small" id="prefSoundStatus" style="margin-top:8px;"></div>
     </div>
   </div>
@@ -635,6 +651,12 @@
                               <option value="Other">Other</option>
                             </select>
                           </div>
+                        </div>
+
+                        <div class="field">
+                          <label>Vibe tags (pick up to 3)</label>
+                          <div class="pillRow" id="vibeTagOptions"></div>
+                          <div class="small">Adds a few personality badges to your profile.</div>
                         </div>
 
                         <div class="field">
@@ -710,6 +732,7 @@
                   <div style="font-weight:900; font-size:16px;" id="modalName"></div>
                   <div class="badge" id="modalRole"></div>
                 </div>
+                <div class="vibeRow" id="profileVibes"></div>
                 <div class="small" id="modalMood"></div>
 
                 <div class="sectionTitle">Details</div>

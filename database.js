@@ -131,8 +131,10 @@ async function runSqliteMigrations() {
     ["lastDailyLoginGoldAt", "lastDailyLoginGoldAt INTEGER"],
     ["lastDiceRollAt", "lastDiceRollAt INTEGER"],
     ["dice_sixes", "dice_sixes INTEGER NOT NULL DEFAULT 0"],
+    ["vibe_tags", "vibe_tags TEXT"],
   ];
   await ensureColumns("users", userColumns);
+  await run("UPDATE users SET vibe_tags='[]' WHERE vibe_tags IS NULL");
   await run("UPDATE users SET prefs_json='{}' WHERE prefs_json IS NULL OR prefs_json='' ");
 
   await migrateLegacyPasswords();
