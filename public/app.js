@@ -996,7 +996,6 @@ dmMessagesEl?.addEventListener("scroll", ()=>{ dmPinned = isNearBottom(dmMessage
 const dmUserBtn = document.getElementById("dmUserBtn");
 const dmInfoBtn = document.getElementById("dmInfoBtn");
 const dmSettingsBtn = document.getElementById("dmSettingsBtn");
-const goldPill = document.getElementById("goldPill");
 const likeProfileBtn = document.getElementById("likeProfileBtn");
 const likeCount = document.getElementById("likeCount");
 const profileLikeMsg = document.getElementById("profileLikeMsg");
@@ -2905,13 +2904,8 @@ function updateGoldUI(){
     const g = Number(progression.gold || 0);
     memberGold.textContent = `Gold: ${g.toLocaleString()}`;
     memberGold.classList.add("show");
-    if (goldPill) {
-      goldPill.textContent = `💰 ${g.toLocaleString()}`;
-      goldPill.classList.add("show");
-    }
   } else {
     memberGold.classList.remove("show");
-    goldPill?.classList.remove("show");
   }
 }
 

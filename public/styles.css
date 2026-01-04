@@ -1977,20 +1977,7 @@ main.chat{
   border:1px solid var(--line); background:var(--panel); color:var(--text);
   outline:none;
 }
-.goldPill{
-  display:none;
-  align-items:center;
-  gap:6px;
-  padding:8px 10px;
-  border-radius:999px;
-  background:var(--panel);
-  border:1px solid var(--line);
-  font-weight:800;
-  font-size:13px;
-  line-height:1;
-  color:var(--text);
-}
-.goldPill.show{ display:inline-flex; }
+
 
 .msgs{
   flex:1;
@@ -3013,15 +3000,12 @@ body.lockScroll{ overflow:hidden; }
 .dmInfoSection .small{ color:var(--muted); }
 .bodyLocked{ overflow:hidden; }
 .mobOnly{ display:none; }
-.mobOnly.goldPill.show{ display:flex; }
 
 @media (max-width: 1260px){
   .dmPanel{ right: calc(16px + var(--membersW)); width:min(640px, 70vw); }
 }
 @media (max-width: 980px){
   .mobOnly{ display:flex; }
-  .mobOnly.goldPill{ display:none; }
-  .mobOnly.goldPill.show{ display:flex; }
   .members{ display:none; }
 
   .topbar{
