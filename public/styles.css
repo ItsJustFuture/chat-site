@@ -2032,7 +2032,12 @@ body.dice-room .sys .diceFace{
   flex-direction:column;
   gap:6px;
   min-width:0;
+  /* Don't stretch children to row width; let bubbles hug their content */
+  align-items:flex-start;
 }
+
+/* Self messages: keep bubble/meta aligned to the right without stretching */
+.msgItem.self .msgMain{ align-items:flex-end; }
 
 /* Collapsed by default: no height, no interaction */
 .msgMain .msgActions{
@@ -2046,7 +2051,8 @@ body.dice-room .sys .diceFace{
   overflow:hidden;
   max-height:0;
   opacity:0;
-  margin-top:0;
+  /* Cancel the .msgMain gap so NO space is reserved while collapsed */
+  margin-top:-6px;
   pointer-events:none;
   transform: translateY(-4px);
   transition: max-height .18s ease, opacity .15s ease, transform .18s ease, margin-top .18s ease;
@@ -2105,8 +2111,9 @@ body.dice-room .sys .diceFace{
   background:var(--messageOtherBg);
   color:var(--messageOtherText);
   padding:10px 12px; border-radius:var(--radiusLg);
-  display:flex; flex-direction:column; gap:6px;
-  min-width:140px;
+  display:inline-flex; flex-direction:column; gap:6px;
+  width:fit-content;
+  min-width:0;
   max-width:min(70vw, 720px);
   word-wrap:break-word;
   border:1px solid var(--border);
@@ -2198,7 +2205,8 @@ body.dice-room .sys .diceFace{
   overflow:hidden;
   max-height:0;
   opacity:0;
-  margin-top:0;
+  /* Cancel the .msgMain gap when collapsed so ZERO space is reserved */
+  margin-top:-6px;
   pointer-events:none;
   transform: translateY(-4px);
   transition: max-height .18s ease, opacity .15s ease, transform .18s ease, margin-top .18s ease;
