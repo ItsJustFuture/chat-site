@@ -1134,11 +1134,7 @@
   --warning: #ffd166;
   --shadow: 0 20px 70px rgba(0,0,0,0.45);
 }
-
-
-  50%  { transform: translate(-50%, -50%) scale(1.02); opacity: 0.80; filter: blur(16px) saturate(1.40) brightness(0.78); }
-  100% { transform: translate(-50%, -50%) scale(0.98); opacity: 0.55; filter: blur(16px) saturate(1.10) brightness(0.98); }
-}
+/* NOTE: removed stray keyframe fragments that could break CSS parsing */
 
 @keyframes irisLolaNeon {
   0%, 100% {
@@ -1948,6 +1944,10 @@ main.chat{
   justify-content:space-between;
   padding:0 14px;
   gap:10px;
+  width:100%;
+  max-width:100vw;
+  box-sizing:border-box;
+  overflow:hidden;
 }
 
 /* UI scale popover (topbar) */
@@ -3024,12 +3024,20 @@ body.lockScroll{ overflow:hidden; }
   .mobOnly.goldPill.show{ display:flex; }
   .members{ display:none; }
 
-  .topbar{ position: sticky; top: 0; z-index: 200; padding:0 10px; gap:8px; }
+  .topbar{
+    position: sticky;
+    top: 0;
+    z-index: 200;
+    padding:0 calc(10px + env(safe-area-inset-right)) 0 calc(10px + env(safe-area-inset-left));
+    gap:8px;
+  }
   /* --- iOS topbar tap fix: prevent wrapping causing buttons to overflow into content layer --- */
   .topbar .row{ flex-wrap: nowrap; }
   .topbar .row{ min-width: 0; }
+  .topbar .topLeft{ flex: 0 0 auto; }
+  .topbar .topActions{ flex: 1 1 auto; justify-content:flex-end; gap:8px; }
   .topbar .searchWrap{ min-width: 0; }
-  .topbar .searchWrap input{ width: 160px; max-width: 34vw; }
+  .topbar .searchWrap input{ width: 140px; max-width: 30vw; }
   .topbar .iconBtn{ flex: 0 0 auto; }
   .msgs{ padding:10px; gap:8px; padding-bottom: 12px; }
   .msg{ gap:8px; }
@@ -3335,7 +3343,12 @@ body.lockScroll{ overflow:hidden; }
 }
 
 @media (max-width: 520px){
-  .searchWrap input{ display:none; }
+  /* Topbar: keep essential buttons visible on narrow screens */
+  .topbar .searchWrap{ display:none; }
+  .topbar .levelToastInline{ display:none; }
+  .topbar{ gap:6px; }
+  .topbar .topActions{ gap:6px; }
+
   .uploadPreview{ flex-direction: column; align-items: stretch; }
   .uploadRight{ min-width: 0; width: 100%; }
   .ts{ display:none; }
@@ -3420,8 +3433,9 @@ main.chat{ position: relative; }
 }
 
 .logoutTop{
-  padding:6px 10px;
-  font-size:12px;
+  background:var(--panel);
+  border-color:var(--line);
+  font-size:18px;
 }
 
 .ytSticky{ position:sticky; top:0; z-index:40; margin:10px 0; transform:translateY(-120%); opacity:0; pointer-events:none; transition:transform 200ms ease, opacity 200ms ease; }
@@ -4065,13 +4079,7 @@ body[data-theme="Iris & Lola Neon"] #membersPane::after {
   pointer-events: none;
   z-index: 6;
 }
-
-  body[data-theme="Iris & Lola Neon"]::after {
-    top: 44%;
-    font-size: clamp(26px, 8vw, 44px);
-    opacity: 0.85;
-  }
-}
+/* NOTE: removed stray Iris & Lola Neon ::after block fragment */
 @media (max-width: 520px) {
   body[data-theme="Iris & Lola Neon"]::before {
     display: none;

@@ -219,12 +219,12 @@
 
       <main class="chat">
         <div class="topbar">
-          <div class="row" style="align-items:center; gap:10px;">
+          <div class="row topLeft" style="align-items:center; gap:10px;">
             <button class="iconBtn mobOnly" id="openChannelsBtn" type="button" title="Channels">☰</button>
-           <div class="roomTitle"><span id="roomTitle" class="srOnly">main</span><button class="btn secondary logoutTop" id="logoutTopBtn" type="button" title="Logout">Log out</button></div>
+           <div class="roomTitle"><span id="roomTitle" class="srOnly">main</span><button class="iconBtn logoutTop" id="logoutTopBtn" type="button" title="Logout" aria-label="Logout">⎋</button></div>
           </div>
 
-          <div class="row" style="align-items:center; gap:10px;">
+          <div class="row topActions" style="align-items:center; gap:10px;">
             <div class="searchWrap">
               <input id="searchInput" placeholder="Search messages...">
             </div>
@@ -233,7 +233,7 @@
             <button class="iconBtn withBadge" id="dmToggleBtn" type="button" title="Direct messages">💬<span class="notifDot" id="dmBadgeDot" title="New DMs"></span></button>
             <button class="iconBtn withBadge" id="groupDmToggleBtn" type="button" title="Group DMs">👥<span class="notifDot" id="groupDmBadgeDot" title="New group DMs"></span></button>
             <button class="iconBtn" id="uiScaleBtn" type="button" title="UI size">⚙️</button>
-<button class="iconBtn mobOnly" id="openMembersBtn" type="button" title="Members">👥</button>
+            <button class="iconBtn mobOnly" id="openMembersBtn" type="button" title="Members">👥</button>
           </div>
         </div>
 
