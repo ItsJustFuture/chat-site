@@ -1103,6 +1103,7 @@ const modalRole = document.getElementById("modalRole");
 const modalMood = document.getElementById("modalMood");
 const profileVibes = document.getElementById("profileVibes");
 const profileSheetHero = document.getElementById("profileSheetHero");
+const profileSheetBg = document.getElementById("profileSheetBg");
 const profileSheetAvatar = document.getElementById("profileSheetAvatar");
 const profileSheetAvatarActions = document.getElementById("profileSheetAvatarActions");
 const profileSheetName = document.getElementById("profileSheetName");
@@ -1162,6 +1163,10 @@ const saveBadgePrefsBtn = document.getElementById("saveBadgePrefsBtn");
 // my profile edit
 const myProfileEdit = document.getElementById("myProfileEdit");
 const avatarFile = document.getElementById("avatarFile");
+const headerColorA = document.getElementById("headerColorA");
+const headerColorB = document.getElementById("headerColorB");
+const headerColorAText = document.getElementById("headerColorAText");
+const headerColorBText = document.getElementById("headerColorBText");
 const editMood = document.getElementById("editMood");
 const editAge = document.getElementById("editAge");
 const editGender = document.getElementById("editGender");
@@ -2039,6 +2044,9 @@ function loadBadgePrefsFromStorage(){
     return { ...badgeDefaults };
   }
 }
+const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const PROFILE_GRADIENT_DEFAULT_A = "#ff6a2b";
+const PROFILE_GRADIENT_DEFAULT_B = "#2b0f08";
 function saveBadgePrefsToStorage(){
   try{ localStorage.setItem("dmBadgePrefs", JSON.stringify(badgePrefs)); }
   catch{}
@@ -2051,16 +2059,33 @@ function isValidCssColor(color){
   return s.color !== "";
 }
 function normalizeColorForInput(color, fallback){
-  const hexOk = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
-  if(hexOk.test(color || "")) return color;
-  if(hexOk.test(fallback || "")) return fallback;
+  if(HEX_COLOR_RE.test(color || "")) return color;
+  if(HEX_COLOR_RE.test(fallback || "")) return fallback;
   return "#000000";
+}
+function sanitizeHexColorInput(raw, fallback=""){
+  const c = String(raw || "").trim();
+  if(HEX_COLOR_RE.test(c)) return c;
+  if(HEX_COLOR_RE.test(fallback || "")) return fallback;
+  return "";
 }
 function sanitizeColor(raw, fallback, hardDefault){
   if(isValidCssColor(raw)) return raw.trim();
   if(isValidCssColor(fallback)) return fallback.trim();
   if(isValidCssColor(hardDefault)) return hardDefault.trim();
   return hardDefault || badgeDefaults.direct;
+}
+function buildProfileHeaderGradient(colorA, colorB){
+  const a = sanitizeHexColorInput(colorA, PROFILE_GRADIENT_DEFAULT_A) || PROFILE_GRADIENT_DEFAULT_A;
+  const b = sanitizeHexColorInput(colorB, PROFILE_GRADIENT_DEFAULT_B) || PROFILE_GRADIENT_DEFAULT_B;
+  return `
+    radial-gradient(900px 260px at 70% 30%, rgba(255,180,80,.45), transparent 60%),
+    linear-gradient(135deg, ${a}, ${b})
+  `;
+}
+function applyProfileHeaderBg(colorA, colorB){
+  if(!profileSheetBg) return;
+  profileSheetBg.style.background = buildProfileHeaderGradient(colorA, colorB);
 }
 function loadDmThemePrefsFromStorage(){
   try {
@@ -4636,6 +4661,7 @@ editDmBtn?.addEventListener("click", ()=>showEditPanel("dm"));
 wireProfileMenu();
 wireSoundPrefs();
 wireProfileAvatarActions();
+wireHeaderGradientInputs();
 tabInfo.addEventListener("click", ()=>setTab("info"));
 tabAbout.addEventListener("click", ()=>setTab("about"));
 tabCustomize?.addEventListener("click", ()=>setTab("customize"));
@@ -5365,8 +5391,59 @@ function renderVibeOptions(selected = []){
       }
       renderVibeOptions(selectedVibeTags);
     });
-    vibeTagOptions.appendChild(btn);
+  vibeTagOptions.appendChild(btn);
   });
+}
+
+function getHeaderGradientInputValues(){
+  const aRaw = headerColorAText?.value || headerColorA?.value;
+  const bRaw = headerColorBText?.value || headerColorB?.value;
+  const a = sanitizeHexColorInput(aRaw, PROFILE_GRADIENT_DEFAULT_A) || PROFILE_GRADIENT_DEFAULT_A;
+  const b = sanitizeHexColorInput(bRaw, PROFILE_GRADIENT_DEFAULT_B) || PROFILE_GRADIENT_DEFAULT_B;
+  return { a, b };
+}
+function syncHeaderGradientInputs(colorA, colorB){
+  const a = sanitizeHexColorInput(colorA, PROFILE_GRADIENT_DEFAULT_A) || PROFILE_GRADIENT_DEFAULT_A;
+  const b = sanitizeHexColorInput(colorB, PROFILE_GRADIENT_DEFAULT_B) || PROFILE_GRADIENT_DEFAULT_B;
+  if(headerColorA) headerColorA.value = normalizeColorForInput(a, PROFILE_GRADIENT_DEFAULT_A);
+  if(headerColorAText) headerColorAText.value = a;
+  if(headerColorB) headerColorB.value = normalizeColorForInput(b, PROFILE_GRADIENT_DEFAULT_B);
+  if(headerColorBText) headerColorBText.value = b;
+  applyProfileHeaderBg(a, b);
+}
+function wireHeaderGradientInputs(){
+  if(headerColorA && !headerColorA._wired){
+    headerColorA._wired = true;
+    headerColorA.addEventListener("input", () => {
+      const vals = getHeaderGradientInputValues();
+      if(headerColorAText) headerColorAText.value = vals.a;
+      applyProfileHeaderBg(vals.a, vals.b);
+    });
+  }
+  if(headerColorAText && !headerColorAText._wired){
+    headerColorAText._wired = true;
+    headerColorAText.addEventListener("input", () => {
+      const vals = getHeaderGradientInputValues();
+      if(headerColorA) headerColorA.value = normalizeColorForInput(vals.a, PROFILE_GRADIENT_DEFAULT_A);
+      applyProfileHeaderBg(vals.a, vals.b);
+    });
+  }
+  if(headerColorB && !headerColorB._wired){
+    headerColorB._wired = true;
+    headerColorB.addEventListener("input", () => {
+      const vals = getHeaderGradientInputValues();
+      if(headerColorBText) headerColorBText.value = vals.b;
+      applyProfileHeaderBg(vals.a, vals.b);
+    });
+  }
+  if(headerColorBText && !headerColorBText._wired){
+    headerColorBText._wired = true;
+    headerColorBText.addEventListener("input", () => {
+      const vals = getHeaderGradientInputValues();
+      if(headerColorB) headerColorB.value = normalizeColorForInput(vals.b, PROFILE_GRADIENT_DEFAULT_B);
+      applyProfileHeaderBg(vals.a, vals.b);
+    });
+  }
 }
 
 function isSelfProfile(p){
@@ -5380,12 +5457,16 @@ function isSelfProfile(p){
 }
 
 function fillProfileUI(p, isSelf){
-  modalAvatar.innerHTML="";
-  modalAvatar.appendChild(avatarNode(p.avatar, p.username, p.role));
-  modalName.textContent=p.username;
-  modalRole.textContent=`${roleIcon(p.role)} ${p.role}`;
-  modalRole.style.color=roleBadgeColor(p.role);
-  modalMood.textContent = p.mood ? `Mood: ${p.mood}` : "Mood: (none)";
+  if (modalAvatar){
+    modalAvatar.innerHTML="";
+    modalAvatar.appendChild(avatarNode(p.avatar, p.username, p.role));
+  }
+  if (modalName) modalName.textContent=p.username;
+  if (modalRole){
+    modalRole.textContent=`${roleIcon(p.role)} ${p.role}`;
+    modalRole.style.color=roleBadgeColor(p.role);
+  }
+  if (modalMood) modalMood.textContent = p.mood ? `Mood: ${p.mood}` : "Mood: (none)";
 
   infoAge.textContent = (p.age ?? "—");
   infoGender.textContent = (p.gender ?? "—");
@@ -5408,6 +5489,8 @@ function fillProfileUI(p, isSelf){
 
 function fillProfileSheetHeader(p, isSelf){
   if (!profileSheetHero) return;
+
+  applyProfileHeaderBg(p?.header_grad_a, p?.header_grad_b);
 
   // Avatar
   if (profileSheetAvatar){
@@ -5713,6 +5796,7 @@ modalTargetUsername = p.username;
   editBio.value=p.bio||"";
   selectedVibeTags = sanitizeVibeTagsClient(p.vibe_tags);
   renderVibeOptions(selectedVibeTags);
+  syncHeaderGradientInputs(p.header_grad_a, p.header_grad_b);
   avatarFile.value="";
   profileMsg.textContent="";
 
@@ -5731,6 +5815,9 @@ saveProfileBtn.addEventListener("click", async ()=>{
   form.append("gender", editGender.value);
   form.append("bio", editBio.value);
   form.append("vibeTags", JSON.stringify(selectedVibeTags || []));
+  const grad = getHeaderGradientInputValues();
+  form.append("headerColorA", grad.a);
+  form.append("headerColorB", grad.b);
   if(avatarFile.files[0]) form.append("avatar", avatarFile.files[0]);
 
   const res=await fetch("/profile", {method:"POST", body:form});

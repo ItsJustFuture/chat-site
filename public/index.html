@@ -472,7 +472,7 @@
      
         <!-- Profile sheet header (custom layout, not a clone) -->
         <div class="profileSheetHero" id="profileSheetHero">
-          <div class="profileSheetBg"></div>
+          <div class="profileSheetBg" id="profileSheetBg"></div>
 
           <div class="profileSheetContent">
             <div class="profileSheetAvatarCard">
@@ -531,7 +531,7 @@
             </button>
             <button class="tab" data-tab="moderation" id="tabModeration" type="button" style="display:none;">
               <span class="tabIcon" aria-hidden="true">🛡️</span>
-              <span class="tabLabel">Moderation</span>
+              <span class="tabLabel">Mod</span>
             </button>
           </div>
 
@@ -664,6 +664,19 @@
                         </div>
 
                         <div class="field">
+                          <label>Header gradient</label>
+                          <div class="colorInputRow tight">
+                            <input id="headerColorA" type="color" aria-label="Header color A">
+                            <input id="headerColorAText" type="text" placeholder="#ff6a2b" aria-label="Header color A text">
+                          </div>
+                          <div class="colorInputRow tight" style="margin-top:6px;">
+                            <input id="headerColorB" type="color" aria-label="Header color B">
+                            <input id="headerColorBText" type="text" placeholder="#2b0f08" aria-label="Header color B text">
+                          </div>
+                          <div class="small">Pick two colors for your profile header gradient.</div>
+                        </div>
+
+                        <div class="field">
                           <label>Mood</label>
                           <input id="editMood" placeholder="e.g. chilling">
                         </div>
@@ -758,18 +771,6 @@
           <div id="viewInfo">
             <div class="modalGrid">
               <div>
-        <div id="legacyProfileHeader" style="display:none">
-                <div class="pAvatar" id="modalAvatar"></div>
-              </div>
-
-              <div>
-                <div class="row" style="align-items:center;">
-                  <div style="font-weight:900; font-size:16px;" id="modalName"></div>
-                  <div class="badge" id="modalRole"></div>
-                </div>
-                <div class="vibeRow" id="profileVibes"></div>
-                <div class="small" id="modalMood"></div>
-
                 <div class="sectionTitle">Details</div>
                 <div class="infoGrid">
                   <div class="infoItem"><div class="k">Age</div><div class="v" id="infoAge">—</div></div>

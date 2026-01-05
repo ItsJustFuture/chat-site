@@ -132,6 +132,8 @@ async function runSqliteMigrations() {
     ["lastDiceRollAt", "lastDiceRollAt INTEGER"],
     ["dice_sixes", "dice_sixes INTEGER NOT NULL DEFAULT 0"],
     ["vibe_tags", "vibe_tags TEXT"],
+    ["header_grad_a", "header_grad_a TEXT"],
+    ["header_grad_b", "header_grad_b TEXT"],
   ];
   await ensureColumns("users", userColumns);
   await run("UPDATE users SET vibe_tags='[]' WHERE vibe_tags IS NULL");
