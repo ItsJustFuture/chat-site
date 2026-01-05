@@ -225,6 +225,18 @@ async function runSqliteMigrations() {
   await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_changelog_seq ON changelog_entries(seq)`);
 
   await run(`
+    CREATE TABLE IF NOT EXISTS changelog_reactions (
+      entry_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      reaction TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE(entry_id, user_id, reaction)
+    )
+  `);
+  await run(`CREATE INDEX IF NOT EXISTS idx_changelog_react_entry ON changelog_reactions(entry_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_changelog_react_user ON changelog_reactions(user_id)`);
+
+  await run(`
     CREATE TABLE IF NOT EXISTS command_audit (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       executor_id INTEGER NOT NULL,

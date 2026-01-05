@@ -211,6 +211,15 @@ const pgInitPromise = (async () => {
         updated_at BIGINT,
         author_id INTEGER REFERENCES users(id) ON DELETE SET NULL
       );
+      CREATE TABLE IF NOT EXISTS changelog_reactions (
+        entry_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        reaction TEXT NOT NULL,
+        created_at BIGINT NOT NULL,
+        CONSTRAINT changelog_reactions_unique UNIQUE(entry_id, user_id, reaction)
+      );
+      CREATE INDEX IF NOT EXISTS idx_changelog_react_entry ON changelog_reactions(entry_id);
+      CREATE INDEX IF NOT EXISTS idx_changelog_react_user ON changelog_reactions(user_id);
     `);
 // Fix camelCase columns that Postgres lowercased previously
 // ---- Fix camelCase timestamp columns Postgres lowercased
@@ -1969,6 +1978,20 @@ function requireLogin(req, res, next) {
 
 const CHANGELOG_TITLE_MAX = 120;
 const CHANGELOG_BODY_MAX = 8000;
+const CHANGELOG_REACTIONS = ["heart", "clap", "down", "eyes"];
+
+function emptyChangelogReactions(){
+  return { heart:0, clap:0, down:0, eyes:0 };
+}
+
+function emptyMyChangelogReactions(){
+  return { heart:false, clap:false, down:false, eyes:false };
+}
+
+function normalizeReactionKey(reaction){
+  const key = String(reaction || "").toLowerCase();
+  return CHANGELOG_REACTIONS.includes(key) ? key : null;
+}
 
 function requireOwner(req, res, next) {
   if (!req.session?.user?.id) return res.status(401).send("Not logged in");
@@ -1991,6 +2014,8 @@ function toChangelogPayload(row) {
     createdAt: normalizeEpoch(row.created_at),
     updatedAt: normalizeEpoch(row.updated_at),
     authorId: row.author_id,
+    reactions: row.reactions || emptyChangelogReactions(),
+    myReactions: row.myReactions || emptyMyChangelogReactions(),
   };
 }
 
@@ -2033,6 +2058,65 @@ async function pgAllChangelog(limit = 0){
   return rows;
 }
 
+async function pgChangelogByIds(ids = []){
+  await pgInitPromise;
+  if(!ids?.length) return [];
+  const { rows } = await pgPool.query(
+    "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries WHERE id = ANY($1) ORDER BY seq DESC",
+    [ids]
+  );
+  return rows;
+}
+
+async function pgFetchChangelogReactionCounts(entryIds = []){
+  if(!entryIds.length) return {};
+  const map = {};
+  const { rows } = await pgPool.query(
+    "SELECT entry_id, reaction, COUNT(*) as count FROM changelog_reactions WHERE entry_id = ANY($1) GROUP BY entry_id, reaction",
+    [entryIds]
+  );
+  for(const row of rows || []){
+    const id = Number(row.entry_id);
+    const key = normalizeReactionKey(row.reaction);
+    if(!id || !key) continue;
+    if(!map[id]) map[id] = emptyChangelogReactions();
+    map[id][key] = Number(row.count) || 0;
+  }
+  return map;
+}
+
+async function pgFetchChangelogUserReactions(entryIds = [], userId){
+  if(!entryIds.length || !userId) return {};
+  const mine = {};
+  const { rows } = await pgPool.query(
+    "SELECT entry_id, reaction FROM changelog_reactions WHERE entry_id = ANY($1) AND user_id=$2",
+    [entryIds, userId]
+  );
+  for(const row of rows || []){
+    const id = Number(row.entry_id);
+    const key = normalizeReactionKey(row.reaction);
+    if(!id || !key) continue;
+    if(!mine[id]) mine[id] = emptyMyChangelogReactions();
+    mine[id][key] = true;
+  }
+  return mine;
+}
+
+async function pgFetchChangelogEntriesWithReactions({ limit = 0, ids = null, userId } = {}){
+  await pgInitPromise;
+  const rows = ids?.length ? await pgChangelogByIds(ids) : await pgAllChangelog(limit);
+  const payloads = (rows || []).map((r) => toChangelogPayload(r));
+  const entryIds = payloads.map((p) => p.id).filter(Boolean);
+  if(!entryIds.length) return payloads;
+  const counts = await pgFetchChangelogReactionCounts(entryIds);
+  const mine = await pgFetchChangelogUserReactions(entryIds, userId);
+  return payloads.map((p) => ({
+    ...p,
+    reactions: counts[p.id] || emptyChangelogReactions(),
+    myReactions: mine[p.id] || emptyMyChangelogReactions(),
+  }));
+}
+
 async function pgCreateChangelogEntry({ title, body, authorId }){
   await pgInitPromise;
   const now = Date.now();
@@ -2060,8 +2144,39 @@ async function pgUpdateChangelogEntry({ id, title, body }){
 
 async function pgDeleteChangelogEntry(id){
   await pgInitPromise;
+  await pgPool.query("DELETE FROM changelog_reactions WHERE entry_id=$1", [id]);
   const { rowCount } = await pgPool.query("DELETE FROM changelog_entries WHERE id=$1", [id]);
   return rowCount > 0;
+}
+
+async function pgChangelogEntryExists(entryId){
+  await pgInitPromise;
+  const { rowCount } = await pgPool.query("SELECT 1 FROM changelog_entries WHERE id=$1", [entryId]);
+  return rowCount > 0;
+}
+
+async function pgToggleChangelogReaction(entryId, userId, reaction){
+  await pgInitPromise;
+  const client = await pgPool.connect();
+  try{
+    await client.query("BEGIN");
+    const existing = await client.query(
+      "DELETE FROM changelog_reactions WHERE entry_id=$1 AND user_id=$2 AND reaction=$3 RETURNING 1",
+      [entryId, userId, reaction]
+    );
+    if(!existing.rowCount){
+      await client.query(
+        "INSERT INTO changelog_reactions (entry_id, user_id, reaction, created_at) VALUES ($1,$2,$3,$4)",
+        [entryId, userId, reaction, Date.now()]
+      );
+    }
+    await client.query("COMMIT");
+  }catch(err){
+    await client.query("ROLLBACK");
+    throw err;
+  }finally{
+    client.release();
+  }
 }
 
 function createChangelogEntrySqlite({ title, body, authorId }) {
@@ -2100,6 +2215,119 @@ function createChangelogEntrySqlite({ title, body, authorId }) {
       });
     });
   });
+}
+
+async function sqliteFetchChangelogEntries({ limit = 0, ids = null } = {}) {
+  if (ids?.length) {
+    const ph = ids.map(() => "?").join(",");
+    return dbAllAsync(
+      `SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries WHERE id IN (${ph}) ORDER BY seq DESC`,
+      ids
+    );
+  }
+  const sql =
+    "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries ORDER BY seq DESC" +
+    (limit ? " LIMIT ?" : "");
+  return dbAllAsync(sql, limit ? [limit] : []);
+}
+
+async function sqliteFetchChangelogReactionCounts(entryIds = []) {
+  if (!entryIds.length) return {};
+  const ph = entryIds.map(() => "?").join(",");
+  const rows = await dbAllAsync(
+    `SELECT entry_id, reaction, COUNT(*) as count FROM changelog_reactions WHERE entry_id IN (${ph}) GROUP BY entry_id, reaction`,
+    entryIds
+  );
+  const map = {};
+  for (const row of rows || []) {
+    const id = Number(row.entry_id);
+    const key = normalizeReactionKey(row.reaction);
+    if (!id || !key) continue;
+    if (!map[id]) map[id] = emptyChangelogReactions();
+    map[id][key] = Number(row.count) || 0;
+  }
+  return map;
+}
+
+async function sqliteFetchChangelogUserReactions(entryIds = [], userId) {
+  if (!entryIds.length || !userId) return {};
+  const ph = entryIds.map(() => "?").join(",");
+  const rows = await dbAllAsync(
+    `SELECT entry_id, reaction FROM changelog_reactions WHERE entry_id IN (${ph}) AND user_id=?`,
+    [...entryIds, userId]
+  );
+  const mine = {};
+  for (const row of rows || []) {
+    const id = Number(row.entry_id);
+    const key = normalizeReactionKey(row.reaction);
+    if (!id || !key) continue;
+    if (!mine[id]) mine[id] = emptyMyChangelogReactions();
+    mine[id][key] = true;
+  }
+  return mine;
+}
+
+async function sqliteFetchChangelogEntriesWithReactions({ limit = 0, ids = null, userId } = {}) {
+  const rows = await sqliteFetchChangelogEntries({ limit, ids });
+  const payloads = (rows || []).map((r) => toChangelogPayload(r));
+  const entryIds = payloads.map((p) => p.id).filter(Boolean);
+  if (!entryIds.length) return payloads;
+  const counts = await sqliteFetchChangelogReactionCounts(entryIds);
+  const mine = await sqliteFetchChangelogUserReactions(entryIds, userId);
+  return payloads.map((p) => ({
+    ...p,
+    reactions: counts[p.id] || emptyChangelogReactions(),
+    myReactions: mine[p.id] || emptyMyChangelogReactions(),
+  }));
+}
+
+async function sqliteToggleChangelogReaction(entryId, userId, reaction) {
+  await dbRunAsync("BEGIN");
+  try {
+    const existing = await dbGetAsync(
+      `SELECT 1 FROM changelog_reactions WHERE entry_id=? AND user_id=? AND reaction=?`,
+      [entryId, userId, reaction]
+    );
+    if (existing) {
+      await dbRunAsync(`DELETE FROM changelog_reactions WHERE entry_id=? AND user_id=? AND reaction=?`, [entryId, userId, reaction]);
+    } else {
+      await dbRunAsync(
+        `INSERT INTO changelog_reactions (entry_id, user_id, reaction, created_at) VALUES (?, ?, ?, ?)`,
+        [entryId, userId, reaction, Date.now()]
+      );
+    }
+    await dbRunAsync("COMMIT");
+  } catch (e) {
+    await dbRunAsync("ROLLBACK");
+    throw e;
+  }
+}
+
+async function sqliteChangelogEntryExists(entryId) {
+  const row = await dbGetAsync(`SELECT 1 FROM changelog_entries WHERE id=?`, [entryId]);
+  return !!row;
+}
+
+async function fetchChangelogEntriesWithReactions({ limit = 0, ids = null, userId } = {}) {
+  if (await pgChangelogEnabled()) {
+    try {
+      return await pgFetchChangelogEntriesWithReactions({ limit, ids, userId });
+    } catch (e) {
+      console.warn("[changelog] PG reactions fallback:", e?.message || e);
+    }
+  }
+
+  return sqliteFetchChangelogEntriesWithReactions({ limit, ids, userId });
+}
+
+async function pgChangelogReactionPayload(entryId, userId) {
+  const rows = await pgFetchChangelogEntriesWithReactions({ ids: [entryId], userId });
+  return rows?.[0] || null;
+}
+
+async function sqliteChangelogReactionPayload(entryId, userId) {
+  const rows = await sqliteFetchChangelogEntriesWithReactions({ ids: [entryId], userId });
+  return rows?.[0] || null;
 }
 
 // ---- Auth routes
@@ -2662,25 +2890,11 @@ app.post("/rooms", requireLogin, (req, res) => {
 // ---- Changelog API
 app.get("/api/changelog", requireLogin, async (req, res) => {
   const limit = clamp(req.query?.limit || 0, 0, 200);
-
-  // Prefer Postgres for persistence on Render; fall back to sqlite on any PG error.
-  if (await pgChangelogEnabled()) {
-    try {
-      const rows = await pgAllChangelog(limit);
-      return res.json((rows || []).map((r) => toChangelogPayload(r)));
-    } catch (e) {
-      console.warn("[changelog] PG GET failed, falling back to sqlite:", e?.message || e);
-    }
-  }
-
   try {
-    const sql =
-      "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries ORDER BY seq DESC" +
-      (limit ? " LIMIT ?" : "");
-    const rows = await dbAllAsync(sql, limit ? [limit] : []);
-    return res.json((rows || []).map((r) => toChangelogPayload(r)));
+    const rows = await fetchChangelogEntriesWithReactions({ limit, userId: req.session?.user?.id });
+    return res.json(rows || []);
   } catch (e) {
-    console.error("[changelog] sqlite GET failed:", e?.message || e);
+    console.error("[changelog] load failed:", e?.message || e);
     return res.status(500).send("Failed to load changelog");
   }
 });
@@ -2782,6 +2996,7 @@ app.delete("/api/changelog/:id", requireOwner, async (req, res) => {
     }
 
     // sqlite fallback
+    await dbRunAsync(`DELETE FROM changelog_reactions WHERE entry_id=?`, [id]);
     const result = await dbRunAsync(`DELETE FROM changelog_entries WHERE id=?`, [id]);
     if (!result?.changes) return res.status(404).send("Entry not found");
     io.emit("changelog updated");
@@ -2790,6 +3005,44 @@ app.delete("/api/changelog/:id", requireOwner, async (req, res) => {
     console.error("[changelog] delete failed:", err?.message || err);
     return res.status(500).send("Failed to delete changelog entry");
   }
+});
+
+app.post("/api/changelog/:id/reaction", requireLogin, async (req, res) => {
+  const entryId = Number(req.params?.id);
+  const reaction = normalizeReactionKey(req.body?.reaction);
+  if (!Number.isFinite(entryId) || entryId <= 0) return res.status(400).send("Invalid entry id");
+  if (!reaction) return res.status(400).send("Invalid reaction");
+
+  const userId = req.session.user.id;
+  let payload = null;
+  let usedPg = false;
+
+  if (await pgChangelogEnabled()) {
+    try {
+      const exists = await pgChangelogEntryExists(entryId);
+      if (!exists) return res.status(404).send("Entry not found");
+      await pgToggleChangelogReaction(entryId, userId, reaction);
+      usedPg = true;
+      payload = await pgChangelogReactionPayload(entryId, userId);
+    } catch (e) {
+      console.warn("[changelog] PG reaction toggle fallback:", e?.message || e);
+      if (usedPg) return res.status(500).send("Failed to update reaction");
+    }
+  }
+
+  if (!payload && !usedPg) {
+    const exists = await sqliteChangelogEntryExists(entryId);
+    if (!exists) return res.status(404).send("Entry not found");
+    await sqliteToggleChangelogReaction(entryId, userId, reaction);
+    payload = await sqliteChangelogReactionPayload(entryId, userId);
+  } else if (!payload && usedPg) {
+    return res.status(500).send("Failed to update reaction");
+  }
+
+  if (!payload) return res.status(500).send("Failed to update reaction");
+
+  io.emit("changelog reactions updated");
+  return res.json(payload);
 });
 // ---- Profile routes
 app.get("/api/profile", requireLogin, (req, res) => res.redirect(307, "/profile"));
