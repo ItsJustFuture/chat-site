@@ -248,6 +248,8 @@ try {
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastDiceRollAt BIGINT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS dice_sixes INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS vibe_tags JSONB NOT NULL DEFAULT '[]'::jsonb`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS header_grad_a TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS header_grad_b TEXT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_bytes BYTEA`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_mime TEXT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_updated BIGINT`,
@@ -429,6 +431,8 @@ const VIBE_TAG_OPTIONS = [
   "Chill", "Chaotic", "Night Owl", "Cozy", "Loud", "Quiet", "Curious", "Unhinged", "Friendly", "Competitive"
 ];
 
+const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+
 function sanitizeVibeTags(raw) {
   const arr = Array.isArray(raw)
     ? raw
@@ -445,6 +449,11 @@ function sanitizeVibeTags(raw) {
     if (hit && !out.includes(hit)) out.push(hit);
   }
   return out;
+}
+function sanitizeHexColor(raw){
+  const c = String(raw || "").trim();
+  if(!c) return null;
+  return HEX_COLOR_RE.test(c) ? c : null;
 }
 function avatarUrlFromRow(row) {
   if (!row) return null;
@@ -487,6 +496,8 @@ function pgRowToUser(row) {
     lastDailyLoginGoldAt: row.lastDailyLoginGoldAt ?? null,
     lastDiceRollAt: row.lastDiceRollAt ?? null,
     vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
+    header_grad_a: sanitizeHexColor(row.header_grad_a),
+    header_grad_b: sanitizeHexColor(row.header_grad_b),
   };
 }
 function dbGet(sql, params = []) {
@@ -518,7 +529,7 @@ async function pgGetUserByUsername(username) {
   const { rows } = await pgPool.query(
     `SELECT id, username, password_hash, role, created_at, avatar, avatar_updated, bio, mood, age, gender, last_seen, last_room, last_status,
             theme, gold, xp, "lastXpMessageAt", "lastDailyLoginAt", "lastGoldTickAt", "lastMessageGoldAt", "lastDailyLoginGoldAt",
-            "lastDiceRollAt", dice_sixes, vibe_tags
+            "lastDiceRollAt", dice_sixes, vibe_tags, header_grad_a, header_grad_b
        FROM users WHERE lower(username) = lower($1) LIMIT 1`,
     [username]
   );
@@ -529,7 +540,7 @@ async function pgGetUserById(id) {
   const { rows } = await pgPool.query(
     `SELECT id, username, password_hash, role, created_at, avatar, avatar_updated, bio, mood, age, gender, last_seen, last_room, last_status,
             theme, gold, xp, "lastXpMessageAt", "lastDailyLoginAt", "lastGoldTickAt", "lastMessageGoldAt", "lastDailyLoginGoldAt",
-            "lastDiceRollAt", dice_sixes, vibe_tags
+            "lastDiceRollAt", dice_sixes, vibe_tags, header_grad_a, header_grad_b
        FROM users WHERE id = $1 LIMIT 1`,
     [id]
   );
@@ -545,7 +556,7 @@ async function pgGetUserRowById(id, columns) {
     "id","username","password_hash","role","created_at","avatar","avatar_bytes","avatar_mime","avatar_updated","bio","mood","age","gender",
     "last_seen","last_room","last_status","theme","gold","xp",
     "lastXpMessageAt","lastDailyLoginAt","lastGoldTickAt","lastMessageGoldAt","lastDailyLoginGoldAt",
-    "lastDiceRollAt","dice_sixes","vibe_tags"
+    "lastDiceRollAt","dice_sixes","vibe_tags","header_grad_a","header_grad_b"
   ]);
   const cols = (Array.isArray(columns) && columns.length)
     ? columns.filter((c) => allow.has(String(c)))
@@ -2788,6 +2799,8 @@ app.get("/profile", requireLogin, async (req, res) => {
         "mood",
         "age",
         "gender",
+        "header_grad_a",
+        "header_grad_b",
         "created_at",
         "last_seen",
         "last_room",
@@ -2818,16 +2831,18 @@ app.get("/profile", requireLogin, async (req, res) => {
             mood: row.mood,
             age: row.age,
             gender: row.gender,
-            created_at: row.created_at,
-            last_seen: row.last_seen,
-            last_room: row.last_room,
-            last_status: lastStatus || null,
-            current_room: live?.room || null,
-            likes: Number(likesRow?.likes || 0),
-            likedByMe: !!Number(likesRow?.liked || 0),
-            vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
-            ...progressionFromRow(row, true),
-          };
+          created_at: row.created_at,
+          last_seen: row.last_seen,
+          last_room: row.last_room,
+          last_status: lastStatus || null,
+          current_room: live?.room || null,
+          header_grad_a: sanitizeHexColor(row.header_grad_a),
+          header_grad_b: sanitizeHexColor(row.header_grad_b),
+          likes: Number(likesRow?.likes || 0),
+          likedByMe: !!Number(likesRow?.liked || 0),
+          vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
+          ...progressionFromRow(row, true),
+        };
 	          return res.json(payload);
 	        }
 	      );
@@ -2839,7 +2854,7 @@ app.get("/profile", requireLogin, async (req, res) => {
 
   // SQLite fallback (original behavior)
   db.get(
-    `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp, vibe_tags
+    `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp, vibe_tags, header_grad_a, header_grad_b
      FROM users WHERE id = ?`,
     [userId],
     (err, row) => {
@@ -2897,7 +2912,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
       for (const cand of candidates) {
         try {
           const r = await pgPool.query(
-            `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp, vibe_tags
+            `SELECT id, username, role, avatar, avatar_updated, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp, vibe_tags, header_grad_a, header_grad_b
              FROM users
              WHERE username = $1 OR lower(username) = lower($1)
              LIMIT 1`,
@@ -2914,7 +2929,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
     if (!row) {
       for (const cand of candidates) {
         row = await dbGet(
-          `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp, vibe_tags
+          `SELECT id, username, role, avatar, avatar_updated, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp, vibe_tags, header_grad_a, header_grad_b
            FROM users
            WHERE username = ? OR lower(username) = lower(?)`,
           [cand, cand]
@@ -2950,6 +2965,8 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
           last_room: row.last_room,
           last_status: lastStatus || null,
           current_room: live?.room || null,
+          header_grad_a: sanitizeHexColor(row.header_grad_a),
+          header_grad_b: sanitizeHexColor(row.header_grad_b),
           likes: Number(likesRow?.likes || 0),
           likedByMe: !!Number(likesRow?.liked || 0),
           vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
@@ -3035,6 +3052,8 @@ app.post("/profile", requireLogin, (req, res) => {
     const age = req.body?.age === "" || req.body?.age == null ? null : clamp(req.body.age, 18, 120);
     const gender = String(req.body?.gender || "").slice(0, 40);
     const vibeTags = sanitizeVibeTags(req.body?.vibeTags);
+    const headerGradA = sanitizeHexColor(req.body?.headerColorA);
+    const headerGradB = sanitizeHexColor(req.body?.headerColorB);
     // Postgres stores vibe_tags as JSONB. node-postgres will otherwise serialize arrays
     // as Postgres array literals, which causes the UPDATE to fail and makes changes
     // appear to "revert" on refresh (because /profile reads from Postgres first).
@@ -3068,9 +3087,11 @@ app.post("/profile", requireLogin, (req, res) => {
                    avatar_mime = $6,
                    avatar_updated = $7,
                    avatar = NULL,
-                   vibe_tags = $8::jsonb
-             WHERE id = $9`,
-            [mood, bio, age, gender, file.buffer, file.mimetype, avatarUpdated, vibeTagsJson, userId]
+                   vibe_tags = $8::jsonb,
+                   header_grad_a = COALESCE($9, header_grad_a),
+                   header_grad_b = COALESCE($10, header_grad_b)
+             WHERE id = $11`,
+            [mood, bio, age, gender, file.buffer, file.mimetype, avatarUpdated, vibeTagsJson, headerGradA, headerGradB, userId]
           );
         } else {
           await pgPool.query(
@@ -3079,9 +3100,11 @@ app.post("/profile", requireLogin, (req, res) => {
                    bio = $2,
                    age = $3,
                    gender = $4,
-                   vibe_tags = $5::jsonb
-             WHERE id = $6`,
-            [mood, bio, age, gender, vibeTagsJson, userId]
+                   vibe_tags = $5::jsonb,
+                   header_grad_a = COALESCE($6, header_grad_a),
+                   header_grad_b = COALESCE($7, header_grad_b)
+             WHERE id = $8`,
+            [mood, bio, age, gender, vibeTagsJson, headerGradA, headerGradB, userId]
           );
         }
         if (avatarUrl) req.session.user.avatar = avatarUrl;
@@ -3102,14 +3125,16 @@ app.post("/profile", requireLogin, (req, res) => {
     }
 
     // SQLite fallback (original behavior)
-    db.get("SELECT avatar, vibe_tags FROM users WHERE id = ?", [userId], (_e, old) => {
+    db.get("SELECT avatar, vibe_tags, header_grad_a, header_grad_b FROM users WHERE id = ?", [userId], (_e, old) => {
       const newAvatar = old?.avatar || null;
       const oldVibes = sanitizeVibeTags(old?.vibe_tags || []);
       const vibeJson = JSON.stringify(vibeTags.length ? vibeTags : oldVibes);
+      const newHeaderGradA = headerGradA ?? sanitizeHexColor(old?.header_grad_a);
+      const newHeaderGradB = headerGradB ?? sanitizeHexColor(old?.header_grad_b);
 
       db.run(
-        `UPDATE users SET mood=?, bio=?, age=?, gender=?, avatar=?, vibe_tags=? WHERE id=?`,
-        [mood, bio, age, gender, newAvatar, vibeJson, userId],
+        `UPDATE users SET mood=?, bio=?, age=?, gender=?, avatar=?, vibe_tags=?, header_grad_a=?, header_grad_b=? WHERE id=?`,
+        [mood, bio, age, gender, newAvatar, vibeJson, newHeaderGradA, newHeaderGradB, userId],
         (err2) => {
           if (err2) return res.status(500).send("Save failed");
           if (avatarUrl) req.session.user.avatar = avatarUrl;
