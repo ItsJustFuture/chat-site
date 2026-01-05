@@ -3,6 +3,7 @@
 
 // Debug hook: enable tap hit-testing logs by setting `window.__TAP_DEBUG__ = true` in the console.
 window.__TAP_DEBUG__ = window.__TAP_DEBUG__ ?? false;
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
 // ---- Theme registry with tiers
 const THEMES = [
@@ -41,7 +42,7 @@ const THEMES = [
     dmScroller: ".dmPanel .dmMessages, #dmModal .dmMessages, .dmMsgs, .messages"
   };
 
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isIOS = IS_IOS;
   if(body) body.classList.toggle("ios", isIOS);
 
   let raf = 0;
@@ -330,6 +331,45 @@ const THEMES = [
   ["pointerdown", "touchstart"].forEach(evt => {
     document.addEventListener(evt, logTap, { capture:true, passive:true });
   });
+})();
+
+// ---- iOS double-tap zoom guard (layered atop CSS/meta)
+(function initIosDoubleTapGuard(){
+  try{
+    if(!IS_IOS || !document?.addEventListener) return;
+    let lastTapTs = 0;
+    let lastX = 0;
+    let lastY = 0;
+    const radius = 20;
+    const thresholdMs = 320;
+    const formSelector = "input, textarea, select, option, [contenteditable='true']";
+    const linkSelector = "a[href]";
+
+    const onTouchEnd = (ev) => {
+      try{
+        if(ev.touches && ev.touches.length > 1) { lastTapTs = 0; return; }
+        const touch = ev.changedTouches && ev.changedTouches[0];
+        if(!touch) return;
+        const target = ev.target;
+        const now = Date.now();
+        const dx = touch.clientX - lastX;
+        const dy = touch.clientY - lastY;
+        const dist = Math.hypot(dx, dy);
+        const isForm = !!(target && target.closest && target.closest(formSelector));
+        const isLink = !!(target && target.closest && target.closest(linkSelector));
+
+        if(!isForm && !isLink && now - lastTapTs > 0 && now - lastTapTs < thresholdMs && dist < radius){
+          ev.preventDefault();
+        }
+
+        lastTapTs = now;
+        lastX = touch.clientX;
+        lastY = touch.clientY;
+      }catch{}
+    };
+
+    document.addEventListener("touchend", onTouchEnd, { passive:false, capture:true });
+  }catch{}
 })();
 
 /* ---- Focus visibility helper (keep inputs inside their scroll shells) ---- */
@@ -730,6 +770,9 @@ let activeMenuTab = "changelog";
 let changelogEntries = [];
 let changelogLoaded = false;
 let changelogDirty = false;
+const CHANGELOG_REACTION_KEYS = ["heart", "clap", "down", "eyes"];
+const CHANGELOG_REACTION_EMOJI = { heart:"♥️", clap:"👏", down:"👎", eyes:"👀" };
+const changelogReactionBusy = new Set();
 let editingChangelogId = null;
 let latestChangelogEntry = null;
 let leaderboardsLoaded = false;
@@ -1175,6 +1218,10 @@ const editAge = document.getElementById("editAge");
 const editGender = document.getElementById("editGender");
 const vibeTagOptions = document.getElementById("vibeTagOptions");
 const editBio = document.getElementById("editBio");
+const bioHelperToggle = document.getElementById("bioHelperToggle");
+const bioHelper = document.getElementById("bioHelper");
+const bioHelperPreview = document.getElementById("bioHelperPreview");
+const bioHelperButtons = document.getElementById("bioHelperButtons");
 const saveProfileBtn = document.getElementById("saveProfileBtn");
 const refreshProfileBtn = document.getElementById("refreshProfileBtn");
 const profileMsg = document.getElementById("profileMsg");
@@ -1192,6 +1239,92 @@ const uiScaleCloseBtn = document.getElementById("uiScaleCloseBtn");
 const uiScaleRange = document.getElementById("uiScaleRange");
 const uiScaleValue = document.getElementById("uiScaleValue");
 const uiScaleResetBtn = document.getElementById("uiScaleResetBtn");
+
+let bioPreviewTimer = null;
+function renderBioPreview(){
+  if(!bioHelperPreview || !editBio) return;
+  bioHelperPreview.innerHTML = renderBBCode(editBio.value || "");
+}
+
+function scheduleBioPreview(){
+  if(bioPreviewTimer) clearTimeout(bioPreviewTimer);
+  bioPreviewTimer = setTimeout(renderBioPreview, 90);
+}
+
+function toggleBioHelperPanel(){
+  if(!bioHelper) return;
+  const isHidden = bioHelper.hasAttribute("hidden");
+  if(isHidden){
+    bioHelper.removeAttribute("hidden");
+    scheduleBioPreview();
+  } else {
+    bioHelper.setAttribute("hidden", "");
+  }
+}
+
+function insertBioTag(tag){
+  if(!editBio) return;
+  const start = editBio.selectionStart ?? editBio.value.length;
+  const end = editBio.selectionEnd ?? start;
+  const selection = editBio.value.slice(start, end);
+  let before = "";
+  let after = "";
+  let body = selection;
+
+  switch(tag){
+    case "b": before = "[b]"; after = "[/b]"; break;
+    case "i": before = "[i]"; after = "[/i]"; break;
+    case "u": before = "[u]"; after = "[/u]"; break;
+    case "s": before = "[s]"; after = "[/s]"; break;
+    case "quote": before = "[quote]"; after = "[/quote]"; break;
+    case "code": before = "[code]"; after = "[/code]"; break;
+    case "url": {
+      const url = prompt("Enter URL", selection || "https://");
+      if(!url) return;
+      before = `[url=${url}]`;
+      after = "[/url]";
+      body = selection || "link text";
+      break;
+    }
+    case "color": {
+      const color = prompt("Color (hex or name)", selection || "#ff6b6b");
+      if(!color) return;
+      before = `[color=${color}]`;
+      after = "[/color]";
+      body = selection || "text";
+      break;
+    }
+    case "img": {
+      const url = selection || prompt("Image URL", "https://");
+      if(!url) return;
+      before = "[img]";
+      after = "[/img]";
+      body = url;
+      break;
+    }
+    default: return;
+  }
+
+  const snippet = `${before}${body || ""}${after}`;
+  editBio.setRangeText(snippet, start, end, "end");
+  scheduleBioPreview();
+  editBio.focus();
+}
+
+if(bioHelperButtons){
+  bioHelperButtons.addEventListener("click", (ev)=>{
+    const target = ev.target;
+    if(!(target instanceof HTMLElement)) return;
+    const tag = target.dataset?.bioTag;
+    if(tag) insertBioTag(tag);
+  });
+}
+if(bioHelperToggle){
+  bioHelperToggle.addEventListener("click", toggleBioHelperPanel);
+}
+if(editBio){
+  editBio.addEventListener("input", scheduleBioPreview, { passive:true });
+}
 
 // member quick mod
 const memberModTools = document.getElementById("memberModTools");
@@ -5106,6 +5239,31 @@ function closeChangelogEditor(){
   if(changelogEditMsg) changelogEditMsg.textContent = "";
 }
 
+function emptyChangelogReactions(){
+  return { heart:0, clap:0, down:0, eyes:0 };
+}
+
+function emptyMyChangelogReactions(){
+  return { heart:false, clap:false, down:false, eyes:false };
+}
+
+function normalizeChangelogEntry(entry){
+  if(!entry) return null;
+  const base = { ...entry };
+  base.reactions = { ...emptyChangelogReactions(), ...(entry.reactions || {}) };
+  base.myReactions = { ...emptyMyChangelogReactions(), ...(entry.myReactions || {}) };
+  return base;
+}
+
+function updateChangelogEntryState(entryId, next){
+  if(!entryId) return;
+  const idx = changelogEntries.findIndex(e => e && e.id === entryId);
+  if(idx >= 0){
+    const merged = normalizeChangelogEntry({ ...changelogEntries[idx], ...(next || {}) });
+    if(merged) changelogEntries[idx] = merged;
+  }
+}
+
 async function loadChangelog(force=false){
   if(!force && changelogLoaded && !changelogDirty) return;
   if(changelogMsg) changelogMsg.textContent = "Loading changelog...";
@@ -5119,7 +5277,8 @@ async function loadChangelog(force=false){
 
   try{
     const rows = JSON.parse(text || "[]");
-    changelogEntries = Array.isArray(rows) ? rows : [];
+    changelogEntries = Array.isArray(rows) ? rows.map(normalizeChangelogEntry).filter(Boolean) : [];
+    changelogReactionBusy.clear();
   }catch{
     changelogEntries = [];
   }
@@ -5222,9 +5381,56 @@ function renderChangelogList(){
     body.className = "changelogBody";
     body.innerHTML = escapeHtml(entry.body || "").replace(/\n/g, "<br>");
 
+    const reactions = entry.reactions || emptyChangelogReactions();
+    const myReactions = entry.myReactions || emptyMyChangelogReactions();
+    const reactionRow = document.createElement("div");
+    reactionRow.className = "changelogReactions";
+    const entryBusy = changelogReactionBusy.has(entry.id);
+    for(const key of CHANGELOG_REACTION_KEYS){
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "changelogReactionBtn";
+      btn.dataset.reaction = key;
+      btn.textContent = `${CHANGELOG_REACTION_EMOJI[key] || key} ${Number(reactions[key] ?? 0)}`;
+      btn.classList.toggle("active", !!myReactions[key]);
+      btn.disabled = entryBusy;
+      btn.addEventListener("click", ()=>toggleChangelogReaction(entry.id, key));
+      reactionRow.appendChild(btn);
+    }
+
     wrap.appendChild(header);
     wrap.appendChild(body);
+    wrap.appendChild(reactionRow);
     changelogList.appendChild(wrap);
+  }
+}
+
+async function toggleChangelogReaction(entryId, reaction){
+  if(!entryId || !reaction) return;
+  if(changelogReactionBusy.has(entryId)) return;
+  changelogReactionBusy.add(entryId);
+  renderChangelogList();
+
+  try{
+    const {res, text} = await api(`/api/changelog/${entryId}/reaction`, {
+      method: "POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ reaction })
+    });
+
+    if(!res.ok){
+      if(changelogMsg) changelogMsg.textContent = text || "Failed to update reaction.";
+    }else{
+      try{
+        const payload = JSON.parse(text || "{}") || {};
+        updateChangelogEntryState(entryId, payload);
+      }catch{}
+    }
+  }catch{
+    if(changelogMsg) changelogMsg.textContent = "Failed to update reaction.";
+  }finally{
+    changelogReactionBusy.delete(entryId);
+    renderChangelogList();
   }
 }
 
@@ -6065,6 +6271,7 @@ modalTargetUsername = p.username;
   editAge.value=(p.age ?? "");
   editGender.value=p.gender||"";
   editBio.value=p.bio||"";
+  scheduleBioPreview();
   selectedVibeTags = sanitizeVibeTagsClient(p.vibe_tags);
   renderVibeOptions(selectedVibeTags);
   syncHeaderGradientInputs(p.header_grad_a, p.header_grad_b);
@@ -6448,6 +6655,10 @@ socket.on("disconnect", (reason) => {
     changelogDirty = true;
     if(rightPanelMode === "menu" && activeMenuTab === "changelog") loadChangelog(true);
     loadLatestUpdateSnippet();
+  });
+  socket.on("changelog reactions updated", ()=>{
+    changelogDirty = true;
+    if(rightPanelMode === "menu" && activeMenuTab === "changelog") loadChangelog(true);
   });
   await loadRooms();
   await loadLatestUpdateSnippet();

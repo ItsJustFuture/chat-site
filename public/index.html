@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>Banter &amp; Brats</title>
   <script src="/theme-init.js"></script>
   <link rel="stylesheet" href="/styles.css">
@@ -709,8 +709,26 @@
                         </div>
 
                         <div class="field">
-                          <label>Bio (BBCode supported)</label>
+                          <div class="fieldLabelRow">
+                            <label>Bio (BBCode supported)</label>
+                            <button class="pillBtn small" id="bioHelperToggle" type="button">BBCode help &amp; preview</button>
+                          </div>
                           <textarea id="editBio" placeholder="[b]bold[/b] [i]italics[/i] [url=https://...]link[/url] [quote]...[/quote]"></textarea>
+                          <div class="bioHelper" id="bioHelper" hidden>
+                            <div class="bioHelperRow" id="bioHelperButtons">
+                              <button type="button" class="pillBtn tiny" data-bio-tag="b">[b][/b]</button>
+                              <button type="button" class="pillBtn tiny" data-bio-tag="i">[i][/i]</button>
+                              <button type="button" class="pillBtn tiny" data-bio-tag="u">[u][/u]</button>
+                              <button type="button" class="pillBtn tiny" data-bio-tag="s">[s][/s]</button>
+                              <button type="button" class="pillBtn tiny" data-bio-tag="quote">[quote][/quote]</button>
+                              <button type="button" class="pillBtn tiny" data-bio-tag="code">[code][/code]</button>
+                              <button type="button" class="pillBtn tiny" data-bio-tag="url">[url]</button>
+                              <button type="button" class="pillBtn tiny" data-bio-tag="color">[color]</button>
+                              <button type="button" class="pillBtn tiny" data-bio-tag="img">[img]</button>
+                            </div>
+                            <div class="bioHelperPreview" id="bioHelperPreview"></div>
+                            <div class="small muted">Use BBCode for simple formatting. Links/images require full URLs.</div>
+                          </div>
                         </div>
 
                         <div class="row">
