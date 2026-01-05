@@ -473,6 +473,7 @@
         <!-- Profile sheet header (custom layout, not a clone) -->
         <div class="profileSheetHero" id="profileSheetHero">
           <div class="profileSheetBg" id="profileSheetBg"></div>
+          <div class="profileSheetOverlay" id="profileSheetOverlay" aria-hidden="true"></div>
 
           <div class="profileSheetContent">
             <div class="profileSheetAvatarCard">
@@ -512,7 +513,7 @@
         </div>
 
           <div class="profileActions">
-            <div class="tabs profileActionTabs" id="tabs">
+            <div class="tabs profileActionTabs profileActionGrid" id="tabs">
             <button class="tab active" data-tab="info" id="tabInfo" type="button">
               <span class="tabIcon" aria-hidden="true">ℹ️</span>
               <span class="tabLabel">Info</span>

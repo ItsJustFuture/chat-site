@@ -4591,13 +4591,49 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
   overflow: hidden;
   border: 1px solid rgba(255,255,255,.08);
   background: rgba(0,0,0,.25);
+  color: var(--profileHeaderText, #fff);
+  --profileHeaderTextShadow: 0 1px 4px rgba(0,0,0,.6);
+  --profileHeaderText: #fff;
+  --profileHeaderPillBg: rgba(0,0,0,.32);
+  --profileHeaderPillBorder: rgba(255,255,255,.18);
 }
 .profileSheetBg{
   height: 170px;
-  background:
-    radial-gradient(900px 260px at 70% 30%, rgba(255,180,80,.45), transparent 60%),
-    linear-gradient(135deg, rgba(255,106,43,.75), rgba(43,15,8,.85));
+  background: var(--profileHeaderBg, linear-gradient(135deg, rgba(255,106,43,.75), rgba(43,15,8,.85)));
   filter: saturate(1.08);
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+.profileSheetOverlay{
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: .55;
+  z-index: 0;
+  background: radial-gradient(120% 80% at 50% 10%, rgba(255,255,255,0.25), transparent 65%);
+}
+.profileSheetOverlay.role-owner{ box-shadow: 0 0 32px 4px rgba(140, 255, 110, 0.35), inset 0 0 40px rgba(80, 255, 160, 0.24); }
+.profileSheetOverlay.role-co-owner{ box-shadow: 0 0 36px 4px rgba(220, 110, 255, 0.30), inset 0 0 46px rgba(160, 90, 255, 0.24); }
+.profileSheetOverlay.role-admin{ box-shadow: 0 0 32px 2px rgba(255, 196, 64, 0.32), inset 0 0 36px rgba(255, 140, 40, 0.22); }
+.profileSheetOverlay.role-moderator{ box-shadow: 0 0 28px 2px rgba(255, 90, 90, 0.30), inset 0 0 32px rgba(200, 60, 60, 0.22); }
+.profileSheetOverlay.role-vip{
+  background: linear-gradient(120deg, rgba(110,210,255,0.35), rgba(190,230,255,0.05), rgba(110,210,255,0.35));
+  background-size: 220% 220%;
+  animation: profileShimmer 8s ease-in-out infinite;
+  opacity: .55;
+}
+.profileSheetOverlay.role-member, .profileSheetOverlay.role-user{ opacity: .18; mix-blend-mode: soft-light; }
+.profileSheetOverlay.role-guest{ opacity: .12; mix-blend-mode: soft-light; }
+
+@keyframes profileShimmer{
+  0%{ background-position: 0% 50%; }
+  50%{ background-position: 100% 50%; }
+  100%{ background-position: 0% 50%; }
+}
+
+@media (prefers-reduced-motion: reduce){
+  .profileSheetOverlay{ animation: none !important; transition: none !important; }
 }
 .profileSheetContent{
   display: grid;
@@ -4654,15 +4690,17 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 .vibeRow{ display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
 .vibeChip{ background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.08); padding:2px 8px; border-radius:999px; font-size:11px; line-height:1.2; color:var(--text,#fff); }
 .vibeChip.mini{ font-size:10px; opacity:0.85; }
-.profileSheetMeta{ color: #fff; padding-bottom: 6px; }
+.profileSheetMeta{ color: var(--profileHeaderText, #fff); padding-bottom: 6px; text-shadow: var(--profileHeaderTextShadow, none); }
 .profileSheetNameRow{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-.profileSheetName{ font-size: 22px; font-weight: 800; letter-spacing: .2px; }
+.profileSheetName{ font-size: 22px; font-weight: 800; letter-spacing: .2px; text-shadow: var(--profileHeaderTextShadow, none); }
 .profileRoleChip{
   font-size: 12px;
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.18);
-  background: rgba(255,255,255,.08);
+  border: 1px solid var(--profileHeaderPillBorder, rgba(255,255,255,.18));
+  background: var(--profileHeaderPillBg, rgba(255,255,255,.08));
+  color: var(--profileHeaderText, #fff);
+  text-shadow: var(--profileHeaderTextShadow, none);
 }
 .profileSheetDetails{
   display:flex;
@@ -4673,14 +4711,17 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 .profileDetail{
   padding:6px 10px;
   border-radius:12px;
-  border:1px solid rgba(255,255,255,.12);
-  background: rgba(0,0,0,.28);
+  border:1px solid var(--profileHeaderPillBorder, rgba(255,255,255,.12));
+  background: var(--profileHeaderPillBg, rgba(0,0,0,.28));
   font-size:12px;
+  color: var(--profileHeaderText, #fff);
+  text-shadow: var(--profileHeaderTextShadow, none);
 }
 .profileSheetSub{
   margin-top: 6px;
   font-size: 12px;
   opacity: .9;
+  text-shadow: var(--profileHeaderTextShadow, none);
 }
 .profileSheetStats{
   margin-top: 6px;
@@ -4692,14 +4733,28 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 .statPill{
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.12);
-  background: rgba(0,0,0,.25);
+  border: 1px solid var(--profileHeaderPillBorder, rgba(255,255,255,.12));
+  background: var(--profileHeaderPillBg, rgba(0,0,0,.25));
   font-size: 12px;
+  color: var(--profileHeaderText, #fff);
+  text-shadow: var(--profileHeaderTextShadow, none);
 }
 
-.profileActions{ display:flex; flex-direction:column; gap:10px; margin:6px 0 10px; }
-.profileActionTabs{ width:100%; flex-wrap:nowrap; grid-template-columns: repeat(4, minmax(72px, 1fr)); display:grid; }
-.profileActionTabs .tab{ aspect-ratio: 1; min-height:72px; }
+.profileActions{ display:flex; flex-direction:column; gap:8px; margin:6px 0 6px; }
+.profileActionTabs{ width:100%; flex-wrap:nowrap; display:grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap:8px; margin:6px 0 4px; }
+.profileActionTabs .tab{
+  aspect-ratio: 1;
+  min-height: 78px;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+.profileActionTabs .tab .tabIcon{ font-size: 20px; }
+.profileActionTabs .tab .tabLabel{ white-space: normal; opacity: .9; font-weight: 800; }
 .profileQuickActions{ display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
 .quickActionGroup{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .quickActionGroup .badge{ height:100%; display:flex; align-items:center; justify-content:center; }
@@ -4707,7 +4762,7 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 .profileMenu{
   display: grid;
   gap: 10px;
-  margin: 10px 0 14px;
+  margin: 8px 0 10px;
 }
 .profileMenuRow{
   width: 100%;

@@ -1152,6 +1152,7 @@ const xpNote = document.getElementById("xpNote");
 const levelToast = document.getElementById("levelToast");
 const levelToastText = document.getElementById("levelToastText");
 const profileSheetVibes = document.getElementById("profileSheetVibes");
+const profileSheetOverlay = document.getElementById("profileSheetOverlay");
 
 const directBadgeColor = document.getElementById("directBadgeColor");
 const groupBadgeColor = document.getElementById("groupBadgeColor");
@@ -2047,6 +2048,10 @@ function loadBadgePrefsFromStorage(){
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 const PROFILE_GRADIENT_DEFAULT_A = "#ff6a2b";
 const PROFILE_GRADIENT_DEFAULT_B = "#2b0f08";
+const prefersReducedMotion = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
+let headerGradientPreviewFrame = 0;
+let headerGradientPreviewNext = null;
+let currentProfileHeaderRole = "";
 function saveBadgePrefsToStorage(){
   try{ localStorage.setItem("dmBadgePrefs", JSON.stringify(badgePrefs)); }
   catch{}
@@ -2075,6 +2080,40 @@ function sanitizeColor(raw, fallback, hardDefault){
   if(isValidCssColor(hardDefault)) return hardDefault.trim();
   return hardDefault || badgeDefaults.direct;
 }
+function hexToRgb(hex){
+  const m = /^#?([0-9a-fA-F]{6})$/.exec((hex || "").trim());
+  if(!m) return null;
+  const intVal = parseInt(m[1], 16);
+  return {
+    r: (intVal >> 16) & 255,
+    g: (intVal >> 8) & 255,
+    b: intVal & 255
+  };
+}
+function relativeLuminance({ r, g, b }){
+  const toLinear = (c) => {
+    const channel = c / 255;
+    return channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+function computeProfileTextTheme(colorA, colorB){
+  const a = hexToRgb(colorA) || hexToRgb(PROFILE_GRADIENT_DEFAULT_A) || { r: 255, g: 106, b: 43 };
+  const b = hexToRgb(colorB) || hexToRgb(PROFILE_GRADIENT_DEFAULT_B) || { r: 43, g: 15, b: 8 };
+  const avgLum = (relativeLuminance(a) + relativeLuminance(b)) / 2;
+  const lightText = avgLum < 0.55;
+  return lightText ? {
+    text: "#fdfdfd",
+    shadow: "0 1px 4px rgba(0,0,0,0.65)",
+    pillBg: "rgba(0,0,0,0.32)",
+    pillBorder: "rgba(255,255,255,0.22)"
+  } : {
+    text: "#0d1b24",
+    shadow: "0 1px 3px rgba(255,255,255,0.35)",
+    pillBg: "rgba(255,255,255,0.24)",
+    pillBorder: "rgba(0,0,0,0.18)"
+  };
+}
 function buildProfileHeaderGradient(colorA, colorB){
   const a = sanitizeHexColorInput(colorA, PROFILE_GRADIENT_DEFAULT_A) || PROFILE_GRADIENT_DEFAULT_A;
   const b = sanitizeHexColorInput(colorB, PROFILE_GRADIENT_DEFAULT_B) || PROFILE_GRADIENT_DEFAULT_B;
@@ -2083,9 +2122,38 @@ function buildProfileHeaderGradient(colorA, colorB){
     linear-gradient(135deg, ${a}, ${b})
   `;
 }
-function applyProfileHeaderBg(colorA, colorB){
-  if(!profileSheetBg) return;
-  profileSheetBg.style.background = buildProfileHeaderGradient(colorA, colorB);
+function applyProfileHeaderOverlay(role){
+  if(!profileSheetOverlay) return;
+  const r = (role || "").toLowerCase();
+  const overlayClass = r.includes("owner") ? (r.includes("co") ? "co-owner" : "owner")
+    : r.includes("admin") ? "admin"
+    : r.includes("mod") ? "moderator"
+    : r.includes("vip") ? "vip"
+    : r.includes("member") ? "member"
+    : r.includes("guest") ? "guest" : "";
+
+  profileSheetOverlay.className = "profileSheetOverlay";
+  if(overlayClass) profileSheetOverlay.classList.add(`role-${overlayClass}`);
+}
+function applyProfileHeaderGradient(colorA, colorB, role){
+  if(!profileSheetBg && !profileSheetHero) return;
+  const a = sanitizeHexColorInput(colorA, PROFILE_GRADIENT_DEFAULT_A) || PROFILE_GRADIENT_DEFAULT_A;
+  const b = sanitizeHexColorInput(colorB, PROFILE_GRADIENT_DEFAULT_B) || PROFILE_GRADIENT_DEFAULT_B;
+  const gradient = buildProfileHeaderGradient(a, b);
+  if(profileSheetBg){
+    profileSheetBg.style.background = gradient;
+    profileSheetBg.style.backgroundRepeat = "no-repeat";
+    profileSheetBg.style.backgroundSize = "cover";
+    profileSheetBg.style.setProperty("--profileHeaderBg", gradient);
+  }
+  if(profileSheetHero){
+    const theme = computeProfileTextTheme(a, b);
+    profileSheetHero.style.setProperty("--profileHeaderText", theme.text);
+    profileSheetHero.style.setProperty("--profileHeaderTextShadow", theme.shadow);
+    profileSheetHero.style.setProperty("--profileHeaderPillBg", theme.pillBg);
+    profileSheetHero.style.setProperty("--profileHeaderPillBorder", theme.pillBorder);
+  }
+  applyProfileHeaderOverlay(role || currentProfileHeaderRole);
 }
 function loadDmThemePrefsFromStorage(){
   try {
@@ -5402,6 +5470,21 @@ function getHeaderGradientInputValues(){
   const b = sanitizeHexColorInput(bRaw, PROFILE_GRADIENT_DEFAULT_B) || PROFILE_GRADIENT_DEFAULT_B;
   return { a, b };
 }
+function scheduleProfileHeaderPreview(colorA, colorB){
+  const next = { a: colorA, b: colorB };
+  headerGradientPreviewNext = next;
+  if(prefersReducedMotion?.matches){
+    applyProfileHeaderGradient(next.a, next.b, currentProfileHeaderRole);
+    return;
+  }
+  if(headerGradientPreviewFrame) return;
+  headerGradientPreviewFrame = requestAnimationFrame(() => {
+    headerGradientPreviewFrame = 0;
+    const vals = headerGradientPreviewNext || next;
+    headerGradientPreviewNext = null;
+    applyProfileHeaderGradient(vals.a, vals.b, currentProfileHeaderRole);
+  });
+}
 function syncHeaderGradientInputs(colorA, colorB){
   const a = sanitizeHexColorInput(colorA, PROFILE_GRADIENT_DEFAULT_A) || PROFILE_GRADIENT_DEFAULT_A;
   const b = sanitizeHexColorInput(colorB, PROFILE_GRADIENT_DEFAULT_B) || PROFILE_GRADIENT_DEFAULT_B;
@@ -5409,7 +5492,7 @@ function syncHeaderGradientInputs(colorA, colorB){
   if(headerColorAText) headerColorAText.value = a;
   if(headerColorB) headerColorB.value = normalizeColorForInput(b, PROFILE_GRADIENT_DEFAULT_B);
   if(headerColorBText) headerColorBText.value = b;
-  applyProfileHeaderBg(a, b);
+  applyProfileHeaderGradient(a, b, currentProfileHeaderRole);
 }
 function wireHeaderGradientInputs(){
   if(headerColorA && !headerColorA._wired){
@@ -5417,7 +5500,7 @@ function wireHeaderGradientInputs(){
     headerColorA.addEventListener("input", () => {
       const vals = getHeaderGradientInputValues();
       if(headerColorAText) headerColorAText.value = vals.a;
-      applyProfileHeaderBg(vals.a, vals.b);
+      scheduleProfileHeaderPreview(vals.a, vals.b);
     });
   }
   if(headerColorAText && !headerColorAText._wired){
@@ -5425,7 +5508,7 @@ function wireHeaderGradientInputs(){
     headerColorAText.addEventListener("input", () => {
       const vals = getHeaderGradientInputValues();
       if(headerColorA) headerColorA.value = normalizeColorForInput(vals.a, PROFILE_GRADIENT_DEFAULT_A);
-      applyProfileHeaderBg(vals.a, vals.b);
+      scheduleProfileHeaderPreview(vals.a, vals.b);
     });
   }
   if(headerColorB && !headerColorB._wired){
@@ -5433,7 +5516,7 @@ function wireHeaderGradientInputs(){
     headerColorB.addEventListener("input", () => {
       const vals = getHeaderGradientInputValues();
       if(headerColorBText) headerColorBText.value = vals.b;
-      applyProfileHeaderBg(vals.a, vals.b);
+      scheduleProfileHeaderPreview(vals.a, vals.b);
     });
   }
   if(headerColorBText && !headerColorBText._wired){
@@ -5441,7 +5524,7 @@ function wireHeaderGradientInputs(){
     headerColorBText.addEventListener("input", () => {
       const vals = getHeaderGradientInputValues();
       if(headerColorB) headerColorB.value = normalizeColorForInput(vals.b, PROFILE_GRADIENT_DEFAULT_B);
-      applyProfileHeaderBg(vals.a, vals.b);
+      scheduleProfileHeaderPreview(vals.a, vals.b);
     });
   }
 }
@@ -5490,7 +5573,8 @@ function fillProfileUI(p, isSelf){
 function fillProfileSheetHeader(p, isSelf){
   if (!profileSheetHero) return;
 
-  applyProfileHeaderBg(p?.header_grad_a, p?.header_grad_b);
+  currentProfileHeaderRole = p?.role || "";
+  applyProfileHeaderGradient(p?.header_grad_a, p?.header_grad_b, currentProfileHeaderRole);
 
   // Avatar
   if (profileSheetAvatar){
@@ -5556,6 +5640,10 @@ function updateProfileActions({ isSelf = false, canModerate = false } = {}){
   if (addFriendBtn) addFriendBtn.style.display = isSelf ? "none" : "";
   if (profileActionMsg) profileActionMsg.textContent = "";
   if (tabModeration) tabModeration.style.display = canModerate ? "" : "none";
+  const editActive = tabEdit?.classList.contains("active");
+  if(!isSelf && editActive){
+    setTab("info");
+  }
 }
 
 function applyProfileMenuVisibility(){
