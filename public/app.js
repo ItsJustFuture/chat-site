@@ -2106,19 +2106,51 @@ function relativeLuminance({ r, g, b }){
   return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
 }
 function computeProfileTextTheme(colorA, colorB){
+  // Profile header/meta text needs to remain readable across both the bright
+  // header gradient and the darker underlay band.
+  //
+  // Rule:
+  // - Dark-mode themes => white text with a subtle black glow.
+  // - Light-mode themes => black text with a subtle white glow.
+  //
+  // We detect "light" themes by name (data-theme), falling back to the
+  // original gradient luminance heuristic if detection fails.
+  const themeName = (document.body?.getAttribute("data-theme") || "").toLowerCase();
+  const looksLight = themeName.includes("light") || themeName.includes("paper") || themeName.includes("parchment") || themeName.includes("sunrise") || themeName.includes("cotton") || themeName.includes("mint");
+
+  if(looksLight){
+    return {
+      text: "#0b0b0b",
+      shadow: "0 1px 4px rgba(255,255,255,0.75)",
+      pillBg: "rgba(255,255,255,0.28)",
+      pillBorder: "rgba(0,0,0,0.18)"
+    };
+  }
+
+  // Default (dark-mode themes)
+  if(themeName){
+    return {
+      text: "#ffffff",
+      shadow: "0 1px 4px rgba(0,0,0,0.75)",
+      pillBg: "rgba(0,0,0,0.30)",
+      pillBorder: "rgba(255,255,255,0.22)"
+    };
+  }
+
+  // Fallback: pre-theme-init or missing attribute.
   const a = hexToRgb(colorA) || hexToRgb(PROFILE_GRADIENT_DEFAULT_A) || { r: 255, g: 106, b: 43 };
   const b = hexToRgb(colorB) || hexToRgb(PROFILE_GRADIENT_DEFAULT_B) || { r: 43, g: 15, b: 8 };
   const avgLum = (relativeLuminance(a) + relativeLuminance(b)) / 2;
   const lightText = avgLum < 0.55;
   return lightText ? {
-    text: "#fdfdfd",
-    shadow: "0 1px 4px rgba(0,0,0,0.65)",
-    pillBg: "rgba(0,0,0,0.32)",
+    text: "#ffffff",
+    shadow: "0 1px 4px rgba(0,0,0,0.75)",
+    pillBg: "rgba(0,0,0,0.30)",
     pillBorder: "rgba(255,255,255,0.22)"
   } : {
-    text: "#0d1b24",
-    shadow: "0 1px 3px rgba(255,255,255,0.35)",
-    pillBg: "rgba(255,255,255,0.24)",
+    text: "#0b0b0b",
+    shadow: "0 1px 4px rgba(255,255,255,0.75)",
+    pillBg: "rgba(255,255,255,0.28)",
     pillBorder: "rgba(0,0,0,0.18)"
   };
 }

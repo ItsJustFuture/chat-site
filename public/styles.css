@@ -4738,7 +4738,7 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 .profileSheetSub{
   margin-top: 6px;
   font-size: 12px;
-  opacity: .9;
+  opacity: 1;
   text-shadow: var(--profileHeaderTextShadow, none);
 }
 .profileSheetStats{
@@ -4850,6 +4850,11 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 
 /* Desktop-only profile modal tightening */
 @media (min-width: 761px){
+  /* In the profile modal, the avatar is already in the hero header.
+     The old two-column modalGrid layout (170px + 1fr) makes the Details
+     section unusably narrow on desktop. */
+  #viewInfo .modalGrid{ grid-template-columns: 1fr; }
+
   /* Smaller action tiles on desktop */
   .profileActionTabs{
     grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
