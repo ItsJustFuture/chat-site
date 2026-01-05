@@ -1317,6 +1317,10 @@ const StickyYouTubePlayer = (()=>{
   let progressTimer = null;
   let currentVideoId = null;
   let pendingAutoplay = false;
+  // "auto" is the only quality option YouTube consistently honors across devices.
+  // We still expose manual qualities when available and attempt to apply them by
+  // re-cueing with `suggestedQuality` (more reliable than `setPlaybackQuality`).
+  let desiredQuality = "auto";
   let state = "expanded";
 
   function loadApi(){
@@ -1390,6 +1394,8 @@ const StickyYouTubePlayer = (()=>{
   function handleReady(){
     updateVolumeUi(player.getVolume?.());
     refreshQualityOptions();
+    // Apply any user-chosen quality after the player is ready.
+    applyDesiredQuality();
   }
   function handleStateChange(e){
     const state = e.data;
@@ -1497,24 +1503,67 @@ const StickyYouTubePlayer = (()=>{
     if(player.isMuted?.()) player.unMute(); else player.mute();
     updateVolumeUi(player.getVolume?.());
   }
+  function applyDesiredQuality(){
+    if(!player) return;
+    const q = desiredQuality || "auto";
+    // Let YouTube handle auto; nothing to apply.
+    if(q === "auto") return;
+
+    // Try the direct setter first (may be ignored on some platforms).
+    try{ player.setPlaybackQuality?.(q); }catch{}
+
+    // More reliable: re-cue at current time with suggestedQuality.
+    if(!currentVideoId) return;
+    let t = 0;
+    try{ t = Number(player.getCurrentTime?.() || 0) || 0; }catch{}
+
+    let wasPlaying = false;
+    try{
+      const st = player.getPlayerState?.();
+      wasPlaying = st === YT.PlayerState.PLAYING || st === YT.PlayerState.BUFFERING;
+    }catch{}
+
+    try{
+      // Some API versions accept an object signature.
+      player.cueVideoById?.({ videoId: currentVideoId, startSeconds: t, suggestedQuality: q });
+    }catch{
+      // Fallback to plain signature if the object form isn't supported.
+      try{ player.cueVideoById?.(currentVideoId); }catch{}
+    }
+
+    if(wasPlaying){
+      setTimeout(()=>{
+        try{ player.playVideo?.(); }catch{}
+      }, 0);
+    }
+  }
+
   function applyQuality(){
-    if(!player || !qualitySelect) return;
-    const q = qualitySelect.value;
-    if(q) player.setPlaybackQuality?.(q);
+    if(!qualitySelect) return;
+    const q = String(qualitySelect.value || "auto").toLowerCase();
+    // Normalize legacy "default" to "auto".
+    desiredQuality = (q === "default") ? "auto" : q;
+    applyDesiredQuality();
   }
   function refreshQualityOptions(){
     if(!player || !qualitySelect || !window.YT?.PlayerState) return;
     const levels = (player.getAvailableQualityLevels?.() || []).filter(Boolean);
     const current = player.getPlaybackQuality?.();
-    const opts = new Set(["default", ...levels]);
+    // Always include Auto. Some players report current quality as "auto".
+    const opts = new Set(["auto", ...levels]);
     qualitySelect.innerHTML = "";
     opts.forEach(level => {
       const opt = document.createElement("option");
       opt.value = level;
-      opt.textContent = level === "default" ? "Auto" : level.toUpperCase();
-      if(level === current) opt.selected = true;
+      opt.textContent = level === "auto" ? "Auto" : level.toUpperCase();
+      const isSelected = (level === current) || (level === "auto" && (!current || current === "auto"));
+      if(isSelected) opt.selected = true;
       qualitySelect.appendChild(opt);
     });
+    // Keep the UI in sync with the user's last choice if it's present.
+    if(desiredQuality && Array.from(qualitySelect.options).some(o => o.value === desiredQuality)){
+      qualitySelect.value = desiredQuality;
+    }
   }
 
   function setMeta(meta){
@@ -1583,6 +1632,7 @@ const StickyYouTubePlayer = (()=>{
       }
       updatePlayPauseUi();
       refreshQualityOptions();
+      applyDesiredQuality();
       updateVolumeUi(player.getVolume?.());
       updateProgress();
     }).catch(err => console.error("[YouTube] failed to load api/player", err));
