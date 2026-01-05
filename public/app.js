@@ -1317,11 +1317,19 @@ const StickyYouTubePlayer = (()=>{
   let progressTimer = null;
   let currentVideoId = null;
   let pendingAutoplay = false;
-  // "auto" is the only quality option YouTube consistently honors across devices.
-  // We still expose manual qualities when available and attempt to apply them by
-  // re-cueing with `suggestedQuality` (more reliable than `setPlaybackQuality`).
-  let desiredQuality = "auto";
   let state = "expanded";
+
+  // In the YouTube IFrame API, quality levels can include both true playback
+  // quality tiers (hd1080, hd720, etc.) AND size-like levels (large/medium/small/tiny).
+  // For this UI, we treat LARGE/MEDIUM/SMALL/TINY as player size controls.
+  const YT_SIZE_LEVELS = ["large","medium","small","tiny"];
+  const YT_SIZE_CLASS = {
+    large: "yt-size-large",
+    medium: "yt-size-medium",
+    small: "yt-size-small",
+    tiny: "yt-size-tiny",
+  };
+  const YT_SIZE_STORAGE_KEY = "yt_player_size";
 
   function loadApi(){
     if(window.YT?.Player) return Promise.resolve(window.YT);
@@ -1363,6 +1371,19 @@ const StickyYouTubePlayer = (()=>{
     minimizeBtn?.addEventListener("click", cycleState);
     closeBtn?.addEventListener("click", close);
     applyState("expanded");
+    // restore saved player size
+    try{
+      const saved = localStorage.getItem(YT_SIZE_STORAGE_KEY);
+      if(saved && YT_SIZE_LEVELS.includes(saved)) applyPlayerSize(saved);
+    }catch{}
+  }
+
+  function applyPlayerSize(size){
+    if(!container) return;
+    Object.values(YT_SIZE_CLASS).forEach(cls => container.classList.remove(cls));
+    const cls = YT_SIZE_CLASS[size];
+    if(cls) container.classList.add(cls);
+    try{ localStorage.setItem(YT_SIZE_STORAGE_KEY, size); }catch{}
   }
 
   function applyState(next){
@@ -1394,8 +1415,6 @@ const StickyYouTubePlayer = (()=>{
   function handleReady(){
     updateVolumeUi(player.getVolume?.());
     refreshQualityOptions();
-    // Apply any user-chosen quality after the player is ready.
-    applyDesiredQuality();
   }
   function handleStateChange(e){
     const state = e.data;
@@ -1503,67 +1522,109 @@ const StickyYouTubePlayer = (()=>{
     if(player.isMuted?.()) player.unMute(); else player.mute();
     updateVolumeUi(player.getVolume?.());
   }
-  function applyDesiredQuality(){
-    if(!player) return;
-    const q = desiredQuality || "auto";
-    // Let YouTube handle auto; nothing to apply.
-    if(q === "auto") return;
-
-    // Try the direct setter first (may be ignored on some platforms).
-    try{ player.setPlaybackQuality?.(q); }catch{}
-
-    // More reliable: re-cue at current time with suggestedQuality.
-    if(!currentVideoId) return;
-    let t = 0;
-    try{ t = Number(player.getCurrentTime?.() || 0) || 0; }catch{}
-
-    let wasPlaying = false;
-    try{
-      const st = player.getPlayerState?.();
-      wasPlaying = st === YT.PlayerState.PLAYING || st === YT.PlayerState.BUFFERING;
-    }catch{}
-
-    try{
-      // Some API versions accept an object signature.
-      player.cueVideoById?.({ videoId: currentVideoId, startSeconds: t, suggestedQuality: q });
-    }catch{
-      // Fallback to plain signature if the object form isn't supported.
-      try{ player.cueVideoById?.(currentVideoId); }catch{}
-    }
-
-    if(wasPlaying){
-      setTimeout(()=>{
-        try{ player.playVideo?.(); }catch{}
-      }, 0);
-    }
-  }
-
   function applyQuality(){
     if(!qualitySelect) return;
-    const q = String(qualitySelect.value || "auto").toLowerCase();
-    // Normalize legacy "default" to "auto".
-    desiredQuality = (q === "default") ? "auto" : q;
-    applyDesiredQuality();
-  }
-  function refreshQualityOptions(){
-    if(!player || !qualitySelect || !window.YT?.PlayerState) return;
-    const levels = (player.getAvailableQualityLevels?.() || []).filter(Boolean);
-    const current = player.getPlaybackQuality?.();
-    // Always include Auto. Some players report current quality as "auto".
-    const opts = new Set(["auto", ...levels]);
-    qualitySelect.innerHTML = "";
-    opts.forEach(level => {
-      const opt = document.createElement("option");
-      opt.value = level;
-      opt.textContent = level === "auto" ? "Auto" : level.toUpperCase();
-      const isSelected = (level === current) || (level === "auto" && (!current || current === "auto"));
-      if(isSelected) opt.selected = true;
-      qualitySelect.appendChild(opt);
-    });
-    // Keep the UI in sync with the user's last choice if it's present.
-    if(desiredQuality && Array.from(qualitySelect.options).some(o => o.value === desiredQuality)){
-      qualitySelect.value = desiredQuality;
+    const v = String(qualitySelect.value || "").trim();
+    if(!v) return;
+
+    // Treat LARGE/MEDIUM/SMALL/TINY as player size controls.
+    if(YT_SIZE_LEVELS.includes(v)){
+      applyPlayerSize(v);
+      return;
     }
+
+    if(!player) return;
+
+    // Normalize UI's "Auto" to API-friendly values.
+    const q = (v === "default") ? "auto" : v;
+
+    // setPlaybackQuality is often ignored by the iframe unless we re-load/cue.
+    // We'll re-load/cue at the current time with suggestedQuality for reliability.
+    try{
+      const pos = Math.max(0, Number(player.getCurrentTime?.() || 0));
+      const wasPlaying = (()=>{
+        const st = player.getPlayerState?.();
+        return st === window.YT?.PlayerState?.PLAYING || st === window.YT?.PlayerState?.BUFFERING;
+      })();
+
+      const loadOrCue = (args)=>{
+        // If the user was actively playing, use loadVideoById to force the stream
+        // to renegotiate at the suggested quality.
+        if(wasPlaying) player.loadVideoById?.(args);
+        else player.cueVideoById?.(args);
+      };
+
+      if(q === "auto"){
+        // Best-effort: clear suggested quality by cueing without suggestedQuality.
+        player.setPlaybackQuality?.("default");
+        player.setPlaybackQuality?.("auto");
+        if(currentVideoId){
+          loadOrCue({ videoId: currentVideoId, startSeconds: pos });
+        }
+      }else{
+        player.setPlaybackQuality?.(q);
+        if(currentVideoId){
+          loadOrCue({ videoId: currentVideoId, startSeconds: pos, suggestedQuality: q });
+        }
+      }
+
+      // If we cued (not loaded) and the user was playing, resume.
+      if(wasPlaying && !player.loadVideoById){
+        setTimeout(()=>{ try{ player.playVideo?.(); }catch{} }, 0);
+      }
+    }catch(err){
+      console.warn("[YouTube] quality/size apply failed", err);
+    }
+  }
+
+  function refreshQualityOptions(){
+    if(!player || !qualitySelect) return;
+    const levels = (player.getAvailableQualityLevels?.() || []).filter(Boolean);
+    const currentQuality = String(player.getPlaybackQuality?.() || "").trim();
+    const sizeSaved = (()=>{
+      try{ return localStorage.getItem(YT_SIZE_STORAGE_KEY) || ""; }catch{ return ""; }
+    })();
+
+    // Build two groups: playback quality + player size.
+    const qualityLevels = [];
+    levels.forEach(l => {
+      const lvl = String(l || "").trim();
+      if(!lvl) return;
+      if(YT_SIZE_LEVELS.includes(lvl)) return;
+      // some browsers return "auto"; include it as the UI's Auto.
+      if(lvl === "default") return;
+      qualityLevels.push(lvl);
+    });
+
+    // Ensure "Auto" exists.
+    const uniqueQual = Array.from(new Set(["auto", ...qualityLevels]));
+
+    qualitySelect.innerHTML = "";
+
+    const ogQ = document.createElement("optgroup");
+    ogQ.label = "Quality";
+    uniqueQual.forEach(lvl => {
+      const opt = document.createElement("option");
+      opt.value = (lvl === "auto") ? "auto" : lvl;
+      opt.textContent = (lvl === "auto") ? "Auto" : lvl.toUpperCase();
+      // If currentQuality isn't present/accurate, default to Auto.
+      if((lvl === "auto" && (!currentQuality || currentQuality === "default" || currentQuality === "auto")) || lvl === currentQuality){
+        opt.selected = true;
+      }
+      ogQ.appendChild(opt);
+    });
+    qualitySelect.appendChild(ogQ);
+
+    const ogS = document.createElement("optgroup");
+    ogS.label = "Player size";
+    YT_SIZE_LEVELS.forEach(sz => {
+      const opt = document.createElement("option");
+      opt.value = sz;
+      opt.textContent = sz.toUpperCase();
+      if(sizeSaved && sizeSaved === sz) opt.selected = true;
+      ogS.appendChild(opt);
+    });
+    qualitySelect.appendChild(ogS);
   }
 
   function setMeta(meta){
@@ -1632,7 +1693,6 @@ const StickyYouTubePlayer = (()=>{
       }
       updatePlayPauseUi();
       refreshQualityOptions();
-      applyDesiredQuality();
       updateVolumeUi(player.getVolume?.());
       updateProgress();
     }).catch(err => console.error("[YouTube] failed to load api/player", err));
@@ -2156,51 +2216,19 @@ function relativeLuminance({ r, g, b }){
   return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
 }
 function computeProfileTextTheme(colorA, colorB){
-  // Profile header/meta text needs to remain readable across both the bright
-  // header gradient and the darker underlay band.
-  //
-  // Rule:
-  // - Dark-mode themes => white text with a subtle black glow.
-  // - Light-mode themes => black text with a subtle white glow.
-  //
-  // We detect "light" themes by name (data-theme), falling back to the
-  // original gradient luminance heuristic if detection fails.
-  const themeName = (document.body?.getAttribute("data-theme") || "").toLowerCase();
-  const looksLight = themeName.includes("light") || themeName.includes("paper") || themeName.includes("parchment") || themeName.includes("sunrise") || themeName.includes("cotton") || themeName.includes("mint");
-
-  if(looksLight){
-    return {
-      text: "#0b0b0b",
-      shadow: "0 1px 4px rgba(255,255,255,0.75)",
-      pillBg: "rgba(255,255,255,0.28)",
-      pillBorder: "rgba(0,0,0,0.18)"
-    };
-  }
-
-  // Default (dark-mode themes)
-  if(themeName){
-    return {
-      text: "#ffffff",
-      shadow: "0 1px 4px rgba(0,0,0,0.75)",
-      pillBg: "rgba(0,0,0,0.30)",
-      pillBorder: "rgba(255,255,255,0.22)"
-    };
-  }
-
-  // Fallback: pre-theme-init or missing attribute.
   const a = hexToRgb(colorA) || hexToRgb(PROFILE_GRADIENT_DEFAULT_A) || { r: 255, g: 106, b: 43 };
   const b = hexToRgb(colorB) || hexToRgb(PROFILE_GRADIENT_DEFAULT_B) || { r: 43, g: 15, b: 8 };
   const avgLum = (relativeLuminance(a) + relativeLuminance(b)) / 2;
   const lightText = avgLum < 0.55;
   return lightText ? {
-    text: "#ffffff",
-    shadow: "0 1px 4px rgba(0,0,0,0.75)",
-    pillBg: "rgba(0,0,0,0.30)",
+    text: "#fdfdfd",
+    shadow: "0 1px 4px rgba(0,0,0,0.65)",
+    pillBg: "rgba(0,0,0,0.32)",
     pillBorder: "rgba(255,255,255,0.22)"
   } : {
-    text: "#0b0b0b",
-    shadow: "0 1px 4px rgba(255,255,255,0.75)",
-    pillBg: "rgba(255,255,255,0.28)",
+    text: "#0d1b24",
+    shadow: "0 1px 3px rgba(255,255,255,0.35)",
+    pillBg: "rgba(255,255,255,0.24)",
     pillBorder: "rgba(0,0,0,0.18)"
   };
 }
@@ -2238,12 +2266,6 @@ function applyProfileHeaderGradient(colorA, colorB, role){
   }
   if(profileSheetHero){
     const theme = computeProfileTextTheme(a, b);
-    // Expose the raw gradient endpoints so CSS can reuse them for solid (non-translucent)
-    // chips/pills that match the header style.
-    profileSheetHero.style.setProperty("--profileGradA", a);
-    profileSheetHero.style.setProperty("--profileGradB", b);
-    profileSheetHero.style.setProperty("--profilePillBg", `linear-gradient(135deg, ${a}, ${b})`);
-
     profileSheetHero.style.setProperty("--profileHeaderText", theme.text);
     profileSheetHero.style.setProperty("--profileHeaderTextShadow", theme.shadow);
     profileSheetHero.style.setProperty("--profileHeaderPillBg", theme.pillBg);
