@@ -2461,6 +2461,17 @@ body.dice-room .sys .diceFace{
     margin-top: 0;
   }
   .profileSheetName{ font-size: 24px; }
+  /* Desktop: keep the big action squares compact and airy */
+  .profileActionTabs{ gap: 10px; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); }
+  .profileActionTabs .tab{
+    min-height: 60px;
+    font-size: 10.5px;
+    gap: 5px;
+  }
+  .profileActionTabs .tab .tabIcon{ font-size: 18px; }
+
+  /* Desktop: spread details info wider across the row */
+  .infoGrid{ grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .tabs{ gap: 8px; }
 }
 .modalTop{ display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;flex-shrink: 0; }
@@ -4593,7 +4604,7 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 /* ==== Profile sheet modal (custom, not a clone) ==== */
 .profileSheetHero{
   position: relative;
-  margin: 10px 0 6px;
+  margin: 6px 0 6px;
   border-radius: 16px;
   overflow: hidden;
   border: 1px solid rgba(255,255,255,.08);
@@ -4605,7 +4616,7 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
   --profileHeaderPillBorder: rgba(255,255,255,.18);
 }
 .profileSheetBg{
-  height: 170px;
+  height: 150px;
   background: var(--profileHeaderBg, linear-gradient(135deg, rgba(255,106,43,.75), rgba(43,15,8,.85)));
   filter: saturate(1.08);
   background-repeat: no-repeat;
@@ -4647,7 +4658,7 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
   grid-template-columns: 110px 1fr;
   gap: 14px;
   padding: 14px;
-  margin-top: -64px;
+  margin-top: -86px;
   align-items: center;
   position: relative;
   z-index: 1;
@@ -4704,8 +4715,8 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
   font-size: 12px;
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid var(--profileHeaderPillBorder, rgba(255,255,255,.18));
-  background: var(--profileHeaderPillBg, rgba(255,255,255,.08));
+  border: 1px solid rgba(255,255,255,.18);
+  background: var(--profilePillBg, var(--profileHeaderPillBg, rgba(255,255,255,.08)));
   color: var(--profileHeaderText, #fff);
   text-shadow: var(--profileHeaderTextShadow, none);
 }
@@ -4718,8 +4729,8 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 .profileDetail{
   padding:6px 10px;
   border-radius:12px;
-  border:1px solid var(--profileHeaderPillBorder, rgba(255,255,255,.12));
-  background: var(--profileHeaderPillBg, rgba(0,0,0,.28));
+  border:1px solid rgba(255,255,255,.16);
+  background: var(--profilePillBg, var(--profileHeaderPillBg, rgba(0,0,0,.28)));
   font-size:12px;
   color: var(--profileHeaderText, #fff);
   text-shadow: var(--profileHeaderTextShadow, none);
@@ -4740,8 +4751,8 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 .statPill{
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid var(--profileHeaderPillBorder, rgba(255,255,255,.12));
-  background: var(--profileHeaderPillBg, rgba(0,0,0,.25));
+  border: 1px solid rgba(255,255,255,.16);
+  background: var(--profilePillBg, var(--profileHeaderPillBg, rgba(0,0,0,.25)));
   font-size: 12px;
   color: var(--profileHeaderText, #fff);
   text-shadow: var(--profileHeaderTextShadow, none);
@@ -4825,16 +4836,37 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 }
 
 @media (max-width: 760px){
-  .profileSheetBg{ height: 150px; }
+  .profileSheetBg{ height: 140px; }
   .profileSheetContent{
     grid-template-columns: 96px 1fr;
-    margin-top: -56px;
+    margin-top: -74px;
     padding: 12px;
   }
   .profileSheetAvatarCard{ width: 96px; height: 96px; border-radius: 16px; }
   .profileSheetName{ font-size: 20px; }
   .profileMenuRow{ grid-template-columns: 42px 1fr auto; }
   .profileMenu{ margin-bottom: calc(12px + env(safe-area-inset-bottom)); }
+}
+
+/* Desktop-only profile modal tightening */
+@media (min-width: 761px){
+  /* Smaller action tiles on desktop */
+  .profileActionTabs{
+    grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+    gap: 12px;
+    margin: 8px 0 6px;
+  }
+  .profileActionTabs .tab{
+    min-height: 60px;
+    gap: 5px;
+    font-size: 10px;
+  }
+  .profileActionTabs .tab .tabIcon{ font-size: 18px; }
+
+  /* Spread info grid wider on desktop (Details section) */
+  .infoGrid{
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
 }
 
 

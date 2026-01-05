@@ -2156,6 +2156,12 @@ function applyProfileHeaderGradient(colorA, colorB, role){
   }
   if(profileSheetHero){
     const theme = computeProfileTextTheme(a, b);
+    // Expose the raw gradient endpoints so CSS can reuse them for solid (non-translucent)
+    // chips/pills that match the header style.
+    profileSheetHero.style.setProperty("--profileGradA", a);
+    profileSheetHero.style.setProperty("--profileGradB", b);
+    profileSheetHero.style.setProperty("--profilePillBg", `linear-gradient(135deg, ${a}, ${b})`);
+
     profileSheetHero.style.setProperty("--profileHeaderText", theme.text);
     profileSheetHero.style.setProperty("--profileHeaderTextShadow", theme.shadow);
     profileSheetHero.style.setProperty("--profileHeaderPillBg", theme.pillBg);
