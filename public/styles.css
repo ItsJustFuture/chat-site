@@ -2480,7 +2480,7 @@ padding: 18px;
 }
 .tabs::-webkit-scrollbar{ display:none; }
 .tab{
-  padding:8px 10px;
+  padding:10px;
   border-radius:12px;
   background:color-mix(in srgb, var(--panel) 85%, transparent);
   border:1px solid var(--border);
@@ -2491,8 +2491,14 @@ padding: 18px;
   user-select:none;
   flex:1 1 120px;
   text-align:center;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
 }
 .tab.active{ background:var(--panel); border-color:var(--border); box-shadow: var(--shadowSm); }
+.tab .tabIcon{ font-size:18px; line-height:1; }
+.tab .tabLabel{ white-space:nowrap; }
 
 .modalGrid{ display:grid; grid-template-columns: 170px 1fr; gap:12px; }
 .pAvatar{ width:160px; height:160px; border-radius:18px; background:var(--avatar-bg); overflow:hidden; border:1px solid var(--border); }
@@ -4599,7 +4605,7 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
   gap: 14px;
   padding: 14px;
   margin-top: -64px;
-  align-items: end;
+  align-items: center;
   position: relative;
   z-index: 1;
 }
@@ -4658,6 +4664,19 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
   border: 1px solid rgba(255,255,255,.18);
   background: rgba(255,255,255,.08);
 }
+.profileSheetDetails{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:6px;
+}
+.profileDetail{
+  padding:6px 10px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.12);
+  background: rgba(0,0,0,.28);
+  font-size:12px;
+}
 .profileSheetSub{
   margin-top: 6px;
   font-size: 12px;
@@ -4677,6 +4696,13 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
   background: rgba(0,0,0,.25);
   font-size: 12px;
 }
+
+.profileActions{ display:flex; flex-direction:column; gap:10px; margin:6px 0 10px; }
+.profileActionTabs{ width:100%; flex-wrap:nowrap; grid-template-columns: repeat(4, minmax(72px, 1fr)); display:grid; }
+.profileActionTabs .tab{ aspect-ratio: 1; min-height:72px; }
+.profileQuickActions{ display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+.quickActionGroup{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.quickActionGroup .badge{ height:100%; display:flex; align-items:center; justify-content:center; }
 
 .profileMenu{
   display: grid;

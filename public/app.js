@@ -1102,6 +1102,18 @@ const modalName = document.getElementById("modalName");
 const modalRole = document.getElementById("modalRole");
 const modalMood = document.getElementById("modalMood");
 const profileVibes = document.getElementById("profileVibes");
+const profileSheetHero = document.getElementById("profileSheetHero");
+const profileSheetAvatar = document.getElementById("profileSheetAvatar");
+const profileSheetAvatarActions = document.getElementById("profileSheetAvatarActions");
+const profileSheetName = document.getElementById("profileSheetName");
+const profileSheetRoleChip = document.getElementById("profileSheetRoleChip");
+const profileSheetStats = document.getElementById("profileSheetStats");
+const profileSheetStars = document.getElementById("profileSheetStars");
+const profileSheetLikes = document.getElementById("profileSheetLikes");
+const profileSheetSub = document.getElementById("profileSheetSub");
+const profileSheetAge = document.getElementById("profileSheetAge");
+const profileSheetGender = document.getElementById("profileSheetGender");
+const profileSheetDetails = document.getElementById("profileSheetDetails");
 const mediaLightbox = document.getElementById("mediaLightbox");
 const mediaLightboxImg = document.getElementById("mediaLightboxImg");
 const mediaLightboxVideo = document.getElementById("mediaLightboxVideo");
@@ -1120,6 +1132,7 @@ const tabInfo = document.getElementById("tabInfo");
 const tabAbout = document.getElementById("tabAbout");
 const tabCustomize = document.getElementById("tabCustomize");
 const tabModeration = document.getElementById("tabModeration");
+const addFriendBtn = document.getElementById("addFriendBtn");
 
 const viewInfo = document.getElementById("viewInfo");
 const viewAbout = document.getElementById("viewAbout");
@@ -1129,6 +1142,7 @@ const viewModeration = document.getElementById("viewModeration");
 const bioRender = document.getElementById("bioRender");
 const copyUsernameBtn = document.getElementById("copyUsernameBtn");
 const mediaMsg = document.getElementById("mediaMsg");
+const profileActionMsg = document.getElementById("profileActionMsg");
 const customizeMsg = document.getElementById("customizeMsg");
 const levelBadge = document.getElementById("levelBadge");
 const xpText = document.getElementById("xpText");
@@ -5355,6 +5369,16 @@ function renderVibeOptions(selected = []){
   });
 }
 
+function isSelfProfile(p){
+  if (!p || !me) return false;
+  const meId = me.id ?? me.user_id;
+  const targetId = p.id ?? p.user_id;
+  if (meId !== undefined && targetId !== undefined && String(meId) === String(targetId)) return true;
+  const meUser = normKey(me.username || "");
+  const targetUser = normKey(p.username || "");
+  return !!meUser && meUser === targetUser;
+}
+
 function fillProfileUI(p, isSelf){
   modalAvatar.innerHTML="";
   modalAvatar.appendChild(avatarNode(p.avatar, p.username, p.role));
@@ -5375,7 +5399,10 @@ function fillProfileUI(p, isSelf){
   renderLevelProgress(p, isSelf);
   syncProfileLikes(p, isSelf);
   if (profileLikeMsg) profileLikeMsg.textContent = "";
+  if (profileActionMsg) profileActionMsg.textContent = "";
+  if (mediaMsg) mediaMsg.textContent = "";
   renderVibeChips(profileVibes, p.vibe_tags);
+  fillProfileSheetHeader(p, isSelf);
 }
 
 
@@ -5393,6 +5420,23 @@ function fillProfileSheetHeader(p, isSelf){
   if (profileSheetRoleChip){
     profileSheetRoleChip.textContent = p.role ? `${roleIcon(p.role)} ${p.role}` : "User";
     profileSheetRoleChip.style.color = roleBadgeColor(p.role || "User");
+  }
+
+  // Age + gender
+  const ageVal = p.age;
+  const genderVal = (p.gender || "").trim();
+  const showAge = ageVal !== undefined && ageVal !== null && String(ageVal).trim() !== "";
+  const showGender = !!genderVal;
+  if (profileSheetAge){
+    profileSheetAge.textContent = showAge ? `Age ${ageVal}` : "";
+    profileSheetAge.style.display = showAge ? "inline-flex" : "none";
+  }
+  if (profileSheetGender){
+    profileSheetGender.textContent = showGender ? genderVal : "";
+    profileSheetGender.style.display = showGender ? "inline-flex" : "none";
+  }
+  if (profileSheetDetails){
+    profileSheetDetails.style.display = (showAge || showGender) ? "flex" : "none";
   }
 
   // Subline: mood + status/room snapshot
@@ -5421,6 +5465,14 @@ function fillProfileSheetHeader(p, isSelf){
   if (profileSheetAvatarActions){
     profileSheetAvatarActions.style.display = isSelf ? "flex" : "none";
   }
+}
+
+function updateProfileActions({ isSelf = false, canModerate = false } = {}){
+  if (tabEdit) tabEdit.style.display = isSelf ? "" : "none";
+  if (viewEdit && !isSelf) viewEdit.style.display = "none";
+  if (addFriendBtn) addFriendBtn.style.display = isSelf ? "none" : "";
+  if (profileActionMsg) profileActionMsg.textContent = "";
+  if (tabModeration) tabModeration.style.display = canModerate ? "" : "none";
 }
 
 function applyProfileMenuVisibility(){
@@ -5664,7 +5716,8 @@ modalTargetUsername = p.username;
   avatarFile.value="";
   profileMsg.textContent="";
 
-  tabModeration.style.display = (roleRank(me.role) >= roleRank("Moderator")) ? "block" : "none";
+  const canMod = (roleRank(me.role) >= roleRank("Moderator"));
+  updateProfileActions({ isSelf: true, canModerate: canMod });
   setTab("info");
   openModal();
 }
@@ -5701,7 +5754,7 @@ async function openMemberProfile(username){
   if(!res.ok) return;
   const p=await res.json();
   modalTargetUserId = Number(p?.id) || null;
-  const isSelf = !!me && normKey(me.username) === normKey(p.username);
+  const isSelf = isSelfProfile(p);
   if (isSelf) applyProgressionPayload(p);
 
   modalTitle.textContent="Member Profile";
@@ -5709,7 +5762,7 @@ async function openMemberProfile(username){
   fillProfileUI(p, isSelf);
   syncCustomizationUI();
 
-  myProfileEdit.style.display="none";
+  myProfileEdit.style.display = isSelf ? "block" : "none";
 
   const iCanMod = (roleRank(me.role) >= roleRank("Moderator")) && (roleRank(me.role) > roleRank(p.role));
   memberModTools.style.display = iCanMod ? "block" : "none";
@@ -5721,7 +5774,7 @@ async function openMemberProfile(username){
   if(modReason) modReason.value = "";
   if(modMsg) modMsg.textContent = "";
 
-  tabModeration.style.display = (roleRank(me.role) >= roleRank("Moderator")) ? "block" : "none";
+  updateProfileActions({ isSelf, canModerate: (roleRank(me.role) >= roleRank("Moderator")) });
   setTab("info");
   openModal();
 }
@@ -5745,6 +5798,11 @@ likeProfileBtn?.addEventListener("click", async () => {
     const isSelf = normKey(modalTargetUsername) === normKey(me?.username);
     likeProfileBtn.disabled = isSelf;
   }
+});
+
+addFriendBtn?.addEventListener("click", () => {
+  if (addFriendBtn.disabled) return;
+  if (profileActionMsg) profileActionMsg.textContent = "Friend system coming soon.";
 });
 
 // media actions
