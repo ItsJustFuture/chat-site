@@ -1319,49 +1319,14 @@ const StickyYouTubePlayer = (()=>{
   let pendingAutoplay = false;
   let state = "expanded";
 
-  // Preferred playback quality (string from the IFrame API). We persist this so it
-  // applies on subsequent loads, and we *force apply* it by rebuilding the iframe
-  // with playerVars.vq when needed (because setPlaybackQuality is unreliable).
-  let preferredQuality = "auto";
-  const YT_QUALITY_STORAGE_KEY = "yt_preferred_quality";
-
-  // In the YouTube IFrame API, quality levels can include both true playback
-  // quality tiers (hd1080, hd720, etc.) AND size-like levels (large/medium/small/tiny).
-  // For this UI, we treat LARGE/MEDIUM/SMALL/TINY as player size controls.
+  // Some YT "quality levels" are actually size-like tiers (large/medium/small/tiny).
+  // We treat those as player size controls.
   const YT_SIZE_LEVELS = ["large","medium","small","tiny"];
-  const YT_SIZE_CLASS = {
-    large: "yt-size-large",
-    medium: "yt-size-medium",
-    small: "yt-size-small",
-    tiny: "yt-size-tiny",
-  };
+  const YT_SIZE_CLASS = { large:"yt-size-large", medium:"yt-size-medium", small:"yt-size-small", tiny:"yt-size-tiny" };
+  const YT_SIZE_HEIGHT = { large:240, medium:180, small:140, tiny:110 };
   const YT_SIZE_STORAGE_KEY = "yt_player_size";
+  const YT_SIZE_DEFAULT = "medium";
 
-  // Map UI labels (including legacy ones) to iframe API quality strings.
-  // YouTube historically used: highres, hd1080, hd720, large, medium, small, tiny, auto.
-  // Some clients may report newer strings; we pass them through if unknown.
-  function normalizeQuality(q){
-    q = String(q || "").trim().toLowerCase();
-    if(!q || q === "default") return "auto";
-    if(q === "auto") return "auto";
-    // Accept either API strings or human-friendly labels.
-    if(q === "highres" || q === "hd2160" || q === "2160" || q === "4k") return "highres";
-    if(q === "hd1440" || q === "1440" || q === "2k") return "hd1440";
-    if(q === "hd1080" || q === "1080" || q === "fhd") return "hd1080";
-    if(q === "hd720" || q === "720" || q === "hd") return "hd720";
-    if(q === "large" || q === "medium" || q === "small" || q === "tiny") return q;
-    return q;
-  }
-
-  function labelForQuality(q){
-    q = normalizeQuality(q);
-    if(q === "auto") return "Auto";
-    if(q === "highres") return "HD2160";
-    if(q === "hd1440") return "HD1440";
-    if(q === "hd1080") return "HD1080";
-    if(q === "hd720") return "HD720";
-    return q.toUpperCase();
-  }
 
   function loadApi(){
     if(window.YT?.Player) return Promise.resolve(window.YT);
@@ -1391,22 +1356,7 @@ const StickyYouTubePlayer = (()=>{
     seekSlider = document.getElementById("ytSeek");
     currentTimeEl = document.getElementById("ytCurrentTime");
     durationEl = document.getElementById("ytDuration");
-	  // Replace the select node to wipe any previously-attached listeners/handlers
-	  // from older builds (or cached inline handlers), then re-bind our handler.
-	  {
-	    const oldSel = document.getElementById("ytQuality");
-	    if(oldSel){
-	      const fresh = oldSel.cloneNode(false);
-	      // preserve attributes
-	      for(const attr of Array.from(oldSel.attributes || [])){
-	        if(attr && attr.name) fresh.setAttribute(attr.name, attr.value);
-	      }
-	      oldSel.parentNode?.replaceChild(fresh, oldSel);
-	      qualitySelect = fresh;
-	    }else{
-	      qualitySelect = null;
-	    }
-	  }
+    qualitySelect = document.getElementById("ytQuality");
     minimizeBtn = document.getElementById("ytMinimize");
     closeBtn = document.getElementById("ytClose");
     playPauseBtn?.addEventListener("click", togglePlayPause);
@@ -1414,94 +1364,45 @@ const StickyYouTubePlayer = (()=>{
     volumeSlider?.addEventListener("input", handleVolumeChange);
     seekSlider?.addEventListener("input", handleSeek);
     seekSlider?.addEventListener("change", handleSeek);
-	  // Attach handler (use onchange to avoid any passive/capture mismatches)
-	  if(qualitySelect){
-	    try{ qualitySelect.onchange = null; }catch{}
-	    qualitySelect.onchange = applyQuality;
-	  }
+    qualitySelect?.addEventListener("change", applyQuality);
     minimizeBtn?.addEventListener("click", cycleState);
     closeBtn?.addEventListener("click", close);
     applyState("expanded");
-    // restore saved player size
+
+    // restore saved player size (or default)
     try{
-      const saved = localStorage.getItem(YT_SIZE_STORAGE_KEY);
-      if(saved && YT_SIZE_LEVELS.includes(saved)) applyPlayerSize(saved);
-    }catch{}
-
-    // restore preferred quality
-    try{
-      const savedQ = localStorage.getItem(YT_QUALITY_STORAGE_KEY);
-      if(savedQ) preferredQuality = normalizeQuality(savedQ);
-    }catch{}
-  }
-
-  function applyPlayerSize(size){
-    if(!container) return;
-    Object.values(YT_SIZE_CLASS).forEach(cls => container.classList.remove(cls));
-    const cls = YT_SIZE_CLASS[size];
-    if(cls) container.classList.add(cls);
-    try{ localStorage.setItem(YT_SIZE_STORAGE_KEY, size); }catch{}
-
-    // Force the actual iframe size to update as well (CSS alone isn't always
-    // enough because the IFrame API sets fixed width/height attributes).
-    forceResizePlayer();
-  }
-
-  function desiredPlayerHeight(){
-    // Use the holder width and 16:9 ratio, with clamped heights per size tier.
-    const w = Math.max(1, Math.round(playerHolder?.getBoundingClientRect?.().width || 0));
-    const base = Math.round(w * 9 / 16);
-    const size = (()=>{ try{ return localStorage.getItem(YT_SIZE_STORAGE_KEY) || "medium"; }catch{ return "medium"; } })();
-    const clamp = (n,min,max)=>Math.max(min, Math.min(max, n));
-    if(size === "large") return clamp(base, 220, 420);
-    if(size === "small") return clamp(base, 140, 260);
-    if(size === "tiny")  return clamp(base, 110, 210);
-    return clamp(base, 180, 320);
-  }
-
-  function forceResizePlayer(){
-    if(!playerHolder) return;
-    const r = playerHolder.getBoundingClientRect?.();
-    const w = Math.max(1, Math.round(r?.width || 0));
-    const h = desiredPlayerHeight();
-
-	  // Apply to both the inner holder and its parent wrapper.
-	  // The wrapper is what the layout actually sizes, and some themes override
-	  // the inner frame height, so set both.
-	  playerHolder.style.height = `${h}px`;
-	  playerHolder.style.minHeight = `${h}px`;
-	  const wrap = playerHolder.parentElement;
-	  if(wrap){
-	    wrap.style.height = `${h}px`;
-	    wrap.style.minHeight = `${h}px`;
-	  }
-
-	  const iframe = playerHolder.querySelector?.("iframe") || wrap?.querySelector?.("iframe");
-    if(iframe){
-      iframe.style.width = "100%";
-      iframe.style.height = "100%";
+      let saved = localStorage.getItem(YT_SIZE_STORAGE_KEY);
+      if(!saved || !YT_SIZE_LEVELS.includes(saved)) saved = YT_SIZE_DEFAULT;
+      applyPlayerSize(saved, { persist:false });
+    }catch{
+      applyPlayerSize(YT_SIZE_DEFAULT, { persist:false });
     }
-
-    try{ player?.setSize?.(w, h); }catch{}
   }
 
-  function enforceVqOnIframe(){
-    // As a last-resort, ensure the iframe URL contains vq=<preferred>.
-    // Some environments ignore setPlaybackQuality/suggestedQuality.
-    const q = normalizeQuality(preferredQuality);
-    if(!q || q === "auto") return;
-    const iframe = playerHolder?.querySelector?.("iframe") || playerHolder?.parentElement?.querySelector?.("iframe");
-    if(!iframe || !iframe.src) return;
+
+  function applyPlayerSize(size, opts={}){
+    if(!container) return;
+    const s = String(size||"").toLowerCase();
+    if(!YT_SIZE_LEVELS.includes(s)) return;
+    Object.values(YT_SIZE_CLASS).forEach(cls => container.classList.remove(cls));
+    const cls = YT_SIZE_CLASS[s];
+    if(cls) container.classList.add(cls);
+
+    const h = YT_SIZE_HEIGHT[s] || YT_SIZE_HEIGHT[YT_SIZE_DEFAULT];
     try{
-      const url = new URL(iframe.src);
-      // Only touch youtube domains
-      if(!/youtube\.com|youtube-nocookie\.com/.test(url.hostname)) return;
-      url.searchParams.set("vq", q);
-      const next = url.toString();
-      if(next !== iframe.src) iframe.src = next;
+      const holder = document.querySelector("#ytSticky .ytPlayerHolder");
+      if(holder){ holder.style.minHeight = h + "px"; holder.style.height = h + "px"; }
+      if(playerHolder){ playerHolder.style.minHeight = h + "px"; playerHolder.style.height = h + "px"; }
+      if(player && typeof player.setSize === "function"){
+        const w = Math.max(240, Math.floor((playerHolder?.getBoundingClientRect().width || holder?.getBoundingClientRect().width || 0)));
+        if(w) player.setSize(w, h);
+      }
     }catch{}
-  }
 
+    if(opts.persist !== false){
+      try{ localStorage.setItem(YT_SIZE_STORAGE_KEY, s); }catch{}
+    }
+  }
   function applyState(next){
     state = next || "expanded";
     if(!container) return;
@@ -1512,24 +1413,11 @@ const StickyYouTubePlayer = (()=>{
   function ensurePlayer(){
     if(player) return Promise.resolve(player);
     return loadApi().then(()=>{
-      const q = normalizeQuality(preferredQuality);
-      const playerVars = {
-        playsinline: 1,
-        controls: 0,
-        modestbranding: 1,
-        rel: 0,
-        autoplay: 0,
-        enablejsapi: 1,
-        origin: window.location.origin,
-      };
-      // Force preferred quality via vq when possible. (Auto -> omit)
-      if(q && q !== "auto") playerVars.vq = q;
-
       player = new YT.Player(playerHolder, {
         height: "180",
         width: "320",
         host: "https://www.youtube-nocookie.com",
-        playerVars,
+        playerVars: { playsinline:1, controls:0, modestbranding:1, rel:0, autoplay:0, enablejsapi:1, origin: window.location.origin },
         events: {
           onReady: handleReady,
           onStateChange: handleStateChange,
@@ -1544,9 +1432,10 @@ const StickyYouTubePlayer = (()=>{
   function handleReady(){
     updateVolumeUi(player.getVolume?.());
     refreshQualityOptions();
-    // Ensure the player matches the current size tier on first load.
-    forceResizePlayer();
-    enforceVqOnIframe();
+    try{
+      const saved = localStorage.getItem(YT_SIZE_STORAGE_KEY) || YT_SIZE_DEFAULT;
+      if(YT_SIZE_LEVELS.includes(saved)) applyPlayerSize(saved, { persist:false });
+    }catch{}
   }
   function handleStateChange(e){
     const state = e.data;
@@ -1656,98 +1545,80 @@ const StickyYouTubePlayer = (()=>{
   }
   function applyQuality(){
     if(!qualitySelect) return;
-    const v = String(qualitySelect.value || "").trim();
-    if(!v) return;
+    const vRaw = String(qualitySelect.value || "").trim();
+    if(!vRaw) return;
+    const v = vRaw.toLowerCase();
 
-    // Treat LARGE/MEDIUM/SMALL/TINY as player size controls.
+    // Size controls (LARGE/MEDIUM/SMALL/TINY)
     if(YT_SIZE_LEVELS.includes(v)){
-      applyPlayerSize(v);
+      applyPlayerSize(v, { persist:true });
       return;
     }
 
-    // Playback quality selection.
-    preferredQuality = normalizeQuality(v);
-    try{ localStorage.setItem(YT_QUALITY_STORAGE_KEY, preferredQuality); }catch{}
+    if(!player || !currentVideoId) return;
 
-    // Most reliable approach: rebuild the iframe with playerVars.vq.
-    // This avoids residual code paths where setPlaybackQuality/suggestedQuality
-    // are silently ignored.
-    forceApplyPreferredQuality();
-  }
+    // "default" in our UI means Auto.
+    const q = (v === "default") ? "auto" : v;
 
-  function forceApplyPreferredQuality(){
-    if(!currentVideoId) return;
-    const q = normalizeQuality(preferredQuality);
-    if(!player){
-      // If player isn't created yet, it will pick up preferredQuality in ensurePlayer.
-      return;
-    }
     try{
+      if(q === "auto"){
+        // Let YouTube adapt.
+        player.setPlaybackQuality?.("default");
+        return;
+      }
+
       const pos = Math.max(0, Number(player.getCurrentTime?.() || 0));
-      const wasPlaying = (()=>{
-        const st = player.getPlayerState?.();
-        return st === window.YT?.PlayerState?.PLAYING || st === window.YT?.PlayerState?.BUFFERING;
-      })();
+      const st = Number(player.getPlayerState?.() || 0);
+      const wasPlaying = (st === window.YT?.PlayerState?.PLAYING || st === window.YT?.PlayerState?.BUFFERING);
 
-      // Destroy and recreate player to ensure vq takes effect.
-      try{ stopProgress(); }catch{}
-      try{ player.destroy?.(); }catch{}
-      player = null;
-
-      ensurePlayer().then(()=>{
-        if(!player) return;
-        // Apply size again (new iframe)
-        forceResizePlayer();
-	        enforceVqOnIframe();
-        // Cue/load at time with suggestedQuality as an additional hint.
-        const args = { videoId: currentVideoId, startSeconds: pos };
-        if(q && q !== "auto") args.suggestedQuality = q;
-        if(wasPlaying) player.loadVideoById?.(args);
-        else player.cueVideoById?.(args);
-        if(wasPlaying) setTimeout(()=>{ try{ player.playVideo?.(); }catch{} }, 0);
-        refreshQualityOptions();
-      });
+      // Best-effort: setPlaybackQuality + cue at current position with suggestedQuality.
+      player.setPlaybackQuality?.(q);
+      player.cueVideoById?.({ videoId: currentVideoId, startSeconds: pos, suggestedQuality: q });
+      if(wasPlaying){
+        // Small delay gives the cue time to apply.
+        setTimeout(()=>{ try{ player.playVideo?.(); }catch{} }, 0);
+      }
     }catch(err){
-      console.warn("[YouTube] forceApplyPreferredQuality failed", err);
+      console.warn("[YouTube] applyQuality failed", err);
     }
   }
-
   function refreshQualityOptions(){
     if(!player || !qualitySelect) return;
-    const levels = (player.getAvailableQualityLevels?.() || []).filter(Boolean);
-    const currentQuality = String(player.getPlaybackQuality?.() || "").trim();
-    const sizeSaved = (()=>{
-      try{ return localStorage.getItem(YT_SIZE_STORAGE_KEY) || ""; }catch{ return ""; }
-    })();
+    const levelsRaw = (player.getAvailableQualityLevels?.() || []).filter(Boolean);
+    const currentQ = String(player.getPlaybackQuality?.() || "").toLowerCase();
 
-    // Build two groups: playback quality + player size.
-    // IMPORTANT: Some environments return size-like tiers in quality levels.
-    // We intentionally exclude them from the Quality group.
     const qualityLevels = [];
-    levels.forEach(l => {
-      const lvl = normalizeQuality(l);
-      if(!lvl) return;
-      if(YT_SIZE_LEVELS.includes(lvl)) return;
-      if(lvl === "default") return;
-      qualityLevels.push(lvl);
+    const sizeLevels = [];
+    levelsRaw.forEach(lvl => {
+      const v = String(lvl).toLowerCase();
+      if(!v) return;
+      if(YT_SIZE_LEVELS.includes(v)) sizeLevels.push(v);
+      else qualityLevels.push(v);
     });
 
-    // Ensure "Auto" exists.
-    const uniqueQual = Array.from(new Set(["auto", ...qualityLevels]));
+    // Keep common qualities in a nice order when available.
+    const prefOrder = ["highres","hd2160","hd1440","hd1080","hd720","large","medium","small","tiny"];
+    const uniqQ = Array.from(new Set(["default", ...qualityLevels]));
+    uniqQ.sort((a,b)=>{
+      const ia = prefOrder.indexOf(a);
+      const ib = prefOrder.indexOf(b);
+      if(ia === -1 && ib === -1) return a.localeCompare(b);
+      if(ia === -1) return 1;
+      if(ib === -1) return -1;
+      return ia - ib;
+    });
+
+    const sizeSaved = (()=>{ try{ return localStorage.getItem(YT_SIZE_STORAGE_KEY) || ""; }catch{ return ""; } })();
 
     qualitySelect.innerHTML = "";
 
     const ogQ = document.createElement("optgroup");
     ogQ.label = "Quality";
-    uniqueQual.forEach(lvl => {
+    uniqQ.forEach(lvl => {
       const opt = document.createElement("option");
-      opt.value = (lvl === "auto") ? "auto" : lvl;
-      opt.textContent = labelForQuality(lvl);
-      // If currentQuality isn't present/accurate, default to Auto.
-      const cur = normalizeQuality(currentQuality);
-      const pref = normalizeQuality(preferredQuality);
-      const shouldSelect = (pref && pref !== "auto") ? (lvl === pref) : ((lvl === "auto" && (!cur || cur === "auto")) || (lvl === cur));
-      if(shouldSelect){
+      opt.value = lvl;
+      opt.textContent = (lvl === "default") ? "Auto" : lvl.toUpperCase();
+      if((lvl === "default" && (!currentQ || currentQ === "default" || currentQ === "auto")) || lvl === currentQ){
         opt.selected = true;
       }
       ogQ.appendChild(opt);
@@ -1756,11 +1627,12 @@ const StickyYouTubePlayer = (()=>{
 
     const ogS = document.createElement("optgroup");
     ogS.label = "Player size";
+    // Use our canonical order for size options
     YT_SIZE_LEVELS.forEach(sz => {
       const opt = document.createElement("option");
       opt.value = sz;
       opt.textContent = sz.toUpperCase();
-      if(sizeSaved && sizeSaved === sz) opt.selected = true;
+      if(sizeSaved && sizeSaved.toLowerCase() === sz) opt.selected = true;
       ogS.appendChild(opt);
     });
     qualitySelect.appendChild(ogS);
@@ -1813,16 +1685,12 @@ const StickyYouTubePlayer = (()=>{
       lastLoadId = videoId;
       // allow a fresh single retry for this load
       if(didRetryForId[videoId]) delete didRetryForId[videoId];
-      const q = normalizeQuality(preferredQuality);
-      const cueArgs = { videoId };
-      if(q && q !== "auto") cueArgs.suggestedQuality = q;
-
       if(!pendingAutoplay){
-        player.cueVideoById?.(cueArgs);
+        player.cueVideoById?.(videoId);
       }else{
         // Prefer cue + play; it tends to avoid the initial generic playback error
         // some users see on the very first click.
-        player.cueVideoById?.(cueArgs);
+        player.cueVideoById?.(videoId);
 
         // Defer play until the cue has settled.
         setTimeout(()=>{
@@ -1834,13 +1702,10 @@ const StickyYouTubePlayer = (()=>{
           }
         }, 0);
       }
-	      // Ensure vq is present in iframe URL even if the API ignores hints.
-	      enforceVqOnIframe();
       updatePlayPauseUi();
       refreshQualityOptions();
       updateVolumeUi(player.getVolume?.());
       updateProgress();
-      forceResizePlayer();
     }).catch(err => console.error("[YouTube] failed to load api/player", err));
     fetchYouTubeMeta(videoId).then(remoteMeta => {
       if(remoteMeta && currentVideoId === videoId) setMeta(remoteMeta);
