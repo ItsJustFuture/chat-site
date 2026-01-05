@@ -2140,6 +2140,8 @@ app.post("/register", async (req, res) => {
       username: user.username,
       role: user.role,
       theme: sanitizeThemeNameServer(user.theme),
+      avatar: user.avatar || "",
+      avatar_updated: user.avatar_updated ?? null,
     };
 
     req.session.save((saveErr) => {
@@ -2192,7 +2194,7 @@ app.post("/login", async (req, res) => {
         );
       }
 
-      req.session.user = { id: pgUser.id, username: pgUser.username, role: pgUser.role, theme };
+      req.session.user = { id: pgUser.id, username: pgUser.username, role: pgUser.role, theme, avatar: pgUser.avatar || "", avatar_updated: pgUser.avatar_updated ?? null };
       await dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", pgUser.id]).catch(() => {});
 
       initGoldTick(pgUser.id);
@@ -2271,7 +2273,7 @@ app.post("/login", async (req, res) => {
       ]
     ).catch((e) => console.error("PG mirror on login failed:", e));
 
-    req.session.user = { id: row.id, username: row.username, role: row.role, theme };
+    req.session.user = { id: row.id, username: row.username, role: row.role, theme, avatar: avatarUrlFromRow(row) || "", avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? null };
 
     await dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]).catch(() => {});
     awardDailyLoginXp(row);
@@ -2325,14 +2327,14 @@ app.get("/me", async (req, res) => {
         );
       } catch (_) {}
 
-      req.session.user = { id: srow.id, username: srow.username, role: srow.role, theme };
+      req.session.user = { id: srow.id, username: srow.username, role: srow.role, theme, avatar: avatarUrlFromRow(srow) || "", avatar_updated: srow.avatar_updated ?? srow.avatarUpdated ?? null };
       return res.json(req.session.user);
     }
 
     const theme = sanitizeThemeNameServer(row.theme);
     if (!row.theme) await pgPool.query("UPDATE users SET theme = $1 WHERE id = $2", [theme, row.id]);
 
-    req.session.user = { id: row.id, username: row.username, role: row.role, theme };
+    req.session.user = { id: row.id, username: row.username, role: row.role, theme, avatar: avatarUrlFromRow(row) || "", avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? null };
     return res.json(req.session.user);
   } catch (e) {
     console.error(e);
@@ -3673,10 +3675,11 @@ io.on("connection", (socket) => {
     id: sessUser.id,
     username: sessUser.username,
     role: sessUser.role,
-    status: "Online",
-    mood: "",
-    avatar: "",
-    vibe_tags: [],
+    theme: sessUser.theme || null,
+    status: sessUser.status || "Online",
+    mood: sessUser.mood || "",
+    avatar: sessUser.avatar || "",
+    vibe_tags: Array.isArray(sessUser.vibe_tags) ? sessUser.vibe_tags : [],
   };
 
   // Track global online usernames (for private theme "together online" effects)
