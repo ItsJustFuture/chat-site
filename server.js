@@ -2194,7 +2194,17 @@ app.post("/login", async (req, res) => {
         );
       }
 
-      req.session.user = { id: pgUser.id, username: pgUser.username, role: pgUser.role, theme, avatar: pgUser.avatar || "", avatar_updated: pgUser.avatar_updated ?? null };
+      // IMPORTANT: In Postgres we primarily store avatars in avatar_bytes/avatar_updated.
+      // If we only read the legacy "avatar" column here, the session will have an empty avatar
+      // and the UI will look like the profile "didn't save" after refresh.
+      req.session.user = {
+        id: pgUser.id,
+        username: pgUser.username,
+        role: pgUser.role,
+        theme,
+        avatar: avatarUrlFromRow(pgUser) || "",
+        avatar_updated: pgUser.avatar_updated ?? pgUser.avatarUpdated ?? null,
+      };
       await dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", pgUser.id]).catch(() => {});
 
       initGoldTick(pgUser.id);
@@ -2298,9 +2308,13 @@ app.get("/me", async (req, res) => {
   try {
     if (!req.session?.user?.id) return res.json(null);
 
+    // If we already have an avatar in-session, keep it as a fallback.
+    const prevAvatar = req.session?.user?.avatar || "";
+    const prevAvatarUpdated = req.session?.user?.avatar_updated ?? null;
+
     // Prefer Postgres
     const { rows } = await pgPool.query(
-      "SELECT id, username, role, theme FROM users WHERE id = $1 LIMIT 1",
+      "SELECT id, username, role, theme, avatar, avatar_bytes, avatar_mime, avatar_updated FROM users WHERE id = $1 LIMIT 1",
       [req.session.user.id]
     );
 
@@ -2309,7 +2323,7 @@ app.get("/me", async (req, res) => {
     // If not in Postgres yet, fallback to SQLite and (optionally) sync
     if (!row) {
       const srow = await dbGet(
-        "SELECT id, username, role, theme FROM users WHERE id = ?",
+        "SELECT id, username, role, theme, avatar, vibe_tags, bio, mood, age, gender FROM users WHERE id = ?",
         [req.session.user.id]
       );
       if (!srow) return res.json(null);
@@ -2327,14 +2341,30 @@ app.get("/me", async (req, res) => {
         );
       } catch (_) {}
 
-      req.session.user = { id: srow.id, username: srow.username, role: srow.role, theme, avatar: avatarUrlFromRow(srow) || "", avatar_updated: srow.avatar_updated ?? srow.avatarUpdated ?? null };
+      const computedAvatar = avatarUrlFromRow(srow) || "";
+      req.session.user = {
+        id: srow.id,
+        username: srow.username,
+        role: srow.role,
+        theme,
+        avatar: computedAvatar || prevAvatar,
+        avatar_updated: srow.avatar_updated ?? srow.avatarUpdated ?? prevAvatarUpdated,
+      };
       return res.json(req.session.user);
     }
 
     const theme = sanitizeThemeNameServer(row.theme);
     if (!row.theme) await pgPool.query("UPDATE users SET theme = $1 WHERE id = $2", [theme, row.id]);
 
-    req.session.user = { id: row.id, username: row.username, role: row.role, theme, avatar: avatarUrlFromRow(row) || "", avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? null };
+    const computedAvatar = avatarUrlFromRow(row) || "";
+    req.session.user = {
+      id: row.id,
+      username: row.username,
+      role: row.role,
+      theme,
+      avatar: computedAvatar || prevAvatar,
+      avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? prevAvatarUpdated,
+    };
     return res.json(req.session.user);
   } catch (e) {
     console.error(e);
@@ -3005,6 +3035,10 @@ app.post("/profile", requireLogin, (req, res) => {
     const age = req.body?.age === "" || req.body?.age == null ? null : clamp(req.body.age, 18, 120);
     const gender = String(req.body?.gender || "").slice(0, 40);
     const vibeTags = sanitizeVibeTags(req.body?.vibeTags);
+    // Postgres stores vibe_tags as JSONB. node-postgres will otherwise serialize arrays
+    // as Postgres array literals, which causes the UPDATE to fail and makes changes
+    // appear to "revert" on refresh (because /profile reads from Postgres first).
+    const vibeTagsJson = JSON.stringify(vibeTags);
     const file = req.file || null;
     const avatarUpdated = file ? Date.now() : null;
     const avatarUrl = file ? `/avatar/${userId}?v=${avatarUpdated}` : null;
@@ -3034,9 +3068,9 @@ app.post("/profile", requireLogin, (req, res) => {
                    avatar_mime = $6,
                    avatar_updated = $7,
                    avatar = NULL,
-                   vibe_tags = $8
+                   vibe_tags = $8::jsonb
              WHERE id = $9`,
-            [mood, bio, age, gender, file.buffer, file.mimetype, avatarUpdated, vibeTags, userId]
+            [mood, bio, age, gender, file.buffer, file.mimetype, avatarUpdated, vibeTagsJson, userId]
           );
         } else {
           await pgPool.query(
@@ -3045,14 +3079,19 @@ app.post("/profile", requireLogin, (req, res) => {
                    bio = $2,
                    age = $3,
                    gender = $4,
-                   vibe_tags = $5
+                   vibe_tags = $5::jsonb
              WHERE id = $6`,
-            [mood, bio, age, gender, vibeTags, userId]
+            [mood, bio, age, gender, vibeTagsJson, userId]
           );
         }
         if (avatarUrl) req.session.user.avatar = avatarUrl;
-        refreshLivePresence();
-        return res.json({ ok: true, avatar: avatarUrl });
+        // Reinforcement: persist the updated session before responding so refresh
+        // cannot revert to a stale/empty avatar due to an unsaved session write.
+        return req.session.save((saveErr) => {
+          if (saveErr) return res.status(500).json({ ok: false, message: "Session save failed" });
+          refreshLivePresence();
+          return res.json({ ok: true, avatar: avatarUrl });
+        });
       }
     } catch (e) {
       console.warn("[/profile][pg] update failed, falling back to sqlite:", e?.message || e);
