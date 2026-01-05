@@ -497,6 +497,10 @@
                 <span class="profileRoleChip" id="profileSheetRoleChip">Role</span>
                 <span class="profileSheetName" id="profileSheetName">—</span>
               </div>
+              <div class="profileSheetDetails" id="profileSheetDetails">
+                <span class="profileDetail" id="profileSheetAge" style="display:none;"></span>
+                <span class="profileDetail" id="profileSheetGender" style="display:none;"></span>
+              </div>
               <div class="profileSheetStats" id="profileSheetStats" style="display:none;">
                 <span class="statPill" id="profileSheetStars">⭐ 0</span>
                 <span class="statPill" id="profileSheetLikes">♡ 0</span>
@@ -506,12 +510,43 @@
             </div>
           </div>
         </div>
-<div class="tabs" id="tabs">
-  <div class="tab active" data-tab="info" id="tabInfo">Info</div>
-  <div class="tab" data-tab="about" id="tabAbout">About</div>
-  <div class="tab" data-tab="edit" id="tabEdit">Edit</div>
-  <div class="tab" data-tab="moderation" id="tabModeration" style="display:none;">Moderation</div>
-</div>
+
+          <div class="profileActions">
+            <div class="tabs profileActionTabs" id="tabs">
+            <button class="tab active" data-tab="info" id="tabInfo" type="button">
+              <span class="tabIcon" aria-hidden="true">ℹ️</span>
+              <span class="tabLabel">Info</span>
+            </button>
+            <button class="tab" data-tab="about" id="tabAbout" type="button">
+              <span class="tabIcon" aria-hidden="true">📄</span>
+              <span class="tabLabel">About</span>
+            </button>
+            <button class="tab" data-tab="edit" id="tabEdit" type="button">
+              <span class="tabIcon" aria-hidden="true">✏️</span>
+              <span class="tabLabel">Edit</span>
+            </button>
+            <button class="tab" id="addFriendBtn" type="button" style="display:none;">
+              <span class="tabIcon" aria-hidden="true">🤝</span>
+              <span class="tabLabel">Add Friend</span>
+            </button>
+            <button class="tab" data-tab="moderation" id="tabModeration" type="button" style="display:none;">
+              <span class="tabIcon" aria-hidden="true">🛡️</span>
+              <span class="tabLabel">Moderation</span>
+            </button>
+          </div>
+
+          <div class="profileQuickActions" id="profileQuickActions">
+            <div class="quickActionGroup">
+              <button class="btn secondary" id="dmUserBtn" type="button">Message</button>
+              <button class="btn secondary" id="likeProfileBtn" type="button">❤️ Like</button>
+              <div class="badge" id="likeCount">0</div>
+            </div>
+            <button class="btn secondary" id="copyUsernameBtn" type="button">Copy username</button>
+          </div>
+          <div class="msgline" id="profileActionMsg"></div>
+          <div class="msgline" id="profileLikeMsg"></div>
+          <div class="msgline" id="mediaMsg"></div>
+        </div>
 
         <div id="viewEdit" style="display:none;">
   <div class="profileMenu" id="profileMenu">
@@ -756,19 +791,7 @@
                   </div>
                   <div class="small" id="xpNote">XP is only visible to you.</div>
                 </div>
-
-                <div class="likeRow">
-                  <button class="btn secondary" id="likeProfileBtn" type="button">❤️ Like</button>
-                  <div class="badge" id="likeCount">0</div>
-                </div>
-                <div class="msgline" id="profileLikeMsg"></div>
-
-                <div class="row" style="gap:8px; margin-top:10px; flex-wrap:wrap;">
-                  <button class="btn secondary" id="dmUserBtn" type="button">Message</button>
-                  <button class="btn secondary" id="copyUsernameBtn" type="button">Copy username</button>
-                <div class="msgline" id="mediaMsg"></div>
-                  </div>
-                </div>
+              </div>
 
                 <div id="memberModTools" style="display:none; margin-top:12px;">
                   <div class="sectionTitle">Moderator tools</div>
