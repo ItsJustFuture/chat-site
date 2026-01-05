@@ -568,6 +568,8 @@ const Sound = (() => {
 let socket = null;
 let me = null;
 let progression = { gold: 0, xp: 0, level: 1, xpIntoLevel: 0, xpForNextLevel: 100 };
+let activeProfileTab = "info";
+let currentProfileIsSelf = false;
 let currentRoom = "main";
 function displayRoomName(room){ return room==="diceroom" ? "Dice Room" : room; }
 
@@ -1178,6 +1180,12 @@ const refreshProfileBtn = document.getElementById("refreshProfileBtn");
 const profileMsg = document.getElementById("profileMsg");
 const logoutBtn = document.getElementById("logoutBtn");
 const logoutTopBtn = document.getElementById("logoutTopBtn");
+
+setMsgline(profileActionMsg, "");
+setMsgline(profileLikeMsg, "");
+setMsgline(mediaMsg, "");
+ensureVisibleOnFocus(editBio);
+ensureVisibleOnFocus(changelogBodyInput);
 const uiScaleBtn = document.getElementById("uiScaleBtn");
 const uiScalePanel = document.getElementById("uiScalePanel");
 const uiScaleCloseBtn = document.getElementById("uiScaleCloseBtn");
@@ -2117,10 +2125,10 @@ function computeProfileTextTheme(colorA, colorB){
 function buildProfileHeaderGradient(colorA, colorB){
   const a = sanitizeHexColorInput(colorA, PROFILE_GRADIENT_DEFAULT_A) || PROFILE_GRADIENT_DEFAULT_A;
   const b = sanitizeHexColorInput(colorB, PROFILE_GRADIENT_DEFAULT_B) || PROFILE_GRADIENT_DEFAULT_B;
-  return `
-    radial-gradient(900px 260px at 70% 30%, rgba(255,180,80,.45), transparent 60%),
-    linear-gradient(135deg, ${a}, ${b})
-  `;
+  const rgb = hexToRgb(a);
+  const highlight = rgb ? `radial-gradient(900px 260px at 70% 30%, rgba(${rgb.r},${rgb.g},${rgb.b},0.28), transparent 60%)` : "";
+  const layers = [highlight, `linear-gradient(135deg, ${a}, ${b})`].filter(Boolean);
+  return layers.join(", ");
 }
 function applyProfileHeaderOverlay(role){
   if(!profileSheetOverlay) return;
@@ -3142,6 +3150,25 @@ function updateGoldUI(){
   }
 }
 
+function levelInfoClient(xpRaw){
+  let xp = Math.max(0, Math.floor(Number(xpRaw) || 0));
+  let level = 1;
+  let remaining = xp;
+  while (remaining >= level * 100) {
+    remaining -= level * 100;
+    level += 1;
+  }
+  const xpForNextLevel = level * 100;
+  return { level, xpIntoLevel: remaining, xpForNextLevel };
+}
+
+function deriveProfileLevel(info){
+  const levelVal = Number(info?.level);
+  if (Number.isFinite(levelVal) && levelVal > 0) return levelVal;
+  if (info && info.xp != null) return levelInfoClient(info.xp).level;
+  return progression.level || 1;
+}
+
 function renderLevelProgress(data, isSelf){
   const info = data || progression || {};
   const levelVal = Number(info.level || progression.level || 1);
@@ -3168,6 +3195,13 @@ function applyProgressionPayload(payload){
     if (payload.xp != null) next.xp = Number(payload.xp || 0);
     if (payload.xpIntoLevel != null) next.xpIntoLevel = Number(payload.xpIntoLevel || 0);
     if (payload.xpForNextLevel != null) next.xpForNextLevel = Number(payload.xpForNextLevel || 100);
+
+    if (payload.level == null && payload.xp != null) {
+      const calc = levelInfoClient(payload.xp);
+      next.level = calc.level;
+      if (payload.xpIntoLevel == null) next.xpIntoLevel = calc.xpIntoLevel;
+      if (payload.xpForNextLevel == null) next.xpForNextLevel = calc.xpForNextLevel;
+    }
   }
   progression = next;
   updateGoldUI();
@@ -4691,6 +4725,7 @@ function focusActiveTab(){
   active?.scrollIntoView({ behavior:"smooth", inline:"center", block:"nearest" });
 }
 function setTab(tab){
+  activeProfileTab = tab;
   for(const el of document.querySelectorAll(".tab")){
     el.classList.toggle("active", el.dataset.tab===tab);
   }
@@ -4699,6 +4734,7 @@ function setTab(tab){
   viewEdit.style.display = tab==="edit" ? "block" : "none";
   viewModeration.style.display = tab==="moderation" ? "block" : "none";
   if(tab === "edit") showEditPanel("about");
+  syncProfileEditUi();
   focusActiveTab();
 }
 tabEdit.addEventListener("click", ()=>setTab("edit"));
@@ -4747,7 +4783,7 @@ function closeModal(){
   quickModMsg.textContent="";
   modMsg.textContent="";
   logsMsg.textContent="";
-  mediaMsg.textContent="";
+  setMsgline(mediaMsg, "");
   if (customizeMsg) customizeMsg.textContent = "";
 }
 closeModalBtn.addEventListener("click", closeModal);
@@ -5425,6 +5461,29 @@ async function loadMyProfile(){
   renderVibeOptions(me.vibe_tags || []);
 }
 
+function setMsgline(el, text){
+  if(!el) return;
+  const raw = text == null ? "" : String(text);
+  const visible = raw.trim().length > 0;
+  el.textContent = raw;
+  el.style.display = visible ? "" : "none";
+}
+
+function formatLastSeen(val){
+  const hasVal = val !== undefined && val !== null && String(val).trim() !== "";
+  return hasVal ? fmtAbs(val) : "—";
+}
+
+function ensureVisibleOnFocus(el){
+  if(!el || el._visibleHooked) return;
+  el._visibleHooked = true;
+  el.addEventListener("focus", () => {
+    setTimeout(() => {
+      try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch {}
+    }, 60);
+  });
+}
+
 function renderVibeChips(targetEl, tags){
   if(!targetEl) return;
   const vibes = sanitizeVibeTagsClient(tags);
@@ -5540,6 +5599,8 @@ function isSelfProfile(p){
 }
 
 function fillProfileUI(p, isSelf){
+  currentProfileIsSelf = !!isSelf;
+
   if (modalAvatar){
     modalAvatar.innerHTML="";
     modalAvatar.appendChild(avatarNode(p.avatar, p.username, p.role));
@@ -5554,7 +5615,7 @@ function fillProfileUI(p, isSelf){
   infoAge.textContent = (p.age ?? "—");
   infoGender.textContent = (p.gender ?? "—");
   infoCreated.textContent = fmtCreated(p.created_at);
-  infoLastSeen.textContent = p.last_seen ? fmtAbs(p.last_seen) : "—";
+  infoLastSeen.textContent = formatLastSeen(p.last_seen);
   infoRoom.textContent = p.current_room ? `#${p.current_room}` : (p.last_room ? `#${p.last_room}` : "—");
   const statusLabel = normalizeStatusLabel(p.last_status, "");
   infoStatus.textContent = statusLabel || "—";
@@ -5562,11 +5623,12 @@ function fillProfileUI(p, isSelf){
   bioRender.innerHTML = p.bio ? renderBBCode(p.bio) : "(no bio)";
   renderLevelProgress(p, isSelf);
   syncProfileLikes(p, isSelf);
-  if (profileLikeMsg) profileLikeMsg.textContent = "";
-  if (profileActionMsg) profileActionMsg.textContent = "";
-  if (mediaMsg) mediaMsg.textContent = "";
+  setMsgline(profileLikeMsg, "");
+  setMsgline(profileActionMsg, "");
+  setMsgline(mediaMsg, "");
   renderVibeChips(profileVibes, p.vibe_tags);
   fillProfileSheetHeader(p, isSelf);
+  syncProfileEditUi();
 }
 
 
@@ -5614,7 +5676,7 @@ function fillProfileSheetHeader(p, isSelf){
   if (profileSheetSub) profileSheetSub.textContent = `${mood} ${status} ${room}`.trim();
   renderVibeChips(profileSheetVibes, p.vibe_tags);
 
-  // Stats (likes are real; "stars" is a placeholder hook you can wire later)
+  // Stats (likes are real; stars show level)
   if (profileSheetStats){
     profileSheetStats.style.display = "flex";
     if (profileSheetLikes){
@@ -5622,28 +5684,28 @@ function fillProfileSheetHeader(p, isSelf){
       profileSheetLikes.textContent = `${isSelf ? "❤️" : (p.likedByMe ? "❤️" : "♡")} ${likesVal.toLocaleString()}`;
     }
     if (profileSheetStars){
-      // If you later add "stars" / "reputation", set p.stars and it will display automatically.
-      const starsVal = Number(p.stars || 0);
-      profileSheetStars.textContent = `⭐ ${starsVal.toLocaleString()}`;
+      const levelVal = deriveProfileLevel(p);
+      profileSheetStars.textContent = `⭐ ${levelVal.toLocaleString()}`;
     }
   }
+}
 
-  // Avatar action buttons only for self
-  if (profileSheetAvatarActions){
-    profileSheetAvatarActions.style.display = isSelf ? "flex" : "none";
-  }
+function syncProfileEditUi(){
+  const showAvatarActions = currentProfileIsSelf && activeProfileTab === "edit";
+  if (profileSheetAvatarActions) profileSheetAvatarActions.style.display = showAvatarActions ? "flex" : "none";
 }
 
 function updateProfileActions({ isSelf = false, canModerate = false } = {}){
   if (tabEdit) tabEdit.style.display = isSelf ? "" : "none";
   if (viewEdit && !isSelf) viewEdit.style.display = "none";
   if (addFriendBtn) addFriendBtn.style.display = isSelf ? "none" : "";
-  if (profileActionMsg) profileActionMsg.textContent = "";
+  setMsgline(profileActionMsg, "");
   if (tabModeration) tabModeration.style.display = canModerate ? "" : "none";
   const editActive = tabEdit?.classList.contains("active");
   if(!isSelf && editActive){
     setTab("info");
   }
+  syncProfileEditUi();
 }
 
 function applyProfileMenuVisibility(){
@@ -5956,19 +6018,19 @@ async function openMemberProfile(username){
 
 likeProfileBtn?.addEventListener("click", async () => {
   if (!modalTargetUsername || likeProfileBtn.disabled) return;
-  profileLikeMsg.textContent = "";
+  setMsgline(profileLikeMsg, "");
   likeProfileBtn.disabled = true;
   try {
     const res = await fetch(`/profile/${encodeURIComponent(modalTargetUsername)}/like`, { method: "POST" });
     if (!res.ok) {
       const t = await res.text().catch(() => "");
-      profileLikeMsg.textContent = t || "Could not update like.";
+      setMsgline(profileLikeMsg, t || "Could not update like.");
       return;
     }
     const data = await res.json();
     syncProfileLikes({ likes: data.likes, likedByMe: data.liked }, false);
   } catch (err) {
-    profileLikeMsg.textContent = "Could not update like.";
+    setMsgline(profileLikeMsg, "Could not update like.");
   } finally {
     const isSelf = normKey(modalTargetUsername) === normKey(me?.username);
     likeProfileBtn.disabled = isSelf;
@@ -5977,14 +6039,14 @@ likeProfileBtn?.addEventListener("click", async () => {
 
 addFriendBtn?.addEventListener("click", () => {
   if (addFriendBtn.disabled) return;
-  if (profileActionMsg) profileActionMsg.textContent = "Friend system coming soon.";
+  setMsgline(profileActionMsg, "Friend system coming soon.");
 });
 
 // media actions
 copyUsernameBtn.addEventListener("click", async ()=>{
   const u = modalTargetUsername || me?.username || "";
-  try{ await navigator.clipboard.writeText(u); mediaMsg.textContent="Copied username."; }
-  catch{ mediaMsg.textContent="Copy failed (browser blocked)."; }
+  try{ await navigator.clipboard.writeText(u); setMsgline(mediaMsg, "Copied username."); }
+  catch{ setMsgline(mediaMsg, "Copy failed (browser blocked)."); }
 });
 saveBadgePrefsBtn?.addEventListener("click", () => {
   const directRaw = directBadgeColorText?.value || directBadgeColor?.value || badgePrefs.direct || badgeDefaults.direct;
