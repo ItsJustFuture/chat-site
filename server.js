@@ -1632,6 +1632,17 @@ function progressionFromRow(row, includePrivate) {
   return base;
 }
 
+function resolveLastSeen(row, live, lastStatus) {
+  const raw = row?.last_seen;
+  const hasRaw = raw !== undefined && raw !== null && String(raw).trim() !== "";
+  const num = Number(raw);
+  if (hasRaw && Number.isFinite(num)) return num;
+
+  const statusLabel = normalizeStatus(lastStatus || row?.last_status, "");
+  const isOnline = !!live || statusLabel === "Online";
+  return isOnline ? Date.now() : null;
+}
+
 function emitProgressionUpdate(userId) {
   const sid = socketIdByUserId.get(userId);
   if (!sid) return;
@@ -2813,6 +2824,7 @@ app.get("/profile", requireLogin, async (req, res) => {
 
       const live = onlineState.get(row.id);
       const lastStatus = normalizeStatus(live?.status || row.last_status, "");
+      const lastSeen = resolveLastSeen(row, live, lastStatus);
 
       // Likes are stored in sqlite in this codebase; keep using it
       db.get(
@@ -2832,7 +2844,7 @@ app.get("/profile", requireLogin, async (req, res) => {
             age: row.age,
             gender: row.gender,
           created_at: row.created_at,
-          last_seen: row.last_seen,
+          last_seen: lastSeen,
           last_room: row.last_room,
           last_status: lastStatus || null,
           current_room: live?.room || null,
@@ -2861,6 +2873,7 @@ app.get("/profile", requireLogin, async (req, res) => {
       if (err || !row) return res.status(404).send("Not found");
       const live = onlineState.get(row.id);
       const lastStatus = normalizeStatus(live?.status || row.last_status, "");
+      const lastSeen = resolveLastSeen(row, live, lastStatus);
       db.get(
         `SELECT
           (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
@@ -2878,10 +2891,12 @@ app.get("/profile", requireLogin, async (req, res) => {
             age: row.age,
             gender: row.gender,
             created_at: row.created_at,
-            last_seen: row.last_seen,
+            last_seen: lastSeen,
             last_room: row.last_room,
             last_status: lastStatus || null,
             current_room: live?.room || null,
+            header_grad_a: sanitizeHexColor(row.header_grad_a),
+            header_grad_b: sanitizeHexColor(row.header_grad_b),
             likes: Number(likesRow?.likes || 0),
             likedByMe: !!Number(likesRow?.liked || 0),
             vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
@@ -2922,7 +2937,6 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
           if (row) break;
         } catch {}
       }
-      row = r.rows?.[0] || null;
     } catch {}
 
     // Fallback to SQLite
@@ -2942,6 +2956,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
 
     const live = onlineState.get(row.id);
     const lastStatus = normalizeStatus(live?.status || row.last_status, "");
+    const lastSeen = resolveLastSeen(row, live, lastStatus);
     const includePrivate = req.session.user.id === row.id;
 
     db.get(
@@ -2961,7 +2976,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
           age: row.age,
           gender: row.gender,
           created_at: row.created_at,
-          last_seen: row.last_seen,
+          last_seen: lastSeen,
           last_room: row.last_room,
           last_status: lastStatus || null,
           current_room: live?.room || null,

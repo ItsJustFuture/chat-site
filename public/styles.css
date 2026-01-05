@@ -2428,12 +2428,12 @@ body.dice-room .sys .diceFace{
   inset: 0;
   background: rgba(0,0,0,0.55);
   display: none;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-padding: 18px;
+  padding: 18px;
   z-index: 400;
 }
 .modalCard{
@@ -2443,13 +2443,16 @@ padding: 18px;
   overflow: hidden;
   background: var(--panel);
   border-radius: 14px;
+  margin-top: 10px;
 }
 
 
 /* Wider, cleaner modal on desktop */
 @media (min-width: 761px){
+  #modal{ align-items: center; }
   .modalCard{
     width: min(980px, calc(100vw - 48px));
+    margin-top: 0;
   }
   .modalBody{
     padding: 0 18px 18px;
@@ -2663,7 +2666,11 @@ padding: 18px;
   cursor:pointer;
   font-weight:800;
 }
-.pillBtn.active{ background:var(--panel); box-shadow: var(--shadowSm); }
+.pillBtn.active{
+  background: color-mix(in srgb, var(--panel) 88%, var(--brand) 18%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 35%, transparent), var(--shadowSm);
+  border-color: color-mix(in srgb, var(--brand) 35%, var(--border));
+}
 .themeGrid{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; align-items:start; }
 
 .themeGrid.oneColumn{ grid-template-columns: 1fr; }
