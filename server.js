@@ -3746,8 +3746,11 @@ if (existingSid && existingSid !== socket.id) {
       );
       const r = rows?.[0];
       if (r) {
-        socket.user.avatar = avatarUrlFromRow(r) || "";
-        socket.user.mood = r.mood || "";
+        // IMPORTANT: don't overwrite a session-provided avatar with an empty value
+        // from a fallback/partial row. This was causing avatars to "reset" on refresh.
+        const computedAvatar = avatarUrlFromRow(r);
+        if (computedAvatar) socket.user.avatar = computedAvatar;
+        if (typeof r.mood === "string") socket.user.mood = r.mood;
         socket.user.vibe_tags = sanitizeVibeTags(r.vibe_tags || []);
         if (socket.currentRoom) emitUserList(socket.currentRoom);
       }
@@ -3762,8 +3765,9 @@ if (existingSid && existingSid !== socket.id) {
     [socket.user.id],
     (_e, row) => {
       if (row) {
-        socket.user.avatar = avatarUrlFromRow(row) || "";
-        socket.user.mood = row.mood || "";
+        const computedAvatar = avatarUrlFromRow(row);
+        if (computedAvatar) socket.user.avatar = computedAvatar;
+        if (typeof row.mood === "string") socket.user.mood = row.mood;
         socket.user.vibe_tags = sanitizeVibeTags(row.vibe_tags || []);
         if (socket.currentRoom) emitUserList(socket.currentRoom);
       }
