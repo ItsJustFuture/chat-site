@@ -5701,10 +5701,7 @@ function renderChangelogList(){
     wrap.appendChild(details);
     changelogList.appendChild(wrap);
 
-    const detailHeight = details.scrollHeight;
     details.setAttribute("aria-hidden", isOpen ? "false" : "true");
-    details.style.maxHeight = isOpen ? `${detailHeight + 16}px` : "0px";
-    reactionRow.style.visibility = isOpen ? "visible" : "hidden";
     reactionRow.setAttribute("aria-hidden", isOpen ? "false" : "true");
   }
 }
