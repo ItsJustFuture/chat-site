@@ -2013,7 +2013,9 @@ const CHANGELOG_TITLE_MAX = 120;
 const CHANGELOG_BODY_MAX = 8000;
 const CHANGELOG_REACTIONS = ["heart", "clap", "down", "eyes"];
 const FAQ_TITLE_MAX = 140;
-const FAQ_DETAILS_MAX = 1000;
+// FAQ questions are title-only; answer_body is staff-editable.
+// Keep question_details column for backwards compatibility but do not accept user input.
+const FAQ_DETAILS_MAX = 0;
 const FAQ_REACTIONS = ["helpful", "love", "funny", "confusing"];
 const FAQ_RATE_LIMIT_MS = 30000;
 const faqAskCooldown = new Map();
@@ -2099,7 +2101,8 @@ function toFaqPayload(row){
 
 function cleanFaqInput(title, details){
   const cleanTitle = String(title || "").trim();
-  const cleanDetails = String(details || "").trimEnd();
+  // Ignore user-provided details: questions are title-only.
+  const cleanDetails = "";
   if(!cleanTitle) return { error: "Question title is required" };
   if(cleanTitle.length > FAQ_TITLE_MAX) return { error: `Title must be at most ${FAQ_TITLE_MAX} characters` };
   if(cleanDetails.length > FAQ_DETAILS_MAX) return { error: `Details must be at most ${FAQ_DETAILS_MAX} characters` };
@@ -2308,6 +2311,14 @@ async function pgChangelogEntryExists(entryId){
 async function pgFaqQuestionExists(questionId){
   await pgInitPromise;
   const { rowCount } = await pgPool.query("SELECT 1 FROM faq_questions WHERE id=$1 AND is_deleted=0", [questionId]);
+  return rowCount > 0;
+}
+
+async function pgDeleteFaqQuestion(id){
+  await pgInitPromise;
+  // Soft-delete to preserve audit/history and avoid breaking references.
+  await pgPool.query("DELETE FROM faq_reactions WHERE question_id=$1", [id]);
+  const { rowCount } = await pgPool.query("UPDATE faq_questions SET is_deleted=1 WHERE id=$1", [id]);
   return rowCount > 0;
 }
 
@@ -2617,6 +2628,12 @@ async function sqliteUpdateFaqAnswer({ id, answerBody, answeredBy }){
     `SELECT id, created_at, question_title, question_details, answer_body, answered_at, answered_by, is_deleted FROM faq_questions WHERE id=?`,
     [id]
   );
+}
+
+async function sqliteDeleteFaqQuestion(id){
+  await dbRunAsync(`DELETE FROM faq_reactions WHERE question_id=?`, [id]);
+  const result = await dbRunAsync(`UPDATE faq_questions SET is_deleted=1 WHERE id=?`, [id]);
+  return !!result?.changes;
 }
 
 async function fetchFaqQuestionsWithReactions(username){
@@ -3426,7 +3443,9 @@ app.patch("/api/faq/:id/answer", requireLogin, async (req, res) => {
   if(!requireMinRole(req.session.user.role, "Admin")) return res.status(403).send("Forbidden");
 
   const answerBody = String(req.body?.answer || "").trimEnd();
-  if(answerBody.length > 4000) return res.status(400).send("Answer is too long");
+  // Allow effectively unlimited answers (TEXT field), but keep a high ceiling
+  // to protect the service from accidental paste-bombs.
+  if(answerBody.length > 50000) return res.status(400).send("Answer is too long");
 
   try{
     let row = null;
@@ -3443,6 +3462,29 @@ app.patch("/api/faq/:id/answer", requireLogin, async (req, res) => {
   }catch(err){
     console.error("[faq] answer failed:", err?.message || err);
     return res.status(500).send("Failed to save answer");
+  }
+});
+
+app.delete("/api/faq/:id", requireLogin, async (req, res) => {
+  const questionId = Number(req.params?.id);
+  if(!Number.isFinite(questionId) || questionId <= 0) return res.status(400).send("Invalid question id");
+  // Admin, Co-owner, Owner
+  if(!requireMinRole(req.session.user.role, "Admin")) return res.status(403).send("Forbidden");
+
+  try{
+    let ok = false;
+    if(await pgChangelogEnabled()){
+      try{ ok = await pgDeleteFaqQuestion(questionId); }catch(e){ console.warn("[faq] PG delete fallback:", e?.message || e); }
+    }
+    if(!ok){
+      ok = await sqliteDeleteFaqQuestion(questionId);
+    }
+    if(!ok) return res.status(404).send("Question not found");
+    io.emit("faq:update");
+    return res.json({ ok:true });
+  }catch(err){
+    console.error("[faq] delete failed:", err?.message || err);
+    return res.status(500).send("Failed to delete question");
   }
 });
 
