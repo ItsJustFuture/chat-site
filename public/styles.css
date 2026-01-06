@@ -1894,18 +1894,21 @@ main.chat{
 }
 
 .changelogList{ display:flex; flex-direction:column; gap:10px; min-height:0; touch-action: pan-y; }
-.changelogEntry{ padding:10px; border-radius:var(--radiusLg); border:1px solid var(--border); background:var(--panel); box-shadow:var(--shadowSm); display:flex; flex-direction:column; gap:6px; min-height:0; overflow:hidden; }
+.changelogEntry{ padding:12px; border-radius:var(--radiusLg); border:1px solid var(--border); background:var(--panel); box-shadow:var(--shadowSm); display:flex; flex-direction:column; gap:8px; min-height:0; overflow:hidden; }
 .changelogEntryHeader{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; flex-wrap:wrap; }
-.changelogEntryTitle{ font-weight:800; }
+.changelogSummary{ flex:1; display:flex; align-items:center; justify-content:space-between; gap:10px; border:none; background:transparent; padding:0; margin:0; text-align:left; color:inherit; font:inherit; cursor:pointer; min-width:0; }
+.changelogEntryTitle{ font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .changelogEntryMeta{ font-size:12px; color:var(--muted); }
 .changelogEntryMetaRow{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-.changelogMeta{ display:flex; flex-direction:column; gap:2px; }
-.changelogToggle{ padding:4px 8px; }
-.changelogDetails{ display:none; flex-direction:column; gap:8px; margin-top:6px; }
+.changelogEntryHint{ font-size:12px; color:var(--muted); }
+.changelogMeta{ display:flex; flex-direction:column; gap:4px; min-width:0; }
+.changelogChevron{ flex:0 0 auto; font-size:14px; transition:transform .15s ease; }
+.changelogEntry.is-open .changelogChevron{ transform:rotate(180deg); }
+.changelogDetails{ display:none; flex-direction:column; gap:8px; margin-top:2px; padding-top:6px; border-top:1px solid var(--border); }
 .changelogEntry.is-open .changelogDetails{ display:flex; }
-.changelogBody{ white-space:pre-line; overflow-wrap:anywhere; max-height:clamp(180px, 40vh, 420px); overflow-y:auto; -webkit-overflow-scrolling:touch; }
+.changelogBody{ white-space:pre-line; overflow-wrap:anywhere; max-height:clamp(200px, 45vh, 440px); overflow-y:auto; -webkit-overflow-scrolling:touch; line-height:1.4; }
 .changelogActions{ display:flex; gap:6px; flex-wrap:wrap; }
-.changelogReactions{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:4px; }
+.changelogReactions{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:2px; }
 .changelogReactionBtn{
   display:inline-flex;
   gap:4px;
@@ -1978,6 +1981,9 @@ main.chat{
 .meName{ font-size:13px; font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .meRole{ font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .meStatusText{ font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:140px; padding:0 2px; }
+.channels.drawer-typing .bottomBar{ display:none; }
+.channels.drawer-typing .roomsPanel,
+.channels.drawer-typing .menuPanel{ padding-bottom:0; }
 
 .iconBtn{
   width:36px; height:36px; padding:0;

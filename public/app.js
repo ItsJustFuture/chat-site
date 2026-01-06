@@ -782,6 +782,7 @@ let activeMenuTab = "changelog";
 let changelogEntries = [];
 let changelogLoaded = false;
 let changelogDirty = false;
+const changelogLocalTouch = new Map();
 let openChangelogId = null;
 const CHANGELOG_REACTION_KEYS = ["heart", "clap", "down", "eyes"];
 const CHANGELOG_REACTION_EMOJI = { heart:"♥️", clap:"👏", down:"👎", eyes:"👀" };
@@ -808,6 +809,8 @@ const recentDiceRolls = new Map();
 const diceRollTimers = new Map();
 let typingUsers = new Set();
 const typingPhraseCache = new Map();
+let drawerTypingMode = false;
+let drawerFocusOutTimer = null;
 let activeDmUsers = new Set();
 let diceCooldownUntil = 0;
 const DICE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
@@ -3718,6 +3721,35 @@ searchInput.addEventListener("input", applySearch);
 function anyDrawerOpen(){
   return channelsPane?.classList.contains("open") || membersPane?.classList.contains("open");
 }
+
+const drawerTextSelectors = "input, textarea, select, [contenteditable='true'], [contenteditable='']";
+function isDrawerTextTarget(target){
+  if(!channelsPane || !target) return false;
+  if(!(target instanceof HTMLElement)) return false;
+  if(target.closest && target.closest(".bottomBar")) return false;
+  return channelsPane.contains(target) && target.matches(drawerTextSelectors);
+}
+
+function setDrawerTypingMode(on){
+  drawerTypingMode = !!on;
+  if(channelsPane) channelsPane.classList.toggle("drawer-typing", drawerTypingMode);
+}
+
+function handleDrawerFocusIn(event){
+  if(!isDrawerTextTarget(event.target)) return;
+  if(drawerFocusOutTimer) clearTimeout(drawerFocusOutTimer);
+  setDrawerTypingMode(true);
+}
+
+function handleDrawerFocusOut(){
+  if(drawerFocusOutTimer) clearTimeout(drawerFocusOutTimer);
+  drawerFocusOutTimer = setTimeout(()=>{
+    const active = document.activeElement;
+    const stillTyping = isDrawerTextTarget(active);
+    setDrawerTypingMode(stillTyping);
+  }, 120);
+}
+
 function setLeftDrawerOpen(isOpen){
   document.body.classList.toggle("drawer-left-open", !!isOpen);
 }
@@ -3763,6 +3795,7 @@ function closeDrawers(){
   drawerOverlay?.classList.remove("show");
   // When drawers close, let the mobile composer span full width again.
   document.body.classList.remove("drawer-left-open", "drawer-right-open");
+  setDrawerTypingMode(false);
   closeMemberMenu();
   syncDesktopMembersWidth();
 }
@@ -3804,6 +3837,8 @@ function openMembers(){
 
 openChannelsBtn?.addEventListener("click", openChannels);
 openMembersBtn?.addEventListener("click", openMembers);
+channelsPane?.addEventListener("focusin", handleDrawerFocusIn, true);
+channelsPane?.addEventListener("focusout", handleDrawerFocusOut, true);
 
 /* Outside tap close: use pointerdown (better on mobile) */
 /* Outside tap close: only when the user taps the overlay itself (never the drawers). */
@@ -5443,17 +5478,22 @@ function normalizeChangelogEntry(entry){
   return base;
 }
 
-function updateChangelogEntryState(entryId, next){
+function updateChangelogEntryState(entryId, next, { touch=false } = {}){
   if(!entryId) return;
   const idx = changelogEntries.findIndex(e => e && String(e.id) === String(entryId));
   if(idx >= 0){
     const merged = normalizeChangelogEntry({ ...changelogEntries[idx], ...(next || {}) });
-    if(merged) changelogEntries[idx] = merged;
+    if(merged){
+      changelogEntries[idx] = merged;
+      if(touch) changelogLocalTouch.set(String(entryId), Date.now());
+    }
   }
 }
 
 async function loadChangelog(force=false){
   if(!force && changelogLoaded && !changelogDirty) return;
+  const requestStartedAt = Date.now();
+  const prevEntries = Array.isArray(changelogEntries) ? [...changelogEntries] : [];
   if(changelogMsg) changelogMsg.textContent = "Loading changelog...";
   const {res, text} = await api("/api/changelog", { method:"GET" });
   if(!res.ok){
@@ -5465,8 +5505,28 @@ async function loadChangelog(force=false){
 
   try{
     const rows = JSON.parse(text || "[]");
-    changelogEntries = Array.isArray(rows) ? rows.map(normalizeChangelogEntry).filter(Boolean) : [];
+    const normalized = Array.isArray(rows) ? rows.map(normalizeChangelogEntry).filter(Boolean) : [];
+    const touched = new Map(changelogLocalTouch);
+    changelogEntries = normalized.map(entry => {
+      if(!entry || entry.id === undefined || entry.id === null) return entry;
+      const key = String(entry.id);
+      const localTouchedAt = touched.get(key) || 0;
+      if(localTouchedAt > requestStartedAt){
+        const prev = prevEntries.find(e => e && String(e.id) === key);
+        if(prev){
+          return { ...entry, reactions: prev.reactions, myReactions: prev.myReactions, __localUpdatedAt: prev.__localUpdatedAt || localTouchedAt };
+        }
+      }
+      if(localTouchedAt){
+        entry.__localUpdatedAt = Math.max(entry.__localUpdatedAt || 0, localTouchedAt);
+      }
+      return entry;
+    });
     changelogReactionBusy.clear();
+    const serverIds = new Set(changelogEntries.map(e => e?.id !== undefined && e?.id !== null ? String(e.id) : null).filter(Boolean));
+    for(const key of Array.from(changelogLocalTouch.keys())){
+      if(!serverIds.has(key)) changelogLocalTouch.delete(key);
+    }
   }catch{
     changelogEntries = [];
   }
@@ -5536,6 +5596,12 @@ function renderChangelogList(){
     const header = document.createElement("div");
     header.className = "changelogEntryHeader";
 
+    const summaryBtn = document.createElement("button");
+    summaryBtn.type = "button";
+    summaryBtn.className = "changelogSummary";
+    summaryBtn.dataset.changelogToggle = String(entry.id);
+    summaryBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+
     const metaBlock = document.createElement("div");
     metaBlock.className = "changelogMeta";
 
@@ -5552,15 +5618,21 @@ function renderChangelogList(){
     meta.textContent = formatChangelogDate(entry.created_at || entry.createdAt || entry.timestamp);
     metaRow.appendChild(meta);
 
-    const toggleBtn = document.createElement("button");
-    toggleBtn.type = "button";
-    toggleBtn.className = "btn text changelogToggle";
-    toggleBtn.dataset.changelogToggle = String(entry.id);
-    toggleBtn.textContent = isOpen ? "Hide" : "View";
-    metaRow.appendChild(toggleBtn);
+    const hint = document.createElement("div");
+    hint.className = "changelogEntryHint";
+    hint.textContent = isOpen ? "Tap to collapse" : "Tap to expand";
+    metaRow.appendChild(hint);
 
     metaBlock.appendChild(metaRow);
-    header.appendChild(metaBlock);
+    summaryBtn.appendChild(metaBlock);
+
+    const chevron = document.createElement("span");
+    chevron.className = "changelogChevron";
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.textContent = "⌄";
+    summaryBtn.appendChild(chevron);
+
+    header.appendChild(summaryBtn);
 
     if(isOwner){
       const actions = document.createElement("div");
@@ -5639,6 +5711,16 @@ function handleChangelogListClick(event){
     openChangelogId = openChangelogId === entryId ? null : entryId;
     renderChangelogList();
     return;
+  }
+
+  const headerTap = event.target.closest(".changelogEntryHeader");
+  if(headerTap && changelogList.contains(headerTap) && !event.target.closest(".changelogActions")){
+    const entryId = headerTap.closest(".changelogEntry")?.dataset.entryId;
+    if(entryId){
+      openChangelogId = openChangelogId === entryId ? null : entryId;
+      renderChangelogList();
+      return;
+    }
   }
 
   const editBtn = event.target.closest("[data-changelog-edit]");
@@ -5892,7 +5974,7 @@ async function toggleChangelogReaction(entryId, reaction){
     updateChangelogEntryState(entryId, {
       reactions: { ...prev.reactions, [reaction]: nextCount },
       myReactions: { ...prev.myReactions, [reaction]: nextActive }
-    });
+    }, { touch:true });
   }
   renderChangelogList();
 
@@ -5905,17 +5987,27 @@ async function toggleChangelogReaction(entryId, reaction){
 
     if(!res.ok){
       if(prev) updateChangelogEntryState(entryId, prev);
+      changelogLocalTouch.delete(entryKey);
       if(changelogMsg) changelogMsg.textContent = text || "Failed to update reaction.";
     }else{
       try{
         const payload = JSON.parse(text || "{}") || {};
-        updateChangelogEntryState(entryId, payload);
-      }catch{}
+        const hasServerState = payload && (payload.reactions || payload.myReactions);
+        if(hasServerState){
+          updateChangelogEntryState(entryId, payload, { touch:true });
+        }else{
+          await loadChangelog(true);
+        }
+      }catch{
+        await loadChangelog(true);
+      }
     }
   }catch{
     if(prev) updateChangelogEntryState(entryId, prev);
+    changelogLocalTouch.delete(entryKey);
     if(changelogMsg) changelogMsg.textContent = "Failed to update reaction.";
   }finally{
+    if(!prev) changelogLocalTouch.delete(entryKey);
     changelogReactionBusy.delete(entryKey);
     renderChangelogList();
   }
