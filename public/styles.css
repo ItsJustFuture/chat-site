@@ -1919,8 +1919,15 @@ body.keyboard-open .menuContent{ padding-bottom: calc(200px + var(--kb, 0px) + e
 .changelogMeta{ display:flex; flex-direction:column; gap:4px; min-width:0; }
 .changelogChevron{ flex:0 0 auto; font-size:14px; transition:transform .15s ease; }
 .changelogEntry.is-open .changelogChevron{ transform:rotate(180deg); }
-.changelogDetails{ display:flex; flex-direction:column; gap:10px; margin-top:2px; padding-top:8px; border-top:1px solid var(--border); max-height:0; overflow:hidden; opacity:0; transition:max-height .2s ease, opacity .2s ease; }
-.changelogEntry.is-open .changelogDetails{ max-height:1600px; opacity:1; }
+/*
+  IMPORTANT (iOS/Safari): animating max-height inside a scrolling flex column
+  can fail to reflow reliably, causing expanded content to visually overlap
+  other entries instead of increasing layout height.
+
+  Use a simple open/closed display toggle for correctness.
+*/
+.changelogDetails{ display:none; flex-direction:column; gap:10px; margin-top:2px; padding-top:8px; border-top:1px solid var(--border); }
+.changelogEntry.is-open .changelogDetails{ display:flex; }
 .changelogBody{ white-space:pre-line; overflow-wrap:anywhere; max-height:clamp(220px, 48vh, 460px); overflow-y:auto; -webkit-overflow-scrolling:touch; line-height:1.4; font-size:14px; }
 .changelogActions{ display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
 .changelogReactions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:2px; }

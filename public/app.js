@@ -2020,7 +2020,28 @@ function previewText(text, max=180){
   return `${raw.slice(0, max - 1)}…`;
 }
 
+// NOTE: Roles may arrive from the server with minor formatting differences
+// (e.g. "Co owner" vs "Co-owner"). Always canonicalize before comparing.
 const ROLES = ["Guest","User","VIP","Moderator","Admin","Co-owner","Owner"];
+
+function canonicalRole(role){
+  const raw = String(role || "").trim();
+  if(!raw) return "User";
+
+  // Normalize: lowercase and strip non-letters so "Co-owner", "Co owner",
+  // "co_owner" all become "coowner".
+  const key = raw.toLowerCase().replace(/[^a-z]/g, "");
+  switch(key){
+    case "guest": return "Guest";
+    case "user": return "User";
+    case "vip": return "VIP";
+    case "moderator": return "Moderator";
+    case "admin": return "Admin";
+    case "coowner": return "Co-owner";
+    case "owner": return "Owner";
+    default: return raw;
+  }
+}
 
 const PUBLIC_THEME_NAMES = new Set(["Minimal Light", "Minimal Dark", "Minimal Light (High Contrast)", "Minimal Dark (High Contrast)", "Paper / Parchment", "Sky Light", "Fantasy Tavern", "Fantasy Tavern (Ember)", "Desert Dusk"]);
 function canUseThemeName(themeName){
@@ -2031,7 +2052,11 @@ function canUseThemeName(themeName){
   return roleRank(role) >= roleRank("VIP");
 }
 
-function roleRank(role){ const i=ROLES.indexOf(role); return i===-1?1:i; }
+function roleRank(role){
+  const canonical = canonicalRole(role);
+  const i = ROLES.indexOf(canonical);
+  return i === -1 ? 1 : i;
+}
 
 const STATUS_ALIASES = {
   "Do Not Disturb": "DnD",
