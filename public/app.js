@@ -2031,23 +2031,7 @@ function canUseThemeName(themeName){
   return roleRank(role) >= roleRank("VIP");
 }
 
-function canonicalRole(role){
-  const raw = String(role || "").trim();
-  if(!raw) return "";
-  const key = raw.toLowerCase().replace(/[^a-z0-9]+/g, "");
-  if(key === "coowner") return "Co-owner";
-  if(key === "vip") return "VIP";
-  if(key === "moderator" || key === "mod") return "Moderator";
-  if(key === "admin" || key === "administrator") return "Admin";
-  if(key === "owner") return "Owner";
-  if(key === "user") return "User";
-  return raw;
-}
-function roleRank(role){
-  const normalized = canonicalRole(role);
-  const i = ROLES.indexOf(normalized);
-  return i === -1 ? 1 : i;
-}
+function roleRank(role){ const i=ROLES.indexOf(role); return i===-1?1:i; }
 
 const STATUS_ALIASES = {
   "Do Not Disturb": "DnD",
@@ -5598,6 +5582,7 @@ async function loadChangelog(force=false){
 function renderChangelogList(){
   if(!changelogList) return;
   changelogList.innerHTML = "";
+
   if(!changelogEntries.length){
     const empty = document.createElement("div");
     empty.className = "small muted";
@@ -5606,76 +5591,73 @@ function renderChangelogList(){
     return;
   }
 
-  const canManage = me && roleRank(me.role) >= roleRank("Owner");
+  const isOwner = me && roleRank(me.role) >= roleRank("Owner");
 
   for(const entry of changelogEntries){
-    const details = document.createElement("details");
-    details.className = "clItem";
-    details.dataset.entryId = String(entry.id);
-    const isOpen = String(openChangelogId) === String(entry.id);
-    details.open = !!isOpen;
+    const entryId = String(entry.id);
+    const isOpen = openChangelogId === entryId;
+
+    const item = document.createElement("details");
+    item.className = "clItem";
+    item.dataset.changelogId = entryId;
+    item.open = isOpen;
 
     const summary = document.createElement("summary");
     summary.className = "clSummary";
-    summary.setAttribute("role", "button");
-    summary.setAttribute("aria-label", "Toggle changelog entry");
 
     const left = document.createElement("div");
-    left.className = "clSummaryLeft";
+    left.className = "clLeft";
 
     const title = document.createElement("div");
     title.className = "clTitle";
-    title.textContent = String(entry.title || "Update");
+    title.textContent = (entry.title || "").trim() || "Update";
+    left.appendChild(title);
 
     const meta = document.createElement("div");
     meta.className = "clMeta";
-    const ts = formatChangelogDate(entry.created_at || entry.ts || entry.createdAt || entry.date);
-    meta.textContent = ts || "";
+    meta.textContent = formatChangelogDate(entry.created_at || entry.createdAt || entry.timestamp);
+    left.appendChild(meta);
 
-    left.appendChild(title);
-    if(meta.textContent) left.appendChild(meta);
+    summary.appendChild(left);
 
-    const right = document.createElement("div");
-    right.className = "clSummaryRight";
-
-    // Inline reactions (always visible, usable without expanding)
+    // Reactions (always visible, even when collapsed)
     const reactions = normalizeChangelogReactions(entry.reactions);
-    const myReactions = normalizeMyChangelogReactions(entry.myReactions);
+    const myReactions = normalizeChangelogReactions(entry.myReactions || entry.my_reactions || entry.mine);
     const reactionRow = document.createElement("div");
     reactionRow.className = "clReactions";
-    const entryBusy = changelogReactionBusy.has(String(entry.id));
-    for(const key of CHANGELOG_REACTION_KEYS){
+    const reactionKeys = ["heart","clap","down","eyes"];
+    const reactionLabels = { heart:"♥️", clap:"👏", down:"👎", eyes:"👀" };
+
+    for(const key of reactionKeys){
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "clReactBtn";
-      btn.dataset.changelogReaction = key;
-      btn.dataset.entryId = String(entry.id);
-      btn.setAttribute("aria-label", `React ${key}`);
-      btn.disabled = entryBusy;
+      btn.dataset.changelogReact = key;
+      btn.dataset.changelogId = entryId;
 
       const emoji = document.createElement("span");
       emoji.className = "clReactEmoji";
-      emoji.textContent = CHANGELOG_REACTION_EMOJI[key] || key;
+      emoji.textContent = reactionLabels[key] || key;
+      btn.appendChild(emoji);
 
       const count = document.createElement("span");
       count.className = "clReactCount";
       count.textContent = String(Math.max(0, Number(reactions[key] ?? 0)));
-
-      btn.appendChild(emoji);
       btn.appendChild(count);
+
       btn.classList.toggle("active", !!myReactions[key]);
       reactionRow.appendChild(btn);
     }
 
+    summary.appendChild(reactionRow);
+
     const chev = document.createElement("span");
     chev.className = "clChevron";
-    chev.textContent = "▾";
+    chev.setAttribute("aria-hidden", "true");
+    chev.textContent = "⌄";
+    summary.appendChild(chev);
 
-    right.appendChild(reactionRow);
-    right.appendChild(chev);
-
-    summary.appendChild(left);
-    summary.appendChild(right);
+    item.appendChild(summary);
 
     const panel = document.createElement("div");
     panel.className = "clPanel";
@@ -5683,10 +5665,9 @@ function renderChangelogList(){
     const body = document.createElement("div");
     body.className = "clBody";
     body.innerHTML = escapeHtml(entry.body || "").replace(/\n/g, "<br>");
-
     panel.appendChild(body);
 
-    if(canManage){
+    if(isOwner){
       const actions = document.createElement("div");
       actions.className = "clActions";
 
@@ -5694,37 +5675,45 @@ function renderChangelogList(){
       editBtn.className = "btn secondary";
       editBtn.type = "button";
       editBtn.textContent = "Edit";
-      editBtn.dataset.changelogEdit = String(entry.id);
+      editBtn.dataset.changelogEdit = entryId;
 
       const delBtn = document.createElement("button");
       delBtn.className = "btn danger";
       delBtn.type = "button";
       delBtn.textContent = "Delete";
-      delBtn.dataset.changelogDelete = String(entry.id);
+      delBtn.dataset.changelogDelete = entryId;
 
       actions.appendChild(editBtn);
       actions.appendChild(delBtn);
       panel.appendChild(actions);
     }
 
-    details.appendChild(summary);
-    details.appendChild(panel);
-    changelogList.appendChild(details);
+    item.appendChild(panel);
+
+    // Native <details> expansion is the most reliable option on iOS Safari.
+    // Keep only one open at a time for readability.
+    item.addEventListener("toggle", ()=>{
+      const nowOpen = item.open;
+      openChangelogId = nowOpen ? entryId : (openChangelogId === entryId ? null : openChangelogId);
+      // Re-render to keep chevrons/state consistent and close other items.
+      renderChangelogList();
+    }, { passive:true });
+
+    changelogList.appendChild(item);
   }
 }
-
 
 function handleChangelogListClick(event){
   if(!changelogList) return;
 
-  const reactionBtn = event.target.closest("[data-changelog-reaction]");
-  if(reactionBtn && changelogList.contains(reactionBtn)){
-    // Prevent <summary> click from toggling the <details> when reacting
+  // Reactions live inside <summary>. Prevent them from toggling the <details>.
+  const reactBtn = event.target.closest("[data-changelog-react]");
+  if(reactBtn && changelogList.contains(reactBtn)){
     event.preventDefault();
     event.stopPropagation();
-    const entryId = reactionBtn.dataset.entryId;
-    const reaction = reactionBtn.dataset.changelogReaction;
-    toggleChangelogReaction(entryId, reaction);
+    const entryId = reactBtn.dataset.changelogId;
+    const reaction = reactBtn.dataset.changelogReact;
+    if(entryId && reaction) toggleChangelogReaction(entryId, reaction);
     return;
   }
 
@@ -5732,49 +5721,31 @@ function handleChangelogListClick(event){
   if(editBtn && changelogList.contains(editBtn)){
     event.preventDefault();
     event.stopPropagation();
-    const entry = changelogEntries.find(e => e && String(e.id) === String(editBtn.dataset.changelogEdit));
+    const entryId = String(editBtn.dataset.changelogEdit || "");
+    const entry = changelogEntries.find(e => String(e.id) === entryId);
     if(entry) openChangelogEditor(entry);
     return;
   }
 
-  const deleteBtn = event.target.closest("[data-changelog-delete]");
-  if(deleteBtn && changelogList.contains(deleteBtn)){
+  const delBtn = event.target.closest("[data-changelog-delete]");
+  if(delBtn && changelogList.contains(delBtn)){
     event.preventDefault();
     event.stopPropagation();
-    deleteChangelogEntry(deleteBtn.dataset.changelogDelete);
+    const entryId = String(delBtn.dataset.changelogDelete || "");
+    if(entryId) deleteChangelogEntry(entryId);
+    return;
   }
-}
 
-function handleChangelogDetailsToggle(event){
-  const details = event.target;
-  if(!details || !details.classList || !details.classList.contains("clItem")) return;
-  const entryId = String(details.dataset.entryId || "");
-  if(details.open){
-    openChangelogId = entryId || null;
-    // Keep only one entry open at a time for cleanliness
-    changelogList.querySelectorAll("details.clItem[open]").forEach((d)=>{ if(d !== details) d.open = false; });
-  } else {
-    if(String(openChangelogId) === entryId) openChangelogId = null;
+  // Backward compatibility (older markup)
+  const legacyReactionBtn = event.target.closest("[data-changelog-reaction]");
+  if(legacyReactionBtn && changelogList.contains(legacyReactionBtn)){
+    event.preventDefault();
+    event.stopPropagation();
+    const entryId = legacyReactionBtn.dataset.entryId;
+    const reaction = legacyReactionBtn.dataset.changelogReaction;
+    if(entryId && reaction) toggleChangelogReaction(entryId, reaction);
+    return;
   }
-}
-
-
-function normalizeFaqReactions(reactions){
-  const base = { helpful:0, love:0, funny:0, confusing:0 };
-  if(!reactions || typeof reactions !== "object") return base;
-  for(const key of FAQ_REACTION_KEYS){
-    base[key] = Math.max(0, Number(reactions[key] ?? 0));
-  }
-  return base;
-}
-
-function normalizeMyFaqReactions(reactions){
-  const base = { helpful:false, love:false, funny:false, confusing:false };
-  if(!reactions || typeof reactions !== "object") return base;
-  for(const key of FAQ_REACTION_KEYS){
-    base[key] = !!reactions[key];
-  }
-  return base;
 }
 
 function normalizeFaqQuestion(row){
@@ -6344,7 +6315,6 @@ if(menuNav){
 }
 if(refreshLeaderboardsBtn) refreshLeaderboardsBtn.addEventListener("click", ()=> fetchLeaderboards({ force:true, reason:"manual" }));
 if(changelogList) changelogList.addEventListener("click", handleChangelogListClick);
-changelogList.addEventListener("toggle", handleChangelogDetailsToggle, true);
 if(faqList) faqList.addEventListener("click", handleFaqListClick);
 if(latestUpdateViewBtn){
   latestUpdateViewBtn.addEventListener("click", (e)=>{

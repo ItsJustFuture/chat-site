@@ -1944,6 +1944,130 @@ body.keyboard-open .menuContent{ padding-bottom: calc(200px + var(--kb, 0px) + e
 .changelogReactionCount{ font-size:12px; opacity:0.85; }
 .latestUpdateReactions{ margin-top:6px; }
 .changelogReactionBtn.active{ background:color-mix(in srgb, var(--accent) 28%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); box-shadow:var(--shadowSm); }
+
+
+/* ===== Changelog redesign (native <details>/<summary> accordion) =====
+   Reason: iOS Safari can fail to reflow flex + scroll containers when animating max-height,
+   causing expanded content to overlay other entries or never become visible.
+   Using <details> gives reliable expansion across browsers.
+*/
+.changelogList{ display:flex; flex-direction:column; gap:14px; min-height:0; }
+
+.clItem{
+  border:1px solid var(--border);
+  border-radius:var(--radiusLg);
+  background:color-mix(in srgb, var(--panel) 92%, transparent);
+  box-shadow:var(--shadowSm);
+  overflow:visible;
+}
+
+.clItem > summary{
+  list-style:none;
+}
+.clItem > summary::-webkit-details-marker{ display:none; }
+
+.clSummary{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:14px 14px;
+  cursor:pointer;
+  user-select:none;
+}
+
+.clLeft{
+  min-width:0;
+  flex:1 1 auto;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+
+.clTitle{
+  font-weight:900;
+  line-height:1.25;
+  font-size:15px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.clMeta{
+  font-size:12px;
+  color:var(--muted);
+  opacity:0.95;
+}
+
+.clReactions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex:0 0 auto;
+  flex-wrap:wrap;
+}
+
+.clReactBtn{
+  display:inline-flex;
+  gap:4px;
+  align-items:center;
+  border-radius:999px;
+  border:1px solid var(--border);
+  background:color-mix(in srgb, var(--panel) 80%, transparent);
+  color:var(--text);
+  padding:3px 6px;
+  cursor:pointer;
+  font-weight:800;
+  font-size:11px;
+  line-height:1.1;
+}
+
+.clReactBtn.active{
+  background:color-mix(in srgb, var(--accent) 18%, var(--panel));
+  border-color:color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow:var(--shadowSm);
+}
+
+.clReactEmoji{ font-size:14px; line-height:1; }
+.clReactCount{ font-size:12px; opacity:0.85; }
+
+.clChevron{
+  flex:0 0 auto;
+  font-size:14px;
+  transition:transform .15s ease;
+  opacity:0.9;
+}
+.clItem[open] .clChevron{ transform:rotate(180deg); }
+
+.clPanel{
+  padding:0 14px 14px 14px;
+  border-top:1px solid var(--border);
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.clBody{
+  white-space:pre-line;
+  overflow-wrap:anywhere;
+  line-height:1.45;
+  font-size:14px;
+}
+
+.clActions{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+}
+.clActions .btn{
+  flex:1 1 140px;
+  min-width:0;
+}
+
+/* Mobile: keep summary readable and prevent clipping */
+@media (max-width: 520px){
+  .clSummary{ align-items:flex-start; flex-wrap:wrap; }
+  .clReactions{ width:100%; justify-content:flex-start; }
+}
 .faqForm{ display:none; flex-direction:column; gap:10px; margin-bottom:10px; position:sticky; bottom: calc(10px + var(--kb, 0px) + env(safe-area-inset-bottom)); z-index:2; background:var(--panel); padding:12px; border-radius:var(--radiusLg); box-shadow:var(--shadowSm); }
 /* Questions are title-only (no separate body input). Keep DOM element for compatibility. */
 #faqDetailsInput{ display:none; }
@@ -5295,100 +5419,3 @@ main.chatMain {
 
 /* === Fix: upload preview should not reserve space when not in use === */
 #uploadPreview{ display:none; }
-
-
-
-/* ==============================
-   Changelog redesign (Accordion)
-   Uses <details>/<summary> for reliable iOS layout
-   ============================== */
-
-#changelogList{ display:flex; flex-direction:column; gap:12px; min-height:0; }
-
-.clItem{
-  border-radius: var(--radiusLg);
-  border: 1px solid rgba(255,255,255,.08);
-  background: rgba(255,255,255,.03);
-  overflow: hidden;
-}
-
-.clSummary{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-  padding:14px 14px;
-  cursor:pointer;
-  user-select:none;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.clSummary::-webkit-details-marker{ display:none; }
-.clSummary::marker{ content:""; }
-
-.clSummaryLeft{ min-width:0; display:flex; flex-direction:column; gap:4px; }
-.clTitle{ font-weight:900; font-size:15px; line-height:1.2; overflow-wrap:anywhere; }
-.clMeta{ font-size:12px; color: var(--muted); opacity:.95; }
-
-.clSummaryRight{ display:flex; align-items:center; gap:10px; flex:0 0 auto; }
-
-.clChevron{
-  flex:0 0 auto;
-  font-size:14px;
-  opacity:.9;
-  transform: rotate(0deg);
-  transition: transform .15s ease;
-}
-
-.clItem[open] .clChevron{ transform: rotate(180deg); }
-
-.clReactions{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
-.clReactBtn{
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  padding:6px 10px;
-  border-radius:999px;
-  border:1px solid rgba(255,255,255,.10);
-  background: rgba(0,0,0,.18);
-  color: inherit;
-  font: inherit;
-  line-height:1;
-  cursor:pointer;
-}
-.clReactBtn:disabled{ opacity:.55; cursor:not-allowed; }
-.clReactBtn.active{ border-color: rgba(255,255,255,.22); background: rgba(255,255,255,.08); }
-.clReactEmoji{ font-size:14px; }
-.clReactCount{ font-size:12px; opacity:.9; }
-
-.clPanel{
-  padding: 0 14px 14px 14px;
-  display:flex;
-  flex-direction:column;
-  gap:12px;
-}
-
-.clBody{
-  padding: 12px 12px;
-  border-radius: var(--radiusMd);
-  background: rgba(0,0,0,.16);
-  border: 1px solid rgba(255,255,255,.07);
-  font-size:14px;
-  line-height:1.45;
-  overflow-wrap:anywhere;
-}
-
-.clActions{
-  display:flex;
-  gap:8px;
-  flex-wrap:wrap;
-  justify-content:flex-end;
-}
-
-/* Mobile: keep things readable and prevent button clipping */
-@media (max-width: 520px){
-  .clSummary{ align-items:flex-start; }
-  .clSummaryRight{ flex-direction:column-reverse; align-items:flex-end; gap:8px; }
-  .clReactBtn{ padding:6px 8px; }
-  .clActions .btn{ flex:1 1 140px; min-width:0; }
-}
