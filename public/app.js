@@ -5,39 +5,6 @@
 window.__TAP_DEBUG__ = window.__TAP_DEBUG__ ?? false;
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
-
-// Shared timestamp formatter used by Changelog + FAQ.
-function formatChangelogDate(ts){
-  if(ts == null || ts === "") return "";
-  let d = null;
-
-  // Accept epoch millis/seconds (number or numeric string)
-  if(typeof ts === "number"){
-    const ms = ts < 1e12 ? ts * 1000 : ts;
-    d = new Date(ms);
-  } else if(typeof ts === "string"){
-    const trimmed = ts.trim();
-    if(!trimmed) return "";
-    const asNum = Number(trimmed);
-    if(Number.isFinite(asNum)){
-      const ms = asNum < 1e12 ? asNum * 1000 : asNum;
-      d = new Date(ms);
-    } else {
-      d = new Date(trimmed);
-    }
-  } else {
-    d = new Date(NaN);
-  }
-
-  if(!d || Number.isNaN(d.getTime())) return "";
-  try{
-    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(d);
-  }catch{
-    // Older browsers fallback
-    return d.toLocaleString();
-  }
-}
-
 // ---- Scroll pinning scheduler (hoisted)
 // This function is referenced early (e.g. visualViewport listeners inside initLayoutMetrics).
 // It must be hoisted to avoid TDZ/ReferenceError when app.js is evaluated.
@@ -948,6 +915,39 @@ const latestUpdateViewBtn = document.getElementById("latestUpdateViewBtn");
 const latestUpdateReactions = document.getElementById("latestUpdateReactions");
 let latestUpdateExpanded = false;
 const changelogList = document.getElementById("changelogList");
+
+// Shared date formatter for Changelog + FAQ.
+// IMPORTANT: keep this at top-level so it is in scope everywhere.
+function formatChangelogDate(ts){
+  if(ts == null || ts === "") return "";
+  let d = null;
+
+  // Accept epoch millis/seconds (number or numeric string)
+  if(typeof ts === "number"){
+    const ms = ts < 1e12 ? ts * 1000 : ts;
+    d = new Date(ms);
+  } else if(typeof ts === "string"){
+    const trimmed = ts.trim();
+    if(!trimmed) return "";
+    const asNum = Number(trimmed);
+    if(Number.isFinite(asNum)){
+      const ms = asNum < 1e12 ? asNum * 1000 : asNum;
+      d = new Date(ms);
+    } else {
+      d = new Date(trimmed);
+    }
+  } else {
+    d = new Date(NaN);
+  }
+
+  if(!d || Number.isNaN(d.getTime())) return "";
+  try{
+    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(d);
+  }catch{
+    // Older browsers fallback
+    return d.toLocaleString();
+  }
+}
 const changelogMsg = document.getElementById("changelogMsg");
 const changelogActions = document.getElementById("changelogActions");
 const changelogNewBtn = document.getElementById("changelogNewBtn");
@@ -5587,8 +5587,7 @@ function renderChangelogList(){
 
   const isOwner = me && roleRank(me.role) >= roleRank("Owner");
 
-  // Format timestamps in the viewer's locale + timezone, but avoid showing "Invalid Date".
-    for(const entry of changelogEntries){
+  for(const entry of changelogEntries){
     const wrap = document.createElement("div");
     wrap.className = "changelogEntry";
     wrap.dataset.entryId = String(entry.id);
