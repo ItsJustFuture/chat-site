@@ -787,6 +787,12 @@ let openChangelogId = null;
 const CHANGELOG_REACTION_KEYS = ["heart", "clap", "down", "eyes"];
 const CHANGELOG_REACTION_EMOJI = { heart:"♥️", clap:"👏", down:"👎", eyes:"👀" };
 const changelogReactionBusy = new Set();
+// When the server pushes a reactions update over websocket, it may arrive before
+// the REST write has fully propagated. Preserve optimistic UI for a short window.
+// (Used inside loadChangelog merging logic.)
+
+// Same idea for FAQ reactions.
+const faqLocalTouch = new Map();
 let editingChangelogId = null;
 let latestChangelogEntry = null;
 let faqQuestions = [];
@@ -5545,11 +5551,15 @@ async function loadChangelog(force=false){
     const rows = JSON.parse(text || "[]");
     const normalized = Array.isArray(rows) ? rows.map(normalizeChangelogEntry).filter(Boolean) : [];
     const touched = new Map(changelogLocalTouch);
+    const now = Date.now();
+    const preserveWindowMs = 2000;
     changelogEntries = normalized.map(entry => {
       if(!entry || entry.id === undefined || entry.id === null) return entry;
       const key = String(entry.id);
       const localTouchedAt = touched.get(key) || 0;
-      if(localTouchedAt > requestStartedAt){
+      // Preserve optimistic UI if the user just reacted, even if a websocket
+      // refresh arrives before the server's GET reflects the change.
+      if(localTouchedAt && (localTouchedAt > requestStartedAt || (now - localTouchedAt) < preserveWindowMs)){
         const prev = prevEntries.find(e => e && String(e.id) === key);
         if(prev){
           return { ...entry, reactions: prev.reactions, myReactions: prev.myReactions, __localUpdatedAt: prev.__localUpdatedAt || localTouchedAt };
@@ -5691,20 +5701,13 @@ function renderChangelogList(){
     item.appendChild(panel);
 
     // Native <details> expansion is the most reliable option on iOS Safari.
-// Allow opening any item; when one opens, automatically close the others.
-item.addEventListener("toggle", ()=>{
-  if(!changelogList) return;
-  if(item.open){
-    openChangelogId = entryId;
-    // Close any other open items without re-rendering (avoids iOS/Safari toggle race).
-    const openItems = changelogList.querySelectorAll("details.clItem[open]");
-    for(const d of openItems){
-      if(d !== item) d.open = false;
-    }
-  }else{
-    if(openChangelogId === entryId) openChangelogId = null;
-  }
-});
+    // Keep only one open at a time for readability.
+    item.addEventListener("toggle", ()=>{
+      const nowOpen = item.open;
+      openChangelogId = nowOpen ? entryId : (openChangelogId === entryId ? null : openChangelogId);
+      // Re-render to keep chevrons/state consistent and close other items.
+      renderChangelogList();
+    }, { passive:true });
 
     changelogList.appendChild(item);
   }
@@ -5713,11 +5716,22 @@ item.addEventListener("toggle", ()=>{
 function handleChangelogListClick(event){
   if(!changelogList) return;
 
+  const popBtn = (btn)=>{
+    if(!btn || !btn.classList) return;
+    // Restart animation
+    btn.classList.remove("pop");
+    // Force reflow so the animation can replay on rapid taps
+    void btn.offsetWidth;
+    btn.classList.add("pop");
+    btn.addEventListener("animationend", ()=>btn.classList.remove("pop"), { once:true });
+  };
+
   // Reactions live inside <summary>. Prevent them from toggling the <details>.
   const reactBtn = event.target.closest("[data-changelog-react]");
   if(reactBtn && changelogList.contains(reactBtn)){
     event.preventDefault();
     event.stopPropagation();
+    popBtn(reactBtn);
     const entryId = reactBtn.dataset.changelogId;
     const reaction = reactBtn.dataset.changelogReact;
     if(entryId && reaction) toggleChangelogReaction(entryId, reaction);
@@ -5930,6 +5944,14 @@ function renderFaqList(){
 
 function handleFaqListClick(event){
   if(!faqList) return;
+
+  const popBtn = (btn)=>{
+    if(!btn || !btn.classList) return;
+    btn.classList.remove("pop");
+    void btn.offsetWidth;
+    btn.classList.add("pop");
+    btn.addEventListener("animationend", ()=>btn.classList.remove("pop"), { once:true });
+  };
   const delBtn = event.target.closest("[data-faq-delete]");
   if(delBtn && faqList.contains(delBtn)){
     const qid = delBtn.dataset.faqDelete;
@@ -5940,6 +5962,7 @@ function handleFaqListClick(event){
   const reactionBtn = event.target.closest("[data-faq-reaction]");
   if(reactionBtn && faqList.contains(reactionBtn)){
     event.preventDefault();
+    popBtn(reactionBtn);
     const reaction = reactionBtn.dataset.faqReaction;
     const questionId = reactionBtn.dataset.questionId;
     if(questionId && reaction) toggleFaqReaction(questionId, reaction);
@@ -6122,6 +6145,7 @@ async function toggleFaqReaction(questionId, reaction){
   mine[reaction] = !isActive;
   reactions[reaction] = Math.max(0, (reactions[reaction] || 0) + (isActive ? -1 : 1));
   faqQuestions[idx] = { ...entry, reactions, myReactions: mine };
+  faqLocalTouch.set(qKey, Date.now());
   faqReactionBusy.add(qKey);
   renderFaqList();
   try{
@@ -6217,15 +6241,39 @@ async function submitFaqQuestion(){
 async function loadFaq(force = false){
   if(activeMenuTab !== "faq") return;
   if(!force && faqLoaded && !faqDirty) return;
+  const requestStartedAt = Date.now();
+  const prevQuestions = Array.isArray(faqQuestions) ? [...faqQuestions] : [];
   if(faqMsg) faqMsg.textContent = "Loading questions...";
   try{
     const {res, text} = await api("/api/faq", { method:"GET" });
     if(!res.ok) throw new Error(text || "Failed to load");
     const rows = JSON.parse(text || "[]");
-    faqQuestions = Array.isArray(rows) ? rows.map(normalizeFaqQuestion).filter(Boolean) : [];
+    const normalized = Array.isArray(rows) ? rows.map(normalizeFaqQuestion).filter(Boolean) : [];
+    const touched = new Map(faqLocalTouch);
+    const now = Date.now();
+    const preserveWindowMs = 2000;
+    faqQuestions = normalized.map(q => {
+      if(!q || q.id === undefined || q.id === null) return q;
+      const key = String(q.id);
+      const localTouchedAt = touched.get(key) || 0;
+      if(localTouchedAt && (localTouchedAt > requestStartedAt || (now - localTouchedAt) < preserveWindowMs)){
+        const prev = prevQuestions.find(p => p && String(p.id) === key);
+        if(prev){
+          return { ...q, reactions: prev.reactions, myReactions: prev.myReactions, __localUpdatedAt: prev.__localUpdatedAt || localTouchedAt };
+        }
+      }
+      if(localTouchedAt){
+        q.__localUpdatedAt = Math.max(q.__localUpdatedAt || 0, localTouchedAt);
+      }
+      return q;
+    });
     faqLoaded = true;
     faqDirty = false;
     faqReactionBusy.clear();
+    const serverIds = new Set(faqQuestions.map(q => q?.id !== undefined && q?.id !== null ? String(q.id) : null).filter(Boolean));
+    for(const key of Array.from(faqLocalTouch.keys())){
+      if(!serverIds.has(key)) faqLocalTouch.delete(key);
+    }
     if(faqMsg) faqMsg.textContent = faqQuestions.length ? "" : "No questions yet.";
     renderFaqList();
   }catch(err){
