@@ -5817,15 +5817,22 @@ async function doRegister(){
   if(!res.ok){ authMsg.textContent=text||"Register failed."; return; }
   authMsg.textContent="Registered! Now click Login.";
 }
-loginBtn.addEventListener("click", doLogin);
-regBtn.addEventListener("click", doRegister);
-authPass.addEventListener("keydown", (e)=>{ if(e.key==="Enter") doLogin(); });
+// Bind auth handlers defensively so a missing/renamed DOM id can't break boot.
+loginBtn?.addEventListener("click", (e)=>{ e?.preventDefault?.(); doLogin(); });
+regBtn?.addEventListener("click", (e)=>{ e?.preventDefault?.(); doRegister(); });
+authPass?.addEventListener("keydown", (e)=>{
+  if(e.key === "Enter"){
+    e.preventDefault();
+    doLogin();
+  }
+});
 
 async function doLogout(){
-  await fetch("/logout", {method:"POST"});
+  // Explicitly include credentials so the session cookie is always sent.
+  await fetch("/logout", {method:"POST", credentials:"include"});
   location.reload();
 }
-logoutBtn.addEventListener("click", doLogout);
+logoutBtn?.addEventListener("click", doLogout);
 
 /* ---- UI scale panel (topbar) */
 (function initUiScaleControls(){
@@ -6714,7 +6721,8 @@ refreshLogsBtn.addEventListener("click", refreshLogs);
 async function startApp(){
   let meRes;
   try{
-    meRes = await fetch("/me");
+    // Explicit credentials prevents edge cases where the session cookie isn't sent.
+    meRes = await fetch("/me", { credentials: "include" });
   }catch(err){
     console.error("Failed to reach /me:", err);
     authMsg.textContent = "Unable to reach the server. Please try again.";
@@ -7134,7 +7142,7 @@ socket.on("dm history", (payload) => {
 // boot: if already logged in, auto start
 (async function boot(){
   try{
-    const res = await fetch("/me");
+    const res = await fetch("/me", { credentials: "include" });
     if(!res.ok) return;
 
     me = await res.json();
