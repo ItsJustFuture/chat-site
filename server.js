@@ -182,6 +182,9 @@ const pgInitPromise = (async () => {
         prefs_json JSONB NOT NULL DEFAULT '{}'::jsonb,
         gold INTEGER NOT NULL DEFAULT 0,
         xp INTEGER NOT NULL DEFAULT 0,
+        lastMessageXpAt BIGINT,
+        lastLoginXpAt BIGINT,
+        lastOnlineXpAt BIGINT,
         lastXpMessageAt BIGINT,
         lastDailyLoginAt BIGINT,
         lastGoldTickAt BIGINT,
@@ -249,6 +252,9 @@ try {
   await pgEnsureCamelColumn("users", "lastMessageGoldAt", "BIGINT");
   await pgEnsureCamelColumn("users", "lastDailyLoginGoldAt", "BIGINT");
   await pgEnsureCamelColumn("users", "lastXpMessageAt", "BIGINT");
+  await pgEnsureCamelColumn("users", "lastMessageXpAt", "BIGINT");
+  await pgEnsureCamelColumn("users", "lastLoginXpAt", "BIGINT");
+  await pgEnsureCamelColumn("users", "lastOnlineXpAt", "BIGINT");
   await pgEnsureCamelColumn("users", "lastDailyLoginAt", "BIGINT");
   await pgEnsureCamelColumn("users", "lastDiceRollAt", "BIGINT");
 } catch (e) {
@@ -270,6 +276,9 @@ try {
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS prefs_json JSONB NOT NULL DEFAULT '{}'::jsonb`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS gold INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS xp INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS "lastMessageXpAt" BIGINT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS "lastLoginXpAt" BIGINT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS "lastOnlineXpAt" BIGINT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastXpMessageAt BIGINT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastDailyLoginAt BIGINT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastGoldTickAt BIGINT`,
@@ -1377,6 +1386,21 @@ async function executeCommand(socket, rawText, room) {
 }
 const AUTO_OWNER = new Set(["iri"]);
 const AUTO_COOWNERS = new Set(["lola henderson", "amelia"]);
+const VIP_PLUS_ROLES = new Set(["vip", "moderator", "admin", "co owner", "co-owner", "owner"]);
+
+function isVipPlus(role) {
+  const norm = String(role || "").toLowerCase();
+  return VIP_PLUS_ROLES.has(norm);
+}
+
+function xpRatesForRole(role) {
+  const vip = isVipPlus(role);
+  return {
+    online: vip ? 2 : 1,
+    message: vip ? 10 : 3,
+    login: vip ? 25 : 15,
+  };
+}
 
 function levelInfo(xpRaw) {
   let xp = Math.max(0, Math.floor(Number(xpRaw) || 0));
@@ -1395,6 +1419,26 @@ function emitLevelUp(userId, newLevel) {
   if (sid) io.to(sid).emit("level up", { level: newLevel });
 }
 
+function liveRoleForUser(userId, fallbackRole = "User") {
+  const sid = socketIdByUserId.get(userId);
+  const sock = sid ? io.sockets.sockets.get(sid) : null;
+  return sock?.user?.role || fallbackRole || "User";
+}
+
+async function primeOnlineXpTracker(userId) {
+  const fallback = { lastTs: Date.now(), carryMs: 0 };
+  onlineXpTrack.set(userId, fallback);
+  try {
+    const row = await getProgressionRow(userId);
+    const last = Number(row?.lastOnlineXpAt || 0);
+    if (Number.isFinite(last) && last > 0) {
+      onlineXpTrack.set(userId, { lastTs: last, carryMs: 0 });
+    }
+  } catch (e) {
+    console.warn("[xp][prime online]", e?.message || e);
+  }
+}
+
 let leaderboardUpdateTimer = null;
 function emitLeaderboardUpdateThrottled() {
   if (leaderboardUpdateTimer) return;
@@ -1404,66 +1448,167 @@ function emitLeaderboardUpdateThrottled() {
   }, 500);
 }
 
-function applyXpGain(userId, delta, cb) {
-  const amount = Math.max(0, Math.floor(Number(delta) || 0));
-  if (!amount) return cb?.(null, null);
+async function getProgressionRow(userId) {
+  try {
+    if (await pgUserExists(userId)) {
+      const { rows } = await pgPool.query(
+        'SELECT username, role, xp, "lastMessageXpAt", "lastLoginXpAt", "lastOnlineXpAt", "lastXpMessageAt", "lastDailyLoginAt" FROM users WHERE id=$1 LIMIT 1',
+        [userId]
+      );
+      if (rows?.[0]) return rows[0];
+    }
+  } catch (e) {
+    console.warn("[xp][pg fetch]", e?.message || e);
+  }
 
-  db.get("SELECT xp FROM users WHERE id = ?", [userId], (err, row) => {
-    if (err || !row) return cb?.(err || new Error("missing"));
-
-    const prevXp = Math.max(0, Math.floor(Number(row.xp) || 0));
-    const prevLevel = levelInfo(prevXp).level;
-    const newXp = prevXp + amount;
-    const info = levelInfo(newXp);
-
-    db.run("UPDATE users SET xp = ? WHERE id = ?", [newXp, userId], () => {
-      if (info.level > prevLevel) emitLevelUp(userId, info.level);
-      emitLeaderboardUpdateThrottled();
-      cb?.(null, { xp: newXp, ...info });
-    });
-  });
-}
-
-function awardMessageXp(userId) {
-  const now = Date.now();
-  db.get("SELECT xp, lastXpMessageAt FROM users WHERE id = ?", [userId], (err, row) => {
-    if (err || !row) return;
-    if (row.lastXpMessageAt && now - row.lastXpMessageAt < 30_000) return;
-
-    const prevXp = Math.max(0, Math.floor(Number(row.xp) || 0));
-    const prevLevel = levelInfo(prevXp).level;
-    const newXp = prevXp + 5;
-    const info = levelInfo(newXp);
-
-    db.run(
-      "UPDATE users SET xp = ?, lastXpMessageAt = ? WHERE id = ?",
-      [newXp, now, userId],
-      () => {
-        if (info.level > prevLevel) emitLevelUp(userId, info.level);
-        emitLeaderboardUpdateThrottled();
-      }
+  return await new Promise((resolve) => {
+    db.get(
+      "SELECT username, role, xp, lastMessageXpAt, lastLoginXpAt, lastOnlineXpAt, lastXpMessageAt, lastDailyLoginAt FROM users WHERE id = ?",
+      [userId],
+      (_e, row) => resolve(row || null)
     );
   });
 }
 
-function awardDailyLoginXp(user) {
-  const now = Date.now();
-  const last = Number(user.lastDailyLoginAt || 0);
-  if (last && now - last < 24 * 60 * 60 * 1000) return;
+async function persistXpState(userId, data) {
+  const newXp = Math.max(0, Math.floor(Number(data.xp) || 0));
+  const lastMessageXpAt = data.lastMessageXpAt ?? null;
+  const lastLoginXpAt = data.lastLoginXpAt ?? null;
+  const lastOnlineXpAt = data.lastOnlineXpAt ?? null;
+  const lastDailyLoginAt = data.lastDailyLoginAt ?? null;
+  const lastXpMessageAt = data.lastXpMessageAt ?? null;
 
-  const prevXp = Math.max(0, Math.floor(Number(user.xp) || 0));
+  try {
+    if (await pgUserExists(userId)) {
+      const sets = ["xp = $1"];
+      const params = [newXp];
+      let idx = 2;
+      if (lastMessageXpAt != null) {
+        sets.push(`"lastMessageXpAt" = $${idx}`);
+        params.push(lastMessageXpAt);
+        idx += 1;
+        sets.push(`"lastXpMessageAt" = $${idx}`);
+        params.push(lastMessageXpAt);
+        idx += 1;
+      }
+      if (lastLoginXpAt != null) {
+        sets.push(`"lastLoginXpAt" = $${idx}`);
+        params.push(lastLoginXpAt);
+        idx += 1;
+      }
+      if (lastOnlineXpAt != null) {
+        sets.push(`"lastOnlineXpAt" = $${idx}`);
+        params.push(lastOnlineXpAt);
+        idx += 1;
+      }
+      if (lastDailyLoginAt != null) {
+        sets.push(`"lastDailyLoginAt" = $${idx}`);
+        params.push(lastDailyLoginAt);
+        idx += 1;
+      }
+      if (lastXpMessageAt != null) {
+        sets.push(`"lastXpMessageAt" = $${idx}`);
+        params.push(lastXpMessageAt);
+        idx += 1;
+      }
+      params.push(userId);
+      await pgPool.query(`UPDATE users SET ${sets.join(", ")} WHERE id = $${idx}`, params);
+    }
+  } catch (e) {
+    console.warn("[xp][pg persist]", e?.message || e);
+  }
+
+  const sqliteSets = ["xp = ?"];
+  const sqliteParams = [newXp];
+  if (lastMessageXpAt != null) {
+    sqliteSets.push("lastMessageXpAt = ?", "lastXpMessageAt = ?");
+    sqliteParams.push(lastMessageXpAt, lastMessageXpAt);
+  }
+  if (lastLoginXpAt != null) {
+    sqliteSets.push("lastLoginXpAt = ?");
+    sqliteParams.push(lastLoginXpAt);
+  }
+  if (lastOnlineXpAt != null) {
+    sqliteSets.push("lastOnlineXpAt = ?");
+    sqliteParams.push(lastOnlineXpAt);
+  }
+  if (lastDailyLoginAt != null) {
+    sqliteSets.push("lastDailyLoginAt = ?");
+    sqliteParams.push(lastDailyLoginAt);
+  }
+  if (lastXpMessageAt != null) {
+    sqliteSets.push("lastXpMessageAt = ?");
+    sqliteParams.push(lastXpMessageAt);
+  }
+
+  return await dbRunAsync(`UPDATE users SET ${sqliteSets.join(", ")} WHERE id = ?`, [...sqliteParams, userId]);
+}
+
+async function applyXpGain(userId, delta, opts = {}) {
+  const amount = Math.max(0, Math.floor(Number(delta) || 0));
+  if (!amount) return null;
+
+  const baseRow = opts.baseRow || (await getProgressionRow(userId));
+  if (!baseRow) return null;
+
+  const prevXp = Math.max(0, Math.floor(Number(baseRow.xp) || 0));
   const prevLevel = levelInfo(prevXp).level;
-  const newXp = prevXp + 25;
+  const newXp = prevXp + amount;
   const info = levelInfo(newXp);
 
-  db.run(
-    "UPDATE users SET xp = ?, lastDailyLoginAt = ? WHERE id = ?",
-    [newXp, now, user.id],
-    () => {
-      if (info.level > prevLevel) emitLevelUp(user.id, info.level);
-      emitLeaderboardUpdateThrottled();
-    }
-  );
+  await persistXpState(userId, {
+    xp: newXp,
+    lastMessageXpAt: opts.lastMessageXpAt ?? opts.lastXpMessageAt ?? null,
+    lastXpMessageAt: opts.lastXpMessageAt ?? null,
+    lastLoginXpAt: opts.lastLoginXpAt ?? null,
+    lastDailyLoginAt: opts.lastDailyLoginAt ?? null,
+    lastOnlineXpAt: opts.lastOnlineXpAt ?? null,
+  });
+
+  if (info.level > prevLevel) emitLevelUp(userId, info.level);
+  emitProgressionUpdate(userId);
+  emitLeaderboardUpdateThrottled();
+  return { xp: newXp, ...info };
+}
+
+async function awardMessageXp(userId, roleHint) {
+  const now = Date.now();
+  const row = await getProgressionRow(userId);
+  if (!row) return;
+  const last = Number(row.lastMessageXpAt ?? row.lastXpMessageAt ?? 0);
+  if (last && now - last < 5 * 60 * 1000) {
+    console.log(`[xp][msg] cooldown user=${userId}`);
+    return;
+  }
+
+  const role = roleHint || row.role || "User";
+  const delta = xpRatesForRole(role).message;
+  const result = await applyXpGain(userId, delta, {
+    baseRow: row,
+    lastMessageXpAt: now,
+    lastXpMessageAt: now,
+  });
+  if (result) console.log(`[xp][msg] +${delta} user=${userId} role=${role}`);
+}
+
+async function awardLoginXp(userId, roleHint) {
+  const now = Date.now();
+  const row = await getProgressionRow(userId);
+  if (!row) return;
+  const last = Number(row.lastLoginXpAt ?? row.lastDailyLoginAt ?? 0);
+  if (last && now - last < 24 * 60 * 60 * 1000) {
+    console.log(`[xp][login] cooldown user=${userId}`);
+    return;
+  }
+
+  const role = roleHint || row.role || "User";
+  const delta = xpRatesForRole(role).login;
+  const result = await applyXpGain(userId, delta, {
+    baseRow: row,
+    lastLoginXpAt: now,
+    lastDailyLoginAt: now,
+  });
+  if (result) console.log(`[xp][login] +${delta} user=${userId} role=${role}`);
 }
 
 function initGoldTick(userId, now = Date.now()) {
@@ -2866,7 +3011,7 @@ app.post("/login", async (req, res) => {
     req.session.user = { id: row.id, username: row.username, role: row.role, theme, avatar: avatarUrlFromRow(row) || "", avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? null };
 
     await dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]).catch(() => {});
-    awardDailyLoginXp(row);
+    await awardLoginXp(row.id, row.role);
     awardDailyLoginGold(row);
     initGoldTick(row.id);
 
@@ -4378,24 +4523,42 @@ app.delete("/dm/thread/:id/messages", requireLogin, (req, res) => {
 });
 
 setInterval(() => {
-  const now = Date.now();
-  for (const [uid, track] of onlineXpTrack.entries()) {
-    if (!onlineState.has(uid)) {
-      onlineXpTrack.delete(uid);
-      continue;
-    }
-    const lastTs = track.lastTs || now;
-    const elapsed = Math.max(0, now - lastTs);
-    const total = (track.carryMs || 0) + elapsed;
-    const gains = Math.floor(total / 100_000);
-    const remainder = total % 100_000;
-    onlineXpTrack.set(uid, { lastTs: now, carryMs: remainder });
-    if (gains > 0) applyXpGain(uid, gains);
-  }
+  const loop = async () => {
+    const now = Date.now();
+    for (const [uid, track] of onlineXpTrack.entries()) {
+      if (!onlineState.has(uid)) {
+        onlineXpTrack.delete(uid);
+        continue;
+      }
+      const lastTs = track.lastTs || now;
+      const elapsed = Math.max(0, now - lastTs);
+      const total = (track.carryMs || 0) + elapsed;
+      const fullMinutes = Math.floor(total / 60_000);
+      const cappedMinutes = Math.min(fullMinutes, 60);
+      const carry = total - cappedMinutes * 60_000;
+      onlineXpTrack.set(uid, { lastTs: now, carryMs: carry });
+      if (cappedMinutes <= 0) continue;
 
-  for (const uid of onlineState.keys()) {
-    awardPassiveGold(uid);
-  }
+      try {
+        const row = await getProgressionRow(uid);
+        if (!row) continue;
+        const role = liveRoleForUser(uid, row.role);
+        const rate = xpRatesForRole(role).online;
+        const delta = Math.max(0, Math.floor(cappedMinutes * rate));
+        if (delta > 0) {
+          await applyXpGain(uid, delta, { baseRow: row, lastOnlineXpAt: now });
+          console.log(`[xp][online] +${delta} user=${uid} mins=${cappedMinutes} role=${role}`);
+        }
+      } catch (e) {
+        console.warn("[xp][online]", e?.message || e);
+      }
+    }
+
+    for (const uid of onlineState.keys()) {
+      awardPassiveGold(uid);
+    }
+  };
+  loop().catch((e) => console.warn("[xp][online loop]", e?.message || e));
 }, 60_000);
 
 // ---- Helpers for punishments
@@ -4505,7 +4668,7 @@ if (existingSid && existingSid !== socket.id) {
   }
 }
   socketIdByUserId.set(socket.user.id, socket.id);
-  onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
+  primeOnlineXpTracker(socket.user.id);
   initGoldTick(socket.user.id);
 
 // Load profile bits for presence (PG-first, SQLite fallback) + refresh member list when ready
@@ -5178,7 +5341,7 @@ socket.on("status change", ({ status }) => {
                   replyText,
                 ],
                 function () {
-                  awardMessageXp(socket.user.id);
+                  awardMessageXp(socket.user.id, socket.user.role).catch((e) => console.warn("[xp][msg]", e?.message || e));
                   awardMessageGold(socket.user.id);
                   const msg = {
                     messageId: this.lastID,

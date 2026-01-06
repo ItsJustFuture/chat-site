@@ -5665,7 +5665,6 @@ function renderChangelogList(){
 
     const details = document.createElement("div");
     details.className = "changelogDetails";
-    details.hidden = !isOpen;
 
     const reactions = normalizeChangelogReactions(entry.reactions);
     const myReactions = normalizeMyChangelogReactions(entry.myReactions);
@@ -5701,6 +5700,12 @@ function renderChangelogList(){
     wrap.appendChild(header);
     wrap.appendChild(details);
     changelogList.appendChild(wrap);
+
+    const detailHeight = details.scrollHeight;
+    details.setAttribute("aria-hidden", isOpen ? "false" : "true");
+    details.style.maxHeight = isOpen ? `${detailHeight + 16}px` : "0px";
+    reactionRow.style.visibility = isOpen ? "visible" : "hidden";
+    reactionRow.setAttribute("aria-hidden", isOpen ? "false" : "true");
   }
 }
 
@@ -7884,6 +7889,44 @@ function focusMainComposer(){
     }
   });
 }
+
+const SOFT_INPUT_SELECTOR = ".menuContent input, .menuContent textarea, .modalContent input, .modalContent textarea, .faqAnswerEdit";
+
+function updateKeyboardInset(target){
+  const vv = window.visualViewport;
+  let kb = 0;
+  if(vv){
+    kb = Math.max(0, window.innerHeight - (vv.height + (vv.offsetTop || 0)));
+  }
+  if(Number.isFinite(kb)){ document.documentElement?.style?.setProperty("--kb", `${Math.round(kb)}px`); }
+  if(target && target.scrollIntoView){
+    setTimeout(() => {
+      try{ target.scrollIntoView({ block:"center", behavior:"smooth" }); }catch{}
+    }, 120);
+  }
+}
+
+document.addEventListener("focusin", (event)=>{
+  const el = event.target;
+  if(!(el instanceof HTMLElement)) return;
+  if(!el.matches(SOFT_INPUT_SELECTOR)) return;
+  document.body.classList.add("keyboard-open");
+  updateKeyboardInset(el);
+});
+
+document.addEventListener("focusout", ()=>{
+  setTimeout(()=>{
+    const active = document.activeElement;
+    if(active && active instanceof HTMLElement && active.matches(SOFT_INPUT_SELECTOR)) return;
+    document.body.classList.remove("keyboard-open");
+    document.documentElement?.style?.setProperty("--kb", "0px");
+  }, 150);
+});
+
+window.visualViewport?.addEventListener("resize", ()=>{
+  const active = document.activeElement;
+  if(active && active instanceof HTMLElement && active.matches(SOFT_INPUT_SELECTOR)) updateKeyboardInset(active);
+});
 
 // focus behavior on mobile keyboard (avoid aggressive scroll jumps on iOS)
 msgInput?.addEventListener("focus", () => {
