@@ -202,7 +202,7 @@ const THEMES = [
       activeInput: document.activeElement && document.activeElement.tagName ? document.activeElement.tagName.toLowerCase() : ""
     };
 
-    root.style.setProperty("--vvh", String(metrics.vvHeight));
+    root.style.setProperty("--vvh", `${metrics.vvHeight}px`);
     root.style.setProperty("--vvhPx", `${metrics.vvHeight}px`);
     root.style.setProperty("--vvTop", `${metrics.vvTop}px`);
     root.style.setProperty("--kbInset", `${metrics.kbInset}px`);
@@ -866,6 +866,7 @@ let replyTarget = null;
 let dmReplyTarget = null;
 let chatPinned = true;
 let dmPinned = true;
+let unseenMainMessages = 0;
 
 // ---- DOM
 const authWrap = document.getElementById("authWrap");
@@ -992,10 +993,38 @@ const sendBtn = document.getElementById("sendBtn");
 const searchInput = document.getElementById("searchInput");
 msgInput?.addEventListener("input", ()=>draftDebounce(saveRoomDraft));
 
-msgs?.addEventListener("scroll", ()=>{ chatPinned = isNearBottom(msgs, 160); });
+const chatShell = document.querySelector("main.chat");
+const composerEl = document.querySelector(".inputBar");
+let jumpToLatestBtn = null;
+
+msgs?.addEventListener("scroll", handleChatScroll, { passive:true });
 
 const fileInput = document.getElementById("fileInput");
 const pickFileBtn = document.getElementById("pickFileBtn");
+
+if(chatShell){
+  jumpToLatestBtn = document.createElement("button");
+  jumpToLatestBtn.id = "jumpToLatest";
+  jumpToLatestBtn.type = "button";
+  jumpToLatestBtn.textContent = "Jump to latest";
+  chatShell.appendChild(jumpToLatestBtn);
+  jumpToLatestBtn.addEventListener("click", ()=>{
+    unseenMainMessages = 0;
+    stickToBottomIfWanted({ force:true, behavior:"smooth" });
+  });
+}
+
+if(msgs) handleChatScroll();
+
+if(window.ResizeObserver && composerEl){
+  const composerObserver = new ResizeObserver(()=> queueStickToBottom());
+  composerObserver.observe(composerEl);
+}
+
+if(window.visualViewport){
+  window.visualViewport.addEventListener("resize", queueStickToBottom, { passive:true });
+  window.visualViewport.addEventListener("scroll", queueStickToBottom, { passive:true });
+}
 
 const meAvatar = document.getElementById("meAvatar");
 const meName = document.getElementById("meName");
@@ -2149,6 +2178,8 @@ function clearMsgs(){
   msgIndex.length=0;
   typingUsers = new Set();
   updatePresenceAuras();
+  unseenMainMessages = 0;
+  updateJumpToLatestButton();
 }
 function addSystem(text){
   const div=document.createElement("div");
@@ -2165,7 +2196,9 @@ function addSystem(text){
   }
 
   msgs.appendChild(div);
-  msgs.scrollTop=msgs.scrollHeight;
+  const shouldStick = isNearBottom(msgs, 160);
+  stickToBottomIfWanted({ force: shouldStick });
+  if(!shouldStick) noteUnseenMainMessage();
 }
 
 let commandPopupDismissed=false;
@@ -2213,6 +2246,48 @@ function isNearBottom(el, threshold = 120){
   if(!el) return true;
   return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
 }
+function scrollToBottom(el, behavior = "auto"){
+  if(!el) return;
+  try{
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  }catch{
+    el.scrollTop = el.scrollHeight;
+  }
+}
+function handleChatScroll(){
+  chatPinned = isNearBottom(msgs, 160);
+  if(chatPinned) unseenMainMessages = 0;
+  updateJumpToLatestButton();
+}
+function updateJumpToLatestButton(){
+  if(!jumpToLatestBtn) return;
+  const show = !chatPinned;
+  const count = unseenMainMessages > 0 ? ` (${unseenMainMessages})` : "";
+  jumpToLatestBtn.classList.toggle("show", show);
+  jumpToLatestBtn.textContent = `Jump to latest${count}`;
+}
+function noteUnseenMainMessage(){
+  if(chatPinned) return;
+  unseenMainMessages = Math.min(unseenMainMessages + 1, 999);
+  updateJumpToLatestButton();
+}
+function stickToBottomIfWanted(opts = {}){
+  if(!msgs) return;
+  const { force = false, behavior = "auto", threshold = 160 } = opts;
+  const shouldStick = force || isNearBottom(msgs, threshold);
+  if(!shouldStick) return;
+  scrollToBottom(msgs, behavior);
+  chatPinned = true;
+  unseenMainMessages = 0;
+  updateJumpToLatestButton();
+}
+const queueStickToBottom = (()=>{
+  let raf = 0;
+  return ()=>{
+    if(raf) cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(()=>stickToBottomIfWanted());
+  };
+})();
 function mentionCandidates(){
   const names = new Set((lastUsers || []).map((u) => u.username || u.name));
   if (me?.username) names.add(me.username);
@@ -3005,9 +3080,9 @@ try{
   if(msgIndex.length > 500) msgIndex.splice(0, msgIndex.length - 500);
 }catch{}
 
-  if(shouldStick){
-    requestAnimationFrame(()=> msgs.scrollTop = msgs.scrollHeight);
-  }
+  const wantStick = shouldStick || isSelf;
+  stickToBottomIfWanted({ force: wantStick, behavior: isSelf ? "smooth" : "auto" });
+  if(!wantStick) noteUnseenMainMessage();
 }
 
 function buildMainMsgItem(m, opts){
@@ -5247,11 +5322,39 @@ function emptyMyChangelogReactions(){
   return { heart:false, clap:false, down:false, eyes:false };
 }
 
+function normalizeChangelogReactions(raw){
+  const base = emptyChangelogReactions();
+  const src = raw && typeof raw === "object" ? raw : {};
+  for(const key of CHANGELOG_REACTION_KEYS){
+    const val = src[key];
+    if(Array.isArray(val)){
+      base[key] = val.length;
+    }else if(val && typeof val === "object" && typeof val.count === "number"){
+      base[key] = Math.max(0, Math.round(val.count));
+    }else if(Number.isFinite(Number(val))){
+      base[key] = Math.max(0, Math.round(Number(val)));
+    }
+  }
+  return base;
+}
+
+function normalizeMyChangelogReactions(raw){
+  const base = emptyMyChangelogReactions();
+  const src = raw && typeof raw === "object" ? raw : {};
+  for(const key of CHANGELOG_REACTION_KEYS){
+    const val = src[key];
+    base[key] = Array.isArray(val) ? val.includes(me?.username) : !!val;
+  }
+  return base;
+}
+
 function normalizeChangelogEntry(entry){
   if(!entry) return null;
   const base = { ...entry };
-  base.reactions = { ...emptyChangelogReactions(), ...(entry.reactions || {}) };
-  base.myReactions = { ...emptyMyChangelogReactions(), ...(entry.myReactions || {}) };
+  base.title = entry.title || "";
+  base.body = entry.body || "";
+  base.reactions = normalizeChangelogReactions(entry.reactions);
+  base.myReactions = normalizeMyChangelogReactions(entry.myReactions);
   return base;
 }
 
@@ -5342,9 +5445,7 @@ function renderChangelogList(){
     header.className = "changelogEntryHeader";
 
     const metaBlock = document.createElement("div");
-    metaBlock.style.display = "flex";
-    metaBlock.style.flexDirection = "column";
-    metaBlock.style.gap = "4px";
+    metaBlock.className = "changelogMeta";
 
     const title = document.createElement("div");
     title.className = "changelogEntryTitle";
@@ -5377,12 +5478,8 @@ function renderChangelogList(){
       header.appendChild(actions);
     }
 
-    const body = document.createElement("div");
-    body.className = "changelogBody";
-    body.innerHTML = escapeHtml(entry.body || "").replace(/\n/g, "<br>");
-
-    const reactions = entry.reactions || emptyChangelogReactions();
-    const myReactions = entry.myReactions || emptyMyChangelogReactions();
+    const reactions = normalizeChangelogReactions(entry.reactions);
+    const myReactions = normalizeMyChangelogReactions(entry.myReactions);
     const reactionRow = document.createElement("div");
     reactionRow.className = "changelogReactions";
     const entryBusy = changelogReactionBusy.has(entry.id);
@@ -5391,16 +5488,20 @@ function renderChangelogList(){
       btn.type = "button";
       btn.className = "changelogReactionBtn";
       btn.dataset.reaction = key;
-      btn.textContent = `${CHANGELOG_REACTION_EMOJI[key] || key} ${Number(reactions[key] ?? 0)}`;
+      btn.textContent = `${CHANGELOG_REACTION_EMOJI[key] || key} ${Math.max(0, Number(reactions[key] ?? 0))}`;
       btn.classList.toggle("active", !!myReactions[key]);
       btn.disabled = entryBusy;
       btn.addEventListener("click", ()=>toggleChangelogReaction(entry.id, key));
       reactionRow.appendChild(btn);
     }
 
+    const body = document.createElement("div");
+    body.className = "changelogBody";
+    body.innerHTML = escapeHtml(entry.body || "").replace(/\n/g, "<br>");
+
     wrap.appendChild(header);
-    wrap.appendChild(body);
     wrap.appendChild(reactionRow);
+    wrap.appendChild(body);
     changelogList.appendChild(wrap);
   }
 }
@@ -5408,7 +5509,22 @@ function renderChangelogList(){
 async function toggleChangelogReaction(entryId, reaction){
   if(!entryId || !reaction) return;
   if(changelogReactionBusy.has(entryId)) return;
+  const entry = changelogEntries.find(e => e && e.id === entryId);
+  const prev = entry ? {
+    reactions: { ...(entry.reactions || {}) },
+    myReactions: { ...(entry.myReactions || {}) }
+  } : null;
+
   changelogReactionBusy.add(entryId);
+
+  if(prev){
+    const nextActive = !prev.myReactions?.[reaction];
+    const nextCount = Math.max(0, Number(prev.reactions?.[reaction] || 0) + (nextActive ? 1 : -1));
+    updateChangelogEntryState(entryId, {
+      reactions: { ...prev.reactions, [reaction]: nextCount },
+      myReactions: { ...prev.myReactions, [reaction]: nextActive }
+    });
+  }
   renderChangelogList();
 
   try{
@@ -5419,6 +5535,7 @@ async function toggleChangelogReaction(entryId, reaction){
     });
 
     if(!res.ok){
+      if(prev) updateChangelogEntryState(entryId, prev);
       if(changelogMsg) changelogMsg.textContent = text || "Failed to update reaction.";
     }else{
       try{
@@ -5427,6 +5544,7 @@ async function toggleChangelogReaction(entryId, reaction){
       }catch{}
     }
   }catch{
+    if(prev) updateChangelogEntryState(entryId, prev);
     if(changelogMsg) changelogMsg.textContent = "Failed to update reaction.";
   }finally{
     changelogReactionBusy.delete(entryId);
@@ -5495,7 +5613,7 @@ function renderLatestUpdateSnippet(){
     latestUpdate.style.display = "none";
     return;
   }
-  latestUpdate.style.display = "block";
+  latestUpdate.style.display = "flex";
 
   // Compact by default to save UI space; expand only when user taps View.
   latestUpdate.classList.toggle("compact", !latestUpdateExpanded);
@@ -6751,6 +6869,7 @@ socket.on("disconnect", (reason) => {
       if(others.length>2) text += ` (+${others.length-2})`;
     }
     typingEl.textContent = text;
+    stickToBottomIfWanted();
     updatePresenceAuras();
   });
   socket.on("level up", ({ level }) => {
