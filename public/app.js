@@ -5682,8 +5682,7 @@ function renderChangelogList(){
 
     const body = document.createElement("div");
     body.className = "clBody";
-    body.innerHTML = escapeHtml(entry.body || "").replace(/
-/g, "<br>");
+    body.innerHTML = escapeHtml(entry.body || "").replace(/\n/g, "<br>");
 
     panel.appendChild(body);
 
