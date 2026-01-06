@@ -5486,6 +5486,45 @@ function emptyMyChangelogReactions(){
   return { heart:false, clap:false, down:false, eyes:false };
 }
 
+// --- FAQ reactions (mirror changelog normalizers)
+function emptyFaqReactions(){
+  const base = {};
+  for(const key of FAQ_REACTION_KEYS) base[key] = 0;
+  return base;
+}
+
+function emptyMyFaqReactions(){
+  const base = {};
+  for(const key of FAQ_REACTION_KEYS) base[key] = false;
+  return base;
+}
+
+function normalizeFaqReactions(raw){
+  const base = emptyFaqReactions();
+  const src = raw && typeof raw === "object" ? raw : {};
+  for(const key of FAQ_REACTION_KEYS){
+    const val = src[key];
+    if(Array.isArray(val)){
+      base[key] = val.length;
+    }else if(val && typeof val === "object" && typeof val.count === "number"){
+      base[key] = Math.max(0, Math.round(val.count));
+    }else if(Number.isFinite(Number(val))){
+      base[key] = Math.max(0, Math.round(Number(val)));
+    }
+  }
+  return base;
+}
+
+function normalizeMyFaqReactions(raw){
+  const base = emptyMyFaqReactions();
+  const src = raw && typeof raw === "object" ? raw : {};
+  for(const key of FAQ_REACTION_KEYS){
+    const val = src[key];
+    base[key] = Array.isArray(val) ? val.includes(me?.username) : !!val;
+  }
+  return base;
+}
+
 function normalizeChangelogReactions(raw){
   const base = emptyChangelogReactions();
   const src = raw && typeof raw === "object" ? raw : {};
