@@ -923,6 +923,21 @@ const loginBtn = document.getElementById("loginBtn");
 const regBtn = document.getElementById("regBtn");
 const togglePassBtn = document.getElementById("togglePassBtn");
 
+// ---- Global client error visibility (helps catch silent auth breaks)
+window.addEventListener("error", (e) => {
+  try{
+    console.error("[CLIENT ERROR]", e?.error || e?.message || e);
+    if (authMsg) authMsg.textContent = `Client error: ${e?.message || "Unknown error"}`;
+  }catch{}
+});
+window.addEventListener("unhandledrejection", (e) => {
+  try{
+    console.error("[UNHANDLED PROMISE]", e?.reason || e);
+    if (authMsg) authMsg.textContent = `Client error: ${String(e?.reason?.message || e?.reason || "Unknown error")}`;
+  }catch{}
+});
+
+
 
 // Auth: show/hide password
 togglePassBtn?.addEventListener("click", ()=>{
@@ -5800,23 +5815,62 @@ async function api(path, options){
 }
 
 async function doLogin(){
-  authMsg.textContent="Logging in...";
-  const {res,text}=await api("/login",{
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({username:authUser.value, password:authPass.value})
-  });
-  if(!res.ok){ authMsg.textContent=text||"Login failed."; return; }
-  await startApp();
+  if(!authUser || !authPass || !authMsg){
+    console.error("Auth UI elements missing:", {authUser, authPass, authMsg});
+    return;
+  }
+  authMsg.textContent = "Logging in...";
+  try{
+    const {res,text} = await api("/login",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({username:authUser.value, password:authPass.value})
+    });
+
+    if(!res?.ok){
+      authMsg.textContent = (text || "Login failed.").toString();
+      return;
+    }
+
+    // Verify the session actually sticks (prevents silent “login did nothing” cases).
+    const meCheck = await fetch("/me", { credentials: "include" }).catch(()=>null);
+    if(!meCheck?.ok){
+      authMsg.textContent = "Login succeeded, but your session didn't stick. Please refresh. (If this persists, it's a cookie/session config issue.)";
+      return;
+    }
+
+    await startApp();
+  }catch(err){
+    console.error("Login crashed:", err);
+    authMsg.textContent = `Login error: ${err?.message || "Unknown error"}`;
+  }
 }
+
 async function doRegister(){
-  authMsg.textContent="Registering...";
-  const {res,text}=await api("/register",{
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({username:authUser.value, password:authPass.value})
-  });
-  if(!res.ok){ authMsg.textContent=text||"Register failed."; return; }
-  authMsg.textContent="Registered! Now click Login.";
+  if(!authUser || !authPass || !authMsg){
+    console.error("Auth UI elements missing:", {authUser, authPass, authMsg});
+    return;
+  }
+  authMsg.textContent = "Registering...";
+  try{
+    const {res,text} = await api("/register",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({username:authUser.value, password:authPass.value})
+    });
+
+    if(!res?.ok){
+      authMsg.textContent = (text || "Register failed.").toString();
+      return;
+    }
+
+    authMsg.textContent = "Registered! Now click Login.";
+  }catch(err){
+    console.error("Register crashed:", err);
+    authMsg.textContent = `Register error: ${err?.message || "Unknown error"}`;
+  }
 }
+
 // Bind auth handlers defensively so a missing/renamed DOM id can't break boot.
 loginBtn?.addEventListener("click", (e)=>{ e?.preventDefault?.(); doLogin(); });
 regBtn?.addEventListener("click", (e)=>{ e?.preventDefault?.(); doRegister(); });
