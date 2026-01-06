@@ -966,6 +966,11 @@ const faqDetailsInput = document.getElementById("faqDetailsInput");
 const faqSubmitBtn = document.getElementById("faqSubmitBtn");
 const faqCancelBtn = document.getElementById("faqCancelBtn");
 const faqEditMsg = document.getElementById("faqEditMsg");
+
+// FAQ: title-only question (max 140 chars). The answer is provided by staff.
+if(faqTitleInput){
+  faqTitleInput.maxLength = 140;
+}
 const channelsCloseBtn = document.getElementById("channelsCloseBtn");
 const membersCloseBtn  = document.getElementById("membersCloseBtn");
 const tabEdit = document.getElementById("tabEdit");
@@ -5593,6 +5598,8 @@ function renderChangelogList(){
     wrap.dataset.entryId = String(entry.id);
     const isOpen = String(openChangelogId) === String(entry.id);
     wrap.classList.toggle("is-open", isOpen);
+    // Non-owners get an extra-compact collapsed view: title only.
+    wrap.classList.toggle("compact", !isOpen && !isOwner);
 
     const header = document.createElement("div");
     header.className = "changelogEntryHeader";
@@ -5621,6 +5628,7 @@ function renderChangelogList(){
 
     const hint = document.createElement("div");
     hint.className = "changelogEntryHint";
+    // Keep hints for owners; collapse them away for compact view.
     hint.textContent = isOpen ? "Tap to collapse" : "Tap to expand";
     metaRow.appendChild(hint);
 
@@ -5764,6 +5772,9 @@ function normalizeFaqQuestion(row){
   return {
     id: row.id,
     question_title: row.question_title || "Untitled",
+    // question_details is kept for backwards compatibility with older builds,
+    // but the current FAQ behavior is: question = title-only.
+    // The "answer" is stored in answer_body and edited by privileged roles.
     question_details: row.question_details || "",
     answer_body: row.answer_body || "",
     created_at: normalizeTs(row.created_at || row.createdAt || row.timestamp),
@@ -5792,13 +5803,26 @@ function renderFaqList(){
     const isOpen = String(openFaqQuestionId) === String(item.id);
     wrap.classList.toggle("is-open", isOpen);
 
+    const hasAnswer = !!String(item.answer_body || "").trim();
+
     const header = document.createElement("div");
     header.className = "faqHeader";
 
     const metaBlock = document.createElement("div");
+
+    const titleRow = document.createElement("div");
+    titleRow.className = "faqTitleRow";
+
+    const status = document.createElement("span");
+    status.className = "faqStatus";
+    status.textContent = hasAnswer ? "✅" : "❌";
+    status.title = hasAnswer ? "Answered" : "Unanswered";
+    titleRow.appendChild(status);
+
     const title = document.createElement("div");
     title.className = "faqTitle";
     title.textContent = item.question_title || "Untitled";
+    titleRow.appendChild(title);
     const metaRow = document.createElement("div");
     metaRow.className = "faqMetaRow";
     const meta = document.createElement("div");
@@ -5813,21 +5837,29 @@ function renderFaqList(){
     toggle.textContent = isOpen ? "Hide" : "View";
     metaRow.appendChild(toggle);
 
-    metaBlock.appendChild(title);
+    metaBlock.appendChild(titleRow);
     metaBlock.appendChild(metaRow);
     header.appendChild(metaBlock);
+
+    // Allow privileged roles to remove abusive questions.
+    if(isPrivileged){
+      const controls = document.createElement("div");
+      controls.className = "faqControls";
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn danger";
+      delBtn.dataset.faqDelete = String(item.id);
+      delBtn.textContent = "Delete";
+      controls.appendChild(delBtn);
+      header.appendChild(controls);
+    }
     wrap.appendChild(header);
 
     const details = document.createElement("div");
     details.className = "faqDetails";
     details.hidden = !isOpen;
 
-    if(item.question_details){
-      const questionText = document.createElement("div");
-      questionText.className = "faqQuestion";
-      questionText.textContent = item.question_details;
-      details.appendChild(questionText);
-    }
+    // Do not show a "question body"; the question is title-only.
 
     const reactions = normalizeFaqReactions(item.reactions);
     const mine = normalizeMyFaqReactions(item.myReactions);
@@ -5884,8 +5916,8 @@ function renderFaqList(){
       answerBlock.appendChild(actions);
     } else {
       const body = document.createElement("div");
-      body.className = "changelogBody";
-      body.textContent = item.answer_body || "No answer yet.";
+      body.className = "faqAnswerText";
+      body.textContent = hasAnswer ? item.answer_body : "No answer yet.";
       answerBlock.appendChild(body);
       if(isPrivileged){
         const editBtn = document.createElement("button");
@@ -5906,6 +5938,13 @@ function renderFaqList(){
 
 function handleFaqListClick(event){
   if(!faqList) return;
+  const delBtn = event.target.closest("[data-faq-delete]");
+  if(delBtn && faqList.contains(delBtn)){
+    const qid = delBtn.dataset.faqDelete;
+    if(qid) deleteFaqQuestion(qid);
+    return;
+  }
+
   const reactionBtn = event.target.closest("[data-faq-reaction]");
   if(reactionBtn && faqList.contains(reactionBtn)){
     event.preventDefault();
@@ -5953,6 +5992,30 @@ function handleFaqListClick(event){
   if(cancelBtn && faqList.contains(cancelBtn)){
     editingFaqId = null;
     renderFaqList();
+    return;
+  }
+
+  const deleteBtn = event.target.closest("[data-faq-delete]");
+  if(deleteBtn && faqList.contains(deleteBtn)){
+    const qid = deleteBtn.dataset.faqDelete;
+    if(qid) deleteFaqQuestion(qid);
+    return;
+  }
+}
+
+async function deleteFaqQuestion(questionId){
+  const qKey = String(questionId);
+  if(!qKey) return;
+  if(!confirm("Delete this question?")) return;
+  try{
+    const {res, text} = await api(`/api/faq/${encodeURIComponent(qKey)}`, { method:"DELETE" });
+    if(!res.ok) throw new Error(text || "Failed to delete");
+    faqQuestions = faqQuestions.filter(q => q && String(q.id) !== qKey);
+    if(String(openFaqQuestionId) === qKey) openFaqQuestionId = null;
+    editingFaqId = null;
+    renderFaqList();
+  }catch(err){
+    alert(err?.message || "Failed to delete question");
   }
 }
 
@@ -6129,7 +6192,8 @@ function closeFaqForm(){
 async function submitFaqQuestion(){
   if(!faqTitleInput) return;
   const title = faqTitleInput.value.trim();
-  const details = faqDetailsInput?.value.trim() || "";
+  // Title-only questions; answer is provided later by privileged roles.
+  const details = "";
   if(!title){
     if(faqEditMsg) faqEditMsg.textContent = "Question is required.";
     return;
