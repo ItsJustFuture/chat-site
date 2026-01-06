@@ -221,6 +221,27 @@ const pgInitPromise = (async () => {
       CREATE INDEX IF NOT EXISTS idx_changelog_react_entry ON changelog_reactions(entry_id);
       CREATE INDEX IF NOT EXISTS idx_changelog_react_user ON changelog_reactions(user_id);
     `);
+
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS faq_questions (
+        id SERIAL PRIMARY KEY,
+        created_at BIGINT,
+        question_title TEXT NOT NULL,
+        question_details TEXT,
+        answer_body TEXT,
+        answered_at BIGINT,
+        answered_by INTEGER,
+        is_deleted INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS faq_reactions (
+        question_id INTEGER NOT NULL,
+        username TEXT NOT NULL,
+        reaction_key TEXT NOT NULL,
+        created_at BIGINT NOT NULL,
+        CONSTRAINT faq_reactions_unique UNIQUE(question_id, username, reaction_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_faq_react_question ON faq_reactions(question_id);
+    `);
 // Fix camelCase columns that Postgres lowercased previously
 // ---- Fix camelCase timestamp columns Postgres lowercased
 try {
@@ -1374,6 +1395,15 @@ function emitLevelUp(userId, newLevel) {
   if (sid) io.to(sid).emit("level up", { level: newLevel });
 }
 
+let leaderboardUpdateTimer = null;
+function emitLeaderboardUpdateThrottled() {
+  if (leaderboardUpdateTimer) return;
+  leaderboardUpdateTimer = setTimeout(() => {
+    leaderboardUpdateTimer = null;
+    io.emit("leaderboard:update");
+  }, 500);
+}
+
 function applyXpGain(userId, delta, cb) {
   const amount = Math.max(0, Math.floor(Number(delta) || 0));
   if (!amount) return cb?.(null, null);
@@ -1388,6 +1418,7 @@ function applyXpGain(userId, delta, cb) {
 
     db.run("UPDATE users SET xp = ? WHERE id = ?", [newXp, userId], () => {
       if (info.level > prevLevel) emitLevelUp(userId, info.level);
+      emitLeaderboardUpdateThrottled();
       cb?.(null, { xp: newXp, ...info });
     });
   });
@@ -1409,6 +1440,7 @@ function awardMessageXp(userId) {
       [newXp, now, userId],
       () => {
         if (info.level > prevLevel) emitLevelUp(userId, info.level);
+        emitLeaderboardUpdateThrottled();
       }
     );
   });
@@ -1429,6 +1461,7 @@ function awardDailyLoginXp(user) {
     [newXp, now, user.id],
     () => {
       if (info.level > prevLevel) emitLevelUp(user.id, info.level);
+      emitLeaderboardUpdateThrottled();
     }
   );
 }
@@ -1979,6 +2012,24 @@ function requireLogin(req, res, next) {
 const CHANGELOG_TITLE_MAX = 120;
 const CHANGELOG_BODY_MAX = 8000;
 const CHANGELOG_REACTIONS = ["heart", "clap", "down", "eyes"];
+const FAQ_TITLE_MAX = 140;
+const FAQ_DETAILS_MAX = 1000;
+const FAQ_REACTIONS = ["helpful", "love", "funny", "confusing"];
+const FAQ_RATE_LIMIT_MS = 30000;
+const faqAskCooldown = new Map();
+
+function emptyFaqReactions(){
+  return { helpful:0, love:0, funny:0, confusing:0 };
+}
+
+function emptyMyFaqReactions(){
+  return { helpful:false, love:false, funny:false, confusing:false };
+}
+
+function normalizeFaqReactionKey(reaction){
+  const key = String(reaction || "").toLowerCase();
+  return FAQ_REACTIONS.includes(key) ? key : null;
+}
 
 function emptyChangelogReactions(){
   return { heart:0, clap:0, down:0, eyes:0 };
@@ -2026,6 +2077,33 @@ function cleanChangelogInput(title, body) {
   if (cleanTitle.length > CHANGELOG_TITLE_MAX) return { error: `Title must be at most ${CHANGELOG_TITLE_MAX} characters` };
   if (cleanBody.length > CHANGELOG_BODY_MAX) return { error: `Body must be at most ${CHANGELOG_BODY_MAX} characters` };
   return { title: cleanTitle, body: cleanBody };
+}
+
+function toFaqPayload(row){
+  if(!row || row.is_deleted) return null;
+  const normalizeEpoch = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  return {
+    id: row.id,
+    question_title: row.question_title,
+    question_details: row.question_details || "",
+    answer_body: row.answer_body || "",
+    created_at: normalizeEpoch(row.created_at),
+    answered_at: normalizeEpoch(row.answered_at),
+    reactions: row.reactions || emptyFaqReactions(),
+    myReactions: row.myReactions || emptyMyFaqReactions(),
+  };
+}
+
+function cleanFaqInput(title, details){
+  const cleanTitle = String(title || "").trim();
+  const cleanDetails = String(details || "").trimEnd();
+  if(!cleanTitle) return { error: "Question title is required" };
+  if(cleanTitle.length > FAQ_TITLE_MAX) return { error: `Title must be at most ${FAQ_TITLE_MAX} characters` };
+  if(cleanDetails.length > FAQ_DETAILS_MAX) return { error: `Details must be at most ${FAQ_DETAILS_MAX} characters` };
+  return { title: cleanTitle, details: cleanDetails };
 }
 
 
@@ -2085,6 +2163,40 @@ async function pgFetchChangelogReactionCounts(entryIds = []){
   return map;
 }
 
+async function pgFetchFaqReactionCounts(questionIds = []){
+  if(!questionIds.length) return {};
+  const map = {};
+  const { rows } = await pgPool.query(
+    "SELECT question_id, reaction_key, COUNT(*) as count FROM faq_reactions WHERE question_id = ANY($1) GROUP BY question_id, reaction_key",
+    [questionIds]
+  );
+  for(const row of rows || []){
+    const id = Number(row.question_id);
+    const key = normalizeFaqReactionKey(row.reaction_key);
+    if(!id || !key) continue;
+    if(!map[id]) map[id] = emptyFaqReactions();
+    map[id][key] = Number(row.count) || 0;
+  }
+  return map;
+}
+
+async function pgFaqMyReactions(questionIds = [], username){
+  if(!questionIds.length || !username) return {};
+  const map = {};
+  const { rows } = await pgPool.query(
+    "SELECT question_id, reaction_key FROM faq_reactions WHERE question_id = ANY($1) AND username=$2",
+    [questionIds, username]
+  );
+  for(const row of rows || []){
+    const id = Number(row.question_id);
+    const key = normalizeFaqReactionKey(row.reaction_key);
+    if(!id || !key) continue;
+    if(!map[id]) map[id] = emptyMyFaqReactions();
+    map[id][key] = true;
+  }
+  return map;
+}
+
 async function pgFetchChangelogUserReactions(entryIds = [], userId){
   if(!entryIds.length || !userId) return {};
   const mine = {};
@@ -2117,6 +2229,23 @@ async function pgFetchChangelogEntriesWithReactions({ limit = 0, ids = null, use
   }));
 }
 
+async function pgFetchFaqQuestionsWithReactions(username){
+  await pgInitPromise;
+  const { rows } = await pgPool.query(
+    "SELECT id, created_at, question_title, question_details, answer_body, answered_at, answered_by, is_deleted FROM faq_questions WHERE is_deleted=0 ORDER BY created_at DESC"
+  );
+  const payloads = (rows || []).map((r) => toFaqPayload(r)).filter(Boolean);
+  const ids = payloads.map((p) => p.id).filter(Boolean);
+  if(!ids.length) return payloads;
+  const counts = await pgFetchFaqReactionCounts(ids);
+  const mine = await pgFaqMyReactions(ids, username);
+  return payloads.map((p) => ({
+    ...p,
+    reactions: counts[p.id] || emptyFaqReactions(),
+    myReactions: mine[p.id] || emptyMyFaqReactions(),
+  }));
+}
+
 async function pgCreateChangelogEntry({ title, body, authorId }){
   await pgInitPromise;
   const now = Date.now();
@@ -2125,6 +2254,16 @@ async function pgCreateChangelogEntry({ title, body, authorId }){
     [title, body, now, now, authorId]
   );
   return rows[0];
+}
+
+async function pgCreateFaqQuestion({ title, details }){
+  await pgInitPromise;
+  const now = Date.now();
+  const { rows } = await pgPool.query(
+    "INSERT INTO faq_questions (created_at, question_title, question_details, answer_body, answered_at, answered_by, is_deleted) VALUES ($1,$2,$3,'', NULL, NULL, 0) RETURNING id, created_at, question_title, question_details, answer_body, answered_at, answered_by, is_deleted",
+    [now, title, details]
+  );
+  return rows[0] || null;
 }
 
 async function pgUpdateChangelogEntry({ id, title, body }){
@@ -2142,6 +2281,17 @@ async function pgUpdateChangelogEntry({ id, title, body }){
   return rows[0] || null;
 }
 
+async function pgUpdateFaqAnswer({ id, answerBody, answeredBy }){
+  await pgInitPromise;
+  const now = Date.now();
+  const { rowCount, rows } = await pgPool.query(
+    "UPDATE faq_questions SET answer_body=$1, answered_at=$2, answered_by=$3 WHERE id=$4 AND is_deleted=0 RETURNING id, created_at, question_title, question_details, answer_body, answered_at, answered_by, is_deleted",
+    [answerBody, now, answeredBy, id]
+  );
+  if(!rowCount) return null;
+  return rows[0] || null;
+}
+
 async function pgDeleteChangelogEntry(id){
   await pgInitPromise;
   await pgPool.query("DELETE FROM changelog_reactions WHERE entry_id=$1", [id]);
@@ -2152,6 +2302,12 @@ async function pgDeleteChangelogEntry(id){
 async function pgChangelogEntryExists(entryId){
   await pgInitPromise;
   const { rowCount } = await pgPool.query("SELECT 1 FROM changelog_entries WHERE id=$1", [entryId]);
+  return rowCount > 0;
+}
+
+async function pgFaqQuestionExists(questionId){
+  await pgInitPromise;
+  const { rowCount } = await pgPool.query("SELECT 1 FROM faq_questions WHERE id=$1 AND is_deleted=0", [questionId]);
   return rowCount > 0;
 }
 
@@ -2168,6 +2324,30 @@ async function pgToggleChangelogReaction(entryId, userId, reaction){
       await client.query(
         "INSERT INTO changelog_reactions (entry_id, user_id, reaction, created_at) VALUES ($1,$2,$3,$4)",
         [entryId, userId, reaction, Date.now()]
+      );
+    }
+    await client.query("COMMIT");
+  }catch(err){
+    await client.query("ROLLBACK");
+    throw err;
+  }finally{
+    client.release();
+  }
+}
+
+async function pgToggleFaqReaction(questionId, username, reaction){
+  await pgInitPromise;
+  const client = await pgPool.connect();
+  try{
+    await client.query("BEGIN");
+    const existing = await client.query(
+      "DELETE FROM faq_reactions WHERE question_id=$1 AND username=$2 AND reaction_key=$3 RETURNING 1",
+      [questionId, username, reaction]
+    );
+    if(!existing.rowCount){
+      await client.query(
+        "INSERT INTO faq_reactions (question_id, username, reaction_key, created_at) VALUES ($1,$2,$3,$4)",
+        [questionId, username, reaction, Date.now()]
       );
     }
     await client.query("COMMIT");
@@ -2328,6 +2508,139 @@ async function pgChangelogReactionPayload(entryId, userId) {
 async function sqliteChangelogReactionPayload(entryId, userId) {
   const rows = await sqliteFetchChangelogEntriesWithReactions({ ids: [entryId], userId });
   return rows?.[0] || null;
+}
+
+async function sqliteFetchFaqQuestions(){
+  return dbAllAsync(
+    `SELECT id, created_at, question_title, question_details, answer_body, answered_at, answered_by, is_deleted FROM faq_questions WHERE is_deleted=0 ORDER BY created_at DESC`
+  );
+}
+
+async function sqliteFetchFaqReactionCounts(questionIds = []){
+  if(!questionIds.length) return {};
+  const ph = questionIds.map(() => "?").join(",");
+  const rows = await dbAllAsync(
+    `SELECT question_id, reaction_key, COUNT(*) as count FROM faq_reactions WHERE question_id IN (${ph}) GROUP BY question_id, reaction_key`,
+    questionIds
+  );
+  const map = {};
+  for(const row of rows || []){
+    const id = Number(row.question_id);
+    const key = normalizeFaqReactionKey(row.reaction_key);
+    if(!id || !key) continue;
+    if(!map[id]) map[id] = emptyFaqReactions();
+    map[id][key] = Number(row.count) || 0;
+  }
+  return map;
+}
+
+async function sqliteFetchFaqUserReactions(questionIds = [], username){
+  if(!questionIds.length || !username) return {};
+  const ph = questionIds.map(() => "?").join(",");
+  const rows = await dbAllAsync(
+    `SELECT question_id, reaction_key FROM faq_reactions WHERE question_id IN (${ph}) AND username=?`,
+    [...questionIds, username]
+  );
+  const mine = {};
+  for(const row of rows || []){
+    const id = Number(row.question_id);
+    const key = normalizeFaqReactionKey(row.reaction_key);
+    if(!id || !key) continue;
+    if(!mine[id]) mine[id] = emptyMyFaqReactions();
+    mine[id][key] = true;
+  }
+  return mine;
+}
+
+async function sqliteFetchFaqQuestionsWithReactions(username){
+  const rows = await sqliteFetchFaqQuestions();
+  const payloads = (rows || []).map(toFaqPayload).filter(Boolean);
+  const ids = payloads.map((p) => p.id).filter(Boolean);
+  if(!ids.length) return payloads;
+  const counts = await sqliteFetchFaqReactionCounts(ids);
+  const mine = await sqliteFetchFaqUserReactions(ids, username);
+  return payloads.map((p) => ({
+    ...p,
+    reactions: counts[p.id] || emptyFaqReactions(),
+    myReactions: mine[p.id] || emptyMyFaqReactions(),
+  }));
+}
+
+async function sqliteToggleFaqReaction(questionId, username, reaction){
+  await dbRunAsync("BEGIN");
+  try {
+    const existing = await dbGetAsync(
+      `SELECT 1 FROM faq_reactions WHERE question_id=? AND username=? AND reaction_key=?`,
+      [questionId, username, reaction]
+    );
+    if(existing){
+      await dbRunAsync(`DELETE FROM faq_reactions WHERE question_id=? AND username=? AND reaction_key=?`, [questionId, username, reaction]);
+    } else {
+      await dbRunAsync(
+        `INSERT INTO faq_reactions (question_id, username, reaction_key, created_at) VALUES (?, ?, ?, ?)`,
+        [questionId, username, reaction, Date.now()]
+      );
+    }
+    await dbRunAsync("COMMIT");
+  } catch (e) {
+    await dbRunAsync("ROLLBACK");
+    throw e;
+  }
+}
+
+async function sqliteFaqQuestionExists(questionId){
+  const row = await dbGetAsync(`SELECT 1 FROM faq_questions WHERE id=? AND is_deleted=0`, [questionId]);
+  return !!row;
+}
+
+async function sqliteCreateFaqQuestion({ title, details }){
+  const now = Date.now();
+  const result = await dbRunAsync(
+    `INSERT INTO faq_questions (created_at, question_title, question_details, answer_body, answered_at, answered_by, is_deleted) VALUES (?, ?, ?, '', NULL, NULL, 0)`,
+    [now, title, details]
+  );
+  const row = await dbGetAsync(
+    `SELECT id, created_at, question_title, question_details, answer_body, answered_at, answered_by, is_deleted FROM faq_questions WHERE id=?`,
+    [result.lastID]
+  );
+  return row;
+}
+
+async function sqliteUpdateFaqAnswer({ id, answerBody, answeredBy }){
+  const now = Date.now();
+  const result = await dbRunAsync(
+    `UPDATE faq_questions SET answer_body=?, answered_at=?, answered_by=? WHERE id=? AND is_deleted=0`,
+    [answerBody, now, answeredBy, id]
+  );
+  if(!result?.changes) return null;
+  return dbGetAsync(
+    `SELECT id, created_at, question_title, question_details, answer_body, answered_at, answered_by, is_deleted FROM faq_questions WHERE id=?`,
+    [id]
+  );
+}
+
+async function fetchFaqQuestionsWithReactions(username){
+  if(await pgChangelogEnabled()){
+    try{
+      return await pgFetchFaqQuestionsWithReactions(username);
+    }catch(e){
+      console.warn("[faq] PG fetch fallback:", e?.message || e);
+    }
+  }
+  return sqliteFetchFaqQuestionsWithReactions(username);
+}
+
+async function faqReactionPayload(questionId, username){
+  if(await pgChangelogEnabled()){
+    try{
+      const rows = await pgFetchFaqQuestionsWithReactions(username);
+      return rows.find((r)=> String(r.id) === String(questionId)) || null;
+    }catch(e){
+      console.warn("[faq] PG reaction payload fallback:", e?.message || e);
+    }
+  }
+  const rows = await sqliteFetchFaqQuestionsWithReactions(username);
+  return rows.find((r)=> String(r.id) === String(questionId)) || null;
 }
 
 // ---- Auth routes
@@ -2809,32 +3122,57 @@ app.post("/api/me/prefs", requireLogin, async (req, res) => {
   });
 });
 
-app.get("/api/leaderboards", requireLogin, async (_req, res) => {
+function sortLeaderboardRows(rows, valueKey) {
+  return rows
+    .map((r) => ({ ...r, username: r.username || "" }))
+    .sort((a, b) => {
+      const diff = Number(b[valueKey] || 0) - Number(a[valueKey] || 0);
+      if (diff !== 0) return diff;
+      const base = String(a.username).localeCompare(String(b.username), undefined, { sensitivity: "base" });
+      if (base !== 0) return base;
+      return String(a.username).localeCompare(String(b.username));
+    });
+}
+
+async function buildLeaderboardPayload() {
+  const [xpRowsRaw, goldRowsRaw, diceRowsRaw, likeRowsRaw] = await Promise.all([
+    dbAllAsync(`SELECT username, xp FROM users ORDER BY xp DESC, LOWER(username) ASC, username ASC LIMIT 20`),
+    dbAllAsync(`SELECT username, gold FROM users ORDER BY gold DESC, LOWER(username) ASC, username ASC LIMIT 20`),
+    dbAllAsync(`SELECT username, dice_sixes FROM users ORDER BY dice_sixes DESC, LOWER(username) ASC, username ASC LIMIT 20`),
+    dbAllAsync(
+      `SELECT u.username, COUNT(pl.user_id) AS likes
+       FROM users u
+       LEFT JOIN profile_likes pl ON pl.target_user_id = u.id
+       GROUP BY u.id
+       ORDER BY likes DESC, LOWER(u.username) ASC, u.username ASC
+       LIMIT 20`
+    ),
+  ]);
+
+  const xpRows = sortLeaderboardRows(xpRowsRaw, "xp");
+  const goldRows = sortLeaderboardRows(goldRowsRaw, "gold");
+  const diceRows = sortLeaderboardRows(diceRowsRaw, "dice_sixes");
+  const likeRows = sortLeaderboardRows(likeRowsRaw, "likes");
+
+  return {
+    xp: xpRows.map((r) => ({ username: r.username, level: levelInfo(r.xp || 0).level, xp: Number(r.xp || 0) })),
+    gold: goldRows.map((r) => ({ username: r.username, gold: Number(r.gold || 0) })),
+    dice: diceRows.map((r) => ({ username: r.username, sixes: Number(r.dice_sixes || 0) })),
+    likes: likeRows.map((r) => ({ username: r.username, likes: Number(r.likes || 0) })),
+  };
+}
+
+async function sendLeaderboard(res) {
   try {
-    const [xpRows, goldRows, diceRows, likeRows] = await Promise.all([
-      dbAllAsync(`SELECT username, xp FROM users ORDER BY xp DESC LIMIT 20`),
-      dbAllAsync(`SELECT username, gold FROM users ORDER BY gold DESC LIMIT 20`),
-      dbAllAsync(`SELECT username, dice_sixes FROM users ORDER BY dice_sixes DESC LIMIT 20`),
-      dbAllAsync(
-        `SELECT u.username, COUNT(pl.user_id) AS likes
-         FROM users u
-         LEFT JOIN profile_likes pl ON pl.target_user_id = u.id
-         GROUP BY u.id
-         ORDER BY likes DESC
-         LIMIT 20`
-      ),
-    ]);
-
-    const xp = xpRows.map((r) => ({ username: r.username, level: levelInfo(r.xp || 0).level, xp: Number(r.xp || 0) }));
-    const gold = goldRows.map((r) => ({ username: r.username, gold: Number(r.gold || 0) }));
-    const dice = diceRows.map((r) => ({ username: r.username, sixes: Number(r.dice_sixes || 0) }));
-    const likes = likeRows.map((r) => ({ username: r.username, likes: Number(r.likes || 0) }));
-
-    return res.json({ xp, gold, dice, likes });
+    const payload = await buildLeaderboardPayload();
+    return res.json(payload);
   } catch (err) {
     return res.status(500).json({ ok: false });
   }
-});
+}
+
+app.get("/api/leaderboard", requireLogin, async (_req, res) => sendLeaderboard(res));
+app.get("/api/leaderboards", requireLogin, async (_req, res) => sendLeaderboard(res));
 
 app.post("/api/me/award-gold", requireLogin, (req, res) => {
   if (process.env.ALLOW_DEV_AWARD_GOLD !== "1") return res.status(404).send("Not found");
@@ -3043,6 +3381,105 @@ app.post("/api/changelog/:id/reaction", requireLogin, async (req, res) => {
 
   io.emit("changelog reactions updated");
   return res.json(payload);
+});
+
+app.get("/api/faq", requireLogin, async (req, res) => {
+  try {
+    const rows = await fetchFaqQuestionsWithReactions(req.session?.user?.username);
+    return res.json(rows || []);
+  } catch (e) {
+    console.error("[faq] load failed:", e?.message || e);
+    return res.status(500).send("Failed to load FAQ");
+  }
+});
+
+app.post("/api/faq", requireLogin, async (req, res) => {
+  const cleaned = cleanFaqInput(req.body?.title, req.body?.details);
+  if(cleaned.error) return res.status(400).send(cleaned.error);
+
+  const userId = req.session.user.id;
+  const now = Date.now();
+  const last = faqAskCooldown.get(userId) || 0;
+  if(now - last < FAQ_RATE_LIMIT_MS) return res.status(429).send("Please wait before asking another question.");
+  faqAskCooldown.set(userId, now);
+
+  try{
+    let row = null;
+    if(await pgChangelogEnabled()){
+      try{ row = await pgCreateFaqQuestion(cleaned); }catch(e){ console.warn("[faq] PG create fallback:", e?.message || e); }
+    }
+    if(!row){
+      row = await sqliteCreateFaqQuestion(cleaned);
+    }
+    const payload = toFaqPayload(row);
+    io.emit("faq:update");
+    return res.json(payload);
+  }catch(err){
+    console.error("[faq] create failed:", err?.message || err);
+    return res.status(500).send("Failed to submit question");
+  }
+});
+
+app.patch("/api/faq/:id/answer", requireLogin, async (req, res) => {
+  const questionId = Number(req.params?.id);
+  if(!Number.isFinite(questionId) || questionId <= 0) return res.status(400).send("Invalid question id");
+  if(!requireMinRole(req.session.user.role, "Admin")) return res.status(403).send("Forbidden");
+
+  const answerBody = String(req.body?.answer || "").trimEnd();
+  if(answerBody.length > 4000) return res.status(400).send("Answer is too long");
+
+  try{
+    let row = null;
+    if(await pgChangelogEnabled()){
+      try{ row = await pgUpdateFaqAnswer({ id: questionId, answerBody, answeredBy: req.session.user.id }); }catch(e){ console.warn("[faq] PG answer fallback:", e?.message || e); }
+    }
+    if(!row){
+      row = await sqliteUpdateFaqAnswer({ id: questionId, answerBody, answeredBy: req.session.user.id });
+    }
+    if(!row) return res.status(404).send("Question not found");
+    const payload = toFaqPayload(row);
+    io.emit("faq:update");
+    return res.json(payload);
+  }catch(err){
+    console.error("[faq] answer failed:", err?.message || err);
+    return res.status(500).send("Failed to save answer");
+  }
+});
+
+app.post("/api/faq/:id/react", requireLogin, async (req, res) => {
+  const questionId = Number(req.params?.id);
+  const reaction = normalizeFaqReactionKey(req.body?.reaction);
+  if(!Number.isFinite(questionId) || questionId <= 0) return res.status(400).send("Invalid question id");
+  if(!reaction) return res.status(400).send("Invalid reaction");
+
+  const username = req.session.user.username;
+  let usedPg = false;
+  try{
+    if(await pgChangelogEnabled()){
+      const exists = await pgFaqQuestionExists(questionId);
+      if(!exists) return res.status(404).send("Question not found");
+      await pgToggleFaqReaction(questionId, username, reaction);
+      usedPg = true;
+      const payload = await faqReactionPayload(questionId, username);
+      io.emit("faq:update");
+      return res.json(payload);
+    }
+  }catch(e){
+    console.warn("[faq] PG reaction toggle fallback:", e?.message || e);
+    if(usedPg) return res.status(500).send("Failed to update reaction");
+  }
+
+  try{
+    const exists = await sqliteFaqQuestionExists(questionId);
+    if(!exists) return res.status(404).send("Question not found");
+    await sqliteToggleFaqReaction(questionId, username, reaction);
+    const payload = await faqReactionPayload(questionId, username);
+    io.emit("faq:update");
+    return res.json(payload);
+  }catch(err){
+    console.error("[faq] reaction failed:", err?.message || err);
+    return res.status(500).send("Failed to update reaction");
+  }
 });
 // ---- Profile routes
 app.get("/api/profile", requireLogin, (req, res) => res.redirect(307, "/profile"));
