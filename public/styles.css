@@ -1734,6 +1734,7 @@ textarea{ min-height:90px; resize:vertical; }
   left:0;
   width:100%;
   height: var(--vvhPx);
+  min-height: 0;
   transform: translateY(var(--vvTop));
   overflow:hidden;
   display:none;
@@ -1746,6 +1747,8 @@ main.chat{
   flex-direction:column;
   height:100%;
   min-height:0;
+  position: relative;
+  height: var(--vvh, 100vh);
 }
 
 .chatMain,
@@ -1761,6 +1764,7 @@ main.chat{
   min-height:0;
   overflow-y:auto;
   -webkit-overflow-scrolling: touch;
+  overflow-anchor: none;
 }
 
 .inputBar{
@@ -1865,10 +1869,13 @@ main.chat{
   border:1px solid var(--border);
   background:var(--panel);
   box-shadow:var(--shadowSm);
+  flex-direction:column;
+  gap:8px;
+  min-height:0;
 }
 .latestUpdateTop{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
 .latestUpdateTitle{ font-weight:800; font-size:14px; }
-.latestUpdateBody{ margin-top:6px; color:var(--text); white-space:pre-line; }
+.latestUpdateBody{ margin-top:6px; color:var(--text); white-space:pre-line; max-height: clamp(220px, 55vh, 520px); overflow-y:auto; -webkit-overflow-scrolling: touch; padding-right:2px; }
 
 /* Rooms panel "Latest update" — compact until expanded */
 .latestUpdate.compact .latestUpdateBody,
@@ -1887,13 +1894,14 @@ main.chat{
 }
 
 .changelogList{ display:flex; flex-direction:column; gap:10px; min-height:0; touch-action: pan-y; }
-.changelogEntry{ padding:10px; border-radius:var(--radiusLg); border:1px solid var(--border); background:var(--panel); box-shadow:var(--shadowSm); }
+.changelogEntry{ padding:10px; border-radius:var(--radiusLg); border:1px solid var(--border); background:var(--panel); box-shadow:var(--shadowSm); display:flex; flex-direction:column; gap:6px; min-height:0; }
 .changelogEntryHeader{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
 .changelogEntryTitle{ font-weight:800; }
 .changelogEntryMeta{ font-size:12px; color:var(--muted); }
-.changelogBody{ margin-top:6px; white-space:pre-line; }
+.changelogMeta{ display:flex; flex-direction:column; gap:2px; }
+.changelogBody{ white-space:pre-line; overflow-wrap:anywhere; }
 .changelogActions{ display:flex; gap:6px; flex-wrap:wrap; }
-.changelogReactions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+.changelogReactions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:2px; }
 .changelogReactionBtn{
   display:inline-flex;
   gap:6px;
@@ -1902,13 +1910,12 @@ main.chat{
   border:1px solid var(--border);
   background:color-mix(in srgb, var(--panel) 80%, transparent);
   color:var(--text);
-  padding:6px 10px;
+  padding:10px 12px;
+  min-height:44px;
+  min-width:44px;
   cursor:pointer;
-  font-weight:700;
-  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  font-weight:800;
 }
-.changelogReactionBtn:hover{ background:color-mix(in srgb, var(--panel) 90%, transparent); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
-.changelogReactionBtn:disabled{ opacity:0.6; cursor:wait; }
 .changelogReactionBtn.active{ background:color-mix(in srgb, var(--accent) 28%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); box-shadow:var(--shadowSm); }
 .chan{
   padding:9px 10px;
@@ -1979,6 +1986,8 @@ main.chat{
 .topbar{
   position:relative;
   height:54px;
+  min-height:54px;
+  flex: 0 0 54px;
   background:var(--panel2);
   border-bottom:1px solid var(--line);
   display:flex;
@@ -2315,6 +2324,10 @@ body.dice-room .sys .diceFace{
 }
 
 .typing{
+  position:absolute;
+  left:0;
+  right:0;
+  bottom: calc(var(--composerH, 72px) + 6px);
   height:22px;
   padding:0 14px;
   color:var(--muted);
@@ -2322,11 +2335,32 @@ body.dice-room .sys .diceFace{
   display:flex;
   align-items:center;
   flex:0 0 auto;
+  pointer-events:none;
+  z-index:120;
 }
 .typing:empty{
   height:0;
   padding:0;
 }
+
+#jumpToLatest{
+  position:absolute;
+  right:14px;
+  bottom: calc(var(--composerH, 72px) + 16px);
+  display:none;
+  align-items:center;
+  gap:6px;
+  padding:10px 14px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  background:color-mix(in srgb, var(--panel) 85%, transparent);
+  color:var(--text);
+  box-shadow:var(--shadowSm);
+  font-weight:800;
+  cursor:pointer;
+  z-index:140;
+}
+#jumpToLatest.show{ display:flex; }
 
 .inputBar{
   padding:12px;
