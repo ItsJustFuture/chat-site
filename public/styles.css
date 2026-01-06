@@ -1973,6 +1973,8 @@ body.keyboard-open .menuContent{ padding-bottom: calc(200px + var(--kb, 0px) + e
   padding:14px 14px;
   cursor:pointer;
   user-select:none;
+  flex-wrap:wrap;
+  width:100%;
 }
 
 .clLeft{
@@ -1981,6 +1983,7 @@ body.keyboard-open .menuContent{ padding-bottom: calc(200px + var(--kb, 0px) + e
   display:flex;
   flex-direction:column;
   gap:4px;
+  min-width:220px;
 }
 
 .clTitle{
@@ -2003,6 +2006,7 @@ body.keyboard-open .menuContent{ padding-bottom: calc(200px + var(--kb, 0px) + e
   gap:8px;
   flex:0 0 auto;
   flex-wrap:wrap;
+  margin-left:auto;
 }
 
 .clReactBtn{

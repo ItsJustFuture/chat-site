@@ -5622,7 +5622,7 @@ function renderChangelogList(){
 
     // Reactions (always visible, even when collapsed)
     const reactions = normalizeChangelogReactions(entry.reactions);
-    const myReactions = normalizeChangelogReactions(entry.myReactions || entry.my_reactions || entry.mine);
+    const myReactions = normalizeMyChangelogReactions(entry.myReactions || entry.my_reactions || entry.mine);
     const reactionRow = document.createElement("div");
     reactionRow.className = "clReactions";
     const reactionKeys = ["heart","clap","down","eyes"];
@@ -5691,13 +5691,20 @@ function renderChangelogList(){
     item.appendChild(panel);
 
     // Native <details> expansion is the most reliable option on iOS Safari.
-    // Keep only one open at a time for readability.
-    item.addEventListener("toggle", ()=>{
-      const nowOpen = item.open;
-      openChangelogId = nowOpen ? entryId : (openChangelogId === entryId ? null : openChangelogId);
-      // Re-render to keep chevrons/state consistent and close other items.
-      renderChangelogList();
-    }, { passive:true });
+// Allow opening any item; when one opens, automatically close the others.
+item.addEventListener("toggle", ()=>{
+  if(!changelogList) return;
+  if(item.open){
+    openChangelogId = entryId;
+    // Close any other open items without re-rendering (avoids iOS/Safari toggle race).
+    const openItems = changelogList.querySelectorAll("details.clItem[open]");
+    for(const d of openItems){
+      if(d !== item) d.open = false;
+    }
+  }else{
+    if(openChangelogId === entryId) openChangelogId = null;
+  }
+});
 
     changelogList.appendChild(item);
   }
