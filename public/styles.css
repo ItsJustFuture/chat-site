@@ -1919,15 +1919,8 @@ body.keyboard-open .menuContent{ padding-bottom: calc(200px + var(--kb, 0px) + e
 .changelogMeta{ display:flex; flex-direction:column; gap:4px; min-width:0; }
 .changelogChevron{ flex:0 0 auto; font-size:14px; transition:transform .15s ease; }
 .changelogEntry.is-open .changelogChevron{ transform:rotate(180deg); }
-/*
-  IMPORTANT (iOS/Safari): animating max-height inside a scrolling flex column
-  can fail to reflow reliably, causing expanded content to visually overlap
-  other entries instead of increasing layout height.
-
-  Use a simple open/closed display toggle for correctness.
-*/
-.changelogDetails{ display:none; flex-direction:column; gap:10px; margin-top:2px; padding-top:8px; border-top:1px solid var(--border); }
-.changelogEntry.is-open .changelogDetails{ display:flex; }
+.changelogDetails{ display:flex; flex-direction:column; gap:10px; margin-top:2px; padding-top:8px; border-top:1px solid var(--border); max-height:0; overflow:hidden; opacity:0; transition:max-height .2s ease, opacity .2s ease; }
+.changelogEntry.is-open .changelogDetails{ max-height:1600px; opacity:1; }
 .changelogBody{ white-space:pre-line; overflow-wrap:anywhere; max-height:clamp(220px, 48vh, 460px); overflow-y:auto; -webkit-overflow-scrolling:touch; line-height:1.4; font-size:14px; }
 .changelogActions{ display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
 .changelogReactions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:2px; }
@@ -5302,3 +5295,100 @@ main.chatMain {
 
 /* === Fix: upload preview should not reserve space when not in use === */
 #uploadPreview{ display:none; }
+
+
+
+/* ==============================
+   Changelog redesign (Accordion)
+   Uses <details>/<summary> for reliable iOS layout
+   ============================== */
+
+#changelogList{ display:flex; flex-direction:column; gap:12px; min-height:0; }
+
+.clItem{
+  border-radius: var(--radiusLg);
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.03);
+  overflow: hidden;
+}
+
+.clSummary{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:14px 14px;
+  cursor:pointer;
+  user-select:none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.clSummary::-webkit-details-marker{ display:none; }
+.clSummary::marker{ content:""; }
+
+.clSummaryLeft{ min-width:0; display:flex; flex-direction:column; gap:4px; }
+.clTitle{ font-weight:900; font-size:15px; line-height:1.2; overflow-wrap:anywhere; }
+.clMeta{ font-size:12px; color: var(--muted); opacity:.95; }
+
+.clSummaryRight{ display:flex; align-items:center; gap:10px; flex:0 0 auto; }
+
+.clChevron{
+  flex:0 0 auto;
+  font-size:14px;
+  opacity:.9;
+  transform: rotate(0deg);
+  transition: transform .15s ease;
+}
+
+.clItem[open] .clChevron{ transform: rotate(180deg); }
+
+.clReactions{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+.clReactBtn{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.10);
+  background: rgba(0,0,0,.18);
+  color: inherit;
+  font: inherit;
+  line-height:1;
+  cursor:pointer;
+}
+.clReactBtn:disabled{ opacity:.55; cursor:not-allowed; }
+.clReactBtn.active{ border-color: rgba(255,255,255,.22); background: rgba(255,255,255,.08); }
+.clReactEmoji{ font-size:14px; }
+.clReactCount{ font-size:12px; opacity:.9; }
+
+.clPanel{
+  padding: 0 14px 14px 14px;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.clBody{
+  padding: 12px 12px;
+  border-radius: var(--radiusMd);
+  background: rgba(0,0,0,.16);
+  border: 1px solid rgba(255,255,255,.07);
+  font-size:14px;
+  line-height:1.45;
+  overflow-wrap:anywhere;
+}
+
+.clActions{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+}
+
+/* Mobile: keep things readable and prevent button clipping */
+@media (max-width: 520px){
+  .clSummary{ align-items:flex-start; }
+  .clSummaryRight{ flex-direction:column-reverse; align-items:flex-end; gap:8px; }
+  .clReactBtn{ padding:6px 8px; }
+  .clActions .btn{ flex:1 1 140px; min-width:0; }
+}

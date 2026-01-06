@@ -2020,28 +2020,7 @@ function previewText(text, max=180){
   return `${raw.slice(0, max - 1)}…`;
 }
 
-// NOTE: Roles may arrive from the server with minor formatting differences
-// (e.g. "Co owner" vs "Co-owner"). Always canonicalize before comparing.
 const ROLES = ["Guest","User","VIP","Moderator","Admin","Co-owner","Owner"];
-
-function canonicalRole(role){
-  const raw = String(role || "").trim();
-  if(!raw) return "User";
-
-  // Normalize: lowercase and strip non-letters so "Co-owner", "Co owner",
-  // "co_owner" all become "coowner".
-  const key = raw.toLowerCase().replace(/[^a-z]/g, "");
-  switch(key){
-    case "guest": return "Guest";
-    case "user": return "User";
-    case "vip": return "VIP";
-    case "moderator": return "Moderator";
-    case "admin": return "Admin";
-    case "coowner": return "Co-owner";
-    case "owner": return "Owner";
-    default: return raw;
-  }
-}
 
 const PUBLIC_THEME_NAMES = new Set(["Minimal Light", "Minimal Dark", "Minimal Light (High Contrast)", "Minimal Dark (High Contrast)", "Paper / Parchment", "Sky Light", "Fantasy Tavern", "Fantasy Tavern (Ember)", "Desert Dusk"]);
 function canUseThemeName(themeName){
@@ -2052,9 +2031,21 @@ function canUseThemeName(themeName){
   return roleRank(role) >= roleRank("VIP");
 }
 
+function canonicalRole(role){
+  const raw = String(role || "").trim();
+  if(!raw) return "";
+  const key = raw.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if(key === "coowner") return "Co-owner";
+  if(key === "vip") return "VIP";
+  if(key === "moderator" || key === "mod") return "Moderator";
+  if(key === "admin" || key === "administrator") return "Admin";
+  if(key === "owner") return "Owner";
+  if(key === "user") return "User";
+  return raw;
+}
 function roleRank(role){
-  const canonical = canonicalRole(role);
-  const i = ROLES.indexOf(canonical);
+  const normalized = canonicalRole(role);
+  const i = ROLES.indexOf(normalized);
   return i === -1 ? 1 : i;
 }
 
@@ -5615,62 +5606,91 @@ function renderChangelogList(){
     return;
   }
 
-  const isOwner = me && roleRank(me.role) >= roleRank("Owner");
+  const canManage = me && roleRank(me.role) >= roleRank("Owner");
 
   for(const entry of changelogEntries){
-    const wrap = document.createElement("div");
-    wrap.className = "changelogEntry";
-    wrap.dataset.entryId = String(entry.id);
+    const details = document.createElement("details");
+    details.className = "clItem";
+    details.dataset.entryId = String(entry.id);
     const isOpen = String(openChangelogId) === String(entry.id);
-    wrap.classList.toggle("is-open", isOpen);
-    // Non-owners get an extra-compact collapsed view: title only.
-    wrap.classList.toggle("compact", !isOpen && !isOwner);
+    details.open = !!isOpen;
 
-    const header = document.createElement("div");
-    header.className = "changelogEntryHeader";
+    const summary = document.createElement("summary");
+    summary.className = "clSummary";
+    summary.setAttribute("role", "button");
+    summary.setAttribute("aria-label", "Toggle changelog entry");
 
-    const summaryBtn = document.createElement("button");
-    summaryBtn.type = "button";
-    summaryBtn.className = "changelogSummary";
-    summaryBtn.dataset.changelogToggle = String(entry.id);
-    summaryBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
-
-    const metaBlock = document.createElement("div");
-    metaBlock.className = "changelogMeta";
+    const left = document.createElement("div");
+    left.className = "clSummaryLeft";
 
     const title = document.createElement("div");
-    title.className = "changelogEntryTitle";
-    title.textContent = entry.title || "Untitled";
-    metaBlock.appendChild(title);
-
-    const metaRow = document.createElement("div");
-    metaRow.className = "changelogEntryMetaRow";
+    title.className = "clTitle";
+    title.textContent = String(entry.title || "Update");
 
     const meta = document.createElement("div");
-    meta.className = "changelogEntryMeta";
-    meta.textContent = formatChangelogDate(entry.created_at || entry.createdAt || entry.timestamp);
-    metaRow.appendChild(meta);
+    meta.className = "clMeta";
+    const ts = formatChangelogDate(entry.created_at || entry.ts || entry.createdAt || entry.date);
+    meta.textContent = ts || "";
 
-    const hint = document.createElement("div");
-    hint.className = "changelogEntryHint";
-    // Keep hints for owners; collapse them away for compact view.
-    hint.textContent = isOpen ? "Tap to collapse" : "Tap to expand";
-    metaRow.appendChild(hint);
+    left.appendChild(title);
+    if(meta.textContent) left.appendChild(meta);
 
-    metaBlock.appendChild(metaRow);
-    summaryBtn.appendChild(metaBlock);
+    const right = document.createElement("div");
+    right.className = "clSummaryRight";
 
-    const chevron = document.createElement("span");
-    chevron.className = "changelogChevron";
-    chevron.setAttribute("aria-hidden", "true");
-    chevron.textContent = "⌄";
-    summaryBtn.appendChild(chevron);
+    // Inline reactions (always visible, usable without expanding)
+    const reactions = normalizeChangelogReactions(entry.reactions);
+    const myReactions = normalizeMyChangelogReactions(entry.myReactions);
+    const reactionRow = document.createElement("div");
+    reactionRow.className = "clReactions";
+    const entryBusy = changelogReactionBusy.has(String(entry.id));
+    for(const key of CHANGELOG_REACTION_KEYS){
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "clReactBtn";
+      btn.dataset.changelogReaction = key;
+      btn.dataset.entryId = String(entry.id);
+      btn.setAttribute("aria-label", `React ${key}`);
+      btn.disabled = entryBusy;
 
-    header.appendChild(summaryBtn);
+      const emoji = document.createElement("span");
+      emoji.className = "clReactEmoji";
+      emoji.textContent = CHANGELOG_REACTION_EMOJI[key] || key;
 
-    if(isOwner){
+      const count = document.createElement("span");
+      count.className = "clReactCount";
+      count.textContent = String(Math.max(0, Number(reactions[key] ?? 0)));
+
+      btn.appendChild(emoji);
+      btn.appendChild(count);
+      btn.classList.toggle("active", !!myReactions[key]);
+      reactionRow.appendChild(btn);
+    }
+
+    const chev = document.createElement("span");
+    chev.className = "clChevron";
+    chev.textContent = "▾";
+
+    right.appendChild(reactionRow);
+    right.appendChild(chev);
+
+    summary.appendChild(left);
+    summary.appendChild(right);
+
+    const panel = document.createElement("div");
+    panel.className = "clPanel";
+
+    const body = document.createElement("div");
+    body.className = "clBody";
+    body.innerHTML = escapeHtml(entry.body || "").replace(/
+/g, "<br>");
+
+    panel.appendChild(body);
+
+    if(canManage){
       const actions = document.createElement("div");
-      actions.className = "changelogActions";
+      actions.className = "clActions";
+
       const editBtn = document.createElement("button");
       editBtn.className = "btn secondary";
       editBtn.type = "button";
@@ -5685,82 +5705,34 @@ function renderChangelogList(){
 
       actions.appendChild(editBtn);
       actions.appendChild(delBtn);
-      header.appendChild(actions);
+      panel.appendChild(actions);
     }
 
-    const details = document.createElement("div");
-    details.className = "changelogDetails";
-
-    const reactions = normalizeChangelogReactions(entry.reactions);
-    const myReactions = normalizeMyChangelogReactions(entry.myReactions);
-    const reactionRow = document.createElement("div");
-    reactionRow.className = "changelogReactions";
-    const entryBusy = changelogReactionBusy.has(String(entry.id));
-    for(const key of CHANGELOG_REACTION_KEYS){
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "changelogReactionBtn";
-      btn.dataset.changelogReaction = key;
-      btn.dataset.entryId = String(entry.id);
-      const emoji = document.createElement("span");
-      emoji.className = "changelogReactionEmoji";
-      emoji.textContent = CHANGELOG_REACTION_EMOJI[key] || key;
-      const count = document.createElement("span");
-      count.className = "changelogReactionCount";
-      count.textContent = String(Math.max(0, Number(reactions[key] ?? 0)));
-      btn.appendChild(emoji);
-      btn.appendChild(count);
-      btn.classList.toggle("active", !!myReactions[key]);
-      btn.disabled = entryBusy;
-      reactionRow.appendChild(btn);
-    }
-
-    const body = document.createElement("div");
-    body.className = "changelogBody";
-    body.innerHTML = escapeHtml(entry.body || "").replace(/\n/g, "<br>");
-
-    details.appendChild(reactionRow);
-    details.appendChild(body);
-
-    wrap.appendChild(header);
-    wrap.appendChild(details);
-    changelogList.appendChild(wrap);
-
-    details.setAttribute("aria-hidden", isOpen ? "false" : "true");
-    reactionRow.setAttribute("aria-hidden", isOpen ? "false" : "true");
+    details.appendChild(summary);
+    details.appendChild(panel);
+    changelogList.appendChild(details);
   }
 }
 
+
 function handleChangelogListClick(event){
   if(!changelogList) return;
+
   const reactionBtn = event.target.closest("[data-changelog-reaction]");
   if(reactionBtn && changelogList.contains(reactionBtn)){
+    // Prevent <summary> click from toggling the <details> when reacting
+    event.preventDefault();
+    event.stopPropagation();
     const entryId = reactionBtn.dataset.entryId;
     const reaction = reactionBtn.dataset.changelogReaction;
     toggleChangelogReaction(entryId, reaction);
     return;
   }
 
-  const toggleBtn = event.target.closest("[data-changelog-toggle]");
-  if(toggleBtn && changelogList.contains(toggleBtn)){
-    const entryId = toggleBtn.dataset.changelogToggle;
-    openChangelogId = openChangelogId === entryId ? null : entryId;
-    renderChangelogList();
-    return;
-  }
-
-  const headerTap = event.target.closest(".changelogEntryHeader");
-  if(headerTap && changelogList.contains(headerTap) && !event.target.closest(".changelogActions")){
-    const entryId = headerTap.closest(".changelogEntry")?.dataset.entryId;
-    if(entryId){
-      openChangelogId = openChangelogId === entryId ? null : entryId;
-      renderChangelogList();
-      return;
-    }
-  }
-
   const editBtn = event.target.closest("[data-changelog-edit]");
   if(editBtn && changelogList.contains(editBtn)){
+    event.preventDefault();
+    event.stopPropagation();
     const entry = changelogEntries.find(e => e && String(e.id) === String(editBtn.dataset.changelogEdit));
     if(entry) openChangelogEditor(entry);
     return;
@@ -5768,9 +5740,25 @@ function handleChangelogListClick(event){
 
   const deleteBtn = event.target.closest("[data-changelog-delete]");
   if(deleteBtn && changelogList.contains(deleteBtn)){
+    event.preventDefault();
+    event.stopPropagation();
     deleteChangelogEntry(deleteBtn.dataset.changelogDelete);
   }
 }
+
+function handleChangelogDetailsToggle(event){
+  const details = event.target;
+  if(!details || !details.classList || !details.classList.contains("clItem")) return;
+  const entryId = String(details.dataset.entryId || "");
+  if(details.open){
+    openChangelogId = entryId || null;
+    // Keep only one entry open at a time for cleanliness
+    changelogList.querySelectorAll("details.clItem[open]").forEach((d)=>{ if(d !== details) d.open = false; });
+  } else {
+    if(String(openChangelogId) === entryId) openChangelogId = null;
+  }
+}
+
 
 function normalizeFaqReactions(reactions){
   const base = { helpful:0, love:0, funny:0, confusing:0 };
@@ -6357,6 +6345,7 @@ if(menuNav){
 }
 if(refreshLeaderboardsBtn) refreshLeaderboardsBtn.addEventListener("click", ()=> fetchLeaderboards({ force:true, reason:"manual" }));
 if(changelogList) changelogList.addEventListener("click", handleChangelogListClick);
+changelogList.addEventListener("toggle", handleChangelogDetailsToggle, true);
 if(faqList) faqList.addEventListener("click", handleFaqListClick);
 if(latestUpdateViewBtn){
   latestUpdateViewBtn.addEventListener("click", (e)=>{
