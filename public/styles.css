@@ -1895,13 +1895,13 @@ main.chat{
 
 .changelogList{ display:flex; flex-direction:column; gap:10px; min-height:0; touch-action: pan-y; }
 .changelogEntry{ padding:10px; border-radius:var(--radiusLg); border:1px solid var(--border); background:var(--panel); box-shadow:var(--shadowSm); display:flex; flex-direction:column; gap:6px; min-height:0; }
-.changelogEntryHeader{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.changelogEntryHeader{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; flex-wrap:wrap; }
 .changelogEntryTitle{ font-weight:800; }
 .changelogEntryMeta{ font-size:12px; color:var(--muted); }
 .changelogMeta{ display:flex; flex-direction:column; gap:2px; }
 .changelogBody{ white-space:pre-line; overflow-wrap:anywhere; }
 .changelogActions{ display:flex; gap:6px; flex-wrap:wrap; }
-.changelogReactions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:2px; }
+.changelogReactions{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:4px; }
 .changelogReactionBtn{
   display:inline-flex;
   gap:6px;
@@ -1910,12 +1910,17 @@ main.chat{
   border:1px solid var(--border);
   background:color-mix(in srgb, var(--panel) 80%, transparent);
   color:var(--text);
-  padding:10px 12px;
-  min-height:44px;
-  min-width:44px;
+  padding:4px 8px;
+  min-height:28px;
+  min-width:0;
   cursor:pointer;
-  font-weight:800;
+  font-weight:700;
+  font-size:12px;
+  line-height:1;
 }
+.changelogReactionEmoji{ font-size:14px; line-height:1; }
+.changelogReactionCount{ font-size:12px; opacity:0.85; }
+.latestUpdateReactions{ margin-top:6px; }
 .changelogReactionBtn.active{ background:color-mix(in srgb, var(--accent) 28%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); box-shadow:var(--shadowSm); }
 .chan{
   padding:9px 10px;

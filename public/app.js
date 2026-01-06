@@ -894,6 +894,7 @@ const latestUpdateTitle = document.getElementById("latestUpdateTitle");
 const latestUpdateDate = document.getElementById("latestUpdateDate");
 const latestUpdateBody = document.getElementById("latestUpdateBody");
 const latestUpdateViewBtn = document.getElementById("latestUpdateViewBtn");
+const latestUpdateReactions = document.getElementById("latestUpdateReactions");
 let latestUpdateExpanded = false;
 const changelogList = document.getElementById("changelogList");
 const changelogMsg = document.getElementById("changelogMsg");
@@ -5462,6 +5463,34 @@ function renderChangelogList(){
 
     metaBlock.appendChild(title);
     metaBlock.appendChild(meta);
+    // Reactions live under the date/time (inside the meta column), so they're
+    // always in a predictable place and never overlap the body text.
+    const reactions = normalizeChangelogReactions(entry.reactions);
+    const myReactions = normalizeMyChangelogReactions(entry.myReactions);
+    const reactionRow = document.createElement("div");
+    reactionRow.className = "changelogReactions";
+    const entryBusy = changelogReactionBusy.has(entry.id);
+    for(const key of CHANGELOG_REACTION_KEYS){
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "changelogReactionBtn";
+      btn.dataset.reaction = key;
+      // Use inner spans so CSS can size emoji/count independently.
+      const emoji = document.createElement("span");
+      emoji.className = "changelogReactionEmoji";
+      emoji.textContent = CHANGELOG_REACTION_EMOJI[key] || key;
+      const count = document.createElement("span");
+      count.className = "changelogReactionCount";
+      count.textContent = String(Math.max(0, Number(reactions[key] ?? 0)));
+      btn.appendChild(emoji);
+      btn.appendChild(count);
+      btn.classList.toggle("active", !!myReactions[key]);
+      btn.disabled = entryBusy;
+      btn.addEventListener("click", ()=>toggleChangelogReaction(entry.id, key));
+      reactionRow.appendChild(btn);
+    }
+
+    metaBlock.appendChild(reactionRow);
     header.appendChild(metaBlock);
 
     if(isOwner){
@@ -5484,29 +5513,11 @@ function renderChangelogList(){
       header.appendChild(actions);
     }
 
-    const reactions = normalizeChangelogReactions(entry.reactions);
-    const myReactions = normalizeMyChangelogReactions(entry.myReactions);
-    const reactionRow = document.createElement("div");
-    reactionRow.className = "changelogReactions";
-    const entryBusy = changelogReactionBusy.has(entry.id);
-    for(const key of CHANGELOG_REACTION_KEYS){
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "changelogReactionBtn";
-      btn.dataset.reaction = key;
-      btn.textContent = `${CHANGELOG_REACTION_EMOJI[key] || key} ${Math.max(0, Number(reactions[key] ?? 0))}`;
-      btn.classList.toggle("active", !!myReactions[key]);
-      btn.disabled = entryBusy;
-      btn.addEventListener("click", ()=>toggleChangelogReaction(entry.id, key));
-      reactionRow.appendChild(btn);
-    }
-
     const body = document.createElement("div");
     body.className = "changelogBody";
     body.innerHTML = escapeHtml(entry.body || "").replace(/\n/g, "<br>");
 
     wrap.appendChild(header);
-    wrap.appendChild(reactionRow);
     wrap.appendChild(body);
     changelogList.appendChild(wrap);
   }
@@ -5628,6 +5639,34 @@ function renderLatestUpdateSnippet(){
   if(latestUpdateDate) latestUpdateDate.textContent = latestChangelogEntry.createdAt
     ? new Date(latestChangelogEntry.createdAt).toLocaleString()
     : "";
+
+  // Render a compact reactions row directly under the timestamp.
+  if(latestUpdateReactions){
+    latestUpdateReactions.innerHTML = "";
+    const reactions = normalizeChangelogReactions(latestChangelogEntry.reactions);
+    const myReactions = normalizeMyChangelogReactions(latestChangelogEntry.myReactions);
+    const entryBusy = changelogReactionBusy.has(latestChangelogEntry.id);
+    for(const key of CHANGELOG_REACTION_KEYS){
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "changelogReactionBtn";
+      btn.dataset.reaction = key;
+      btn.classList.toggle("active", !!myReactions[key]);
+      btn.disabled = entryBusy;
+
+      const emoji = document.createElement("span");
+      emoji.className = "changelogReactionEmoji";
+      emoji.textContent = CHANGELOG_REACTION_EMOJI[key] || key;
+      const count = document.createElement("span");
+      count.className = "changelogReactionCount";
+      count.textContent = String(Math.max(0, Number(reactions[key] ?? 0)));
+      btn.appendChild(emoji);
+      btn.appendChild(count);
+
+      btn.addEventListener("click", ()=>toggleChangelogReaction(latestChangelogEntry.id, key));
+      latestUpdateReactions.appendChild(btn);
+    }
+  }
 
   if(latestUpdateBody){
     latestUpdateBody.textContent = latestUpdateExpanded
