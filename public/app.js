@@ -782,13 +782,28 @@ let activeMenuTab = "changelog";
 let changelogEntries = [];
 let changelogLoaded = false;
 let changelogDirty = false;
+let openChangelogId = null;
 const CHANGELOG_REACTION_KEYS = ["heart", "clap", "down", "eyes"];
 const CHANGELOG_REACTION_EMOJI = { heart:"♥️", clap:"👏", down:"👎", eyes:"👀" };
 const changelogReactionBusy = new Set();
 let editingChangelogId = null;
 let latestChangelogEntry = null;
-let leaderboardsLoaded = false;
-let leaderboardsLoading = false;
+let faqQuestions = [];
+let faqLoaded = false;
+let faqDirty = false;
+let openFaqQuestionId = null;
+const FAQ_REACTION_KEYS = ["helpful", "love", "funny", "confusing"];
+const FAQ_REACTION_EMOJI = { helpful:"👍", love:"❤️", funny:"😂", confusing:"❓" };
+const faqReactionBusy = new Set();
+let editingFaqId = null;
+const leaderboardState = {
+  isOpen: false,
+  inFlight: false,
+  lastFetchAt: 0,
+  intervalId: null,
+  lastError: false,
+  wsCooldownUntil: 0
+};
 const recentDiceRolls = new Map();
 const diceRollTimers = new Map();
 let typingUsers = new Set();
@@ -906,6 +921,15 @@ const changelogBodyInput = document.getElementById("changelogBodyInput");
 const changelogSaveBtn = document.getElementById("changelogSaveBtn");
 const changelogCancelBtn = document.getElementById("changelogCancelBtn");
 const changelogEditMsg = document.getElementById("changelogEditMsg");
+const faqList = document.getElementById("faqList");
+const faqMsg = document.getElementById("faqMsg");
+const faqAskBtn = document.getElementById("faqAskBtn");
+const faqForm = document.getElementById("faqForm");
+const faqTitleInput = document.getElementById("faqTitleInput");
+const faqDetailsInput = document.getElementById("faqDetailsInput");
+const faqSubmitBtn = document.getElementById("faqSubmitBtn");
+const faqCancelBtn = document.getElementById("faqCancelBtn");
+const faqEditMsg = document.getElementById("faqEditMsg");
 const channelsCloseBtn = document.getElementById("channelsCloseBtn");
 const membersCloseBtn  = document.getElementById("membersCloseBtn");
 const tabEdit = document.getElementById("tabEdit");
@@ -1132,6 +1156,7 @@ const leaderboardGold = document.getElementById("leaderboardGold");
 const leaderboardDice = document.getElementById("leaderboardDice");
 const leaderboardLikes = document.getElementById("leaderboardLikes");
 const leaderboardsMsg = document.getElementById("leaderboardsMsg");
+const leaderboardsUpdatedAt = document.getElementById("leaderboardsUpdatedAt");
 const refreshLeaderboardsBtn = document.getElementById("refreshLeaderboardsBtn");
 const dmSettingsMenu = document.getElementById("dmSettingsMenu");
 const dmDeleteHistoryBtn = document.getElementById("dmDeleteHistoryBtn");
@@ -5223,6 +5248,11 @@ function ensureChangelogLoaded(force = false){
   return loadChangelog(force);
 }
 
+function ensureFaqLoaded(force = false){
+  if(activeMenuTab !== "faq") return;
+  return loadFaq(force);
+}
+
 function renderLeaderboard(listEl, items, mapper){
   if (!listEl) return;
   listEl.innerHTML = "";
@@ -5252,26 +5282,71 @@ function renderLeaderboard(listEl, items, mapper){
   });
 }
 
-async function loadLeaderboards(force = false){
-  if (leaderboardsLoading) return;
-  if (leaderboardsLoaded && !force) return;
-  leaderboardsLoading = true;
-  if (leaderboardsMsg) leaderboardsMsg.textContent = "Loading...";
-  try {
-    const res = await fetch("/api/leaderboards");
-    if (!res.ok) throw new Error();
+function formatLeaderboardTime(ts){
+  if(!ts) return "";
+  try{
+    return new Intl.DateTimeFormat(undefined, { hour12:false, hour:"2-digit", minute:"2-digit", second:"2-digit" }).format(new Date(ts));
+  }catch{
+    const d = new Date(ts);
+    return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString();
+  }
+}
+
+function updateLeaderboardTimestamp(ts){
+  if(!leaderboardsUpdatedAt) return;
+  leaderboardsUpdatedAt.textContent = ts ? `Last updated: ${formatLeaderboardTime(ts)}` : "";
+}
+
+function stopLeaderboardPolling(){
+  if(leaderboardState.intervalId){
+    clearInterval(leaderboardState.intervalId);
+    leaderboardState.intervalId = null;
+  }
+}
+
+function startLeaderboardPolling(){
+  stopLeaderboardPolling();
+  leaderboardState.intervalId = setInterval(()=>{
+    if(leaderboardState.isOpen) fetchLeaderboards({ force:true, reason:"poll" });
+  }, 15000);
+}
+
+async function fetchLeaderboards({ force=false, reason="manual" } = {}){
+  if(leaderboardState.inFlight) return;
+  if(!force && !leaderboardState.isOpen && reason !== "manual") return;
+  leaderboardState.inFlight = true;
+  if(leaderboardsMsg){
+    leaderboardsMsg.textContent = (reason === "manual" || !leaderboardState.lastFetchAt) ? "Loading..." : "";
+  }
+  try{
+    const res = await fetch("/api/leaderboard", { credentials:"include" });
+    if(!res.ok) throw new Error("failed");
     const data = await res.json();
     renderLeaderboard(leaderboardXp, data?.xp, (item, idx) => ({ label: `${idx + 1}. ${item.username}`, meta: `Level ${item.level}` }));
     renderLeaderboard(leaderboardGold, data?.gold, (item, idx) => ({ label: `${idx + 1}. ${item.username}`, meta: `${Number(item.gold || 0).toLocaleString()} Gold` }));
     renderLeaderboard(leaderboardDice, data?.dice, (item, idx) => ({ label: `${idx + 1}. ${item.username}`, meta: `${Number(item.sixes || 0)}× ${diceFace(6)}` }));
     renderLeaderboard(leaderboardLikes, data?.likes, (item, idx) => ({ label: `${idx + 1}. ${item.username}`, meta: `${Number(item.likes || 0)} likes` }));
-    leaderboardsLoaded = true;
+    leaderboardState.lastFetchAt = Date.now();
+    leaderboardState.lastError = false;
     if (leaderboardsMsg) leaderboardsMsg.textContent = "";
-  } catch {
-    leaderboardsLoaded = false;
-    if (leaderboardsMsg) leaderboardsMsg.textContent = "Failed to load leaderboards.";
-  } finally {
-    leaderboardsLoading = false;
+    updateLeaderboardTimestamp(leaderboardState.lastFetchAt);
+  }catch{
+    leaderboardState.lastError = true;
+    if (leaderboardsMsg) leaderboardsMsg.textContent = "Failed to refresh leaderboards.";
+  }finally{
+    leaderboardState.inFlight = false;
+  }
+}
+
+function setLeaderboardOpen(isOpen){
+  const next = !!isOpen;
+  if(leaderboardState.isOpen === next) return;
+  leaderboardState.isOpen = next;
+  if(next){
+    fetchLeaderboards({ force:true, reason:"open" });
+    startLeaderboardPolling();
+  }else{
+    stopLeaderboardPolling();
   }
 }
 
@@ -5283,6 +5358,8 @@ function setRightPanelMode(mode){
   if(menuToggleBtn) menuToggleBtn.classList.toggle("active", rightPanelMode === "menu");
   updateRoomControlsVisibility();
   if(rightPanelMode === "menu" && activeMenuTab === "changelog") ensureChangelogLoaded();
+  if(rightPanelMode === "menu" && activeMenuTab === "faq") ensureFaqLoaded();
+  setLeaderboardOpen(rightPanelMode === "menu" && activeMenuTab === "leaderboards");
 }
 
 function setMenuTab(tab){
@@ -5294,7 +5371,8 @@ function setMenuTab(tab){
     section.classList.toggle("active", section.dataset.menuSection === activeMenuTab);
   });
   if(activeMenuTab === "changelog") ensureChangelogLoaded();
-  if(activeMenuTab === "leaderboards") loadLeaderboards();
+  if(activeMenuTab === "faq") ensureFaqLoaded();
+  setLeaderboardOpen(activeMenuTab === "leaderboards" && rightPanelMode === "menu");
 }
 
 function updateChangelogControlsVisibility(){
@@ -5367,7 +5445,7 @@ function normalizeChangelogEntry(entry){
 
 function updateChangelogEntryState(entryId, next){
   if(!entryId) return;
-  const idx = changelogEntries.findIndex(e => e && e.id === entryId);
+  const idx = changelogEntries.findIndex(e => e && String(e.id) === String(entryId));
   if(idx >= 0){
     const merged = normalizeChangelogEntry({ ...changelogEntries[idx], ...(next || {}) });
     if(merged) changelogEntries[idx] = merged;
@@ -5391,6 +5469,10 @@ async function loadChangelog(force=false){
     changelogReactionBusy.clear();
   }catch{
     changelogEntries = [];
+  }
+
+  if(openChangelogId && !changelogEntries.some(e => String(e.id) === String(openChangelogId))){
+    openChangelogId = null;
   }
 
   changelogLoaded = true;
@@ -5447,6 +5529,9 @@ function renderChangelogList(){
   for(const entry of changelogEntries){
     const wrap = document.createElement("div");
     wrap.className = "changelogEntry";
+    wrap.dataset.entryId = String(entry.id);
+    const isOpen = String(openChangelogId) === String(entry.id);
+    wrap.classList.toggle("is-open", isOpen);
 
     const header = document.createElement("div");
     header.className = "changelogEntryHeader";
@@ -5456,26 +5541,62 @@ function renderChangelogList(){
 
     const title = document.createElement("div");
     title.className = "changelogEntryTitle";
-    title.textContent = entry.title || "(untitled)";
+    title.textContent = entry.title || "Untitled";
+    metaBlock.appendChild(title);
+
+    const metaRow = document.createElement("div");
+    metaRow.className = "changelogEntryMetaRow";
+
     const meta = document.createElement("div");
     meta.className = "changelogEntryMeta";
-    meta.textContent = formatChangelogDate(entry.createdAt);
+    meta.textContent = formatChangelogDate(entry.created_at || entry.createdAt || entry.timestamp);
+    metaRow.appendChild(meta);
 
-    metaBlock.appendChild(title);
-    metaBlock.appendChild(meta);
-    // Reactions live under the date/time (inside the meta column), so they're
-    // always in a predictable place and never overlap the body text.
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "btn text changelogToggle";
+    toggleBtn.dataset.changelogToggle = String(entry.id);
+    toggleBtn.textContent = isOpen ? "Hide" : "View";
+    metaRow.appendChild(toggleBtn);
+
+    metaBlock.appendChild(metaRow);
+    header.appendChild(metaBlock);
+
+    if(isOwner){
+      const actions = document.createElement("div");
+      actions.className = "changelogActions";
+      const editBtn = document.createElement("button");
+      editBtn.className = "btn secondary";
+      editBtn.type = "button";
+      editBtn.textContent = "Edit";
+      editBtn.dataset.changelogEdit = String(entry.id);
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn danger";
+      delBtn.type = "button";
+      delBtn.textContent = "Delete";
+      delBtn.dataset.changelogDelete = String(entry.id);
+
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+      header.appendChild(actions);
+    }
+
+    const details = document.createElement("div");
+    details.className = "changelogDetails";
+    details.hidden = !isOpen;
+
     const reactions = normalizeChangelogReactions(entry.reactions);
     const myReactions = normalizeMyChangelogReactions(entry.myReactions);
     const reactionRow = document.createElement("div");
     reactionRow.className = "changelogReactions";
-    const entryBusy = changelogReactionBusy.has(entry.id);
+    const entryBusy = changelogReactionBusy.has(String(entry.id));
     for(const key of CHANGELOG_REACTION_KEYS){
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "changelogReactionBtn";
-      btn.dataset.reaction = key;
-      // Use inner spans so CSS can size emoji/count independently.
+      btn.dataset.changelogReaction = key;
+      btn.dataset.entryId = String(entry.id);
       const emoji = document.createElement("span");
       emoji.className = "changelogReactionEmoji";
       emoji.textContent = CHANGELOG_REACTION_EMOJI[key] || key;
@@ -5486,53 +5607,284 @@ function renderChangelogList(){
       btn.appendChild(count);
       btn.classList.toggle("active", !!myReactions[key]);
       btn.disabled = entryBusy;
-      btn.addEventListener("click", ()=>toggleChangelogReaction(entry.id, key));
       reactionRow.appendChild(btn);
-    }
-
-    metaBlock.appendChild(reactionRow);
-    header.appendChild(metaBlock);
-
-    if(isOwner){
-      const actions = document.createElement("div");
-      actions.className = "changelogActions";
-      const editBtn = document.createElement("button");
-      editBtn.className = "btn secondary";
-      editBtn.type = "button";
-      editBtn.textContent = "Edit";
-      editBtn.addEventListener("click", ()=>openChangelogEditor(entry));
-
-      const delBtn = document.createElement("button");
-      delBtn.className = "btn danger";
-      delBtn.type = "button";
-      delBtn.textContent = "Delete";
-      delBtn.addEventListener("click", ()=>deleteChangelogEntry(entry.id));
-
-      actions.appendChild(editBtn);
-      actions.appendChild(delBtn);
-      header.appendChild(actions);
     }
 
     const body = document.createElement("div");
     body.className = "changelogBody";
     body.innerHTML = escapeHtml(entry.body || "").replace(/\n/g, "<br>");
 
+    details.appendChild(reactionRow);
+    details.appendChild(body);
+
     wrap.appendChild(header);
-    wrap.appendChild(body);
+    wrap.appendChild(details);
     changelogList.appendChild(wrap);
+  }
+}
+
+function handleChangelogListClick(event){
+  if(!changelogList) return;
+  const reactionBtn = event.target.closest("[data-changelog-reaction]");
+  if(reactionBtn && changelogList.contains(reactionBtn)){
+    const entryId = reactionBtn.dataset.entryId;
+    const reaction = reactionBtn.dataset.changelogReaction;
+    toggleChangelogReaction(entryId, reaction);
+    return;
+  }
+
+  const toggleBtn = event.target.closest("[data-changelog-toggle]");
+  if(toggleBtn && changelogList.contains(toggleBtn)){
+    const entryId = toggleBtn.dataset.changelogToggle;
+    openChangelogId = openChangelogId === entryId ? null : entryId;
+    renderChangelogList();
+    return;
+  }
+
+  const editBtn = event.target.closest("[data-changelog-edit]");
+  if(editBtn && changelogList.contains(editBtn)){
+    const entry = changelogEntries.find(e => e && String(e.id) === String(editBtn.dataset.changelogEdit));
+    if(entry) openChangelogEditor(entry);
+    return;
+  }
+
+  const deleteBtn = event.target.closest("[data-changelog-delete]");
+  if(deleteBtn && changelogList.contains(deleteBtn)){
+    deleteChangelogEntry(deleteBtn.dataset.changelogDelete);
+  }
+}
+
+function normalizeFaqReactions(reactions){
+  const base = { helpful:0, love:0, funny:0, confusing:0 };
+  if(!reactions || typeof reactions !== "object") return base;
+  for(const key of FAQ_REACTION_KEYS){
+    base[key] = Math.max(0, Number(reactions[key] ?? 0));
+  }
+  return base;
+}
+
+function normalizeMyFaqReactions(reactions){
+  const base = { helpful:false, love:false, funny:false, confusing:false };
+  if(!reactions || typeof reactions !== "object") return base;
+  for(const key of FAQ_REACTION_KEYS){
+    base[key] = !!reactions[key];
+  }
+  return base;
+}
+
+function normalizeFaqQuestion(row){
+  if(!row) return null;
+  const normalizeTs = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  return {
+    id: row.id,
+    question_title: row.question_title || "Untitled",
+    question_details: row.question_details || "",
+    answer_body: row.answer_body || "",
+    created_at: normalizeTs(row.created_at || row.createdAt || row.timestamp),
+    answered_at: normalizeTs(row.answered_at || row.answeredAt),
+    reactions: normalizeFaqReactions(row.reactions),
+    myReactions: normalizeMyFaqReactions(row.myReactions)
+  };
+}
+
+function renderFaqList(){
+  if(!faqList) return;
+  faqList.innerHTML = "";
+  if(!faqQuestions.length){
+    const empty = document.createElement("div");
+    empty.className = "card muted";
+    empty.textContent = "No questions yet.";
+    faqList.appendChild(empty);
+    return;
+  }
+
+  const isPrivileged = me && roleRank(me.role) >= roleRank("Admin");
+  for(const item of faqQuestions){
+    const wrap = document.createElement("div");
+    wrap.className = "faqEntry";
+    wrap.dataset.questionId = String(item.id);
+    const isOpen = String(openFaqQuestionId) === String(item.id);
+    wrap.classList.toggle("is-open", isOpen);
+
+    const header = document.createElement("div");
+    header.className = "faqHeader";
+
+    const metaBlock = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "faqTitle";
+    title.textContent = item.question_title || "Untitled";
+    const metaRow = document.createElement("div");
+    metaRow.className = "faqMetaRow";
+    const meta = document.createElement("div");
+    meta.className = "faqMeta";
+    meta.textContent = formatChangelogDate(item.created_at);
+    metaRow.appendChild(meta);
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "btn text faqToggle";
+    toggle.dataset.faqToggle = String(item.id);
+    toggle.textContent = isOpen ? "Hide" : "View";
+    metaRow.appendChild(toggle);
+
+    metaBlock.appendChild(title);
+    metaBlock.appendChild(metaRow);
+    header.appendChild(metaBlock);
+    wrap.appendChild(header);
+
+    const details = document.createElement("div");
+    details.className = "faqDetails";
+    details.hidden = !isOpen;
+
+    if(item.question_details){
+      const questionText = document.createElement("div");
+      questionText.className = "faqQuestion";
+      questionText.textContent = item.question_details;
+      details.appendChild(questionText);
+    }
+
+    const reactions = normalizeFaqReactions(item.reactions);
+    const mine = normalizeMyFaqReactions(item.myReactions);
+    const reactionRow = document.createElement("div");
+    reactionRow.className = "faqReactions";
+    const busy = faqReactionBusy.has(String(item.id));
+    for(const key of FAQ_REACTION_KEYS){
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "faqReactionBtn";
+      btn.dataset.faqReaction = key;
+      btn.dataset.questionId = String(item.id);
+      const emoji = document.createElement("span");
+      emoji.className = "faqReactionEmoji";
+      emoji.textContent = FAQ_REACTION_EMOJI[key] || key;
+      const count = document.createElement("span");
+      count.className = "faqReactionCount";
+      count.textContent = String(Math.max(0, Number(reactions[key] ?? 0)));
+      btn.appendChild(emoji);
+      btn.appendChild(count);
+      btn.classList.toggle("active", !!mine[key]);
+      btn.disabled = busy;
+      reactionRow.appendChild(btn);
+    }
+
+    const answerBlock = document.createElement("div");
+    answerBlock.className = "faqAnswerBlock";
+    const answerLabel = document.createElement("div");
+    answerLabel.className = "faqMeta";
+    answerLabel.textContent = item.answered_at ? `Answered ${formatChangelogDate(item.answered_at)}` : "Awaiting answer";
+    answerBlock.appendChild(answerLabel);
+
+    if(isPrivileged && editingFaqId === item.id){
+      const editArea = document.createElement("textarea");
+      editArea.className = "faqAnswerEdit";
+      editArea.value = item.answer_body || "";
+      editArea.dataset.faqAnswerInput = String(item.id);
+      answerBlock.appendChild(editArea);
+
+      const actions = document.createElement("div");
+      actions.className = "faqAnswerActions";
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "btn";
+      saveBtn.type = "button";
+      saveBtn.dataset.faqSaveAnswer = String(item.id);
+      saveBtn.textContent = "Save answer";
+      const cancelBtn = document.createElement("button");
+      cancelBtn.className = "btn secondary";
+      cancelBtn.type = "button";
+      cancelBtn.dataset.faqCancelAnswer = String(item.id);
+      cancelBtn.textContent = "Cancel";
+      actions.appendChild(saveBtn);
+      actions.appendChild(cancelBtn);
+      answerBlock.appendChild(actions);
+    } else {
+      const body = document.createElement("div");
+      body.className = "changelogBody";
+      body.textContent = item.answer_body || "No answer yet.";
+      answerBlock.appendChild(body);
+      if(isPrivileged){
+        const editBtn = document.createElement("button");
+        editBtn.className = "btn secondary";
+        editBtn.type = "button";
+        editBtn.dataset.faqEditAnswer = String(item.id);
+        editBtn.textContent = item.answer_body ? "Edit answer" : "Add answer";
+        answerBlock.appendChild(editBtn);
+      }
+    }
+
+    details.appendChild(reactionRow);
+    details.appendChild(answerBlock);
+    wrap.appendChild(details);
+    faqList.appendChild(wrap);
+  }
+}
+
+function handleFaqListClick(event){
+  if(!faqList) return;
+  const reactionBtn = event.target.closest("[data-faq-reaction]");
+  if(reactionBtn && faqList.contains(reactionBtn)){
+    event.preventDefault();
+    const reaction = reactionBtn.dataset.faqReaction;
+    const questionId = reactionBtn.dataset.questionId;
+    if(questionId && reaction) toggleFaqReaction(questionId, reaction);
+    return;
+  }
+
+  const toggleBtn = event.target.closest("[data-faq-toggle]");
+  if(toggleBtn && faqList.contains(toggleBtn)){
+    const qid = toggleBtn.dataset.faqToggle;
+    if(qid){
+      openFaqQuestionId = String(openFaqQuestionId) === String(qid) ? null : qid;
+      if(openFaqQuestionId) editingFaqId = null;
+      renderFaqList();
+    }
+    return;
+  }
+
+  const editBtn = event.target.closest("[data-faq-edit-answer]");
+  if(editBtn && faqList.contains(editBtn)){
+    const qid = editBtn.dataset.faqEditAnswer;
+    if(qid){
+      openFaqQuestionId = qid;
+      editingFaqId = Number(qid);
+      renderFaqList();
+      const input = faqList.querySelector("[data-faq-answer-input]");
+      input?.focus();
+    }
+    return;
+  }
+
+  const saveBtn = event.target.closest("[data-faq-save-answer]");
+  if(saveBtn && faqList.contains(saveBtn)){
+    const qid = saveBtn.dataset.faqSaveAnswer;
+    const input = faqList.querySelector("[data-faq-answer-input]");
+    if(qid && input){
+      saveFaqAnswer(qid, input.value);
+    }
+    return;
+  }
+
+  const cancelBtn = event.target.closest("[data-faq-cancel-answer]");
+  if(cancelBtn && faqList.contains(cancelBtn)){
+    editingFaqId = null;
+    renderFaqList();
   }
 }
 
 async function toggleChangelogReaction(entryId, reaction){
   if(!entryId || !reaction) return;
-  if(changelogReactionBusy.has(entryId)) return;
-  const entry = changelogEntries.find(e => e && e.id === entryId);
+  const entryKey = String(entryId);
+  if(changelogReactionBusy.has(entryKey)) return;
+  const entry = changelogEntries.find(e => e && String(e.id) === entryKey);
+  if(!entry) return;
   const prev = entry ? {
     reactions: { ...(entry.reactions || {}) },
     myReactions: { ...(entry.myReactions || {}) }
   } : null;
 
-  changelogReactionBusy.add(entryId);
+  changelogReactionBusy.add(entryKey);
 
   if(prev){
     const nextActive = !prev.myReactions?.[reaction];
@@ -5564,7 +5916,7 @@ async function toggleChangelogReaction(entryId, reaction){
     if(prev) updateChangelogEntryState(entryId, prev);
     if(changelogMsg) changelogMsg.textContent = "Failed to update reaction.";
   }finally{
-    changelogReactionBusy.delete(entryId);
+    changelogReactionBusy.delete(entryKey);
     renderChangelogList();
   }
 }
@@ -5608,6 +5960,130 @@ async function deleteChangelogEntry(id){
   }
   await loadChangelog(true);
   await loadLatestUpdateSnippet();
+}
+
+async function toggleFaqReaction(questionId, reaction){
+  const qKey = String(questionId);
+  if(!qKey || faqReactionBusy.has(qKey)) return;
+  const idx = faqQuestions.findIndex((q)=> q && String(q.id) === qKey);
+  if(idx === -1) return;
+  const entry = faqQuestions[idx];
+  const reactions = normalizeFaqReactions(entry.reactions);
+  const mine = normalizeMyFaqReactions(entry.myReactions);
+  const isActive = !!mine[reaction];
+  mine[reaction] = !isActive;
+  reactions[reaction] = Math.max(0, (reactions[reaction] || 0) + (isActive ? -1 : 1));
+  faqQuestions[idx] = { ...entry, reactions, myReactions: mine };
+  faqReactionBusy.add(qKey);
+  renderFaqList();
+  try{
+    const {res, text} = await api(`/api/faq/${encodeURIComponent(qKey)}/react`, {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ reaction })
+    });
+    if(!res.ok) throw new Error(text || "Failed");
+    const payload = JSON.parse(text || "null");
+    const normalized = normalizeFaqQuestion(payload);
+    if(normalized){
+      faqQuestions[idx] = normalized;
+    }
+  }catch(err){
+    if(faqMsg) faqMsg.textContent = (err?.message || "Failed to update reaction");
+    faqDirty = true;
+  }finally{
+    faqReactionBusy.delete(qKey);
+    renderFaqList();
+  }
+}
+
+async function saveFaqAnswer(questionId, answer){
+  const qKey = String(questionId);
+  if(!qKey) return;
+  if(faqEditMsg) faqEditMsg.textContent = "Saving answer...";
+  try{
+    const {res, text} = await api(`/api/faq/${encodeURIComponent(qKey)}/answer`, {
+      method:"PATCH", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ answer })
+    });
+    if(!res.ok) throw new Error(text || "Failed to save");
+    const payload = JSON.parse(text || "null");
+    const normalized = normalizeFaqQuestion(payload);
+    if(normalized){
+      const idx = faqQuestions.findIndex((q)=> q && String(q.id) === qKey);
+      if(idx !== -1) faqQuestions[idx] = normalized;
+    }
+    editingFaqId = null;
+    if(faqEditMsg) faqEditMsg.textContent = "";
+    renderFaqList();
+  }catch(err){
+    if(faqEditMsg) faqEditMsg.textContent = err?.message || "Failed to save answer.";
+  }
+}
+
+function openFaqForm(){
+  if(!faqForm) return;
+  faqForm.style.display = "flex";
+  faqTitleInput?.focus();
+}
+
+function closeFaqForm(){
+  if(faqForm) faqForm.style.display = "none";
+  if(faqTitleInput) faqTitleInput.value = "";
+  if(faqDetailsInput) faqDetailsInput.value = "";
+  if(faqEditMsg) faqEditMsg.textContent = "";
+}
+
+async function submitFaqQuestion(){
+  if(!faqTitleInput) return;
+  const title = faqTitleInput.value.trim();
+  const details = faqDetailsInput?.value.trim() || "";
+  if(!title){
+    if(faqEditMsg) faqEditMsg.textContent = "Question is required.";
+    return;
+  }
+  if(faqEditMsg) faqEditMsg.textContent = "Submitting...";
+  try{
+    const {res, text} = await api("/api/faq", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ title, details })
+    });
+    if(!res.ok) throw new Error(text || "Failed to submit");
+    const payload = JSON.parse(text || "null");
+    const normalized = normalizeFaqQuestion(payload);
+    if(normalized){
+      faqQuestions = [normalized, ...faqQuestions];
+      openFaqQuestionId = normalized.id;
+      editingFaqId = null;
+      faqLoaded = true;
+      faqDirty = false;
+      renderFaqList();
+    }
+    closeFaqForm();
+    if(faqMsg) faqMsg.textContent = "";
+  }catch(err){
+    if(faqEditMsg) faqEditMsg.textContent = err?.message || "Failed to submit question.";
+  }
+}
+
+async function loadFaq(force = false){
+  if(activeMenuTab !== "faq") return;
+  if(!force && faqLoaded && !faqDirty) return;
+  if(faqMsg) faqMsg.textContent = "Loading questions...";
+  try{
+    const {res, text} = await api("/api/faq", { method:"GET" });
+    if(!res.ok) throw new Error(text || "Failed to load");
+    const rows = JSON.parse(text || "[]");
+    faqQuestions = Array.isArray(rows) ? rows.map(normalizeFaqQuestion).filter(Boolean) : [];
+    faqLoaded = true;
+    faqDirty = false;
+    faqReactionBusy.clear();
+    if(faqMsg) faqMsg.textContent = faqQuestions.length ? "" : "No questions yet.";
+    renderFaqList();
+  }catch(err){
+    if(faqMsg) faqMsg.textContent = err?.message || "Failed to load questions.";
+    faqQuestions = [];
+    renderFaqList();
+  }
 }
 
 async function loadLatestUpdateSnippet(){
@@ -5695,7 +6171,9 @@ if(menuNav){
     setMenuTab(btn.dataset.menuTab);
   });
 }
-if(refreshLeaderboardsBtn) refreshLeaderboardsBtn.addEventListener("click", ()=> loadLeaderboards(true));
+if(refreshLeaderboardsBtn) refreshLeaderboardsBtn.addEventListener("click", ()=> fetchLeaderboards({ force:true, reason:"manual" }));
+if(changelogList) changelogList.addEventListener("click", handleChangelogListClick);
+if(faqList) faqList.addEventListener("click", handleFaqListClick);
 if(latestUpdateViewBtn){
   latestUpdateViewBtn.addEventListener("click", (e)=>{
     e.preventDefault();
@@ -5706,6 +6184,9 @@ if(latestUpdateViewBtn){
 if(changelogNewBtn) changelogNewBtn.addEventListener("click", ()=>openChangelogEditor());
 if(changelogCancelBtn) changelogCancelBtn.addEventListener("click", closeChangelogEditor);
 if(changelogSaveBtn) changelogSaveBtn.addEventListener("click", saveChangelogEntry);
+if(faqAskBtn) faqAskBtn.addEventListener("click", openFaqForm);
+if(faqCancelBtn) faqCancelBtn.addEventListener("click", closeFaqForm);
+if(faqSubmitBtn) faqSubmitBtn.addEventListener("click", submitFaqQuestion);
 closeChangelogEditor();
 
 function setReplyTarget(target){
@@ -6830,6 +7311,18 @@ socket.on("disconnect", (reason) => {
   socket.on("changelog reactions updated", ()=>{
     changelogDirty = true;
     if(rightPanelMode === "menu" && activeMenuTab === "changelog") loadChangelog(true);
+  });
+  socket.on("faq:update", ()=>{
+    faqDirty = true;
+    if(rightPanelMode === "menu" && activeMenuTab === "faq") loadFaq(true);
+  });
+  socket.on("leaderboard:update", ()=>{
+    if(!leaderboardState.isOpen) return;
+    const now = Date.now();
+    if(now - leaderboardState.lastFetchAt < 2000) return;
+    if(now < leaderboardState.wsCooldownUntil) return;
+    leaderboardState.wsCooldownUntil = now + 2000;
+    fetchLeaderboards({ force:true, reason:"ws" });
   });
   await loadRooms();
   await loadLatestUpdateSnippet();

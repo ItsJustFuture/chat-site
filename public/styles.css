@@ -1894,34 +1894,58 @@ main.chat{
 }
 
 .changelogList{ display:flex; flex-direction:column; gap:10px; min-height:0; touch-action: pan-y; }
-.changelogEntry{ padding:10px; border-radius:var(--radiusLg); border:1px solid var(--border); background:var(--panel); box-shadow:var(--shadowSm); display:flex; flex-direction:column; gap:6px; min-height:0; }
+.changelogEntry{ padding:10px; border-radius:var(--radiusLg); border:1px solid var(--border); background:var(--panel); box-shadow:var(--shadowSm); display:flex; flex-direction:column; gap:6px; min-height:0; overflow:hidden; }
 .changelogEntryHeader{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; flex-wrap:wrap; }
 .changelogEntryTitle{ font-weight:800; }
 .changelogEntryMeta{ font-size:12px; color:var(--muted); }
+.changelogEntryMetaRow{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .changelogMeta{ display:flex; flex-direction:column; gap:2px; }
-.changelogBody{ white-space:pre-line; overflow-wrap:anywhere; }
+.changelogToggle{ padding:4px 8px; }
+.changelogDetails{ display:none; flex-direction:column; gap:8px; margin-top:6px; }
+.changelogEntry.is-open .changelogDetails{ display:flex; }
+.changelogBody{ white-space:pre-line; overflow-wrap:anywhere; max-height:clamp(180px, 40vh, 420px); overflow-y:auto; -webkit-overflow-scrolling:touch; }
 .changelogActions{ display:flex; gap:6px; flex-wrap:wrap; }
 .changelogReactions{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:4px; }
 .changelogReactionBtn{
   display:inline-flex;
-  gap:6px;
+  gap:4px;
   align-items:center;
   border-radius:999px;
   border:1px solid var(--border);
   background:color-mix(in srgb, var(--panel) 80%, transparent);
   color:var(--text);
-  padding:4px 8px;
-  min-height:28px;
+  padding:3px 7px;
+  min-height:0;
   min-width:0;
   cursor:pointer;
   font-weight:700;
-  font-size:12px;
-  line-height:1;
+  font-size:11px;
+  line-height:1.1;
 }
 .changelogReactionEmoji{ font-size:14px; line-height:1; }
 .changelogReactionCount{ font-size:12px; opacity:0.85; }
 .latestUpdateReactions{ margin-top:6px; }
 .changelogReactionBtn.active{ background:color-mix(in srgb, var(--accent) 28%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); box-shadow:var(--shadowSm); }
+.faqForm{ display:none; flex-direction:column; gap:10px; margin-bottom:10px; }
+.faqList{ display:flex; flex-direction:column; gap:10px; min-height:0; touch-action: pan-y; }
+.faqEntry{ padding:10px; border-radius:var(--radiusLg); border:1px solid var(--border); background:var(--panel); box-shadow:var(--shadowSm); display:flex; flex-direction:column; gap:6px; min-height:0; overflow:hidden; }
+.faqHeader{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.faqTitle{ font-weight:800; }
+.faqMetaRow{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.faqMeta{ font-size:12px; color:var(--muted); }
+.faqToggle{ padding:4px 8px; }
+.faqDetails{ display:none; flex-direction:column; gap:8px; margin-top:6px; }
+.faqEntry.is-open .faqDetails{ display:flex; }
+.faqQuestion{ white-space:pre-line; overflow-wrap:anywhere; color:var(--muted); }
+.faqAnswerBlock{ display:flex; flex-direction:column; gap:6px; }
+.faqReactions{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:4px; }
+.faqReactionBtn{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:var(--radiusMd); border:1px solid var(--border); background:color-mix(in srgb, var(--panel) 90%, var(--border)); font-size:13px; cursor:pointer; }
+.faqReactionBtn:disabled{ opacity:0.6; cursor:default; }
+.faqReactionEmoji{ font-size:14px; line-height:1; }
+.faqReactionCount{ font-size:12px; opacity:0.85; }
+.faqReactionBtn.active{ background:color-mix(in srgb, var(--accent) 28%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); box-shadow:var(--shadowSm); }
+.faqAnswerActions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.faqAnswerEdit{ width:100%; min-height:120px; }
 .chan{
   padding:9px 10px;
   border-radius:var(--radiusMd);

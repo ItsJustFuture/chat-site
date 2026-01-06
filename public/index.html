@@ -141,22 +141,42 @@
 
     <div class="menuSection" data-menu-section="faq">
       <div class="menuSectionHeader">
-        <div class="title">FAQ</div>
+        <div class="title">Questions</div>
+        <div class="menuActions">
+          <button class="btn" id="faqAskBtn" type="button">Ask a question</button>
+        </div>
       </div>
-      <div class="card muted">Coming soon.</div>
+      <div class="faqForm" id="faqForm">
+        <div class="field">
+          <label for="faqTitleInput">Question</label>
+          <input id="faqTitleInput" maxlength="140" placeholder="What do you want to know?" />
+        </div>
+        <div class="field">
+          <label for="faqDetailsInput">Details (optional)</label>
+          <textarea id="faqDetailsInput" rows="3" maxlength="1000" placeholder="Add context or examples..."></textarea>
+        </div>
+        <div class="row" style="align-items:center; gap:10px; flex-wrap:wrap;">
+          <button class="btn" id="faqSubmitBtn" type="button">Submit</button>
+          <button class="btn secondary" id="faqCancelBtn" type="button">Cancel</button>
+          <div class="msgline" id="faqEditMsg"></div>
+        </div>
+      </div>
+      <div class="msgline" id="faqMsg"></div>
+      <div class="faqList" id="faqList"></div>
     </div>
 
-    <div class="menuSection" data-menu-section="leaderboards">
-      <div class="menuSectionHeader">
-        <div>
-          <div class="title">Leaderboards</div>
-          <div class="small muted">XP, Gold, Dice sixes, and profile likes.</div>
+      <div class="menuSection" data-menu-section="leaderboards">
+        <div class="menuSectionHeader">
+          <div>
+            <div class="title">Leaderboards</div>
+            <div class="small muted">XP, Gold, Dice sixes, and profile likes.</div>
         </div>
         <div class="menuActions">
           <button class="btn secondary" id="refreshLeaderboardsBtn" type="button">Refresh</button>
         </div>
       </div>
       <div class="msgline" id="leaderboardsMsg"></div>
+      <div class="small muted" id="leaderboardsUpdatedAt"></div>
       <div class="leaderboardGrid">
         <div class="card leaderboardCard">
           <div class="sectionTitle">XP leaderboard</div>
