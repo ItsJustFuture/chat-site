@@ -1632,6 +1632,8 @@ const headerColorB = document.getElementById("headerColorB");
 const headerColorAText = document.getElementById("headerColorAText");
 const headerColorBText = document.getElementById("headerColorBText");
 const editMood = document.getElementById("editMood");
+const editUsername = document.getElementById("editUsername");
+const changeUsernameBtn = document.getElementById("changeUsernameBtn");
 const editAge = document.getElementById("editAge");
 const editGender = document.getElementById("editGender");
 const vibeTagOptions = document.getElementById("vibeTagOptions");
@@ -7037,6 +7039,7 @@ async function loadMyProfile(){
   meAvatar.appendChild(avatarNode(p.avatar, p.username, p.role));
   renderLevelProgress(progression, true);
   renderVibeOptions(me.vibe_tags || []);
+  if (editUsername) editUsername.value = "";
 }
 
 function setMsgline(el, text){
@@ -7906,6 +7909,7 @@ modalTargetUsername = p.username;
   memberModTools.style.display="none";
 
   editMood.value=p.mood||"";
+  if (editUsername) editUsername.value = "";
   editAge.value=(p.age ?? "");
   editGender.value=p.gender||"";
   editBio.value=p.bio||"";
@@ -7946,6 +7950,34 @@ saveProfileBtn.addEventListener("click", async ()=>{
   await loadMyProfile();
   socket?.emit("join room", { room: currentRoom, status: normalizeStatusLabel(statusSelect.value, "Online") });
   await openMyProfile();
+});
+changeUsernameBtn?.addEventListener("click", async () => {
+  if (!editUsername) return;
+  const desired = String(editUsername.value || "").trim();
+  if (!desired) {
+    profileMsg.textContent = "Enter a new username.";
+    return;
+  }
+  profileMsg.textContent = "Changing username...";
+  try {
+    const res = await fetch("/api/me/username", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: desired }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      profileMsg.textContent = data.message || "Could not change username.";
+      return;
+    }
+    profileMsg.textContent = `Username updated to ${data.username}.`;
+    editUsername.value = "";
+    await loadMyProfile();
+    await loadProgression();
+  } catch (err) {
+    console.error("Username change failed", err);
+    profileMsg.textContent = "Could not change username.";
+  }
 });
 refreshProfileBtn.addEventListener("click", openMyProfile);
 
@@ -8412,6 +8444,14 @@ socket.on("disconnect", (reason) => {
   });
   socket.on("progression:update", (payload = {}) => {
     applyProgressionPayload(payload);
+    renderLevelProgress(progression, true);
+  });
+  socket.on("profile:update", async (payload = {}) => {
+    if (payload?.username && me) {
+      me.username = payload.username;
+      meName.textContent = payload.username;
+    }
+    await loadMyProfile();
     renderLevelProgress(progression, true);
   });
   socket.on("history", (history)=>{

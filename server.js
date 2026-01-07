@@ -245,6 +245,46 @@ const pgInitPromise = (async () => {
       );
       CREATE INDEX IF NOT EXISTS idx_faq_react_question ON faq_reactions(question_id);
     `);
+
+    // Track profile likes in Postgres so we can keep counts consistent across PG-first reads.
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS profile_likes (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        target_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at BIGINT NOT NULL,
+        CONSTRAINT profile_likes_unique UNIQUE(user_id, target_user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_profile_likes_target ON profile_likes(target_user_id);
+      CREATE INDEX IF NOT EXISTS idx_profile_likes_user ON profile_likes(user_id);
+    `);
+
+    // Centralized gold spending ledger so spend reasons can be audited later.
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS gold_transactions (
+        id BIGSERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        amount INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        created_at BIGINT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_gold_transactions_user ON gold_transactions(user_id);
+      CREATE INDEX IF NOT EXISTS idx_gold_transactions_created ON gold_transactions(created_at DESC);
+    `);
+
+    // Best-effort backfill of legacy SQLite likes into Postgres so leaderboards/profile counts stay consistent.
+    try {
+      const sqliteLikes = await dbAllAsync("SELECT user_id, target_user_id, created_at FROM profile_likes");
+      for (const row of sqliteLikes || []) {
+        await pgPool.query(
+          `INSERT INTO profile_likes (user_id, target_user_id, created_at)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (user_id, target_user_id) DO NOTHING`,
+          [row.user_id, row.target_user_id, row.created_at]
+        );
+      }
+    } catch (e) {
+      console.warn("[pg backfill] profile_likes:", e?.message || e);
+    }
 // Fix camelCase columns that Postgres lowercased previously
 // ---- Fix camelCase timestamp columns Postgres lowercased
 try {
@@ -774,6 +814,31 @@ const ROLE_DISPLAY = {
   Owner: "Owner",
 };
 
+function extractMentionId(raw) {
+  const text = String(raw || "").trim();
+  const match = text.match(/^<@(\d+)>$/) || text.match(/^@(\d+)$/);
+  if (!match) return null;
+  const id = Number(match[1]);
+  return Number.isInteger(id) ? id : null;
+}
+
+function parseUserAndAmountArgs(rawArgs, amountLabel = "amount") {
+  const tokens = parseQuotedArgs(rawArgs);
+  if (tokens.length < 2) {
+    return { error: `Missing user or ${amountLabel}.` };
+  }
+  const amountToken = tokens[tokens.length - 1];
+  const amount = Number(amountToken);
+  if (!Number.isFinite(amount)) {
+    return { error: `Invalid ${amountLabel}.` };
+  }
+  const userRaw = tokens.slice(0, -1).join(" ").trim();
+  if (!userRaw) {
+    return { error: "Missing user." };
+  }
+  return { userRaw, amount };
+}
+
 function findUserByMention(raw, cb) {
   const rawName = String(raw || "").replace(/^@+/, "").trim().slice(0, 64);
   const cleaned = cleanUsernameForLookup(rawName);
@@ -800,8 +865,34 @@ function findUserByMention(raw, cb) {
         (err, row) => (err ? resolve(null) : resolve(row || null))
       );
     });
+  const sqliteGetById = (id) =>
+    new Promise((resolve) => {
+      db.get(
+        "SELECT id, username, role FROM users WHERE id = ? LIMIT 1",
+        [id],
+        (err, row) => (err ? resolve(null) : resolve(row || null))
+      );
+    });
 
   (async () => {
+    const mentionId = extractMentionId(raw);
+    if (mentionId) {
+      if (await pgUsersEnabled()) {
+        try {
+          const { rows } = await pgPool.query(
+            "SELECT id, username, role FROM users WHERE id = $1 LIMIT 1",
+            [mentionId]
+          );
+          const row = rows?.[0] || null;
+          if (row?.id && row?.username) return cb(null, row);
+        } catch (e) {
+          console.warn("[findUserByMention][pg id] failed, falling back to sqlite:", e?.message || e);
+        }
+      }
+      const row = await sqliteGetById(mentionId);
+      if (row?.id && row?.username) return cb(null, row);
+    }
+
     for (const name of candidates) {
       // Prefer Postgres when enabled (Render/prod), but fall back to SQLite.
       if (await pgUsersEnabled()) {
@@ -829,6 +920,26 @@ function findUserByMention(raw, cb) {
   })().catch((e) => cb(e));
 }
 
+async function findUserByUsername(rawName) {
+  const name = sanitizeUsername(rawName);
+  if (!name) return null;
+  if (await pgUsersEnabled()) {
+    try {
+      const { rows } = await pgPool.query(
+        "SELECT id, username, role FROM users WHERE lower(username) = lower($1) LIMIT 1",
+        [name]
+      );
+      if (rows?.[0]) return rows[0];
+    } catch (e) {
+      console.warn("[findUserByUsername][pg] failed, falling back to sqlite:", e?.message || e);
+    }
+  }
+  return await dbGetAsync(
+    "SELECT id, username, role FROM users WHERE lower(username) = lower(?) LIMIT 1",
+    [name]
+  ).catch(() => null);
+}
+
 
 function logCommandAudit({ executor, commandName, args, targets, room, success, error }) {
   db.run(
@@ -849,13 +960,59 @@ function logCommandAudit({ executor, commandName, args, targets, room, success, 
   );
 }
 
+function parseQuotedArgs(raw) {
+  const input = String(raw || "");
+  const out = [];
+  let buf = "";
+  let quote = null;
+  let escaped = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    if (escaped) {
+      buf += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+      } else {
+        buf += ch;
+      }
+      continue;
+    }
+    if (ch === "\"" || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (buf) {
+        out.push(buf);
+        buf = "";
+      }
+      continue;
+    }
+    buf += ch;
+  }
+  if (buf) out.push(buf);
+  return out;
+}
+
 function parseCommand(text) {
   const raw = String(text || "").trim();
   if (!raw.startsWith("/")) return null;
-  const parts = raw.slice(1).split(/\s+/).filter(Boolean);
-  if (!parts.length) return null;
-  const [name, ...args] = parts;
-  return { name: name.toLowerCase(), args };
+  const trimmed = raw.slice(1);
+  const spaceIdx = trimmed.search(/\s/);
+  const name = (spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx)).trim();
+  if (!name) return null;
+  const rawArgs = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
+  const args = rawArgs ? parseQuotedArgs(rawArgs) : [];
+  return { name: name.toLowerCase(), args, rawArgs };
 }
 
 const slowmodeTracker = new Map(); // key `${room}:${userId}` -> last ts
@@ -886,12 +1043,14 @@ const GOLD_TICK_MS = 60_000;
 const goldInFlight = new Set();
 const MESSAGE_GOLD_COOLDOWN_MS = 5 * 60 * 1000;
 const DAILY_GOLD_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const USERNAME_CHANGE_COST = 5000;
 // ---- Real-time presence tracking
 const onlineState = new Map(); // userId -> { room, status }
 const socketIdByUserId = new Map(); // userId -> socket.id
 const typingByRoom = new Map(); // room -> Set(username)
 const msgRate = new Map(); // socket.id -> { lastTs, count }
 const onlineXpTrack = new Map(); // userId -> { lastTs, carryMs }
+const xpUpdateLocks = new Map(); // userId -> Promise chain to prevent XP races
 
 // ---- DM read receipts (in-memory; resets on restart)
 const dmReadState = new Map(); // threadId -> Map(userId -> { messageId, ts })
@@ -925,6 +1084,117 @@ function dbRunAsync(sql, params = []) {
       resolve(this);
     });
   });
+}
+
+// Serialize XP updates per user to prevent race conditions between concurrent XP events.
+async function withXpLock(userId, fn) {
+  const prev = xpUpdateLocks.get(userId) || Promise.resolve();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  xpUpdateLocks.set(userId, prev.then(() => gate));
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (xpUpdateLocks.get(userId) === gate) xpUpdateLocks.delete(userId);
+  }
+}
+
+function buildXpUpdateFields(newXp, opts = {}, forPg = false) {
+  const sets = [forPg ? "xp = $1" : "xp = ?"];
+  const params = [newXp];
+  let idx = 2;
+
+  const lastMessageXpAt = opts.lastMessageXpAt ?? opts.lastXpMessageAt ?? null;
+  const lastLoginXpAt = opts.lastLoginXpAt ?? null;
+  const lastOnlineXpAt = opts.lastOnlineXpAt ?? null;
+  const lastDailyLoginAt = opts.lastDailyLoginAt ?? null;
+  const lastXpMessageAt = opts.lastXpMessageAt ?? null;
+
+  if (lastMessageXpAt != null) {
+    sets.push(forPg ? `"lastMessageXpAt" = $${idx}` : "lastMessageXpAt = ?");
+    params.push(lastMessageXpAt);
+    idx += 1;
+    sets.push(forPg ? `"lastXpMessageAt" = $${idx}` : "lastXpMessageAt = ?");
+    params.push(lastMessageXpAt);
+    idx += 1;
+  }
+  if (lastLoginXpAt != null) {
+    sets.push(forPg ? `"lastLoginXpAt" = $${idx}` : "lastLoginXpAt = ?");
+    params.push(lastLoginXpAt);
+    idx += 1;
+  }
+  if (lastOnlineXpAt != null) {
+    sets.push(forPg ? `"lastOnlineXpAt" = $${idx}` : "lastOnlineXpAt = ?");
+    params.push(lastOnlineXpAt);
+    idx += 1;
+  }
+  if (lastDailyLoginAt != null) {
+    sets.push(forPg ? `"lastDailyLoginAt" = $${idx}` : "lastDailyLoginAt = ?");
+    params.push(lastDailyLoginAt);
+    idx += 1;
+  }
+  if (lastXpMessageAt != null) {
+    sets.push(forPg ? `"lastXpMessageAt" = $${idx}` : "lastXpMessageAt = ?");
+    params.push(lastXpMessageAt);
+  }
+
+  return { sets, params };
+}
+
+async function spendGoldInTransaction(client, userId, amount, reason) {
+  const spendAmount = Math.max(0, Math.floor(Number(amount) || 0));
+  if (!spendAmount || !Number.isFinite(spendAmount)) {
+    return { ok: false, error: "INVALID_AMOUNT", message: "Invalid spend amount." };
+  }
+  const spendReason = String(reason || "").trim();
+  if (!spendReason) {
+    return { ok: false, error: "INVALID_REASON", message: "Missing spend reason." };
+  }
+
+  const { rows } = await client.query("SELECT gold FROM users WHERE id = $1 FOR UPDATE", [userId]);
+  const row = rows?.[0];
+  if (!row) return { ok: false, error: "NOT_FOUND", message: "User not found." };
+
+  const current = Number(row.gold || 0);
+  if (current < spendAmount) {
+    return { ok: false, error: "INSUFFICIENT_GOLD", message: "Not enough gold.", gold: current };
+  }
+
+  const nextGold = current - spendAmount;
+  await client.query("UPDATE users SET gold = $1 WHERE id = $2", [nextGold, userId]);
+  await client.query(
+    "INSERT INTO gold_transactions (user_id, amount, reason, created_at) VALUES ($1, $2, $3, $4)",
+    [userId, spendAmount, spendReason, Date.now()]
+  );
+  return { ok: true, gold: nextGold };
+}
+
+// Centralized gold spending helper: atomic deduction + ledger logging for extensibility.
+async function spendGold(userId, amount, reason, opts = {}) {
+  if (!(await pgUsersEnabled())) {
+    return { ok: false, error: "PG_UNAVAILABLE", message: "Gold spending is unavailable right now." };
+  }
+  const client = opts.client || await pgPool.connect();
+  const manageTx = !opts.client;
+  try {
+    if (manageTx) await client.query("BEGIN");
+    const result = await spendGoldInTransaction(client, userId, amount, reason);
+    if (!result.ok) {
+      if (manageTx) await client.query("ROLLBACK");
+      return result;
+    }
+    if (manageTx) await client.query("COMMIT");
+    return result;
+  } catch (e) {
+    if (manageTx) {
+      try { await client.query("ROLLBACK"); } catch {}
+    }
+    throw e;
+  } finally {
+    if (manageTx) client.release();
+  }
 }
 
 const commandRegistry = {
@@ -1272,10 +1542,11 @@ const commandRegistry = {
     description: "Add gold",
     usage: "/givegold @user amount",
     example: "/givegold @sam 50",
-    handler: async ({ args }) => {
-      const amt = Number(args[1]);
-      if (!args[0] || !Number.isFinite(amt)) return { ok: false, message: "Missing arguments" };
-      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+    handler: async ({ rawArgs }) => {
+      const parsed = parseUserAndAmountArgs(rawArgs, "amount");
+      if (parsed.error) return { ok: false, message: parsed.error };
+      const target = await new Promise((resolve, reject) => findUserByMention(parsed.userRaw, (e, u) => (e ? reject(e) : resolve(u))));
+      const amt = Number(parsed.amount);
       await dbRunAsync(`UPDATE users SET gold = gold + ? WHERE id=?`, [amt, target.id]);
       emitProgressionUpdate(target.id);
       return { ok: true, message: `Gave ${amt} gold to ${target.username}` };
@@ -1286,10 +1557,11 @@ const commandRegistry = {
     description: "Set user gold",
     usage: "/setgold @user amount",
     example: "/setgold @sam 0",
-    handler: async ({ args }) => {
-      const amt = Number(args[1]);
-      if (!args[0] || !Number.isFinite(amt)) return { ok: false, message: "Missing arguments" };
-      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+    handler: async ({ rawArgs }) => {
+      const parsed = parseUserAndAmountArgs(rawArgs, "amount");
+      if (parsed.error) return { ok: false, message: parsed.error };
+      const target = await new Promise((resolve, reject) => findUserByMention(parsed.userRaw, (e, u) => (e ? reject(e) : resolve(u))));
+      const amt = Number(parsed.amount);
       await dbRunAsync(`UPDATE users SET gold=? WHERE id=?`, [amt, target.id]);
       emitProgressionUpdate(target.id);
       return { ok: true, message: `Set gold for ${target.username} to ${amt}` };
@@ -1312,10 +1584,12 @@ const commandRegistry = {
     description: "Set level",
     usage: "/setlevel @user level",
     example: "/setlevel @sam 5",
-    handler: async ({ args }) => {
-      const level = Number(args[1]);
-      if (!args[0] || !Number.isFinite(level) || level < 1) return { ok: false, message: "Missing arguments" };
-      const target = await new Promise((resolve, reject) => findUserByMention(args[0], (e, u) => (e ? reject(e) : resolve(u))));
+    handler: async ({ rawArgs }) => {
+      const parsed = parseUserAndAmountArgs(rawArgs, "level");
+      if (parsed.error) return { ok: false, message: parsed.error };
+      const level = Number(parsed.amount);
+      if (!Number.isFinite(level) || level < 1) return { ok: false, message: "Invalid level." };
+      const target = await new Promise((resolve, reject) => findUserByMention(parsed.userRaw, (e, u) => (e ? reject(e) : resolve(u))));
       let xpNeeded = 0;
       for (let i = 1; i < Math.floor(level); i++) xpNeeded += i * 100;
       await dbRunAsync(`UPDATE users SET xp=? WHERE id=?`, [xpNeeded, target.id]);
@@ -1414,6 +1688,18 @@ const commandRegistry = {
     example: "/forcereload",
     handler: async () => ({ ok: true, message: "Reloaded config" }),
   },
+  rebuildleaderboards: {
+    minRole: "Owner",
+    description: "Rebuild leaderboards",
+    usage: "/rebuildleaderboards",
+    example: "/rebuildleaderboards",
+    handler: async () => {
+      // Safe rebuild path for admins to refresh leaderboard data on demand.
+      await rebuildLeaderboards({ force: true });
+      io.emit("leaderboard:update");
+      return { ok: true, message: "Leaderboards rebuilt." };
+    },
+  },
   setconfig: {
     minRole: "Owner",
     description: "Set config flag",
@@ -1479,7 +1765,7 @@ async function executeCommand(socket, rawText, room) {
   }
 
   try {
-    const result = await meta.handler({ args: parsed.args, room, socket, actor, actorRole });
+    const result = await meta.handler({ args: parsed.args, rawArgs: parsed.rawArgs, room, socket, actor, actorRole, rawText });
     const payload = { ok: !!result.ok, message: result.message, type: result.type || "info" };
     if (result.commands) payload.commands = result.commands;
     if (result.role) payload.role = result.role;
@@ -1655,27 +1941,78 @@ async function applyXpGain(userId, delta, opts = {}) {
   const amount = Math.max(0, Math.floor(Number(delta) || 0));
   if (!amount) return null;
 
-  const baseRow = opts.baseRow || (await getProgressionRow(userId));
-  if (!baseRow) return null;
+  return withXpLock(userId, async () => {
+    let prevXp = 0;
+    let prevLevel = 1;
+    let newXp = 0;
+    let info = null;
 
-  const prevXp = Math.max(0, Math.floor(Number(baseRow.xp) || 0));
-  const prevLevel = levelInfo(prevXp).level;
-  const newXp = prevXp + amount;
-  const info = levelInfo(newXp);
+    if (await pgUserExists(userId)) {
+      const client = await pgPool.connect();
+      try {
+        await client.query("BEGIN");
+        const { rows } = await client.query(
+          'SELECT xp FROM users WHERE id = $1 FOR UPDATE',
+          [userId]
+        );
+        const baseRow = rows?.[0];
+        if (!baseRow) {
+          await client.query("ROLLBACK");
+          return null;
+        }
 
-  await persistXpState(userId, {
-    xp: newXp,
-    lastMessageXpAt: opts.lastMessageXpAt ?? opts.lastXpMessageAt ?? null,
-    lastXpMessageAt: opts.lastXpMessageAt ?? null,
-    lastLoginXpAt: opts.lastLoginXpAt ?? null,
-    lastDailyLoginAt: opts.lastDailyLoginAt ?? null,
-    lastOnlineXpAt: opts.lastOnlineXpAt ?? null,
+        prevXp = Math.max(0, Math.floor(Number(baseRow.xp) || 0));
+        prevLevel = levelInfo(prevXp).level;
+        newXp = prevXp + amount;
+        info = levelInfo(newXp);
+
+        const { sets, params } = buildXpUpdateFields(newXp, opts, true);
+        params.push(userId);
+        await client.query(`UPDATE users SET ${sets.join(", ")} WHERE id = $${params.length}`, params);
+        await client.query("COMMIT");
+      } catch (e) {
+        try { await client.query("ROLLBACK"); } catch {}
+        console.warn("[xp][pg apply]", e?.message || e);
+        return null;
+      } finally {
+        client.release();
+      }
+
+      // Best-effort mirror to SQLite so fallback reads don't show stale XP.
+      try {
+        const sqliteUpdate = buildXpUpdateFields(newXp, opts, false);
+        await dbRunAsync(
+          `UPDATE users SET ${sqliteUpdate.sets.join(", ")} WHERE id = ?`,
+          [...sqliteUpdate.params, userId]
+        );
+      } catch (e) {
+        console.warn("[xp][sqlite mirror]", e?.message || e);
+      }
+    } else {
+      const baseRow = opts.baseRow || (await getProgressionRow(userId));
+      if (!baseRow) return null;
+
+      prevXp = Math.max(0, Math.floor(Number(baseRow.xp) || 0));
+      prevLevel = levelInfo(prevXp).level;
+      newXp = prevXp + amount;
+      info = levelInfo(newXp);
+
+      await persistXpState(userId, {
+        xp: newXp,
+        lastMessageXpAt: opts.lastMessageXpAt ?? opts.lastXpMessageAt ?? null,
+        lastXpMessageAt: opts.lastXpMessageAt ?? null,
+        lastLoginXpAt: opts.lastLoginXpAt ?? null,
+        lastDailyLoginAt: opts.lastDailyLoginAt ?? null,
+        lastOnlineXpAt: opts.lastOnlineXpAt ?? null,
+      });
+    }
+
+    // Emit level-up only after the committed XP write to avoid racey toasts.
+    if (info && info.level > prevLevel) emitLevelUp(userId, info.level);
+    emitProgressionUpdate(userId);
+    emitLeaderboardUpdateThrottled();
+    return info ? { xp: newXp, ...info } : null;
   });
-
-  if (info.level > prevLevel) emitLevelUp(userId, info.level);
-  emitProgressionUpdate(userId);
-  emitLeaderboardUpdateThrottled();
-  return { xp: newXp, ...info };
 }
 
 async function awardMessageXp(userId, roleHint) {
@@ -3266,6 +3603,70 @@ app.get("/api/me/gold", requireLogin, async (req, res) => {
   }
 });
 
+app.post("/api/me/username", requireLogin, async (req, res) => {
+  const userId = req.session.user.id;
+  const raw = String(req.body?.username || "").trim();
+  const newName = sanitizeUsername(raw);
+
+  if (!newName || newName.length < 2) {
+    return res.status(400).json({ ok: false, message: "Invalid username." });
+  }
+  if (normKey(newName) === normKey(req.session.user.username)) {
+    return res.status(400).json({ ok: false, message: "That is already your username." });
+  }
+  if (!(await pgUsersEnabled())) {
+    return res.status(503).json({ ok: false, message: "Username changes are unavailable right now." });
+  }
+
+  let nextGold = null;
+  const client = await pgPool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const existing = await client.query(
+      "SELECT id FROM users WHERE lower(username) = lower($1) AND id <> $2 LIMIT 1",
+      [newName, userId]
+    );
+    if (existing.rows?.length) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, message: "Username already taken." });
+    }
+
+    const spend = await spendGoldInTransaction(client, userId, USERNAME_CHANGE_COST, "username_change");
+    if (!spend.ok) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ ok: false, message: spend.message || "Not enough gold.", gold: spend.gold ?? null });
+    }
+
+    await client.query("UPDATE users SET username = $1 WHERE id = $2", [newName, userId]);
+    await client.query("COMMIT");
+    nextGold = spend.gold;
+  } catch (e) {
+    try { await client.query("ROLLBACK"); } catch {}
+    if (e?.code === "23505") {
+      return res.status(409).json({ ok: false, message: "Username already taken." });
+    }
+    console.error("[username change]", e);
+    return res.status(500).json({ ok: false, message: "Failed to update username." });
+  } finally {
+    client.release();
+  }
+
+  // Best-effort mirror to SQLite so legacy lookups remain consistent.
+  try {
+    await dbRunAsync("UPDATE users SET username = ? WHERE id = ?", [newName, userId]);
+  } catch (e) {
+    console.warn("[username change][sqlite]", e?.message || e);
+  }
+
+  req.session.user.username = newName;
+  return req.session.save((saveErr) => {
+    if (saveErr) return res.status(500).json({ ok: false, message: "Session save failed." });
+    updateLiveUsername(userId, newName);
+    return res.json({ ok: true, username: newName, gold: nextGold, cost: USERNAME_CHANGE_COST });
+  });
+});
+
 app.get("/api/me/theme", requireLogin, async (req, res) => {
   try {
     // Prefer Postgres
@@ -3464,20 +3865,57 @@ function sortLeaderboardRows(rows, valueKey) {
     });
 }
 
+let leaderboardCache = { payload: null, updatedAt: 0, inFlight: null };
+
 async function buildLeaderboardPayload() {
-  const [xpRowsRaw, goldRowsRaw, diceRowsRaw, likeRowsRaw] = await Promise.all([
-    dbAllAsync(`SELECT username, xp FROM users ORDER BY xp DESC, LOWER(username) ASC, username ASC LIMIT 20`),
-    dbAllAsync(`SELECT username, gold FROM users ORDER BY gold DESC, LOWER(username) ASC, username ASC LIMIT 20`),
-    dbAllAsync(`SELECT username, dice_sixes FROM users ORDER BY dice_sixes DESC, LOWER(username) ASC, username ASC LIMIT 20`),
-    dbAllAsync(
-      `SELECT u.username, COUNT(pl.user_id) AS likes
+  const merged = new Map();
+
+  if (await pgUsersEnabled()) {
+    try {
+      const { rows } = await pgPool.query(
+        `SELECT u.id,
+                u.username,
+                COALESCE(u.xp, 0) AS xp,
+                COALESCE(u.gold, 0) AS gold,
+                COALESCE(u.dice_sixes, 0) AS dice_sixes,
+                COALESCE(COUNT(pl.user_id), 0) AS likes
+           FROM users u
+           LEFT JOIN profile_likes pl ON pl.target_user_id = u.id
+          GROUP BY u.id`
+      );
+      for (const row of rows || []) {
+        const id = Number(row.id);
+        if (!Number.isInteger(id)) continue;
+        merged.set(id, row);
+      }
+    } catch (e) {
+      console.warn("[leaderboard][pg] failed, falling back to sqlite:", e?.message || e);
+    }
+  }
+
+  // Backfill any users that only exist in SQLite so the leaderboard includes everyone.
+  const sqliteRows = await dbAllAsync(
+    `SELECT u.id,
+            u.username,
+            COALESCE(u.xp, 0) AS xp,
+            COALESCE(u.gold, 0) AS gold,
+            COALESCE(u.dice_sixes, 0) AS dice_sixes,
+            COALESCE(COUNT(pl.user_id), 0) AS likes
        FROM users u
        LEFT JOIN profile_likes pl ON pl.target_user_id = u.id
-       GROUP BY u.id
-       ORDER BY likes DESC, LOWER(u.username) ASC, u.username ASC
-       LIMIT 20`
-    ),
-  ]);
+      GROUP BY u.id`
+  );
+  for (const row of sqliteRows || []) {
+    const id = Number(row.id);
+    if (!Number.isInteger(id) || merged.has(id)) continue;
+    merged.set(id, row);
+  }
+
+  const rows = Array.from(merged.values());
+  const xpRowsRaw = rows.map((r) => ({ username: r.username, xp: r.xp }));
+  const goldRowsRaw = rows.map((r) => ({ username: r.username, gold: r.gold }));
+  const diceRowsRaw = rows.map((r) => ({ username: r.username, dice_sixes: r.dice_sixes }));
+  const likeRowsRaw = rows.map((r) => ({ username: r.username, likes: r.likes }));
 
   const xpRows = sortLeaderboardRows(xpRowsRaw, "xp");
   const goldRows = sortLeaderboardRows(goldRowsRaw, "gold");
@@ -3492,9 +3930,26 @@ async function buildLeaderboardPayload() {
   };
 }
 
+async function rebuildLeaderboards({ force = false } = {}) {
+  if (leaderboardCache.inFlight && !force) return leaderboardCache.inFlight;
+  leaderboardCache.inFlight = (async () => {
+    const payload = await buildLeaderboardPayload();
+    leaderboardCache.payload = payload;
+    leaderboardCache.updatedAt = Date.now();
+    return payload;
+  })();
+  try {
+    return await leaderboardCache.inFlight;
+  } finally {
+    leaderboardCache.inFlight = null;
+  }
+}
+
 async function sendLeaderboard(res) {
   try {
-    const payload = await buildLeaderboardPayload();
+    const now = Date.now();
+    const shouldRefresh = !leaderboardCache.payload || (now - leaderboardCache.updatedAt > 10_000);
+    const payload = shouldRefresh ? await rebuildLeaderboards({ force: true }) : leaderboardCache.payload;
     return res.json(payload);
   } catch (err) {
     return res.status(500).json({ ok: false });
@@ -3839,6 +4294,91 @@ app.post("/api/faq/:id/react", requireLogin, async (req, res) => {
 // ---- Profile routes
 app.get("/api/profile", requireLogin, (req, res) => res.redirect(307, "/profile"));
 
+async function fetchProfileLikeStats(targetUserId, viewerId) {
+  if (await pgUsersEnabled()) {
+    try {
+      const { rows } = await pgPool.query(
+        `SELECT COUNT(*)::int AS likes,
+                EXISTS(SELECT 1 FROM profile_likes WHERE user_id = $2 AND target_user_id = $1) AS liked`,
+        [targetUserId, viewerId]
+      );
+      return { likes: Number(rows?.[0]?.likes || 0), liked: !!rows?.[0]?.liked };
+    } catch (e) {
+      console.warn("[profile likes][pg] failed, falling back to sqlite:", e?.message || e);
+    }
+  }
+
+  return await new Promise((resolve) => {
+    db.get(
+      `SELECT
+        (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
+        EXISTS(SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?) AS liked`,
+      [targetUserId, viewerId, targetUserId],
+      (_likeErr, likesRow) => {
+        resolve({
+          likes: Number(likesRow?.likes || 0),
+          liked: !!Number(likesRow?.liked || 0),
+        });
+      }
+    );
+  });
+}
+
+async function toggleProfileLike(userId, targetUserId) {
+  if (await pgUsersEnabled()) {
+    try {
+      const now = Date.now();
+      await pgPool.query(
+        `WITH deleted AS (
+            DELETE FROM profile_likes
+             WHERE user_id = $1 AND target_user_id = $2
+             RETURNING 1
+         ),
+         inserted AS (
+           INSERT INTO profile_likes (user_id, target_user_id, created_at)
+           SELECT $1, $2, $3
+            WHERE NOT EXISTS (SELECT 1 FROM deleted)
+           ON CONFLICT (user_id, target_user_id) DO NOTHING
+           RETURNING 1
+         )
+         SELECT 1`,
+        [userId, targetUserId, now]
+      );
+      const stats = await fetchProfileLikeStats(targetUserId, userId);
+      // Best-effort mirror to SQLite so legacy reads stay consistent.
+      try {
+        if (stats.liked) {
+          await dbRunAsync(
+            `INSERT OR IGNORE INTO profile_likes (user_id, target_user_id, created_at) VALUES (?, ?, ?)`,
+            [userId, targetUserId, now]
+          );
+        } else {
+          await dbRunAsync(`DELETE FROM profile_likes WHERE user_id = ? AND target_user_id = ?`, [userId, targetUserId]);
+        }
+      } catch (e) {
+        console.warn("[profile likes][sqlite mirror]", e?.message || e);
+      }
+      return stats;
+    } catch (e) {
+      console.warn("[profile likes][pg toggle] failed, falling back to sqlite:", e?.message || e);
+    }
+  }
+
+  const existing = await dbGetAsync(
+    `SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?`,
+    [userId, targetUserId]
+  ).catch(() => null);
+  if (existing) {
+    await dbRunAsync(`DELETE FROM profile_likes WHERE user_id = ? AND target_user_id = ?`, [userId, targetUserId]);
+  } else {
+    await dbRunAsync(
+      `INSERT OR IGNORE INTO profile_likes (user_id, target_user_id, created_at) VALUES (?, ?, ?)`,
+      [userId, targetUserId, Date.now()]
+    );
+  }
+  return await fetchProfileLikeStats(targetUserId, userId);
+}
+
 app.get("/profile", requireLogin, async (req, res) => {
   const userId = req.session.user.id;
 
@@ -3871,87 +4411,67 @@ app.get("/profile", requireLogin, async (req, res) => {
       const lastStatus = normalizeStatus(live?.status || row.last_status, "");
       const lastSeen = resolveLastSeen(row, live, lastStatus);
 
-      // Likes are stored in sqlite in this codebase; keep using it
-      db.get(
-        `SELECT
-          (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
-          EXISTS(SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?) AS liked
-        `,
-        [row.id, userId, row.id],
-        (_likeErr, likesRow) => {
-          const payload = {
-            id: row.id,
-            username: row.username,
-            role: row.role,
-            avatar: avatarUrlFromRow(row),
-            bio: row.bio,
-            mood: row.mood,
-            age: row.age,
-            gender: row.gender,
-          created_at: row.created_at,
-          last_seen: lastSeen,
-          last_room: row.last_room,
-          last_status: lastStatus || null,
-          current_room: live?.room || null,
-          header_grad_a: sanitizeHexColor(row.header_grad_a),
-          header_grad_b: sanitizeHexColor(row.header_grad_b),
-          likes: Number(likesRow?.likes || 0),
-          likedByMe: !!Number(likesRow?.liked || 0),
-          vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
-          ...progressionFromRow(row, true),
-        };
-	          return res.json(payload);
-	        }
-	      );
-      return;
+      const likeStats = await fetchProfileLikeStats(row.id, userId);
+      const payload = {
+        id: row.id,
+        username: row.username,
+        role: row.role,
+        avatar: avatarUrlFromRow(row),
+        bio: row.bio,
+        mood: row.mood,
+        age: row.age,
+        gender: row.gender,
+        created_at: row.created_at,
+        last_seen: lastSeen,
+        last_room: row.last_room,
+        last_status: lastStatus || null,
+        current_room: live?.room || null,
+        header_grad_a: sanitizeHexColor(row.header_grad_a),
+        header_grad_b: sanitizeHexColor(row.header_grad_b),
+        likes: likeStats.likes,
+        likedByMe: likeStats.liked,
+        vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
+        ...progressionFromRow(row, true),
+      };
+      return res.json(payload);
     }
   } catch (e) {
     console.warn("[/profile][pg] failed, falling back to sqlite:", e?.message || e);
   }
 
   // SQLite fallback (original behavior)
-  db.get(
+  const row = await dbGet(
     `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp, vibe_tags, header_grad_a, header_grad_b
      FROM users WHERE id = ?`,
-    [userId],
-    (err, row) => {
-      if (err || !row) return res.status(404).send("Not found");
-      const live = onlineState.get(row.id);
-      const lastStatus = normalizeStatus(live?.status || row.last_status, "");
-      const lastSeen = resolveLastSeen(row, live, lastStatus);
-      db.get(
-        `SELECT
-          (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
-          EXISTS(SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?) AS liked
-        `,
-        [row.id, userId, row.id],
-        (_likeErr, likesRow) => {
-          const payload = {
-            id: row.id,
-            username: row.username,
-            role: row.role,
-            avatar: avatarUrlFromRow(row),
-            bio: row.bio,
-            mood: row.mood,
-            age: row.age,
-            gender: row.gender,
-            created_at: row.created_at,
-            last_seen: lastSeen,
-            last_room: row.last_room,
-            last_status: lastStatus || null,
-            current_room: live?.room || null,
-            header_grad_a: sanitizeHexColor(row.header_grad_a),
-            header_grad_b: sanitizeHexColor(row.header_grad_b),
-            likes: Number(likesRow?.likes || 0),
-            likedByMe: !!Number(likesRow?.liked || 0),
-            vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
-            ...progressionFromRow(row, true),
-          };
-          return res.json(payload);
-        }
-      );
-    }
+    [userId]
   );
+  if (!row) return res.status(404).send("Not found");
+  const live = onlineState.get(row.id);
+  const lastStatus = normalizeStatus(live?.status || row.last_status, "");
+  const lastSeen = resolveLastSeen(row, live, lastStatus);
+  const likeStats = await fetchProfileLikeStats(row.id, userId);
+  const payload = {
+    id: row.id,
+    username: row.username,
+    role: row.role,
+    avatar: avatarUrlFromRow(row),
+    bio: row.bio,
+    mood: row.mood,
+    age: row.age,
+    gender: row.gender,
+    created_at: row.created_at,
+    last_seen: lastSeen,
+    last_room: row.last_room,
+    last_status: lastStatus || null,
+    current_room: live?.room || null,
+    header_grad_a: sanitizeHexColor(row.header_grad_a),
+    header_grad_b: sanitizeHexColor(row.header_grad_b),
+    likes: likeStats.likes,
+    likedByMe: likeStats.liked,
+    vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
+    ...progressionFromRow(row, true),
+  };
+  return res.json(payload);
 });
 
 app.get("/profile/:username", requireLogin, async (req, res) => {
@@ -4004,84 +4524,54 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
     const lastSeen = resolveLastSeen(row, live, lastStatus);
     const includePrivate = req.session.user.id === row.id;
 
-    db.get(
-      `SELECT
-        (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
-        EXISTS(SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?) AS liked
-      `,
-      [row.id, req.session.user.id, row.id],
-      (_likeErr, likesRow) => {
-        const payload = {
-          id: row.id,
-          username: row.username,
-          role: row.role,
-          avatar: avatarUrlFromRow(row),
-          bio: row.bio,
-          mood: live?.mood ?? row.mood,
-          age: row.age,
-          gender: row.gender,
-          created_at: row.created_at,
-          last_seen: lastSeen,
-          last_room: row.last_room,
-          last_status: lastStatus || null,
-          current_room: live?.room || null,
-          header_grad_a: sanitizeHexColor(row.header_grad_a),
-          header_grad_b: sanitizeHexColor(row.header_grad_b),
-          likes: Number(likesRow?.likes || 0),
-          likedByMe: !!Number(likesRow?.liked || 0),
-          vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
-          ...progressionFromRow(row, includePrivate),
-        };
-        return res.json(payload);
-      }
-    );
+    const likeStats = await fetchProfileLikeStats(row.id, req.session.user.id);
+    const payload = {
+      id: row.id,
+      username: row.username,
+      role: row.role,
+      avatar: avatarUrlFromRow(row),
+      bio: row.bio,
+      mood: live?.mood ?? row.mood,
+      age: row.age,
+      gender: row.gender,
+      created_at: row.created_at,
+      last_seen: lastSeen,
+      last_room: row.last_room,
+      last_status: lastStatus || null,
+      current_room: live?.room || null,
+      header_grad_a: sanitizeHexColor(row.header_grad_a),
+      header_grad_b: sanitizeHexColor(row.header_grad_b),
+      likes: likeStats.likes,
+      likedByMe: likeStats.liked,
+      vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
+      ...progressionFromRow(row, includePrivate),
+    };
+    return res.json(payload);
   } catch (e) {
     return res.status(500).send("Server error");
   }
 });
 
-app.post("/profile/:username/like", requireLogin, (req, res) => {
+app.post("/profile/:username/like", requireLogin, async (req, res) => {
   const u = sanitizeUsername(req.params.username);
   if (!u) return res.status(400).send("Bad username");
 
-  db.get(`SELECT id FROM users WHERE lower(username) = lower(?)`, [u], (err, target) => {
-    if (err || !target) return res.status(404).send("Not found");
-    if (target.id === req.session.user.id) return res.status(400).json({ ok: false, message: "You cannot like yourself." });
+  const target = await findUserByUsername(u);
+  if (!target) return res.status(404).send("Not found");
+  if (target.id === req.session.user.id) {
+    return res.status(400).json({ ok: false, message: "You cannot like yourself." });
+  }
 
-    db.get(
-      `SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?`,
-      [req.session.user.id, target.id],
-      (_likeErr, row) => {
-        const now = Date.now();
-        const toggle = row
-          ? dbRunAsync(`DELETE FROM profile_likes WHERE user_id = ? AND target_user_id = ?`, [req.session.user.id, target.id])
-          : dbRunAsync(`INSERT INTO profile_likes (user_id, target_user_id, created_at) VALUES (?, ?, ?)`, [
-              req.session.user.id,
-              target.id,
-              now,
-            ]);
-
-        Promise.resolve(toggle)
-          .then(() => {
-            db.get(
-              `SELECT
-                (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
-                EXISTS(SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?) AS liked
-              `,
-              [target.id, req.session.user.id, target.id],
-              (_countErr, likesRow) => {
-                return res.json({
-                  ok: true,
-                  likes: Number(likesRow?.likes || 0),
-                  liked: !!Number(likesRow?.liked || 0),
-                });
-              }
-            );
-          })
-          .catch(() => res.status(500).json({ ok: false, message: "Could not update like" }));
-      }
-    );
-  });
+  try {
+    const stats = await toggleProfileLike(req.session.user.id, target.id);
+    return res.json({
+      ok: true,
+      likes: stats.likes,
+      liked: stats.liked,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, message: "Could not update like" });
+  }
 });
 
 // Avatar upload for profile edits (2MB max, in-memory only)
@@ -4767,6 +5257,35 @@ function emitOnlineUsers() {
   try {
     io.emit("onlineUsers", Array.from(ONLINE_USERS));
   } catch {}
+}
+
+function updateLiveUsername(userId, newUsername) {
+  const sid = socketIdByUserId.get(userId);
+  const s = sid ? io.sockets.sockets.get(sid) : null;
+  if (!s?.user) return;
+
+  const oldUsername = s.user.username;
+  if (oldUsername && oldUsername !== newUsername) {
+    ONLINE_USERS.delete(oldUsername);
+  }
+  s.user.username = newUsername;
+  if (s.request?.session?.user) {
+    s.request.session.user.username = newUsername;
+    s.request.session.save?.(() => {});
+  }
+  if (newUsername) ONLINE_USERS.add(newUsername);
+
+  // Replace any live typing indicators so the UI updates immediately.
+  for (const set of typingByRoom.values()) {
+    if (oldUsername && set.has(oldUsername)) {
+      set.delete(oldUsername);
+      set.add(newUsername);
+    }
+  }
+
+  emitOnlineUsers();
+  if (s.currentRoom) emitUserList(s.currentRoom);
+  io.to(sid).emit("profile:update", { username: newUsername });
 }
 
 function emitUserList(room) {
