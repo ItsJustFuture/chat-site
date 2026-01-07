@@ -361,7 +361,10 @@ app.use((req, res, next) => {
       "script-src-elem 'self' 'unsafe-eval' 'unsafe-inline' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com",
       // Inline style attributes are set by the client JS (e.g. show/hide panels),
       // so allow them alongside our external stylesheet.
-      "style-src 'self' 'unsafe-inline'",
+      // Also allow Google Fonts stylesheets for optional custom fonts.
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      // Allow Google Fonts font files.
+      "font-src 'self' data: https://fonts.gstatic.com",
       // allow avatars/uploads + blob previews on client
       "img-src 'self' data: blob: https://i.ytimg.com",
       "media-src 'self' blob:",
@@ -3418,7 +3421,9 @@ app.post("/api/me/prefs", requireLogin, async (req, res) => {
       const { rows } = await pgPool.query("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
       const current = safeJsonParse(rows?.[0]?.prefs_json, {});
       const merged = { ...(current || {}), ...(incoming || {}) };
-      await pgPool.query("UPDATE users SET prefs_json = $1 WHERE id = $2", [merged, userId]);
+      // IMPORTANT: node-postgres does not reliably serialize plain JS objects to JSON/JSONB.
+      // Always stringify and cast to jsonb to ensure prefs are actually persisted.
+      await pgPool.query("UPDATE users SET prefs_json = $1::jsonb WHERE id = $2", [JSON.stringify(merged), userId]);
 
       // Keep SQLite in sync
       db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId]);
