@@ -1635,6 +1635,7 @@ const editMood = document.getElementById("editMood");
 const editAge = document.getElementById("editAge");
 const editGender = document.getElementById("editGender");
 const vibeTagOptions = document.getElementById("vibeTagOptions");
+const vibeTagLimitLabel = document.getElementById("vibeTagLimit");
 const editBio = document.getElementById("editBio");
 const bioHelperToggle = document.getElementById("bioHelperToggle");
 const bioHelper = document.getElementById("bioHelper");
@@ -2349,7 +2350,10 @@ const STATUS_ALIASES = {
   "Looking to Chat": "Chatting",
   "Invisible": "Lurking",
 };
-const VIBE_TAG_OPTIONS = ["Chill", "Chaotic", "Night Owl", "Cozy", "Loud", "Quiet", "Curious", "Unhinged", "Friendly", "Competitive"];
+let VIBE_TAG_DEFS = [];
+let VIBE_TAG_OPTIONS = [];
+let VIBE_TAG_LIMIT = 3;
+const VIBE_TAG_LOOKUP = new Map();
 function normalizeStatusLabel(status, fallback=""){
   const raw = String(status || "").trim();
   if(!raw) return fallback;
@@ -2369,15 +2373,65 @@ function statusDotColor(status){
   }
 }
 
+function updateVibeTagLimitText(){
+  if(vibeTagLimitLabel) vibeTagLimitLabel.textContent = String(VIBE_TAG_LIMIT);
+}
+
+function setVibeTagDefs(payload){
+  const defs = Array.isArray(payload?.vibes) ? payload.vibes : [];
+  VIBE_TAG_DEFS = defs.filter((def) => def && def.label && def.emoji);
+  VIBE_TAG_OPTIONS = VIBE_TAG_DEFS.map((def) => def.label);
+  if (Number.isFinite(Number(payload?.limit))) {
+    VIBE_TAG_LIMIT = Number(payload.limit);
+  }
+  VIBE_TAG_LOOKUP.clear();
+  VIBE_TAG_DEFS.forEach((def) => {
+    const label = String(def.label || "").trim();
+    if (!label) return;
+    const normalized = label.toLowerCase();
+    VIBE_TAG_LOOKUP.set(normalized, { ...def, label });
+    if (def.id) VIBE_TAG_LOOKUP.set(String(def.id).toLowerCase(), { ...def, label });
+  });
+  updateVibeTagLimitText();
+}
+
+async function loadVibeTags(){
+  try{
+    const res = await fetch("/api/vibes");
+    if(!res.ok) return;
+    const data = await res.json();
+    setVibeTagDefs(data);
+  }catch(err){
+    console.warn("Failed to load vibe tags:", err);
+  }
+}
+
+function getVibeDef(tag){
+  const key = String(tag || "").trim().toLowerCase();
+  if(!key) return null;
+  return VIBE_TAG_LOOKUP.get(key) || null;
+}
+
+function formatVibeChipLabel(tag){
+  const def = getVibeDef(tag);
+  if(def?.emoji && def?.label) return `${def.emoji} ${def.label}`;
+  return String(tag || "").trim();
+}
+
 function sanitizeVibeTagsClient(raw){
   const arr = Array.isArray(raw) ? raw : [];
   const out = [];
+  const hasOptions = VIBE_TAG_OPTIONS.length > 0;
   arr.forEach((v) => {
-    if (out.length >= 3) return;
+    if (out.length >= VIBE_TAG_LIMIT) return;
     const val = String(v || "").trim();
     if (!val) return;
-    const hit = VIBE_TAG_OPTIONS.find((opt) => opt.toLowerCase() === val.toLowerCase());
-    if (hit && !out.includes(hit)) out.push(hit);
+    if(hasOptions){
+      const hit = VIBE_TAG_OPTIONS.find((opt) => opt.toLowerCase() === val.toLowerCase());
+      if (hit && !out.includes(hit)) out.push(hit);
+    } else if (!out.includes(val)) {
+      out.push(val);
+    }
   });
   return out;
 }
@@ -4048,7 +4102,7 @@ function renderMembers(users){
       vibes.forEach((v)=>{
         const chip = document.createElement("span");
         chip.className = "vibeChip mini";
-        chip.textContent = v;
+        chip.textContent = formatVibeChipLabel(v);
         vibeRow.appendChild(chip);
       });
       meta.appendChild(vibeRow);
@@ -7071,7 +7125,7 @@ function renderVibeChips(targetEl, tags){
   vibes.forEach((tag)=>{
     const chip = document.createElement("span");
     chip.className = "vibeChip";
-    chip.textContent = tag;
+    chip.textContent = formatVibeChipLabel(tag);
     targetEl.appendChild(chip);
   });
 }
@@ -7080,18 +7134,19 @@ function renderVibeOptions(selected = []){
   if(!vibeTagOptions) return;
   selectedVibeTags = sanitizeVibeTagsClient(selected);
   vibeTagOptions.innerHTML = "";
-  VIBE_TAG_OPTIONS.forEach((tag)=>{
+  VIBE_TAG_DEFS.forEach((def)=>{
+    const tag = def.label;
     const btn = document.createElement("button");
     btn.type = "button";
     const active = selectedVibeTags.includes(tag);
     btn.className = "pillBtn" + (active ? " active" : "");
-    btn.textContent = tag;
+    btn.textContent = formatVibeChipLabel(tag);
     btn.addEventListener("click", ()=>{
       const on = selectedVibeTags.includes(tag);
       if(on){
         selectedVibeTags = selectedVibeTags.filter((t)=>t!==tag);
       } else {
-        if(selectedVibeTags.length >= 3) return;
+        if(selectedVibeTags.length >= VIBE_TAG_LIMIT) return;
         selectedVibeTags = [...selectedVibeTags, tag];
       }
       renderVibeOptions(selectedVibeTags);
@@ -8256,6 +8311,7 @@ async function startApp(){
 
   if(!me){ authMsg.textContent="Please login."; return; }
 
+  await loadVibeTags();
   await loadThemePreference();
 
     authWrap.style.display="none";
