@@ -666,6 +666,13 @@ const dmThemeDefaults = { background: "#1e1f22" };
 let dmThemePrefs = { ...dmThemeDefaults };
 let dmTab = "direct";
 const dmUnreadThreads = new Set();
+let chatFxPrefs = { ...CHAT_FX_DEFAULTS };
+let chatFxDraft = null;
+let chatFxPrefEls = null;
+let chatFxPreviewBubble = null;
+let chatFxStatus = null;
+let chatFxPrefsLoaded = false;
+let chatFxPrefsLoading = false;
 
 // --- DM avatar strip (direct DMs only): last-read + lightweight avatar cache
 const DM_LAST_READ_KEY = "dm:lastRead:v1";
@@ -752,15 +759,14 @@ function normalizeChatFxAccent(input){
 function normalizeChatFx(input){
   const fx = (input && typeof input === "object") ? input : {};
   const enabled = fx.enabled !== false;
-  if (!enabled) return { ...CHAT_FX_DEFAULTS, enabled: false };
   return {
     enabled,
     glow: normalizeChatFxGlow(fx.glow),
     font: normalizeChatFxFontKey(fx.font),
     radius: normalizeChatFxNumber(fx.radius, CHAT_FX_DEFAULTS.radius, 6, 28),
-    border: normalizeChatFxNumber(fx.border, CHAT_FX_DEFAULTS.border, 0, 4),
-    glass: normalizeChatFxNumber(fx.glass, CHAT_FX_DEFAULTS.glass, 0, 0.85),
-    blur: normalizeChatFxNumber(fx.blur, CHAT_FX_DEFAULTS.blur, 0, 18),
+    border: normalizeChatFxNumber(fx.border, CHAT_FX_DEFAULTS.border, 0, 3),
+    glass: normalizeChatFxNumber(fx.glass, CHAT_FX_DEFAULTS.glass, 0, 1),
+    blur: normalizeChatFxNumber(fx.blur, CHAT_FX_DEFAULTS.blur, 0, 16),
     density: normalizeChatFxDensity(fx.density),
     accent: normalizeChatFxAccent(fx.accent)
   };
@@ -803,28 +809,29 @@ function resolveChatFx(message, author){
 function applyChatFxToBubble(bubble, fx, options = {}){
   if (!bubble) return;
   const resolved = normalizeChatFx(fx);
+  const effective = resolved.enabled ? resolved : CHAT_FX_DEFAULTS;
   const glowMap = { off: 0, soft: 0.4, neon: 0.8, strong: 1.15 };
-  const glowValue = glowMap[resolved.glow] ?? 0;
-  const fontStack = CHAT_FX_FONT_STACKS[resolved.font] || CHAT_FX_FONT_STACKS.system;
-  const densityPreset = CHAT_FX_DENSITY_PRESETS[resolved.density] || CHAT_FX_DENSITY_PRESETS.cozy;
-  const radiusGrouped = Math.max(8, resolved.radius - 2);
+  const glowValue = glowMap[effective.glow] ?? 0;
+  const fontStack = CHAT_FX_FONT_STACKS[effective.font] || CHAT_FX_FONT_STACKS.system;
+  const densityPreset = CHAT_FX_DENSITY_PRESETS[effective.density] || CHAT_FX_DENSITY_PRESETS.cozy;
+  const radiusGrouped = Math.max(8, effective.radius - 2);
 
   bubble.style.setProperty("--fx-font-family", fontStack);
   bubble.style.setProperty("--fx-glow", String(glowValue));
-  bubble.style.setProperty("--fx-accent", resolved.accent || "var(--accent)");
-  bubble.style.setProperty("--fx-radius", `${resolved.radius}px`);
+  bubble.style.setProperty("--fx-accent", effective.accent || "var(--accent)");
+  bubble.style.setProperty("--fx-radius", `${effective.radius}px`);
   bubble.style.setProperty("--fx-radius-grouped", `${radiusGrouped}px`);
-  bubble.style.setProperty("--fx-border", `${resolved.border}px`);
-  bubble.style.setProperty("--fx-glass", String(resolved.glass));
-  bubble.style.setProperty("--fx-blur", `${resolved.blur}px`);
-  bubble.style.setProperty("--fx-density", resolved.density);
+  bubble.style.setProperty("--fx-border", `${effective.border}px`);
+  bubble.style.setProperty("--fx-glass", String(effective.glass));
+  bubble.style.setProperty("--fx-blur", `${effective.blur}px`);
+  bubble.style.setProperty("--fx-density", effective.density);
   bubble.style.setProperty("--fx-pad-y", `${densityPreset.padY}px`);
   bubble.style.setProperty("--fx-pad-x", `${densityPreset.padX}px`);
   bubble.style.setProperty("--fx-inner-gap", `${densityPreset.innerGap}px`);
   bubble.style.setProperty("--fx-time-size", `${densityPreset.timeSize}px`);
 
   bubble.classList.remove("fx-density-compact", "fx-density-cozy", "fx-density-spacious");
-  bubble.classList.add(`fx-density-${resolved.density}`);
+  bubble.classList.add(`fx-density-${effective.density}`);
 
   if (options.groupBody){
     options.groupBody.style.setProperty("--fx-group-gap", `${densityPreset.groupGap}px`);
@@ -2813,6 +2820,51 @@ function queuePersistPrefs(partial){
   }, 800);
 }
 
+function mergeChatFxDefaults(fx){
+  const safe = (fx && typeof fx === "object") ? fx : {};
+  const merged = { ...CHAT_FX_DEFAULTS, ...safe };
+  if (safe.enabled === false) merged.enabled = false;
+  return normalizeChatFx(merged);
+}
+
+function applyChatFxPrefsFromServer(fx){
+  chatFxPrefs = mergeChatFxDefaults(fx);
+  chatFxPrefsLoaded = true;
+  if (me?.username){
+    me.chatFx = { ...chatFxPrefs };
+    updateUserFxMap(me.username, chatFxPrefs);
+  }
+  if (chatFxPrefEls){
+    syncChatFxControls(chatFxPrefs);
+    updateChatFxPreview(chatFxPrefs);
+    chatFxDraft = { ...chatFxPrefs };
+  }
+}
+
+async function loadChatFxPrefs({ force = false } = {}){
+  if (!me) return;
+  if (chatFxPrefsLoading) return;
+  if (chatFxPrefsLoaded && !force){
+    if (chatFxPrefEls){
+      syncChatFxControls(chatFxPrefs);
+      updateChatFxPreview(chatFxPrefs);
+      chatFxDraft = { ...chatFxPrefs };
+    }
+    return;
+  }
+  chatFxPrefsLoading = true;
+  try{
+    const res = await fetch("/api/me/prefs");
+    if(!res.ok) return;
+    const data = await res.json();
+    const prefs = data?.prefs || {};
+    applyChatFxPrefsFromServer(prefs.chatFx || {});
+  }catch{
+  }finally{
+    chatFxPrefsLoading = false;
+  }
+}
+
 async function loadUserPrefs(){
   try{
     const res = await fetch("/api/me/prefs");
@@ -2833,6 +2885,11 @@ async function loadUserPrefs(){
     if (prefs.sound && typeof prefs.sound === "object") {
       Sound.importPrefs(prefs.sound);
       syncSoundPrefsUI(false);
+    }
+    if (prefs.chatFx && typeof prefs.chatFx === "object") {
+      applyChatFxPrefsFromServer(prefs.chatFx);
+    } else {
+      applyChatFxPrefsFromServer({});
     }
   }catch{}
 }
@@ -5363,6 +5420,7 @@ editDmBtn?.addEventListener("click", ()=>showEditPanel("dm"));
 // New profile edit menu + avatar action wiring
 wireProfileMenu();
 wireSoundPrefs();
+wireChatFxPrefs();
 wireProfileAvatarActions();
 wireHeaderGradientInputs();
 tabInfo.addEventListener("click", ()=>setTab("info"));
@@ -7210,12 +7268,284 @@ function wireSoundPrefs(){
   });
 }
 
+function updateChatFxSliderValue(el, value, decimals = 0){
+  if (!el) return;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return;
+  el.textContent = decimals > 0 ? num.toFixed(decimals) : String(Math.round(num));
+}
+
+function setChatFxControlsDisabled(disabled){
+  if (!chatFxPrefEls) return;
+  const controls = [
+    chatFxPrefEls.glow,
+    chatFxPrefEls.font,
+    chatFxPrefEls.radius,
+    chatFxPrefEls.border,
+    chatFxPrefEls.glass,
+    chatFxPrefEls.blur,
+    chatFxPrefEls.accent
+  ];
+  controls.forEach((el) => {
+    if (el) el.disabled = disabled;
+  });
+  chatFxPrefEls.densityButtons?.forEach((btn) => {
+    btn.disabled = disabled;
+    btn.classList.toggle("disabled", disabled);
+  });
+}
+
+function setChatFxDensityButtons(value){
+  if (!chatFxPrefEls?.densityButtons) return;
+  chatFxPrefEls.densityButtons.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.value === value);
+  });
+}
+
+function getChatFxDensitySelection(){
+  if (!chatFxPrefEls?.densityButtons) return CHAT_FX_DEFAULTS.density;
+  const active = chatFxPrefEls.densityButtons.find((btn) => btn.classList.contains("active"));
+  return active?.dataset.value || CHAT_FX_DEFAULTS.density;
+}
+
+function syncChatFxControls(fx){
+  if (!chatFxPrefEls) return;
+  const resolved = normalizeChatFx(fx);
+  chatFxPrefEls.enabled.checked = resolved.enabled;
+  chatFxPrefEls.glow.value = resolved.glow;
+  chatFxPrefEls.font.value = resolved.font;
+  chatFxPrefEls.radius.value = String(resolved.radius);
+  chatFxPrefEls.border.value = String(resolved.border);
+  chatFxPrefEls.glass.value = String(resolved.glass);
+  chatFxPrefEls.blur.value = String(resolved.blur);
+  chatFxPrefEls.accent.value = resolved.accent || "";
+  setChatFxDensityButtons(resolved.density);
+  updateChatFxSliderValue(chatFxPrefEls.radiusValue, resolved.radius);
+  updateChatFxSliderValue(chatFxPrefEls.borderValue, resolved.border);
+  updateChatFxSliderValue(chatFxPrefEls.glassValue, resolved.glass, 2);
+  updateChatFxSliderValue(chatFxPrefEls.blurValue, resolved.blur);
+  setChatFxControlsDisabled(!resolved.enabled);
+}
+
+function readChatFxFormRaw(){
+  if (!chatFxPrefEls) return { ...CHAT_FX_DEFAULTS };
+  return {
+    enabled: chatFxPrefEls.enabled.checked,
+    glow: chatFxPrefEls.glow.value,
+    font: chatFxPrefEls.font.value,
+    radius: Number(chatFxPrefEls.radius.value),
+    border: Number(chatFxPrefEls.border.value),
+    glass: Number(chatFxPrefEls.glass.value),
+    blur: Number(chatFxPrefEls.blur.value),
+    density: getChatFxDensitySelection(),
+    accent: (chatFxPrefEls.accent.value || "").trim()
+  };
+}
+
+function updateChatFxPreview(fx){
+  if (!chatFxPreviewBubble) return;
+  applyChatFxToBubble(chatFxPreviewBubble, fx);
+  chatFxPreviewBubble.closest(".chatFxPreview")?.classList.toggle("disabled", !normalizeChatFx(fx).enabled);
+}
+
+function handleChatFxInput(){
+  if (!chatFxPrefEls) return;
+  const normalized = normalizeChatFx(readChatFxFormRaw());
+  chatFxDraft = normalized;
+  updateChatFxSliderValue(chatFxPrefEls.radiusValue, normalized.radius);
+  updateChatFxSliderValue(chatFxPrefEls.borderValue, normalized.border);
+  updateChatFxSliderValue(chatFxPrefEls.glassValue, normalized.glass, 2);
+  updateChatFxSliderValue(chatFxPrefEls.blurValue, normalized.blur);
+  updateChatFxPreview(normalized);
+  setChatFxControlsDisabled(!normalized.enabled);
+}
+
+function applyChatFxToSelfBubbles(fx){
+  if (!me?.username) return;
+  const normalized = normalizeChatFx(fx);
+  document.querySelectorAll(".msgItem.self .bubble").forEach((bubble) => {
+    const groupBody = bubble.closest(".msgGroupBody");
+    applyChatFxToBubble(bubble, normalized, { groupBody });
+  });
+  document.querySelectorAll(".dmRow.self").forEach((row) => {
+    const bubble = row.querySelector(".dmBubble");
+    const wrap = row.querySelector(".dmBubbleWrap");
+    applyChatFxToBubble(bubble, normalized, { dmRow: row, dmWrap: wrap });
+  });
+}
+
+async function saveChatFxPrefs(){
+  if (!chatFxPrefEls || !me) return;
+  const normalized = normalizeChatFx(readChatFxFormRaw());
+  if (chatFxStatus) chatFxStatus.textContent = "Saving...";
+  const saved = await persistUserPrefs({ chatFx: normalized });
+  if (!saved){
+    if (chatFxStatus) chatFxStatus.textContent = "Could not save.";
+    return;
+  }
+  applyChatFxPrefsFromServer(saved.chatFx || normalized);
+  applyChatFxToSelfBubbles(chatFxPrefs);
+  if (chatFxStatus) {
+    chatFxStatus.textContent = "Saved.";
+    setTimeout(() => {
+      if (chatFxStatus?.textContent === "Saved.") chatFxStatus.textContent = "";
+    }, 2400);
+  }
+}
+
+function wireChatFxPrefs(){
+  if (!editPreferencesPanel || editPreferencesPanel._chatFxWired) return;
+  editPreferencesPanel._chatFxWired = true;
+
+  const section = document.createElement("div");
+  section.className = "chatFxSection";
+  section.innerHTML = `
+    <div class="sectionTitle">Chat Appearance</div>
+    <div class="panelBox chatFxPanel">
+      <div class="small" style="margin-bottom:10px;">
+        Customize your chat bubbles. Changes preview here until you save them.
+      </div>
+      <div class="chatFxPreview" id="chatFxPreview">
+        <div class="chatFxPreviewRow self">
+          <div class="bubble chatFxPreviewBubble" id="chatFxPreviewBubble">
+            <div class="meta">
+              <div class="name">You</div>
+              <div class="time">Just now</div>
+            </div>
+            <div class="text">Your message preview bubble.</div>
+          </div>
+        </div>
+      </div>
+      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <label style="margin:0;">Enabled</label>
+        <input id="chatFxEnabled" type="checkbox">
+      </div>
+      <div class="field">
+        <label>Glow</label>
+        <select id="chatFxGlow">
+          <option value="off">Off</option>
+          <option value="soft">Soft</option>
+          <option value="neon">Neon</option>
+          <option value="strong">Strong</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Font</label>
+        <select id="chatFxFont">
+          <option value="system">System</option>
+          <option value="inter">Inter</option>
+          <option value="poppins">Poppins</option>
+          <option value="nunito">Nunito</option>
+          <option value="jetbrains">JetBrains Mono</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Bubble radius</label>
+        <div class="chatFxSliderRow">
+          <input id="chatFxRadius" type="range" min="6" max="28" step="1">
+          <span class="chatFxSliderValue" id="chatFxRadiusValue">14</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Border thickness</label>
+        <div class="chatFxSliderRow">
+          <input id="chatFxBorder" type="range" min="0" max="3" step="1">
+          <span class="chatFxSliderValue" id="chatFxBorderValue">0</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Glass opacity</label>
+        <div class="chatFxSliderRow">
+          <input id="chatFxGlass" type="range" min="0" max="1" step="0.05">
+          <span class="chatFxSliderValue" id="chatFxGlassValue">0</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Glass blur</label>
+        <div class="chatFxSliderRow">
+          <input id="chatFxBlur" type="range" min="0" max="16" step="1">
+          <span class="chatFxSliderValue" id="chatFxBlurValue">0</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Density</label>
+        <div class="chatFxDensityRow" id="chatFxDensity">
+          <button class="pillBtn" type="button" data-value="compact">Compact</button>
+          <button class="pillBtn" type="button" data-value="cozy">Cozy</button>
+          <button class="pillBtn" type="button" data-value="spacious">Spacious</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Accent color (optional)</label>
+        <input id="chatFxAccent" type="text" placeholder="#RRGGBB">
+        <div class="small">Leave blank to keep your theme accent.</div>
+      </div>
+      <div class="chatFxActions">
+        <div class="chatFxStatus" id="chatFxStatus"></div>
+        <button class="btn" id="chatFxSaveBtn" type="button">Save appearance</button>
+      </div>
+    </div>
+  `;
+
+  editPreferencesPanel.appendChild(section);
+
+  const q = (sel) => section.querySelector(sel);
+  chatFxPrefEls = {
+    enabled: q("#chatFxEnabled"),
+    glow: q("#chatFxGlow"),
+    font: q("#chatFxFont"),
+    radius: q("#chatFxRadius"),
+    radiusValue: q("#chatFxRadiusValue"),
+    border: q("#chatFxBorder"),
+    borderValue: q("#chatFxBorderValue"),
+    glass: q("#chatFxGlass"),
+    glassValue: q("#chatFxGlassValue"),
+    blur: q("#chatFxBlur"),
+    blurValue: q("#chatFxBlurValue"),
+    accent: q("#chatFxAccent"),
+    saveBtn: q("#chatFxSaveBtn"),
+    status: q("#chatFxStatus"),
+    densityRow: q("#chatFxDensity")
+  };
+  chatFxPrefEls.densityButtons = Array.from(chatFxPrefEls.densityRow?.querySelectorAll("button") || []);
+  chatFxPreviewBubble = q("#chatFxPreviewBubble");
+  chatFxStatus = chatFxPrefEls.status;
+
+  chatFxPrefEls.enabled?.addEventListener("change", handleChatFxInput);
+  chatFxPrefEls.glow?.addEventListener("change", handleChatFxInput);
+  chatFxPrefEls.font?.addEventListener("change", handleChatFxInput);
+  chatFxPrefEls.radius?.addEventListener("input", handleChatFxInput);
+  chatFxPrefEls.border?.addEventListener("input", handleChatFxInput);
+  chatFxPrefEls.glass?.addEventListener("input", handleChatFxInput);
+  chatFxPrefEls.blur?.addEventListener("input", handleChatFxInput);
+  chatFxPrefEls.accent?.addEventListener("input", handleChatFxInput);
+  chatFxPrefEls.accent?.addEventListener("blur", () => {
+    const normalized = normalizeChatFx(readChatFxFormRaw());
+    if (chatFxPrefEls?.accent) chatFxPrefEls.accent.value = normalized.accent || "";
+    handleChatFxInput();
+  });
+
+  chatFxPrefEls.densityButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.disabled) return;
+      setChatFxDensityButtons(btn.dataset.value);
+      handleChatFxInput();
+    });
+  });
+
+  chatFxPrefEls.saveBtn?.addEventListener("click", saveChatFxPrefs);
+
+  syncChatFxControls(chatFxPrefs);
+  updateChatFxPreview(chatFxPrefs);
+  chatFxDraft = { ...chatFxPrefs };
+}
+
 function wireProfileMenu(){
   if (!profileMenu) return;
   if (profileMenu._wired) return;
   profileMenu._wired = true;
 
-  profileMenu.addEventListener("click", (e) => {
+  profileMenu.addEventListener("click", async (e) => {
     const btn = e.target.closest("[data-action]");
     if (!btn) return;
     const action = btn.dataset.action;
@@ -7234,6 +7564,7 @@ function wireProfileMenu(){
       if (profileMsg) profileMsg.textContent = "";
       // Sync UI toggles
       try { syncSoundPrefsUI(true); } catch {}
+      await loadChatFxPrefs({ force: true });
       return;
     }
   });
