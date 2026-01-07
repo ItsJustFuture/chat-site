@@ -494,6 +494,54 @@ function sanitizeHexColor(raw){
   if(!c) return null;
   return HEX_COLOR_RE.test(c) ? c : null;
 }
+
+const CHAT_FX_DEFAULTS = Object.freeze({
+  enabled: true,
+  glow: "off",
+  font: "system",
+  bubbleRadius: 14,
+  borderPx: 0,
+  glass: 0,
+  glassBlur: 0,
+  density: "cozy",
+  accent: null,
+});
+const CHAT_FX_GLOWS = new Set(["off", "soft", "neon", "strong"]);
+const CHAT_FX_FONTS = new Set(["system", "inter", "poppins", "nunito", "jetbrains"]);
+const CHAT_FX_DENSITIES = new Set(["compact", "cozy", "spacious"]);
+const CHAT_FX_HEX = /^#[0-9a-f]{6}$/i;
+
+function sanitizeChatFx(raw) {
+  const out = { ...CHAT_FX_DEFAULTS };
+  if (!raw || typeof raw !== "object") return out;
+
+  if (typeof raw.enabled === "boolean") out.enabled = raw.enabled;
+  if (CHAT_FX_GLOWS.has(raw.glow)) out.glow = raw.glow;
+  if (CHAT_FX_FONTS.has(raw.font)) out.font = raw.font;
+
+  if (Number.isFinite(Number(raw.bubbleRadius))) {
+    out.bubbleRadius = clamp(raw.bubbleRadius, 6, 28);
+  }
+  if (Number.isFinite(Number(raw.borderPx))) {
+    out.borderPx = clamp(raw.borderPx, 0, 3);
+  }
+  if (Number.isFinite(Number(raw.glass))) {
+    out.glass = clamp(raw.glass, 0, 1);
+  }
+  if (Number.isFinite(Number(raw.glassBlur))) {
+    out.glassBlur = clamp(raw.glassBlur, 0, 16);
+  }
+  if (CHAT_FX_DENSITIES.has(raw.density)) out.density = raw.density;
+
+  if (raw.accent == null) {
+    out.accent = null;
+  } else {
+    const accent = String(raw.accent || "").trim();
+    out.accent = CHAT_FX_HEX.test(accent) ? accent : null;
+  }
+
+  return out;
+}
 function avatarUrlFromRow(row) {
   if (!row) return null;
   const id = row.id ?? row.user_id ?? row.userId;
@@ -3223,6 +3271,7 @@ function sanitizePrefsInput(p) {
   if (p && typeof p === "object") {
     if (p.dmBadgePrefs && typeof p.dmBadgePrefs === "object") out.dmBadgePrefs = p.dmBadgePrefs;
     if (p.dmThemePrefs && typeof p.dmThemePrefs === "object") out.dmThemePrefs = p.dmThemePrefs;
+    if (p.chatFx && typeof p.chatFx === "object") out.chatFx = sanitizeChatFx(p.chatFx);
     if (p.sound && typeof p.sound === "object") {
       const sound = {};
       for (const key of ["enabled", "room", "dm", "mention", "sent", "receive", "reaction"]) {
@@ -3232,6 +3281,36 @@ function sanitizePrefsInput(p) {
     }
   }
   return out;
+}
+
+function buildAuthorsFxMap(usernames, cb) {
+  const unique = Array.from(new Set((usernames || []).filter((name) => typeof name === "string" && name.trim())));
+  if (!unique.length) return cb({});
+  const placeholders = unique.map(() => "?").join(",");
+  db.all(
+    `SELECT username, prefs_json FROM users WHERE username IN (${placeholders})`,
+    unique,
+    (_e, rows) => {
+      const map = {};
+      for (const name of unique) {
+        map[name] = sanitizeChatFx(null);
+      }
+      for (const row of rows || []) {
+        const prefs = safeJsonParse(row?.prefs_json, {});
+        map[row.username] = sanitizeChatFx(prefs?.chatFx);
+      }
+      cb(map);
+    }
+  );
+}
+
+function updateLiveChatFx(userId, chatFx) {
+  const sid = socketIdByUserId.get(userId);
+  const s = sid ? io.sockets.sockets.get(sid) : null;
+  if (!s?.user) return;
+  s.user.chatFx = sanitizeChatFx(chatFx);
+  if (s.currentRoom) emitUserList(s.currentRoom);
+  io.emit("user fx updated", { userId: s.user.id, username: s.user.username, chatFx: s.user.chatFx });
 }
 
 app.get("/api/me/prefs", requireLogin, async (req, res) => {
@@ -3257,6 +3336,7 @@ app.get("/api/me/prefs", requireLogin, async (req, res) => {
 app.post("/api/me/prefs", requireLogin, async (req, res) => {
   const userId = req.session.user.id;
   const incoming = sanitizePrefsInput(req.body?.prefs ?? req.body);
+  const shouldUpdateChatFx = Object.prototype.hasOwnProperty.call(incoming || {}, "chatFx");
 
   try {
     if (await pgUserExists(userId)) {
@@ -3267,6 +3347,10 @@ app.post("/api/me/prefs", requireLogin, async (req, res) => {
 
       // Keep SQLite in sync
       db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId]);
+      if (shouldUpdateChatFx) {
+        req.session.user.chatFx = sanitizeChatFx(merged.chatFx);
+        updateLiveChatFx(userId, merged.chatFx);
+      }
       return res.json({ ok: true, prefs: merged });
     }
   } catch (e) {
@@ -3279,6 +3363,10 @@ app.post("/api/me/prefs", requireLogin, async (req, res) => {
     const merged = { ...(current || {}), ...(incoming || {}) };
     db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId], (err2) => {
       if (err2) return res.status(500).send("Failed");
+      if (shouldUpdateChatFx) {
+        req.session.user.chatFx = sanitizeChatFx(merged.chatFx);
+        updateLiveChatFx(userId, merged.chatFx);
+      }
       return res.json({ ok: true, prefs: merged });
     });
   });
@@ -4619,6 +4707,7 @@ function emitUserList(room) {
         mood: s.user.mood || "",
         avatar: s.user.avatar || "",
         vibe_tags: sanitizeVibeTags(s.user.vibe_tags || []),
+        chatFx: sanitizeChatFx(s.user.chatFx),
       });
     }
   }
@@ -4654,6 +4743,7 @@ io.on("connection", (socket) => {
     mood: sessUser.mood || "",
     avatar: sessUser.avatar || "",
     vibe_tags: Array.isArray(sessUser.vibe_tags) ? sessUser.vibe_tags : [],
+    chatFx: sanitizeChatFx(sessUser.chatFx),
   };
 
   // Track global online usernames (for private theme "together online" effects)
@@ -4676,7 +4766,7 @@ if (existingSid && existingSid !== socket.id) {
   try {
     if (await pgUserExists(socket.user.id)) {
       const { rows } = await pgPool.query(
-        "SELECT avatar, avatar_updated, mood, vibe_tags FROM users WHERE id=$1 LIMIT 1",
+        "SELECT avatar, avatar_updated, mood, vibe_tags, prefs_json FROM users WHERE id=$1 LIMIT 1",
         [socket.user.id]
       );
       const r = rows?.[0];
@@ -4687,6 +4777,8 @@ if (existingSid && existingSid !== socket.id) {
         if (computedAvatar) socket.user.avatar = computedAvatar;
         if (typeof r.mood === "string") socket.user.mood = r.mood;
         socket.user.vibe_tags = sanitizeVibeTags(r.vibe_tags || []);
+        const prefs = safeJsonParse(r?.prefs_json, {});
+        socket.user.chatFx = sanitizeChatFx(prefs?.chatFx);
         if (socket.currentRoom) emitUserList(socket.currentRoom);
       }
       return;
@@ -4696,7 +4788,7 @@ if (existingSid && existingSid !== socket.id) {
   }
 
   db.get(
-    "SELECT avatar, mood, vibe_tags FROM users WHERE id = ?",
+    "SELECT avatar, mood, vibe_tags, prefs_json FROM users WHERE id = ?",
     [socket.user.id],
     (_e, row) => {
       if (row) {
@@ -4704,6 +4796,8 @@ if (existingSid && existingSid !== socket.id) {
         if (computedAvatar) socket.user.avatar = computedAvatar;
         if (typeof row.mood === "string") socket.user.mood = row.mood;
         socket.user.vibe_tags = sanitizeVibeTags(row.vibe_tags || []);
+        const prefs = safeJsonParse(row?.prefs_json, {});
+        socket.user.chatFx = sanitizeChatFx(prefs?.chatFx);
         if (socket.currentRoom) emitUserList(socket.currentRoom);
       }
     }
@@ -4901,7 +4995,7 @@ function doJoin(room, status) {
      ORDER BY ts ASC LIMIT 200`,
     [room, legacyRoom],
     (_e, rows) => {
-      const history = (rows || []).map((r) => ({
+      const baseHistory = (rows || []).map((r) => ({
         messageId: r.id,
         room: r.room,
         user: r.username,
@@ -4921,26 +5015,34 @@ function doJoin(room, status) {
             attachmentType: r.attachment_type || null,
             attachmentSize: r.attachment_size || null,
       }));
-      socket.emit("history", history);
 
-      const ids = history.map((m) => m.messageId).slice(-80);
-      if (ids.length) {
-        const placeholders = ids.map(() => "?").join(",");
-        db.all(
-          `SELECT message_id, username, emoji FROM reactions WHERE message_id IN (${placeholders})`,
-          ids,
-          (_e2, reacts) => {
-            const byMsg = {};
-            for (const r of reacts || []) {
-              byMsg[r.message_id] = byMsg[r.message_id] || {};
-              byMsg[r.message_id][r.username] = r.emoji;
+      const usernames = baseHistory.map((m) => m.user).filter(Boolean);
+      buildAuthorsFxMap(usernames, (authorsFx) => {
+        const history = baseHistory.map((m) => ({
+          ...m,
+          chatFx: authorsFx[m.user] || sanitizeChatFx(null),
+        }));
+        socket.emit("history", history, { authorsFx });
+
+        const ids = history.map((m) => m.messageId).slice(-80);
+        if (ids.length) {
+          const placeholders = ids.map(() => "?").join(",");
+          db.all(
+            `SELECT message_id, username, emoji FROM reactions WHERE message_id IN (${placeholders})`,
+            ids,
+            (_e2, reacts) => {
+              const byMsg = {};
+              for (const r of reacts || []) {
+                byMsg[r.message_id] = byMsg[r.message_id] || {};
+                byMsg[r.message_id][r.username] = r.emoji;
+              }
+              for (const mid of Object.keys(byMsg)) {
+                socket.emit("reaction update", { messageId: mid, reactions: byMsg[mid] });
+              }
             }
-            for (const mid of Object.keys(byMsg)) {
-              socket.emit("reaction update", { messageId: mid, reactions: byMsg[mid] });
-            }
-          }
-        );
-      }
+          );
+        }
+      });
     }
   );
 
@@ -5003,40 +5105,44 @@ if (!room) {
             attachmentType: r.attachment_type || null,
             attachmentSize: r.attachment_size || null,
           }));
-          socket.emit("dm history", {
-            threadId: tid,
-            title: thread.title || "",
-            isGroup: !!thread.is_group,
-            participants: thread.participants || [],
-            messages: msgs,
-          });
+          const usernames = msgs.map((m) => m.user).filter(Boolean);
+          buildAuthorsFxMap(usernames, (authorsFx) => {
+            socket.emit("dm history", {
+              threadId: tid,
+              title: thread.title || "",
+              isGroup: !!thread.is_group,
+              participants: thread.participants || [],
+              messages: msgs,
+              authorsFx,
+            });
 
-          // Send initial DM reactions for these messages (so the client can render immediately)
-          try {
-            const mids = (msgs || []).map(m => Number(m.messageId || m.id)).filter(n => Number.isInteger(n));
-            if (mids.length) {
-              const placeholders = mids.map(() => "?").join(",");
-              db.all(
-                `SELECT message_id, username, emoji
-                   FROM dm_reactions
-                  WHERE thread_id = ?
-                    AND message_id IN (${placeholders})`,
-                [tid, ...mids],
-                (_re, rrows) => {
-                  const byMid = new Map();
-                  for (const rr of (rrows || [])) {
-                    const k = String(rr.message_id);
-                    if (!byMid.has(k)) byMid.set(k, {});
-                    byMid.get(k)[rr.username] = rr.emoji;
+            // Send initial DM reactions for these messages (so the client can render immediately)
+            try {
+              const mids = (msgs || []).map(m => Number(m.messageId || m.id)).filter(n => Number.isInteger(n));
+              if (mids.length) {
+                const placeholders = mids.map(() => "?").join(",");
+                db.all(
+                  `SELECT message_id, username, emoji
+                     FROM dm_reactions
+                    WHERE thread_id = ?
+                      AND message_id IN (${placeholders})`,
+                  [tid, ...mids],
+                  (_re, rrows) => {
+                    const byMid = new Map();
+                    for (const rr of (rrows || [])) {
+                      const k = String(rr.message_id);
+                      if (!byMid.has(k)) byMid.set(k, {});
+                      byMid.get(k)[rr.username] = rr.emoji;
+                    }
+                    for (const mid of mids) {
+                      const reactions = byMid.get(String(mid)) || {};
+                      socket.emit("dm reaction update", { threadId: tid, messageId: mid, reactions });
+                    }
                   }
-                  for (const mid of mids) {
-                    const reactions = byMid.get(String(mid)) || {};
-                    socket.emit("dm reaction update", { threadId: tid, messageId: mid, reactions });
-                  }
-                }
-              );
-            }
-          } catch {}
+                );
+              }
+            } catch {}
+          });
 
         }
       );
@@ -5135,6 +5241,7 @@ socket.on("dm message", ({ threadId, text, replyToId, attachment }) => {
             attachmentMime: attMime,
             attachmentType: attType,
             attachmentSize: attSize,
+              chatFx: sanitizeChatFx(socket.user.chatFx),
 replyToId: replyPk,
               replyToUser: replyUser || "",
               replyToText: replyText || "",
@@ -5358,6 +5465,7 @@ socket.on("status change", ({ status }) => {
                     replyToId: replyPk,
                     replyToUser: replyUser || "",
                     replyToText: replyText || "",
+                    chatFx: sanitizeChatFx(socket.user.chatFx),
                   };
                   io.to(room).emit("chat message", msg);
                 }
