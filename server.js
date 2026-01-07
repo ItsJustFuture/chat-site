@@ -750,24 +750,54 @@ function findUserByMention(raw, cb) {
   const cleaned = cleanUsernameForLookup(rawName);
   const legacy = sanitizeUsername(rawName);
 
-  const tryOne = (name, next) => {
-    if (!name) return next();
-    db.get(
-      `SELECT id, username, role FROM users
-       WHERE username = ?
-          OR lower(username) = lower(?)
-       ORDER BY CASE WHEN username = ? THEN 0 ELSE 1 END
-       LIMIT 1`,
-      [name, name, name],
-      (err, row) => {
-        if (!err && row) return cb(null, row);
-        next();
-      }
-    );
-  };
+  const candidates = [];
+  for (const v of [rawName, cleaned, legacy]) {
+    const s = String(v || "").trim();
+    if (!s) continue;
+    // de-dupe by lowercased key
+    if (candidates.some((x) => normKey(x) === normKey(s))) continue;
+    candidates.push(s);
+  }
 
-  // Try the most faithful version first, then the cleaned lookup, then legacy sanitized.
-  tryOne(rawName, () => tryOne(cleaned, () => tryOne(legacy, () => cb(new Error("User not found")))));
+  const sqliteGet = (name) =>
+    new Promise((resolve) => {
+      db.get(
+        `SELECT id, username, role FROM users
+         WHERE username = ?
+            OR lower(username) = lower(?)
+         ORDER BY CASE WHEN username = ? THEN 0 ELSE 1 END
+         LIMIT 1`,
+        [name, name, name],
+        (err, row) => (err ? resolve(null) : resolve(row || null))
+      );
+    });
+
+  (async () => {
+    for (const name of candidates) {
+      // Prefer Postgres when enabled (Render/prod), but fall back to SQLite.
+      if (await pgUsersEnabled()) {
+        try {
+          const { rows } = await pgPool.query(
+            `SELECT id, username, role FROM users
+             WHERE username = $1
+                OR lower(username) = lower($2)
+             ORDER BY CASE WHEN username = $3 THEN 0 ELSE 1 END
+             LIMIT 1`,
+            [name, name, name]
+          );
+          const row = rows?.[0] || null;
+          if (row?.id && row?.username) return cb(null, row);
+        } catch (e) {
+          // If PG is misbehaving, keep behavior functional via SQLite.
+          console.warn("[findUserByMention][pg] failed, falling back to sqlite:", e?.message || e);
+        }
+      }
+
+      const row = await sqliteGet(name);
+      if (row?.id && row?.username) return cb(null, row);
+    }
+    return cb(new Error("User not found"));
+  })().catch((e) => cb(e));
 }
 
 
@@ -5771,10 +5801,13 @@ socket.on("status change", ({ status }) => {
     const lookupName = rawName || sanitized;
     if (!lookupName) return;
 
-    db.get(
-      "SELECT id, username, role as oldRole FROM users WHERE lower(username)=lower(?) LIMIT 1",
-      [lookupName], (_e, target) => {
-      if (!target) return;
+    findUserByMention(lookupName, (_e, found) => {
+      if (!found) {
+        io.to(socket.id).emit("system", `User not found: ${lookupName}`);
+        return;
+      }
+
+      const target = { id: found.id, username: found.username, oldRole: found.role };
 
       // Permission checks: you can only modify users below you.
       if (actorRole !== "Owner" && !canModerate(actorRole, target.oldRole)) return;
@@ -5805,7 +5838,7 @@ socket.on("status change", ({ status }) => {
           }
         }
 
-        io.to(room).emit("system", `${target.username} role set to ${role}.`);
+        io.to(room).emit("system", `${target.username} role set to ${role}.${reason ? "" : ""}`);
         emitUserList(room);
       }).catch((e) => {
         console.error("[mod set role]", e);
