@@ -1364,19 +1364,39 @@ if(window.ResizeObserver && composerEl){
 // iOS virtual keyboard: keep the conversation pinned to bottom on the *first* viewport resize.
 // When the keyboard appears, scrollTop can briefly land off-bottom, causing a jarring jump.
 let __vvPinRaf = 0;
+// On iOS Safari, scroll position can be mutated *before* the first visualViewport resize fires.
+// Capture a "was pinned" snapshot on input focus so we can force-pin even if chatPinned flips.
+let __vvExpectKeyboard = false;
+let __vvChatPinnedSnapshot = true;
+let __vvDmPinnedSnapshot = true;
+let __vvExpectTimer = null;
+
+function markExpectKeyboard(){
+  // Only meaningful on mobile / iOS, but harmless elsewhere.
+  __vvExpectKeyboard = true;
+  __vvChatPinnedSnapshot = isNearBottom(msgs, 260);
+  __vvDmPinnedSnapshot = isNearBottom(dmMessagesEl, 260);
+  if(__vvExpectTimer) clearTimeout(__vvExpectTimer);
+  // Keyboard open/close animations can take a beat on iOS.
+  __vvExpectTimer = setTimeout(()=>{ __vvExpectKeyboard = false; }, 1400);
+}
+
 function handleVisualViewportPin(){
   if(__vvPinRaf) cancelAnimationFrame(__vvPinRaf);
   __vvPinRaf = requestAnimationFrame(()=>{
     // If the user was pinned to bottom before the resize, force it.
-    if(chatPinned) stickToBottomIfWanted({ force:true, behavior:"auto" });
-    if(dmPinned && dmMessagesEl) {
+    // Use the focus snapshot during keyboard open so we don't lose the pinned state.
+    const shouldForceChat = __vvExpectKeyboard ? __vvChatPinnedSnapshot : chatPinned;
+    const shouldForceDm = __vvExpectKeyboard ? __vvDmPinnedSnapshot : dmPinned;
+    if(shouldForceChat) stickToBottomIfWanted({ force:true, behavior:"auto" });
+    if(shouldForceDm && dmMessagesEl) {
       try{ dmMessagesEl.scrollTo({ top: dmMessagesEl.scrollHeight, behavior:"auto" }); }
       catch{ dmMessagesEl.scrollTop = dmMessagesEl.scrollHeight; }
     }
     // One more pass after layout settles (Safari iOS sometimes needs it).
     setTimeout(()=>{
-      if(chatPinned) stickToBottomIfWanted({ force:true, behavior:"auto" });
-      if(dmPinned && dmMessagesEl) dmMessagesEl.scrollTop = dmMessagesEl.scrollHeight;
+      if(shouldForceChat) stickToBottomIfWanted({ force:true, behavior:"auto" });
+      if(shouldForceDm && dmMessagesEl) dmMessagesEl.scrollTop = dmMessagesEl.scrollHeight;
     }, 60);
   });
 }
@@ -1395,6 +1415,11 @@ const replyPreview = document.getElementById("replyPreview");
 const replyPreviewText = document.getElementById("replyPreviewText");
 const replyPreviewClose = document.getElementById("replyPreviewClose");
 const mentionDropdown = document.getElementById("mentionDropdown");
+
+// iOS keyboard / visualViewport: capture a "was pinned" snapshot before the keyboard resizes the viewport.
+// markExpectKeyboard is defined below (function hoisting), safe to reference here.
+msgInput?.addEventListener("focus", () => { try{ markExpectKeyboard(); }catch{} });
+msgInput?.addEventListener("touchstart", () => { try{ markExpectKeyboard(); }catch{} }, { passive:true });
 
 // dms
 const dmPanel = document.getElementById("dmPanel");
@@ -1434,6 +1459,10 @@ const dmText = document.getElementById("dmText");
 const dmFileInput = document.getElementById("dmFileInput");
 const dmPickFileBtn = document.getElementById("dmPickFileBtn");
 const dmSendBtn = document.getElementById("dmSendBtn");
+
+// iOS keyboard / visualViewport: snapshot pinned state for DM view too.
+dmText?.addEventListener("focus", () => { try{ markExpectKeyboard(); }catch{} });
+dmText?.addEventListener("touchstart", () => { try{ markExpectKeyboard(); }catch{} }, { passive:true });
 dmText?.addEventListener("input", ()=>draftDebounce(saveDmDraft));
 
 // Ensure DM quick bars start closed on load (safety net in case markup defaults are changed)
