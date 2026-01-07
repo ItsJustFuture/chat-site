@@ -2412,6 +2412,10 @@ body.dice-room .sys .diceFace{
   flex-wrap:wrap;
 }
 .msgItem .name{ font-weight:700; }
+.msgItem .name .unameText{
+  font-family: var(--fx-name-font-family, inherit);
+  color: var(--fx-name-color, inherit);
+}
 .msgItem .time{
   font-size: var(--fx-time-size, 11px);
   opacity: .65;
