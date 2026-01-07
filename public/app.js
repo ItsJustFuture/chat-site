@@ -629,6 +629,30 @@ let lastUsers = [];
 const reactionsCache = Object.create(null);
 const dmReactionsCache = Object.create(null);
 const dmReadCache = Object.create(null); // threadId -> { userId, messageId, ts }
+const userFxMap = Object.create(null);
+const CHAT_FX_DEFAULTS = Object.freeze({
+  enabled: true,
+  glow: "off",
+  font: "system",
+  radius: 14,
+  border: 0,
+  glass: 0,
+  blur: 0,
+  density: "cozy",
+  accent: ""
+});
+const CHAT_FX_FONT_STACKS = Object.freeze({
+  system: "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+  inter: "\"Inter\", system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+  poppins: "\"Poppins\", \"Segoe UI\", system-ui, -apple-system, Roboto, \"Helvetica Neue\", Arial, sans-serif",
+  nunito: "\"Nunito\", \"Segoe UI\", system-ui, -apple-system, Roboto, \"Helvetica Neue\", Arial, sans-serif",
+  jetbrains: "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+});
+const CHAT_FX_DENSITY_PRESETS = Object.freeze({
+  compact: { padY: 6, padX: 8, innerGap: 4, timeSize: 10, groupGap: 0, dmGap: 4, dmGapTight: 0 },
+  cozy: { padY: 10, padX: 12, innerGap: 6, timeSize: 11, groupGap: 1, dmGap: 6, dmGapTight: 1 },
+  spacious: { padY: 12, padX: 14, innerGap: 8, timeSize: 12, groupGap: 4, dmGap: 10, dmGapTight: 2 }
+});
 
 const msgIndex = [];
 let dmThreads = [];
@@ -687,6 +711,132 @@ function loadUiScale(){
 
 let dmLastRead = loadJson(DM_LAST_READ_KEY, {}); // { [threadId]: lastReadTs }
 let avatarCache = loadJson(AVATAR_CACHE_KEY, {}); // { [username]: avatarUrl }
+
+function normalizeChatFxFontKey(input){
+  const raw = String(input || "").trim().toLowerCase();
+  if (!raw) return CHAT_FX_DEFAULTS.font;
+  if (raw.includes("jetbrains")) return "jetbrains";
+  if (raw.includes("mono")) return "jetbrains";
+  if (raw.includes("inter")) return "inter";
+  if (raw.includes("poppins")) return "poppins";
+  if (raw.includes("nunito")) return "nunito";
+  if (raw.includes("system")) return "system";
+  return CHAT_FX_DEFAULTS.font;
+}
+
+function normalizeChatFxDensity(input){
+  const raw = String(input || "").trim().toLowerCase();
+  if (raw === "compact" || raw === "cozy" || raw === "spacious") return raw;
+  return CHAT_FX_DEFAULTS.density;
+}
+
+function normalizeChatFxGlow(input){
+  const raw = String(input || "").trim().toLowerCase();
+  if (raw === "soft" || raw === "neon" || raw === "strong" || raw === "off") return raw;
+  return CHAT_FX_DEFAULTS.glow;
+}
+
+function normalizeChatFxNumber(input, fallback, min, max){
+  const n = Number(input);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function normalizeChatFxAccent(input){
+  if (!input) return "";
+  const raw = String(input).trim();
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw)) return raw;
+  return "";
+}
+
+function normalizeChatFx(input){
+  const fx = (input && typeof input === "object") ? input : {};
+  const enabled = fx.enabled !== false;
+  if (!enabled) return { ...CHAT_FX_DEFAULTS, enabled: false };
+  return {
+    enabled,
+    glow: normalizeChatFxGlow(fx.glow),
+    font: normalizeChatFxFontKey(fx.font),
+    radius: normalizeChatFxNumber(fx.radius, CHAT_FX_DEFAULTS.radius, 6, 28),
+    border: normalizeChatFxNumber(fx.border, CHAT_FX_DEFAULTS.border, 0, 4),
+    glass: normalizeChatFxNumber(fx.glass, CHAT_FX_DEFAULTS.glass, 0, 0.85),
+    blur: normalizeChatFxNumber(fx.blur, CHAT_FX_DEFAULTS.blur, 0, 18),
+    density: normalizeChatFxDensity(fx.density),
+    accent: normalizeChatFxAccent(fx.accent)
+  };
+}
+
+function updateUserFxMap(username, fx){
+  if (!username) return;
+  const key = String(username);
+  userFxMap[key] = normalizeChatFx(fx);
+}
+
+function hydrateUserFxMap(authorsFx){
+  if (!authorsFx) return;
+  if (Array.isArray(authorsFx)){
+    authorsFx.forEach((entry)=>{
+      if (!entry) return;
+      const name = entry.user || entry.username || entry.name || "";
+      const fx = entry.chatFx || entry.fx || entry;
+      updateUserFxMap(name, fx);
+    });
+    return;
+  }
+  if (typeof authorsFx === "object"){
+    Object.entries(authorsFx).forEach(([name, fx]) => updateUserFxMap(name, fx));
+  }
+}
+
+function resolveMessageAuthor(message){
+  return String(message?.user ?? message?.username ?? message?.from ?? message?.sender ?? "");
+}
+
+function resolveChatFx(message, author){
+  const name = author || resolveMessageAuthor(message);
+  const baseFx = userFxMap[name] || {};
+  const msgFx = message?.chatFx;
+  const merged = msgFx ? { ...baseFx, ...msgFx } : baseFx;
+  return normalizeChatFx(merged);
+}
+
+function applyChatFxToBubble(bubble, fx, options = {}){
+  if (!bubble) return;
+  const resolved = normalizeChatFx(fx);
+  const glowMap = { off: 0, soft: 0.4, neon: 0.8, strong: 1.15 };
+  const glowValue = glowMap[resolved.glow] ?? 0;
+  const fontStack = CHAT_FX_FONT_STACKS[resolved.font] || CHAT_FX_FONT_STACKS.system;
+  const densityPreset = CHAT_FX_DENSITY_PRESETS[resolved.density] || CHAT_FX_DENSITY_PRESETS.cozy;
+  const radiusGrouped = Math.max(8, resolved.radius - 2);
+
+  bubble.style.setProperty("--fx-font-family", fontStack);
+  bubble.style.setProperty("--fx-glow", String(glowValue));
+  bubble.style.setProperty("--fx-accent", resolved.accent || "var(--accent)");
+  bubble.style.setProperty("--fx-radius", `${resolved.radius}px`);
+  bubble.style.setProperty("--fx-radius-grouped", `${radiusGrouped}px`);
+  bubble.style.setProperty("--fx-border", `${resolved.border}px`);
+  bubble.style.setProperty("--fx-glass", String(resolved.glass));
+  bubble.style.setProperty("--fx-blur", `${resolved.blur}px`);
+  bubble.style.setProperty("--fx-density", resolved.density);
+  bubble.style.setProperty("--fx-pad-y", `${densityPreset.padY}px`);
+  bubble.style.setProperty("--fx-pad-x", `${densityPreset.padX}px`);
+  bubble.style.setProperty("--fx-inner-gap", `${densityPreset.innerGap}px`);
+  bubble.style.setProperty("--fx-time-size", `${densityPreset.timeSize}px`);
+
+  bubble.classList.remove("fx-density-compact", "fx-density-cozy", "fx-density-spacious");
+  bubble.classList.add(`fx-density-${resolved.density}`);
+
+  if (options.groupBody){
+    options.groupBody.style.setProperty("--fx-group-gap", `${densityPreset.groupGap}px`);
+  }
+  if (options.dmRow){
+    options.dmRow.style.setProperty("--fx-dm-gap", `${densityPreset.dmGap}px`);
+    options.dmRow.style.setProperty("--fx-dm-gap-tight", `${densityPreset.dmGapTight}px`);
+  }
+  if (options.dmWrap){
+    options.dmWrap.style.setProperty("--fx-time-size", `${densityPreset.timeSize}px`);
+  }
+}
 
 function markDmRead(threadId, ts) {
   const cur = Number(dmLastRead[threadId] || 0);
@@ -3065,6 +3215,8 @@ function addMessage(m){
   const senderName = String(m.user ?? m.username ?? m.from ?? m.sender ?? "");
   const senderRole = String(m.role ?? m.userRole ?? "");
   const isSelf = !!(senderName && me && (senderName === me.username));
+  if (m?.chatFx) updateUserFxMap(senderName, m.chatFx);
+  const resolvedFx = resolveChatFx(m, senderName);
 
 
 // Hydrate reply context client-side (server may only send replyToId)
@@ -3126,6 +3278,8 @@ try{
     isSelf
   });
 
+  const bubbleEl = item.querySelector(".bubble");
+  applyChatFxToBubble(bubbleEl, resolvedFx, { groupBody: body });
   body.appendChild(item);
 
   if (m.__fresh) {
@@ -3655,6 +3809,7 @@ function renderMembers(users){
   refreshModTargetOptions(lastUsers);
   memberList.innerHTML="";
   lastUsers.forEach(u=>{
+    if (u?.chatFx) updateUserFxMap(u.name, u.chatFx);
     const row=document.createElement("div");
     row.className="mItem";
     row.dataset.username = u.name;
@@ -4296,6 +4451,9 @@ function renderDmMessages(threadId){
   for (let i = 0; i < msgsArr.length; i++) {
     const m = msgsArr[i];
     const isSelf = String(m.user) === String(me?.username);
+    const authorName = resolveMessageAuthor(m);
+    if (m?.chatFx) updateUserFxMap(authorName, m.chatFx);
+    const resolvedFx = resolveChatFx(m, authorName);
 
     const prev = i > 0 ? msgsArr[i - 1] : null;
     const next = i < (msgsArr.length - 1) ? msgsArr[i + 1] : null;
@@ -4375,6 +4533,7 @@ function renderDmMessages(threadId){
 
     const bubble = document.createElement("div");
     bubble.className = "dmBubble" + (isSelf ? " self" : "");
+    applyChatFxToBubble(bubble, resolvedFx, { dmRow: row, dmWrap: bubbleWrap });
 
     if (m.replyToId && (m.replyToUser || m.replyToText)) {
       const replyLink = document.createElement("button");
@@ -7665,8 +7824,13 @@ socket.on("disconnect", (reason) => {
     renderLevelProgress(progression, true);
   });
   socket.on("history", (history)=>{
+    let messages = history;
+    if (history && !Array.isArray(history) && typeof history === "object") {
+      hydrateUserFxMap(history.authorsFx || history.authors_fx || history.userFxMap);
+      messages = history.messages || history.history || history.items || [];
+    }
     clearMsgs();
-    (history||[]).forEach(m=>safeAddMessage(m));
+    (messages||[]).forEach(m=>safeAddMessage(m));
     applySearch();
   });
   socket.on("chat message", (m)=>{
@@ -7741,6 +7905,12 @@ socket.on("disconnect", (reason) => {
 
 socket.on("dm history", (payload) => {
     const { threadId, messages = [], participants = [], title = "" } = payload || {};
+    hydrateUserFxMap(payload?.authorsFx || payload?.authors_fx);
+    if (Array.isArray(messages)) {
+      messages.forEach((msg) => {
+        if (msg?.chatFx) updateUserFxMap(resolveMessageAuthor(msg), msg.chatFx);
+      });
+    }
     const lastText = messages.length
       ? messages[messages.length - 1].text || ""
       : (dmThreads.find((t) => String(t.id) === String(threadId))?.last_text || "");
@@ -7802,6 +7972,7 @@ socket.on("dm history", (payload) => {
   socket.on("dm message", (m) => {
   try {
     m.__fresh = true;
+    if (m?.chatFx) updateUserFxMap(resolveMessageAuthor(m), m.chatFx);
     const arr = dmMessages.get(m.threadId) || [];
     arr.push(m);
     dmMessages.set(m.threadId, arr);
