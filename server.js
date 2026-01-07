@@ -543,6 +543,7 @@ const CHAT_FX_DEFAULTS = Object.freeze({
   enabled: true,
   glow: "off",
   font: "system",
+  nameFont: "system",
   bubbleRadius: 14,
   borderPx: 0,
   glass: 0,
@@ -551,10 +552,19 @@ const CHAT_FX_DEFAULTS = Object.freeze({
   accent: null,
   bubbleColor: null,
   textColor: null,
+  nameColor: null,
   autoContrast: false,
 });
 const CHAT_FX_GLOWS = new Set(["off", "soft", "neon", "strong"]);
-const CHAT_FX_FONTS = new Set(["system", "inter", "poppins", "nunito", "jetbrains", "rubik", "montserrat", "spacegrotesk"]);
+const CHAT_FX_FONTS = new Set([
+  "system",
+  "inter","roboto","opensans","lato","poppins","nunito","rubik","montserrat","spacegrotesk","worksans","sourcesans3","raleway","oswald","ubuntu","firasans","gothicA1",
+  "merriweather","playfair","crimson","libreserif","robotoslab","alegreya","cinzel",
+  "jetbrains","inconsolata","spacemono","ibmplexmono","dmmono","pressstart",
+  "anton","bebas","abril",
+  "pacifico","dancing","caveat","indieflower","permanentmarker",
+  "metalmania"
+]);
 const CHAT_FX_DENSITIES = new Set(["compact", "cozy", "spacious"]);
 const CHAT_FX_HEX = /^#[0-9a-f]{6}$/i;
 
@@ -565,6 +575,11 @@ function sanitizeChatFx(raw) {
   if (typeof raw.enabled === "boolean") out.enabled = raw.enabled;
   if (CHAT_FX_GLOWS.has(raw.glow)) out.glow = raw.glow;
   if (CHAT_FX_FONTS.has(raw.font)) out.font = raw.font;
+
+  // Username styling (shown anywhere the username appears)
+  const nameFontRaw = raw.nameFont ?? raw.usernameFont ?? raw.userNameFont ?? raw.uNameFont;
+  const nf = String(nameFontRaw || "").trim();
+  if (CHAT_FX_FONTS.has(nf)) out.nameFont = nf;
 
   // Backwards/forwards compatibility: accept either client-style keys (radius/border/blur)
   // or server-style keys (bubbleRadius/borderPx/glassBlur).
@@ -606,6 +621,14 @@ function sanitizeChatFx(raw) {
   } else {
     const tc = String(raw.textColor || "").trim();
     out.textColor = CHAT_FX_HEX.test(tc) ? tc : null;
+  }
+
+  const nameColorRaw = raw.nameColor ?? raw.usernameColor ?? raw.userNameColor ?? raw.uNameColor;
+  if (nameColorRaw == null || nameColorRaw === "") {
+    out.nameColor = null;
+  } else {
+    const nc = String(nameColorRaw || "").trim();
+    out.nameColor = CHAT_FX_HEX.test(nc) ? nc : null;
   }
 
   if (typeof raw.autoContrast === "boolean") out.autoContrast = raw.autoContrast;
