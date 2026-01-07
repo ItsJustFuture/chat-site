@@ -7915,9 +7915,8 @@ modOpenProfileBtn.addEventListener("click", async ()=>{
   await openMemberProfile(target);
 });
 modSetRoleBtn.addEventListener("click", ()=>{
+  // Role changes can be done without a reason.
   const reason = (modReason.value || "").trim();
-  const err=requireReason(reason);
-  if(err){ modMsg.textContent=err; return; }
   const target = selectedModTarget();
   const targetErr = ensureTarget(target);
   if(targetErr){ modMsg.textContent = targetErr; return; }
