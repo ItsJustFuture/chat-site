@@ -2356,7 +2356,7 @@ body.dice-room .sys .diceFace{
 .msgAvatar{ width:38px; height:38px; border-radius:50%; background:var(--avatar-bg); overflow:hidden; flex:0 0 auto; border:1px solid var(--border); }
 .msgAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
 .bubble{
-  --fx-base: var(--messageOtherBg);
+  --fx-base: var(--fx-bubble-bg, var(--messageOtherBg));
   color:var(--fx-text, var(--messageOtherText));
   padding:var(--fx-pad-y, 10px) var(--fx-pad-x, 12px);
   border-radius:var(--fx-radius, 14px);
@@ -2383,7 +2383,7 @@ body.dice-room .sys .diceFace{
     0 0 calc(var(--fx-glow, 0) * 14px) color-mix(in srgb, var(--fx-accent, var(--accent)) 28%, transparent);
 }
 .self .bubble{
-  --fx-base: var(--messageSelfBg);
+  --fx-base: var(--fx-bubble-bg, var(--messageSelfBg));
   color:var(--fx-text, var(--messageSelfText));
 }
 
@@ -2884,6 +2884,21 @@ body.dice-room .sys .diceFace{
   font-size:12px;
   color:var(--muted);
 }
+.chatFxColorRow{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.chatFxColorRow input[type="color"]{
+  width:42px;
+  height:34px;
+  padding:0;
+  border:none;
+  background:transparent;
+}
+.chatFxColorRow input[type="text"]{
+  flex:1;
+}
 .chatFxDensityRow{ display:flex; flex-wrap:wrap; gap:8px; }
 .chatFxActions{
   display:flex;
@@ -3339,7 +3354,7 @@ body.lockScroll{ overflow:hidden; }
 .dmRow.self .dmBubbleWrap{ align-items:flex-end; }
 
 .dmBubble{
-  --fx-base: var(--panel);
+  --fx-base: var(--fx-bubble-bg, var(--panel));
   color:var(--fx-text, var(--text));
   display:inline-flex;
   width: fit-content;
@@ -3363,7 +3378,7 @@ body.lockScroll{ overflow:hidden; }
     0 0 calc(var(--fx-glow, 0) * 14px) color-mix(in srgb, var(--fx-accent, var(--accent)) 28%, transparent);
 }
 .dmBubble.self{
-  --fx-base: var(--bubbleSelf);
+  --fx-base: var(--fx-bubble-bg, var(--bubbleSelf));
   color:var(--fx-text, #fff);
 }
 .dmMetaRow{

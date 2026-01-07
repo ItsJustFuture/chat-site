@@ -640,6 +640,7 @@ const CHAT_FX_DEFAULTS = Object.freeze({
   blur: 0,
   density: "cozy",
   accent: "",
+  bubbleColor: "",
   textColor: "",
   autoContrast: false
 });
@@ -765,6 +766,13 @@ function normalizeChatFxAccent(input){
   return "";
 }
 
+function normalizeChatFxBubbleColor(input){
+  if (!input) return "";
+  const raw = String(input).trim();
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw)) return raw;
+  return "";
+}
+
 function normalizeChatFxTextColor(input){
   if (!input) return "";
   const raw = String(input).trim();
@@ -778,6 +786,7 @@ function normalizeChatFx(input){
   const radiusRaw = (fx.radius ?? fx.bubbleRadius);
   const borderRaw = (fx.border ?? fx.borderPx);
   const blurRaw = (fx.blur ?? fx.glassBlur);
+  const bubbleColorRaw = (fx.bubbleColor ?? fx.bubbleBg ?? fx.bubble);
   return {
     enabled,
     glow: normalizeChatFxGlow(fx.glow),
@@ -788,6 +797,7 @@ function normalizeChatFx(input){
     blur: normalizeChatFxNumber(blurRaw, CHAT_FX_DEFAULTS.blur, 0, 16),
     density: normalizeChatFxDensity(fx.density),
     accent: normalizeChatFxAccent(fx.accent),
+    bubbleColor: normalizeChatFxBubbleColor(bubbleColorRaw),
     textColor: normalizeChatFxTextColor(fx.textColor),
     autoContrast: fx.autoContrast === true
   };
@@ -865,6 +875,24 @@ function pickAutoContrastTextColor(el){
   return lum > 0.52 ? "#000000" : "#ffffff";
 }
 
+function hexToRgbTuple(hex){
+  const raw = String(hex || "").trim();
+  const m = raw.match(/^#([0-9a-f]{6})$/i);
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return { r, g, b, a: 1 };
+}
+
+function pickAutoContrastFromHex(hex){
+  const t = hexToRgbTuple(hex);
+  if (!t) return "";
+  const lum = relativeLuminance(t);
+  return lum > 0.52 ? "#000000" : "#ffffff";
+}
+
 function applyChatFxToBubble(bubble, fx, options = {}){
   if (!bubble) return;
   const resolved = normalizeChatFx(fx);
@@ -875,13 +903,19 @@ function applyChatFxToBubble(bubble, fx, options = {}){
   const densityPreset = CHAT_FX_DENSITY_PRESETS[effective.density] || CHAT_FX_DENSITY_PRESETS.cozy;
   const radiusGrouped = Math.max(8, effective.radius - 2);
 
+  // Bubble background override (optional)
+  const bubbleBg = (effective.bubbleColor || "").trim();
+  if (bubbleBg) bubble.style.setProperty("--fx-bubble-bg", bubbleBg);
+  else bubble.style.removeProperty("--fx-bubble-bg");
+
   bubble.style.setProperty("--fx-font-family", fontStack);
   bubble.style.setProperty("--fx-glow", String(glowValue));
   bubble.style.setProperty("--fx-accent", effective.accent || "var(--accent)");
   // Text colour: explicit override beats auto-contrast.
   const textOverride = (effective.textColor || "").trim();
   const autoContrast = !!effective.autoContrast && !textOverride;
-  const autoColor = autoContrast ? pickAutoContrastTextColor(bubble) : "";
+  // If the user has set a bubble background colour, prefer that for auto-contrast.
+  const autoColor = autoContrast ? (bubbleBg ? pickAutoContrastFromHex(bubbleBg) : pickAutoContrastTextColor(bubble)) : "";
   bubble.style.setProperty("--fx-text", textOverride || autoColor || "");
   bubble.classList.toggle("fx-autoContrast", autoContrast);
   bubble.style.setProperty("--fx-radius", `${effective.radius}px`);
@@ -7403,6 +7437,7 @@ function syncChatFxControls(fx){
   chatFxPrefEls.glass.value = String(resolved.glass);
   chatFxPrefEls.blur.value = String(resolved.blur);
   chatFxPrefEls.accent.value = resolved.accent || "";
+  if (chatFxPrefEls.bubbleColor) chatFxPrefEls.bubbleColor.value = resolved.bubbleColor || "";
   if (chatFxPrefEls.textColor) chatFxPrefEls.textColor.value = resolved.textColor || "";
   if (chatFxPrefEls.autoContrast) chatFxPrefEls.autoContrast.checked = !!resolved.autoContrast;
   setChatFxDensityButtons(resolved.density);
@@ -7411,6 +7446,18 @@ function syncChatFxControls(fx){
   updateChatFxSliderValue(chatFxPrefEls.glassValue, resolved.glass, 2);
   updateChatFxSliderValue(chatFxPrefEls.blurValue, resolved.blur);
   setChatFxControlsDisabled(!resolved.enabled);
+
+  // Keep color pickers in sync (they can't be blank, so use fallbacks when empty/invalid)
+  try {
+    if (chatFxPrefEls.bubbleColorPick) {
+      const v = String(resolved.bubbleColor || "").trim();
+      chatFxPrefEls.bubbleColorPick.value = /^#[0-9a-f]{6}$/i.test(v) ? v : "#2b2d31";
+    }
+    if (chatFxPrefEls.textColorPick) {
+      const v = String(resolved.textColor || "").trim();
+      chatFxPrefEls.textColorPick.value = /^#[0-9a-f]{6}$/i.test(v) ? v : "#ffffff";
+    }
+  } catch {}
 }
 
 function readChatFxFormRaw(){
@@ -7425,6 +7472,7 @@ function readChatFxFormRaw(){
     blur: Number(chatFxPrefEls.blur.value),
     density: getChatFxDensitySelection(),
     accent: (chatFxPrefEls.accent.value || "").trim(),
+    bubbleColor: (chatFxPrefEls.bubbleColor?.value || "").trim(),
     textColor: (chatFxPrefEls.textColor?.value || "").trim(),
     autoContrast: !!chatFxPrefEls.autoContrast?.checked
   };
@@ -7572,8 +7620,21 @@ function wireChatFxPrefs(){
         <div class="small">Leave blank to keep your theme accent.</div>
       </div>
       <div class="field">
+        <label>Bubble color (optional)</label>
+        <div class="chatFxColorRow">
+          <input id="chatFxBubbleColorPick" type="color" value="#2b2d31" aria-label="Pick bubble color">
+          <input id="chatFxBubbleColor" type="text" placeholder="#RRGGBB">
+          <button class="pillBtn" id="chatFxBubbleColorClear" type="button">Clear</button>
+        </div>
+        <div class="small">Leave blank to use the theme bubble colour.</div>
+      </div>
+      <div class="field">
         <label>Text color (optional)</label>
-        <input id="chatFxTextColor" type="text" placeholder="#RRGGBB">
+        <div class="chatFxColorRow">
+          <input id="chatFxTextColorPick" type="color" value="#ffffff" aria-label="Pick text color">
+          <input id="chatFxTextColor" type="text" placeholder="#RRGGBB">
+          <button class="pillBtn" id="chatFxTextColorClear" type="button">Clear</button>
+        </div>
         <div class="small">Leave blank to use the theme's default message text.</div>
       </div>
       <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
@@ -7603,7 +7664,12 @@ function wireChatFxPrefs(){
     blur: q("#chatFxBlur"),
     blurValue: q("#chatFxBlurValue"),
     accent: q("#chatFxAccent"),
+    bubbleColor: q("#chatFxBubbleColor"),
+    bubbleColorPick: q("#chatFxBubbleColorPick"),
+    bubbleColorClear: q("#chatFxBubbleColorClear"),
     textColor: q("#chatFxTextColor"),
+    textColorPick: q("#chatFxTextColorPick"),
+    textColorClear: q("#chatFxTextColorClear"),
     autoContrast: q("#chatFxAutoContrast"),
     saveBtn: q("#chatFxSaveBtn"),
     status: q("#chatFxStatus"),
@@ -7621,6 +7687,7 @@ function wireChatFxPrefs(){
   chatFxPrefEls.glass?.addEventListener("input", handleChatFxInput);
   chatFxPrefEls.blur?.addEventListener("input", handleChatFxInput);
   chatFxPrefEls.accent?.addEventListener("input", handleChatFxInput);
+  chatFxPrefEls.bubbleColor?.addEventListener("input", handleChatFxInput);
   chatFxPrefEls.textColor?.addEventListener("input", handleChatFxInput);
   chatFxPrefEls.autoContrast?.addEventListener("change", handleChatFxInput);
   chatFxPrefEls.accent?.addEventListener("blur", () => {
@@ -7628,9 +7695,65 @@ function wireChatFxPrefs(){
     if (chatFxPrefEls?.accent) chatFxPrefEls.accent.value = normalized.accent || "";
     handleChatFxInput();
   });
+  chatFxPrefEls.bubbleColor?.addEventListener("blur", () => {
+    const normalized = normalizeChatFx(readChatFxFormRaw());
+    if (chatFxPrefEls?.bubbleColor) chatFxPrefEls.bubbleColor.value = normalized.bubbleColor || "";
+    // Keep picker in sync (only supports 6-digit).
+    if (chatFxPrefEls?.bubbleColorPick) {
+      const v = (normalized.bubbleColor || "").trim();
+      if (/^#[0-9a-f]{6}$/i.test(v)) chatFxPrefEls.bubbleColorPick.value = v;
+    }
+    handleChatFxInput();
+  });
   chatFxPrefEls.textColor?.addEventListener("blur", () => {
     const normalized = normalizeChatFx(readChatFxFormRaw());
     if (chatFxPrefEls?.textColor) chatFxPrefEls.textColor.value = normalized.textColor || "";
+    handleChatFxInput();
+  });
+
+  // Color picker wiring (bubble + text): keep picker <-> text inputs synced and allow clearing to blank.
+  const syncPickerFromText = (textEl, pickerEl, fallback) => {
+    if (!textEl || !pickerEl) return;
+    const v = String(textEl.value || "").trim();
+    if (/^#([0-9a-f]{6})$/i.test(v)) pickerEl.value = v;
+    else pickerEl.value = fallback;
+  };
+  const syncTextFromPicker = (textEl, pickerEl) => {
+    if (!textEl || !pickerEl) return;
+    textEl.value = pickerEl.value || "";
+  };
+
+  // Bubble color picker
+  if (chatFxPrefEls.bubbleColorPick && chatFxPrefEls.bubbleColor){
+    syncPickerFromText(chatFxPrefEls.bubbleColor, chatFxPrefEls.bubbleColorPick, "#2b2d31");
+    chatFxPrefEls.bubbleColorPick.addEventListener("input", () => {
+      syncTextFromPicker(chatFxPrefEls.bubbleColor, chatFxPrefEls.bubbleColorPick);
+      handleChatFxInput();
+    });
+    chatFxPrefEls.bubbleColor.addEventListener("input", () => {
+      syncPickerFromText(chatFxPrefEls.bubbleColor, chatFxPrefEls.bubbleColorPick, "#2b2d31");
+    });
+  }
+  chatFxPrefEls.bubbleColorClear?.addEventListener("click", () => {
+    if (chatFxPrefEls?.bubbleColor) chatFxPrefEls.bubbleColor.value = "";
+    syncPickerFromText(chatFxPrefEls?.bubbleColor, chatFxPrefEls?.bubbleColorPick, "#2b2d31");
+    handleChatFxInput();
+  });
+
+  // Text color picker
+  if (chatFxPrefEls.textColorPick && chatFxPrefEls.textColor){
+    syncPickerFromText(chatFxPrefEls.textColor, chatFxPrefEls.textColorPick, "#ffffff");
+    chatFxPrefEls.textColorPick.addEventListener("input", () => {
+      syncTextFromPicker(chatFxPrefEls.textColor, chatFxPrefEls.textColorPick);
+      handleChatFxInput();
+    });
+    chatFxPrefEls.textColor.addEventListener("input", () => {
+      syncPickerFromText(chatFxPrefEls.textColor, chatFxPrefEls.textColorPick, "#ffffff");
+    });
+  }
+  chatFxPrefEls.textColorClear?.addEventListener("click", () => {
+    if (chatFxPrefEls?.textColor) chatFxPrefEls.textColor.value = "";
+    syncPickerFromText(chatFxPrefEls?.textColor, chatFxPrefEls?.textColorPick, "#ffffff");
     handleChatFxInput();
   });
 
