@@ -505,9 +505,11 @@ const CHAT_FX_DEFAULTS = Object.freeze({
   glassBlur: 0,
   density: "cozy",
   accent: null,
+  textColor: null,
+  autoContrast: false,
 });
 const CHAT_FX_GLOWS = new Set(["off", "soft", "neon", "strong"]);
-const CHAT_FX_FONTS = new Set(["system", "inter", "poppins", "nunito", "jetbrains"]);
+const CHAT_FX_FONTS = new Set(["system", "inter", "poppins", "nunito", "jetbrains", "rubik", "montserrat", "spacegrotesk"]);
 const CHAT_FX_DENSITIES = new Set(["compact", "cozy", "spacious"]);
 const CHAT_FX_HEX = /^#[0-9a-f]{6}$/i;
 
@@ -519,17 +521,22 @@ function sanitizeChatFx(raw) {
   if (CHAT_FX_GLOWS.has(raw.glow)) out.glow = raw.glow;
   if (CHAT_FX_FONTS.has(raw.font)) out.font = raw.font;
 
-  if (Number.isFinite(Number(raw.bubbleRadius))) {
-    out.bubbleRadius = clamp(raw.bubbleRadius, 6, 28);
+  // Backwards/forwards compatibility: accept either client-style keys (radius/border/blur)
+  // or server-style keys (bubbleRadius/borderPx/glassBlur).
+  const bubbleRadiusRaw = raw.bubbleRadius ?? raw.radius;
+  if (Number.isFinite(Number(bubbleRadiusRaw))) {
+    out.bubbleRadius = clamp(bubbleRadiusRaw, 6, 28);
   }
-  if (Number.isFinite(Number(raw.borderPx))) {
-    out.borderPx = clamp(raw.borderPx, 0, 3);
+  const borderPxRaw = raw.borderPx ?? raw.border;
+  if (Number.isFinite(Number(borderPxRaw))) {
+    out.borderPx = clamp(borderPxRaw, 0, 3);
   }
   if (Number.isFinite(Number(raw.glass))) {
     out.glass = clamp(raw.glass, 0, 1);
   }
-  if (Number.isFinite(Number(raw.glassBlur))) {
-    out.glassBlur = clamp(raw.glassBlur, 0, 16);
+  const glassBlurRaw = raw.glassBlur ?? raw.blur;
+  if (Number.isFinite(Number(glassBlurRaw))) {
+    out.glassBlur = clamp(glassBlurRaw, 0, 16);
   }
   if (CHAT_FX_DENSITIES.has(raw.density)) out.density = raw.density;
 
@@ -539,6 +546,15 @@ function sanitizeChatFx(raw) {
     const accent = String(raw.accent || "").trim();
     out.accent = CHAT_FX_HEX.test(accent) ? accent : null;
   }
+
+  if (raw.textColor == null) {
+    out.textColor = null;
+  } else {
+    const tc = String(raw.textColor || "").trim();
+    out.textColor = CHAT_FX_HEX.test(tc) ? tc : null;
+  }
+
+  if (typeof raw.autoContrast === "boolean") out.autoContrast = raw.autoContrast;
 
   return out;
 }
@@ -3316,22 +3332,41 @@ function sanitizePrefsInput(p) {
 function buildAuthorsFxMap(usernames, cb) {
   const unique = Array.from(new Set((usernames || []).filter((name) => typeof name === "string" && name.trim())));
   if (!unique.length) return cb({});
-  const placeholders = unique.map(() => "?").join(",");
-  db.all(
-    `SELECT username, prefs_json FROM users WHERE username IN (${placeholders})`,
-    unique,
-    (_e, rows) => {
-      const map = {};
-      for (const name of unique) {
-        map[name] = sanitizeChatFx(null);
+
+  // Prefer Postgres during the SQLite -> PG migration.
+  (async () => {
+    const base = {};
+    for (const name of unique) base[name] = sanitizeChatFx(null);
+
+    try {
+      if (pgPool) {
+        const { rows } = await pgPool.query(
+          "SELECT username, prefs_json FROM users WHERE username = ANY($1::text[])",
+          [unique]
+        );
+        for (const row of rows || []) {
+          const prefs = safeJsonParse(row?.prefs_json, {});
+          base[row.username] = sanitizeChatFx(prefs?.chatFx);
+        }
+        return cb(base);
       }
-      for (const row of rows || []) {
-        const prefs = safeJsonParse(row?.prefs_json, {});
-        map[row.username] = sanitizeChatFx(prefs?.chatFx);
-      }
-      cb(map);
+    } catch (e) {
+      console.warn("[chatFx][authorsFx][pg] failed, falling back to sqlite:", e?.message || e);
     }
-  );
+
+    const placeholders = unique.map(() => "?").join(",");
+    db.all(
+      `SELECT username, prefs_json FROM users WHERE username IN (${placeholders})`,
+      unique,
+      (_e, rows) => {
+        for (const row of rows || []) {
+          const prefs = safeJsonParse(row?.prefs_json, {});
+          base[row.username] = sanitizeChatFx(prefs?.chatFx);
+        }
+        cb(base);
+      }
+    );
+  })();
 }
 
 function updateLiveChatFx(userId, chatFx) {
