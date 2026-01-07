@@ -4,6 +4,8 @@
 // Debug hook: enable tap hit-testing logs by setting `window.__TAP_DEBUG__ = true` in the console.
 window.__TAP_DEBUG__ = window.__TAP_DEBUG__ ?? false;
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const PREFERS_REDUCED_MOTION = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const DELETE_ANIM_MS = PREFERS_REDUCED_MOTION ? 1 : 200;
 
 // ---- Scroll pinning scheduler (hoisted)
 // This function is referenced early (e.g. visualViewport listeners inside initLayoutMetrics).
@@ -3754,7 +3756,7 @@ actions.appendChild(replyBtn);
     actions.appendChild(editBtn);
   }
 
-  if(roleRank((me && me.role) ? me.role : "member") >= roleRank("Moderator")){
+  if (canDeleteMessage(isSelf)) {
     const del = document.createElement("button");
     del.type="button";
     del.className="delBtn";
@@ -3762,7 +3764,16 @@ actions.appendChild(replyBtn);
     del.title="Delete";
     del.onclick=(e)=>{
       e.stopPropagation();
-      if(confirm("Delete this message?")) socket?.emit("delete message", { messageId: mid });
+      if(!confirm("Delete this message?")) return;
+      markMessageDeleting(item);
+      socket?.emit("delete message", { messageId: mid }, (res = {}) => {
+        if (!res.ok) {
+          clearMessageDeleting(item);
+          addSystem(res.message || "Failed to delete message.");
+          return;
+        }
+        handleMainMessageDeleted(mid);
+      });
     };
     actions.appendChild(del);
   }
@@ -3918,6 +3929,74 @@ function renderDmReactions(messageId, reactionsMap){
 
   const host = container.closest(".dmRow");
   if(host) host.classList.toggle("hasReacts", Object.keys(counts).length > 0);
+}
+
+function canDeleteMessage(isSelf){
+  const myRole = me?.role || "User";
+  const isModerator = roleRank(myRole) >= roleRank("Moderator");
+  if (isModerator) return true;
+  return isSelf && roleRank(myRole) >= roleRank("VIP");
+}
+
+function markMessageDeleting(row){
+  if (!row) return;
+  row.classList.add("message--deleting");
+  row.dataset.deletePending = "1";
+}
+
+function clearMessageDeleting(row){
+  if (!row) return;
+  row.classList.remove("message--deleting");
+  delete row.dataset.deletePending;
+  delete row.dataset.deleteRemoving;
+}
+
+function removeMessageWithAnimation(row, onDone){
+  if (!row || row.dataset.deleteRemoving === "1") return;
+  row.dataset.deleteRemoving = "1";
+  row.classList.add("message--deleting");
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    row.removeEventListener("transitionend", onEnd);
+    if (row.isConnected) row.remove();
+    if (onDone) onDone();
+  };
+  const onEnd = (e) => {
+    if (e.target !== row) return;
+    finish();
+  };
+  row.addEventListener("transitionend", onEnd);
+  setTimeout(finish, DELETE_ANIM_MS + 80);
+}
+
+function removeFromMsgIndex(messageId){
+  const idx = msgIndex.findIndex((x) => String(x.id) === String(messageId));
+  if (idx !== -1) msgIndex.splice(idx, 1);
+}
+
+function handleMainMessageDeleted(messageId){
+  removeFromMsgIndex(messageId);
+  const row = document.querySelector(`[data-mid="${messageId}"]`);
+  if (row) removeMessageWithAnimation(row, () => closeReactionMenu());
+  else closeReactionMenu();
+}
+
+function handleDmMessageDeleted(threadId, messageId){
+  const midKey = String(messageId);
+  delete dmReactionsCache[midKey];
+
+  const tidKey = dmMessages.has(threadId) ? threadId : String(threadId);
+  const arr = dmMessages.get(tidKey) || [];
+  const idx = arr.findIndex((x) => String(x.messageId || x.id) === midKey);
+  if (idx !== -1) {
+    arr.splice(idx, 1);
+    dmMessages.set(tidKey, arr);
+  }
+
+  const row = document.querySelector(`[data-dm-mid="${midKey}"]`);
+  if (row) removeMessageWithAnimation(row);
 }
 
 function closeMemberMenu(){
@@ -4757,18 +4836,6 @@ function renderDmMessages(threadId){
       focusDmComposer();
     };
 
-    const delBtn = document.createElement("button");
-    delBtn.type = "button";
-    delBtn.className = "iconBtn smallIcon";
-    delBtn.title = "Delete";
-    delBtn.textContent = "🗑️";
-    delBtn.onclick = (e) => {
-      e.stopPropagation();
-      const ok = confirm("Delete this message?");
-      if (!ok) return;
-      socket?.emit("dm delete message", { threadId, messageId: (m.messageId || m.id) });
-    };
-
     actions.appendChild(reactBtn);
     actions.appendChild(replyBtn);
     // Edit (self, within 5 minutes)
@@ -4785,7 +4852,29 @@ function renderDmMessages(threadId){
       };
       actions.appendChild(editBtn);
     }
-    actions.appendChild(delBtn);
+    if (canDeleteMessage(isSelf)) {
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "iconBtn smallIcon";
+      delBtn.title = "Delete";
+      delBtn.textContent = "🗑️";
+      delBtn.onclick = (e) => {
+        e.stopPropagation();
+        const ok = confirm("Delete this message?");
+        if (!ok) return;
+        markMessageDeleting(row);
+        const msgId = (m.messageId || m.id);
+        socket?.emit("dm delete message", { threadId, messageId: msgId }, (res = {}) => {
+          if (!res.ok) {
+            clearMessageDeleting(row);
+            addSystem(res.message || "Failed to delete message.");
+            return;
+          }
+          handleDmMessageDeleted(threadId, msgId);
+        });
+      };
+      actions.appendChild(delBtn);
+    }
 
     // Bubble + meta
     const bubbleWrap = document.createElement("div");
@@ -8544,15 +8633,12 @@ socket.on("disconnect", (reason) => {
     if (Sound.shouldReaction()) Sound.cues.reaction();
   });
 
-  socket.on("message deleted", ({ messageId }) => {
-    const row = document.querySelector(`[data-mid="${messageId}"]`);
-    if (row) row.remove();
-
-    const idx = msgIndex.findIndex((x) => String(x.id) === String(messageId));
-    if (idx !== -1) msgIndex.splice(idx, 1);
-
-    closeReactionMenu();
-  });
+  const onMainMessageDeleted = ({ messageId }) => {
+    if (!messageId) return;
+    handleMainMessageDeleted(messageId);
+  };
+  socket.on("message deleted", onMainMessageDeleted);
+  socket.on("messageDeleted", onMainMessageDeleted);
 
     socket.on("dm message edited", ({ threadId, messageId, text, editedAt }) => {
     const tid = String(threadId);
@@ -8730,22 +8816,8 @@ socket.on("dm history", (payload) => {
   });
 
   socket.on("dm message deleted", ({ threadId, messageId }) => {
-    const midKey = String(messageId);
-    const row = document.querySelector(`[data-dm-mid="${midKey}"]`);
-    if (row) row.remove();
-    delete dmReactionsCache[midKey];
-
-    // Remove from cached messages
-    const tidKey = threadId;
-    const arr = dmMessages.get(tidKey) || [];
-    const idx = arr.findIndex((x) => String(x.messageId || x.id) === midKey);
-    if (idx !== -1) {
-      arr.splice(idx, 1);
-      dmMessages.set(tidKey, arr);
-    }
-
+    handleDmMessageDeleted(threadId, messageId);
     if (String(activeDmId) === String(threadId)) {
-      // Close any open action menus
       closeReactionMenu();
     }
   });

@@ -1336,6 +1336,8 @@ const commandRegistry = {
       const rows = await dbAllAsync(`SELECT id FROM messages WHERE room=? AND deleted=0 ORDER BY ts DESC LIMIT ?`, [room, amt]);
       for (const r of rows) {
         await dbRunAsync(`UPDATE messages SET deleted=1 WHERE id=?`, [r.id]);
+        await dbRunAsync(`DELETE FROM reactions WHERE message_id=?`, [r.id]);
+        io.to(room).emit("messageDeleted", { messageId: r.id, roomId: room });
         io.to(room).emit("message deleted", { messageId: r.id });
       }
       return { ok: true, message: `Cleared ${rows.length} messages in #${room}` };
@@ -4839,11 +4841,19 @@ function handleListDmThreads(req, res) {
 
   db.all(
     `SELECT t.id, t.title, t.is_group, t.created_at,
-            COALESCE(t.last_message_id, (SELECT id FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1)) AS last_message_id,
-            (SELECT text FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1) AS last_text,
-            COALESCE(t.last_message_at, (SELECT ts FROM dm_messages WHERE thread_id=t.id ORDER BY ts DESC LIMIT 1)) AS last_ts,
+            COALESCE(
+              (SELECT id FROM dm_messages WHERE id=t.last_message_id AND deleted=0),
+              (SELECT id FROM dm_messages WHERE thread_id=t.id AND deleted=0 ORDER BY ts DESC LIMIT 1)
+            ) AS last_message_id,
+            (SELECT text FROM dm_messages WHERE thread_id=t.id AND deleted=0 ORDER BY ts DESC LIMIT 1) AS last_text,
+            COALESCE(
+              (SELECT ts FROM dm_messages WHERE id=t.last_message_id AND deleted=0),
+              t.last_message_at,
+              (SELECT ts FROM dm_messages WHERE thread_id=t.id AND deleted=0 ORDER BY ts DESC LIMIT 1)
+            ) AS last_ts,
             (SELECT COUNT(*) FROM dm_messages m
               WHERE m.thread_id = t.id
+                AND m.deleted = 0
                 AND m.user_id != ?
                 AND m.ts > COALESCE(pself.last_read_at, 0)
             ) AS unreadCount
@@ -5688,7 +5698,7 @@ if (!room) {
       socket.join(`dm:${tid}`);
 
       db.all(
-        `SELECT id, thread_id, user_id, username, text, ts, edited_at, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_mime, attachment_type, attachment_size FROM dm_messages WHERE thread_id=? ORDER BY ts DESC LIMIT 50`,
+        `SELECT id, thread_id, user_id, username, text, ts, edited_at, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_mime, attachment_type, attachment_size FROM dm_messages WHERE thread_id=? AND deleted=0 ORDER BY ts DESC LIMIT 50`,
         [tid],
         (_e, rows) => {
           const msgs = (rows || []).reverse().map((r) => ({
@@ -5861,7 +5871,7 @@ replyToId: replyPk,
 
       if (Number.isInteger(replyId)) {
         db.get(
-          `SELECT id, username, text FROM dm_messages WHERE id = ? AND thread_id = ?`,
+          `SELECT id, username, text FROM dm_messages WHERE id = ? AND thread_id = ? AND deleted=0`,
           [replyId, tid],
           (_e, row) => {
             doInsert(row || {});
@@ -5885,7 +5895,7 @@ replyToId: replyPk,
       if (err || !thread) return;
 
       db.get(
-        `SELECT id, thread_id, user_id, ts FROM dm_messages WHERE id = ? AND thread_id = ?`,
+        `SELECT id, thread_id, user_id, ts FROM dm_messages WHERE id = ? AND thread_id = ? AND deleted=0`,
         [mid, tid],
         (e2, row) => {
           if (e2 || !row) return;
@@ -6149,38 +6159,173 @@ socket.on("status change", ({ status }) => {
     );
   });
 
-  // ---- Moderation: delete message
-  socket.on("mod delete message", ({ messageId }) => {
-    const room = socket.currentRoom;
-    if (!room) return;
+  const logDeleteFailure = ({ scope, messageId, actorId, actorRole, reason, roomId, threadId }) => {
+    console.warn(`[delete:${scope}]`, { messageId, actorId, actorRole, roomId, threadId, reason });
+  };
 
-    const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Moderator")) return;
+  const respondDelete = (ack, payload) => {
+    if (typeof ack === "function") ack(payload);
+  };
 
-    const mid = String(messageId || "").trim();
-    if (!mid) return;
+  const emitMainMessageDeleted = (messageId, roomId) => {
+    const rawRoom = String(roomId || "").trim();
+    if (!rawRoom) return;
+    const emitRoom = rawRoom.startsWith("#") ? rawRoom.slice(1) : rawRoom;
+    io.to(emitRoom).emit("messageDeleted", { messageId, roomId: emitRoom });
+    io.to(emitRoom).emit("message deleted", { messageId });
+  };
+
+  const handleMainDeleteMessage = ({ messageId } = {}, ack) => {
+    const actor = socket.user;
+    if (!actor) {
+      respondDelete(ack, { ok: false, message: "Not authenticated." });
+      return;
+    }
+
+    const actorRole = actor.role || socket.request?.session?.user?.role || "User";
+    const mid = Number(messageId);
+    if (!Number.isInteger(mid)) {
+      respondDelete(ack, { ok: false, message: "Invalid message id." });
+      logDeleteFailure({ scope: "main", messageId, actorId: actor.id, actorRole, reason: "invalid_id" });
+      return;
+    }
 
     db.get(
-      "SELECT * FROM messages WHERE id=? AND room=?",
-      [mid, room],
-      (_e, msg) => {
-        if (!msg) return;
-        // cannot delete higher/equal role messages unless it's your own
-        if (!canModerate(actorRole, msg.role) && msg.user_id !== socket.user.id) return;
+      "SELECT id, room, user_id, username, role, deleted FROM messages WHERE id=?",
+      [mid],
+      (err, msg) => {
+        if (err) {
+          respondDelete(ack, { ok: false, message: "Failed to load message." });
+          logDeleteFailure({ scope: "main", messageId: mid, actorId: actor.id, actorRole, reason: "load_failed" });
+          return;
+        }
+        if (!msg) {
+          respondDelete(ack, { ok: false, message: "Message not found." });
+          logDeleteFailure({ scope: "main", messageId: mid, actorId: actor.id, actorRole, reason: "not_found" });
+          return;
+        }
 
-        db.run("UPDATE messages SET deleted=1 WHERE id=?", [mid], () => {
-          io.to(room).emit("message deleted", { messageId: mid });
-          logModAction({
-            actor: socket.user,
-            action: "DELETE_MESSAGE",
-            targetUserId: msg.user_id,
-            targetUsername: msg.username,
-            room,
-            details: `messageId=${mid}`,
+        const isModerator = requireMinRole(actorRole, "Moderator");
+        const isVip = requireMinRole(actorRole, "VIP");
+        const isOwner = Number(msg.user_id) === Number(actor.id);
+        if (!isModerator && !(isVip && isOwner)) {
+          respondDelete(ack, { ok: false, message: "Not allowed to delete this message." });
+          logDeleteFailure({ scope: "main", messageId: mid, actorId: actor.id, actorRole, roomId: msg.room, reason: "forbidden" });
+          return;
+        }
+
+        const wasDeleted = Number(msg.deleted || 0) === 1;
+        if (wasDeleted) {
+          respondDelete(ack, { ok: true, alreadyDeleted: true });
+          emitMainMessageDeleted(mid, msg.room);
+          return;
+        }
+
+        db.run("UPDATE messages SET deleted=1 WHERE id=?", [mid], (updateErr) => {
+          if (updateErr) {
+            respondDelete(ack, { ok: false, message: "Failed to delete message." });
+            logDeleteFailure({ scope: "main", messageId: mid, actorId: actor.id, actorRole, roomId: msg.room, reason: "update_failed" });
+            return;
+          }
+
+          db.run("DELETE FROM reactions WHERE message_id=?", [mid], (reactErr) => {
+            if (reactErr) {
+              console.warn("[delete:main] reaction cleanup failed", { messageId: mid, error: reactErr?.message || reactErr });
+            }
+            if (requireMinRole(actorRole, "Moderator")) {
+              logModAction({
+                actor,
+                action: "DELETE_MESSAGE",
+                targetUserId: msg.user_id,
+                targetUsername: msg.username,
+                room: msg.room,
+                details: `messageId=${mid}`,
+              });
+            }
+            respondDelete(ack, { ok: true });
+            emitMainMessageDeleted(mid, msg.room);
           });
         });
       }
     );
+  };
+
+  socket.on("delete message", handleMainDeleteMessage);
+  // Backward compatibility for older clients
+  socket.on("mod delete message", handleMainDeleteMessage);
+
+  socket.on("dm delete message", ({ threadId, messageId } = {}, ack) => {
+    const actor = socket.user;
+    if (!actor) {
+      respondDelete(ack, { ok: false, message: "Not authenticated." });
+      return;
+    }
+
+    const tid = Number(threadId);
+    const mid = Number(messageId);
+    if (!Number.isInteger(tid) || !Number.isInteger(mid)) {
+      respondDelete(ack, { ok: false, message: "Invalid message id." });
+      logDeleteFailure({ scope: "dm", messageId, actorId: actor.id, actorRole: actor.role, threadId, reason: "invalid_id" });
+      return;
+    }
+
+    loadThreadForUser(tid, actor.id, (err, thread) => {
+      if (err || !thread) {
+        respondDelete(ack, { ok: false, message: "Not allowed in this thread." });
+        logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole: actor.role, threadId: tid, reason: "thread_access" });
+        return;
+      }
+
+      const actorRole = actor.role || socket.request?.session?.user?.role || "User";
+      db.get(
+        "SELECT id, thread_id, user_id, deleted FROM dm_messages WHERE id=? AND thread_id=?",
+        [mid, tid],
+        (msgErr, msg) => {
+          if (msgErr) {
+            respondDelete(ack, { ok: false, message: "Failed to load message." });
+            logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole, threadId: tid, reason: "load_failed" });
+            return;
+          }
+          if (!msg) {
+            respondDelete(ack, { ok: false, message: "Message not found." });
+            logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole, threadId: tid, reason: "not_found" });
+            return;
+          }
+
+          const isModerator = requireMinRole(actorRole, "Moderator");
+          const isVip = requireMinRole(actorRole, "VIP");
+          const isOwner = Number(msg.user_id) === Number(actor.id);
+          if (!isModerator && !(isVip && isOwner)) {
+            respondDelete(ack, { ok: false, message: "Not allowed to delete this message." });
+            logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole, threadId: tid, reason: "forbidden" });
+            return;
+          }
+
+          const wasDeleted = Number(msg.deleted || 0) === 1;
+          if (wasDeleted) {
+            respondDelete(ack, { ok: true, alreadyDeleted: true });
+            io.to(`dm:${tid}`).emit("dm message deleted", { threadId: tid, messageId: mid });
+            return;
+          }
+
+          db.run("UPDATE dm_messages SET deleted=1 WHERE id=? AND thread_id=?", [mid, tid], (delErr) => {
+            if (delErr) {
+              respondDelete(ack, { ok: false, message: "Failed to delete message." });
+              logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole, threadId: tid, reason: "update_failed" });
+              return;
+            }
+
+            db.run("DELETE FROM dm_reactions WHERE thread_id=? AND message_id=?", [tid, mid], (reactErr) => {
+              if (reactErr) {
+                console.warn("[delete:dm] reaction cleanup failed", { messageId: mid, threadId: tid, error: reactErr?.message || reactErr });
+              }
+              respondDelete(ack, { ok: true });
+              io.to(`dm:${tid}`).emit("dm message deleted", { threadId: tid, messageId: mid });
+            });
+          });
+        }
+      );
+    });
   });
 
   // ---- Kick / Mute / Ban + Unmute/Unban/Warn + Set role

@@ -314,7 +314,8 @@ async function runSqliteMigrations() {
       user_id INTEGER NOT NULL,
       username TEXT NOT NULL,
       text TEXT,
-      ts INTEGER NOT NULL
+      ts INTEGER NOT NULL,
+      deleted INTEGER NOT NULL DEFAULT 0
     )
   `);
 
@@ -327,6 +328,7 @@ async function runSqliteMigrations() {
     ["attachment_mime", "attachment_mime TEXT"],
     ["attachment_type", "attachment_type TEXT"],
     ["attachment_size", "attachment_size INTEGER"],
+    ["deleted", "deleted INTEGER NOT NULL DEFAULT 0"],
 ]);
   // DM reactions (1 reaction per user per DM message)
   await run(`
