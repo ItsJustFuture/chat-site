@@ -505,6 +505,7 @@ const CHAT_FX_DEFAULTS = Object.freeze({
   glassBlur: 0,
   density: "cozy",
   accent: null,
+  bubbleColor: null,
   textColor: null,
   autoContrast: false,
 });
@@ -545,6 +546,15 @@ function sanitizeChatFx(raw) {
   } else {
     const accent = String(raw.accent || "").trim();
     out.accent = CHAT_FX_HEX.test(accent) ? accent : null;
+  }
+
+  // Optional bubble background override (hex)
+  const bubbleColorRaw = raw.bubbleColor ?? raw.bubbleBg ?? raw.bubble;
+  if (bubbleColorRaw == null || bubbleColorRaw === "") {
+    out.bubbleColor = null;
+  } else {
+    const bc = String(bubbleColorRaw || "").trim();
+    out.bubbleColor = CHAT_FX_HEX.test(bc) ? bc : null;
   }
 
   if (raw.textColor == null) {
