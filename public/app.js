@@ -639,14 +639,19 @@ const CHAT_FX_DEFAULTS = Object.freeze({
   glass: 0,
   blur: 0,
   density: "cozy",
-  accent: ""
+  accent: "",
+  textColor: "",
+  autoContrast: false
 });
 const CHAT_FX_FONT_STACKS = Object.freeze({
   system: "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
   inter: "\"Inter\", system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
   poppins: "\"Poppins\", \"Segoe UI\", system-ui, -apple-system, Roboto, \"Helvetica Neue\", Arial, sans-serif",
   nunito: "\"Nunito\", \"Segoe UI\", system-ui, -apple-system, Roboto, \"Helvetica Neue\", Arial, sans-serif",
-  jetbrains: "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+  jetbrains: "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+  rubik: "\"Rubik\", system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+  montserrat: "\"Montserrat\", system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+  spacegrotesk: "\"Space Grotesk\", system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif"
 });
 const CHAT_FX_DENSITY_PRESETS = Object.freeze({
   compact: { padY: 6, padX: 8, innerGap: 4, timeSize: 10, groupGap: 0, dmGap: 4, dmGapTight: 0 },
@@ -724,6 +729,10 @@ function normalizeChatFxFontKey(input){
   if (!raw) return CHAT_FX_DEFAULTS.font;
   if (raw.includes("jetbrains")) return "jetbrains";
   if (raw.includes("mono")) return "jetbrains";
+  if (raw.includes("space") && raw.includes("grotesk")) return "spacegrotesk";
+  if (raw.includes("grotesk")) return "spacegrotesk";
+  if (raw.includes("montserrat")) return "montserrat";
+  if (raw.includes("rubik")) return "rubik";
   if (raw.includes("inter")) return "inter";
   if (raw.includes("poppins")) return "poppins";
   if (raw.includes("nunito")) return "nunito";
@@ -756,19 +765,31 @@ function normalizeChatFxAccent(input){
   return "";
 }
 
+function normalizeChatFxTextColor(input){
+  if (!input) return "";
+  const raw = String(input).trim();
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw)) return raw;
+  return "";
+}
+
 function normalizeChatFx(input){
   const fx = (input && typeof input === "object") ? input : {};
   const enabled = fx.enabled !== false;
+  const radiusRaw = (fx.radius ?? fx.bubbleRadius);
+  const borderRaw = (fx.border ?? fx.borderPx);
+  const blurRaw = (fx.blur ?? fx.glassBlur);
   return {
     enabled,
     glow: normalizeChatFxGlow(fx.glow),
     font: normalizeChatFxFontKey(fx.font),
-    radius: normalizeChatFxNumber(fx.radius, CHAT_FX_DEFAULTS.radius, 6, 28),
-    border: normalizeChatFxNumber(fx.border, CHAT_FX_DEFAULTS.border, 0, 3),
+    radius: normalizeChatFxNumber(radiusRaw, CHAT_FX_DEFAULTS.radius, 6, 28),
+    border: normalizeChatFxNumber(borderRaw, CHAT_FX_DEFAULTS.border, 0, 3),
     glass: normalizeChatFxNumber(fx.glass, CHAT_FX_DEFAULTS.glass, 0, 1),
-    blur: normalizeChatFxNumber(fx.blur, CHAT_FX_DEFAULTS.blur, 0, 16),
+    blur: normalizeChatFxNumber(blurRaw, CHAT_FX_DEFAULTS.blur, 0, 16),
     density: normalizeChatFxDensity(fx.density),
-    accent: normalizeChatFxAccent(fx.accent)
+    accent: normalizeChatFxAccent(fx.accent),
+    textColor: normalizeChatFxTextColor(fx.textColor),
+    autoContrast: fx.autoContrast === true
   };
 }
 
@@ -806,6 +827,44 @@ function resolveChatFx(message, author){
   return normalizeChatFx(merged);
 }
 
+function parseCssRgbToTuple(cssColor){
+  const raw = String(cssColor || "").trim();
+  // rgb(r, g, b) or rgba(r, g, b, a)
+  const m = raw.match(/^rgba?\(([^)]+)\)$/i);
+  if(!m) return null;
+  const parts = m[1].split(",").map((p) => p.trim());
+  if(parts.length < 3) return null;
+  const r = Number(parts[0]);
+  const g = Number(parts[1]);
+  const b = Number(parts[2]);
+  const a = parts.length >= 4 ? Number(parts[3]) : 1;
+  if(![r,g,b,a].every((n) => Number.isFinite(n))) return null;
+  return { r, g, b, a };
+}
+
+function relativeLuminance({ r, g, b }){
+  // sRGB -> linear
+  const srgb = [r, g, b].map((v) => {
+    const x = Math.max(0, Math.min(255, v)) / 255;
+    return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
+}
+
+function pickAutoContrastTextColor(el){
+  if(!el) return "";
+  let bg = "";
+  try{ bg = getComputedStyle(el).backgroundColor; }catch{}
+  let t = parseCssRgbToTuple(bg);
+  // If transparent, use body background as a fallback.
+  if(!t || (t.a !== undefined && t.a < 0.15)){
+    try{ t = parseCssRgbToTuple(getComputedStyle(document.body).backgroundColor); }catch{}
+  }
+  if(!t) return "";
+  const lum = relativeLuminance(t);
+  return lum > 0.52 ? "#000000" : "#ffffff";
+}
+
 function applyChatFxToBubble(bubble, fx, options = {}){
   if (!bubble) return;
   const resolved = normalizeChatFx(fx);
@@ -819,6 +878,12 @@ function applyChatFxToBubble(bubble, fx, options = {}){
   bubble.style.setProperty("--fx-font-family", fontStack);
   bubble.style.setProperty("--fx-glow", String(glowValue));
   bubble.style.setProperty("--fx-accent", effective.accent || "var(--accent)");
+  // Text colour: explicit override beats auto-contrast.
+  const textOverride = (effective.textColor || "").trim();
+  const autoContrast = !!effective.autoContrast && !textOverride;
+  const autoColor = autoContrast ? pickAutoContrastTextColor(bubble) : "";
+  bubble.style.setProperty("--fx-text", textOverride || autoColor || "");
+  bubble.classList.toggle("fx-autoContrast", autoContrast);
   bubble.style.setProperty("--fx-radius", `${effective.radius}px`);
   bubble.style.setProperty("--fx-radius-grouped", `${radiusGrouped}px`);
   bubble.style.setProperty("--fx-border", `${effective.border}px`);
@@ -1262,9 +1327,28 @@ if(window.ResizeObserver && composerEl){
   composerObserver.observe(composerEl);
 }
 
+// iOS virtual keyboard: keep the conversation pinned to bottom on the *first* viewport resize.
+// When the keyboard appears, scrollTop can briefly land off-bottom, causing a jarring jump.
+let __vvPinRaf = 0;
+function handleVisualViewportPin(){
+  if(__vvPinRaf) cancelAnimationFrame(__vvPinRaf);
+  __vvPinRaf = requestAnimationFrame(()=>{
+    // If the user was pinned to bottom before the resize, force it.
+    if(chatPinned) stickToBottomIfWanted({ force:true, behavior:"auto" });
+    if(dmPinned && dmMessagesEl) {
+      try{ dmMessagesEl.scrollTo({ top: dmMessagesEl.scrollHeight, behavior:"auto" }); }
+      catch{ dmMessagesEl.scrollTop = dmMessagesEl.scrollHeight; }
+    }
+    // One more pass after layout settles (Safari iOS sometimes needs it).
+    setTimeout(()=>{
+      if(chatPinned) stickToBottomIfWanted({ force:true, behavior:"auto" });
+      if(dmPinned && dmMessagesEl) dmMessagesEl.scrollTop = dmMessagesEl.scrollHeight;
+    }, 60);
+  });
+}
 if(window.visualViewport){
-  window.visualViewport.addEventListener("resize", queueStickToBottom, { passive:true });
-  window.visualViewport.addEventListener("scroll", queueStickToBottom, { passive:true });
+  window.visualViewport.addEventListener("resize", handleVisualViewportPin, { passive:true });
+  window.visualViewport.addEventListener("scroll", handleVisualViewportPin, { passive:true });
 }
 
 const meAvatar = document.getElementById("meAvatar");
@@ -7319,6 +7403,8 @@ function syncChatFxControls(fx){
   chatFxPrefEls.glass.value = String(resolved.glass);
   chatFxPrefEls.blur.value = String(resolved.blur);
   chatFxPrefEls.accent.value = resolved.accent || "";
+  if (chatFxPrefEls.textColor) chatFxPrefEls.textColor.value = resolved.textColor || "";
+  if (chatFxPrefEls.autoContrast) chatFxPrefEls.autoContrast.checked = !!resolved.autoContrast;
   setChatFxDensityButtons(resolved.density);
   updateChatFxSliderValue(chatFxPrefEls.radiusValue, resolved.radius);
   updateChatFxSliderValue(chatFxPrefEls.borderValue, resolved.border);
@@ -7338,7 +7424,9 @@ function readChatFxFormRaw(){
     glass: Number(chatFxPrefEls.glass.value),
     blur: Number(chatFxPrefEls.blur.value),
     density: getChatFxDensitySelection(),
-    accent: (chatFxPrefEls.accent.value || "").trim()
+    accent: (chatFxPrefEls.accent.value || "").trim(),
+    textColor: (chatFxPrefEls.textColor?.value || "").trim(),
+    autoContrast: !!chatFxPrefEls.autoContrast?.checked
   };
 }
 
@@ -7437,6 +7525,9 @@ function wireChatFxPrefs(){
           <option value="poppins">Poppins</option>
           <option value="nunito">Nunito</option>
           <option value="jetbrains">JetBrains Mono</option>
+          <option value="rubik">Rubik</option>
+          <option value="montserrat">Montserrat</option>
+          <option value="spacegrotesk">Space Grotesk</option>
         </select>
       </div>
       <div class="field">
@@ -7480,6 +7571,15 @@ function wireChatFxPrefs(){
         <input id="chatFxAccent" type="text" placeholder="#RRGGBB">
         <div class="small">Leave blank to keep your theme accent.</div>
       </div>
+      <div class="field">
+        <label>Text color (optional)</label>
+        <input id="chatFxTextColor" type="text" placeholder="#RRGGBB">
+        <div class="small">Leave blank to use the theme's default message text.</div>
+      </div>
+      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <label style="margin:0;">Auto-contrast text</label>
+        <input id="chatFxAutoContrast" type="checkbox">
+      </div>
       <div class="chatFxActions">
         <div class="chatFxStatus" id="chatFxStatus"></div>
         <button class="btn" id="chatFxSaveBtn" type="button">Save appearance</button>
@@ -7503,6 +7603,8 @@ function wireChatFxPrefs(){
     blur: q("#chatFxBlur"),
     blurValue: q("#chatFxBlurValue"),
     accent: q("#chatFxAccent"),
+    textColor: q("#chatFxTextColor"),
+    autoContrast: q("#chatFxAutoContrast"),
     saveBtn: q("#chatFxSaveBtn"),
     status: q("#chatFxStatus"),
     densityRow: q("#chatFxDensity")
@@ -7519,9 +7621,16 @@ function wireChatFxPrefs(){
   chatFxPrefEls.glass?.addEventListener("input", handleChatFxInput);
   chatFxPrefEls.blur?.addEventListener("input", handleChatFxInput);
   chatFxPrefEls.accent?.addEventListener("input", handleChatFxInput);
+  chatFxPrefEls.textColor?.addEventListener("input", handleChatFxInput);
+  chatFxPrefEls.autoContrast?.addEventListener("change", handleChatFxInput);
   chatFxPrefEls.accent?.addEventListener("blur", () => {
     const normalized = normalizeChatFx(readChatFxFormRaw());
     if (chatFxPrefEls?.accent) chatFxPrefEls.accent.value = normalized.accent || "";
+    handleChatFxInput();
+  });
+  chatFxPrefEls.textColor?.addEventListener("blur", () => {
+    const normalized = normalizeChatFx(readChatFxFormRaw());
+    if (chatFxPrefEls?.textColor) chatFxPrefEls.textColor.value = normalized.textColor || "";
     handleChatFxInput();
   });
 
