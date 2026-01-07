@@ -53,6 +53,7 @@ process.on("uncaughtException", (err) => {
 });
 const { Server } = require("socket.io");
 const { db, migrationsReady } = require("./database");
+const { VIBE_TAGS, VIBE_TAG_LIMIT } = require("./vibe-tags");
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -509,9 +510,9 @@ function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
 
-const VIBE_TAG_OPTIONS = [
-  "Chill", "Chaotic", "Night Owl", "Cozy", "Loud", "Quiet", "Curious", "Unhinged", "Friendly", "Competitive"
-];
+const VIBE_TAG_LABELS = new Map(
+  VIBE_TAGS.map((tag) => [String(tag.label).toLowerCase(), tag.label])
+);
 
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
@@ -524,10 +525,10 @@ function sanitizeVibeTags(raw) {
 
   const out = [];
   for (const v of arr) {
-    if (out.length >= 3) break;
+    if (out.length >= VIBE_TAG_LIMIT) break;
     const val = String(v || "").trim();
     if (!val) continue;
-    const hit = VIBE_TAG_OPTIONS.find((opt) => opt.toLowerCase() === val.toLowerCase());
+    const hit = VIBE_TAG_LABELS.get(val.toLowerCase());
     if (hit && !out.includes(hit)) out.push(hit);
   }
   return out;
@@ -3543,6 +3544,9 @@ app.get("/me", async (req, res) => {
 
 // Back-compat alias used by some clients
 app.get("/api/me", (req, res) => res.redirect(307, "/me"));
+app.get("/api/vibes", (_req, res) => {
+  res.json({ limit: VIBE_TAG_LIMIT, vibes: VIBE_TAGS });
+});
 
 app.get("/api/me/progression", requireLogin, async (req, res) => {
   const uid = req.session.user.id;
