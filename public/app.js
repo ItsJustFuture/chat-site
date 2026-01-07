@@ -3976,10 +3976,22 @@ function removeFromMsgIndex(messageId){
   if (idx !== -1) msgIndex.splice(idx, 1);
 }
 
+function cleanupEmptyMessageGroup(group){
+  if(!group) return;
+  const body = group.querySelector(".msgGroupBody");
+  if(!body || !body.querySelector(".msgItem")) group.remove();
+}
+
 function handleMainMessageDeleted(messageId){
   removeFromMsgIndex(messageId);
   const row = document.querySelector(`[data-mid="${messageId}"]`);
-  if (row) removeMessageWithAnimation(row, () => closeReactionMenu());
+  const group = row?.closest(".msgGroup");
+  if (row) {
+    removeMessageWithAnimation(row, () => {
+      closeReactionMenu();
+      cleanupEmptyMessageGroup(group);
+    });
+  }
   else closeReactionMenu();
 }
 
@@ -5969,6 +5981,20 @@ function updateChangelogControlsVisibility(){
   if(!isOwner) closeChangelogEditor();
 }
 
+function scrollChangelogEditorIntoView(){
+  if(!changelogEditor) return;
+  const scroller = menuPanel?.querySelector(".menuContent") || document.querySelector(".menuContent");
+  if(scroller && scroller.contains(changelogEditor)){
+    const rect = changelogEditor.getBoundingClientRect();
+    const scrollerRect = scroller.getBoundingClientRect();
+    if(rect.top < scrollerRect.top || rect.bottom > scrollerRect.bottom){
+      try { changelogEditor.scrollIntoView({ behavior:"smooth", block:"nearest" }); } catch {}
+    }
+    return;
+  }
+  try { changelogEditor.scrollIntoView({ behavior:"smooth", block:"nearest" }); } catch {}
+}
+
 function openChangelogEditor(entry){
   if(!changelogEditor) return;
   editingChangelogId = entry?.id || null;
@@ -5976,7 +6002,10 @@ function openChangelogEditor(entry){
   if(changelogBodyInput) changelogBodyInput.value = entry?.body || "";
   if(changelogEditMsg) changelogEditMsg.textContent = "";
   changelogEditor.style.display = "block";
-  changelogTitleInput?.focus();
+  requestAnimationFrame(()=>{
+    scrollChangelogEditorIntoView();
+    changelogTitleInput?.focus();
+  });
 }
 
 function closeChangelogEditor(){
@@ -6249,12 +6278,14 @@ function renderChangelogList(){
     item.appendChild(panel);
 
     // Native <details> expansion is the most reliable option on iOS Safari.
-    // Keep only one open at a time for readability.
+    // Keep only one open at a time for readability (without re-rendering).
     item.addEventListener("toggle", ()=>{
       const nowOpen = item.open;
       openChangelogId = nowOpen ? entryId : (openChangelogId === entryId ? null : openChangelogId);
-      // Re-render to keep chevrons/state consistent and close other items.
-      renderChangelogList();
+      if(!nowOpen) return;
+      changelogList.querySelectorAll("details.clItem[open]").forEach((other)=>{
+        if(other !== item) other.open = false;
+      });
     }, { passive:true });
 
     changelogList.appendChild(item);
