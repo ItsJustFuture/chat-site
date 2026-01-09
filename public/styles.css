@@ -3000,7 +3000,8 @@ body:not(.polish-pack) .tonePicker{
   display: none;
   align-items: flex-start;
   justify-content: center;
-  overflow: auto;
+  /* Prevent double-scroll containers on iOS. The inner modalBody should scroll. */
+  overflow: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding: 18px;
@@ -3010,7 +3011,8 @@ body:not(.polish-pack) .tonePicker{
   position: relative;
   display: flex;
   flex-direction: column;
-  max-height: calc(var(--vvhPx) - 20px);
+  /* Robust viewport cap: vvH (set in JS) with a dvh fallback for iOS */
+  max-height: calc(var(--vvhPx, 100dvh) - 36px);
   overflow: hidden;
   background: var(--panel);
   border-radius: 14px;
@@ -3041,6 +3043,8 @@ body:not(.polish-pack) .tonePicker{
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  /* iOS: ensure the scroll container is actually allowed to pan */
+  touch-action: pan-y;
 }
 .modalContent{ flex:1 1 auto; overflow:auto; -webkit-overflow-scrolling: touch; padding-right:2px; min-height:0; }
 .tabs{
@@ -4129,7 +4133,8 @@ body.lockScroll{ overflow:hidden; }
   .modalCard{
     width: 100vw;
     max-width: 100vw;
-    max-height: calc(var(--vvhPx) - 20px);
+    /* Fallbacks for iOS Safari where custom vvH may be missing */
+    max-height: calc(var(--vvhPx, 100dvh) - 20px);
     border-radius: 16px;
   }
   @supports (height: 100svh){
@@ -6219,9 +6224,3 @@ main.chatMain {
 .inlineModalOverlay.show{ display:flex; }
 .inlineModalCard{ width: min(820px, calc(100% - 10px)); max-height: calc(100% - 10px); overflow:auto; -webkit-overflow-scrolling: touch; }
 .inlineModalHeader{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
-
-
-/* Fix: ensure modal body can scroll consistently (profile modal) */
-#modal .modalCard{
-  height: min(calc(var(--vvhPx) - 20px), calc(100vh - 20px));
-}
