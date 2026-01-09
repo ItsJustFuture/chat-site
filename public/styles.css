@@ -5735,6 +5735,20 @@ body.polish-pack.polish-animations .msg-new .dmBubble{
   }
 }
 
+@keyframes mentionJump{
+  0%{ box-shadow: 0 0 0 0 color-mix(in srgb, var(--mentionBg) 65%, transparent); }
+  45%{ box-shadow: 0 0 0 6px color-mix(in srgb, var(--mentionBg) 85%, transparent); }
+  100%{ box-shadow: 0 0 0 0 transparent; }
+}
+.msgItem.msg-mention-hit .bubble{
+  animation: mentionJump 1200ms ease;
+}
+@media (prefers-reduced-motion: reduce){
+  .msgItem.msg-mention-hit .bubble{
+    animation: none;
+  }
+}
+
 
 /* === DM bubble sizing & alignment FIX === */
 .dmRow{
