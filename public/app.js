@@ -697,7 +697,7 @@ const Sound = (() => {
 let socket = null;
 let me = null;
 let progression = { gold: 0, xp: 0, level: 1, xpIntoLevel: 0, xpForNextLevel: 100 };
-let activeProfileTab = "info";
+let activeProfileTab = "account";
 let currentProfileIsSelf = false;
 let currentRoom = "main";
 function displayRoomName(room){ return room==="diceroom" ? "Dice Room" : room; }
@@ -1170,6 +1170,125 @@ function loadUiScale(){
   }catch{ return null; }
 }
 
+/* ---- Notifications (client-side MVP) ---- */
+const NOTIFICATIONS_KEY = "notifications:v1";
+const NOTIFICATIONS_READ_KEY = "notifications:readAt:v1";
+const NOTIFICATIONS_MAX = 50;
+let notifications = loadJson(NOTIFICATIONS_KEY, []);
+let notificationsReadAt = Number(localStorage.getItem(NOTIFICATIONS_READ_KEY) || 0);
+notifications = (Array.isArray(notifications) ? notifications : []).map((item) => ({
+  ...item,
+  read: item?.read ?? (Number(item?.ts || 0) <= notificationsReadAt),
+}));
+
+function notificationIcon(type){
+  if (type === "mention") return "💬";
+  if (type === "reaction") return "✨";
+  if (type === "moderation") return "🛡️";
+  if (type === "system") return "📣";
+  return "🔔";
+}
+
+function saveNotifications(){
+  saveJson(NOTIFICATIONS_KEY, notifications);
+}
+
+function pushNotification({ type = "system", text = "", ts = Date.now(), target = "" } = {}){
+  const message = String(text || "").trim();
+  if (!message) return;
+  const entry = {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    type,
+    text: message,
+    ts: Number(ts) || Date.now(),
+    target,
+    read: false,
+  };
+  notifications = [entry, ...notifications].slice(0, NOTIFICATIONS_MAX);
+  saveNotifications();
+  renderNotifications();
+  updateNotificationsBadge();
+}
+
+function updateNotificationsBadge(){
+  if (!notificationsDot) return;
+  const hasUnread = notifications.some(item => !item.read);
+  notificationsDot.style.display = hasUnread ? "" : "none";
+}
+
+function markNotificationsRead(){
+  if (!notifications.length) return;
+  notifications = notifications.map(item => ({ ...item, read: true }));
+  notificationsReadAt = Date.now();
+  try{ localStorage.setItem(NOTIFICATIONS_READ_KEY, String(notificationsReadAt)); }catch{}
+  saveNotifications();
+  updateNotificationsBadge();
+}
+
+function notificationGroupLabel(ts){
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return "Older";
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startThat = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((startToday - startThat) / 86400000);
+  if (diffDays <= 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  return "Older";
+}
+
+function renderNotifications(){
+  if (!notificationsList || !notificationsEmpty) return;
+  notificationsList.innerHTML = "";
+  if (!notifications.length){
+    notificationsEmpty.style.display = "block";
+    return;
+  }
+  notificationsEmpty.style.display = "none";
+
+  const grouped = new Map();
+  notifications.forEach((item) => {
+    const label = notificationGroupLabel(item.ts);
+    if (!grouped.has(label)) grouped.set(label, []);
+    grouped.get(label).push(item);
+  });
+
+  for (const [label, items] of grouped.entries()){
+    const groupEl = document.createElement("div");
+    groupEl.className = "notificationsGroup";
+    const heading = document.createElement("div");
+    heading.className = "notificationsGroupTitle";
+    heading.textContent = label;
+    groupEl.appendChild(heading);
+
+    items.forEach((item) => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "notificationsRow";
+      row.dataset.notificationId = item.id;
+      row.innerHTML = `
+        <span class="notificationsIcon" aria-hidden="true">${notificationIcon(item.type)}</span>
+        <span class="notificationsText">${escapeHtml(item.text)}</span>
+        <span class="notificationsTime">${escapeHtml(fmtAbs(item.ts))}</span>
+      `;
+      groupEl.appendChild(row);
+    });
+    notificationsList.appendChild(groupEl);
+  }
+}
+
+function openNotificationsModal(){
+  if (!notificationsModal) return;
+  notificationsModal.hidden = false;
+  renderNotifications();
+  markNotificationsRead();
+}
+
+function closeNotificationsModal(){
+  if (!notificationsModal) return;
+  notificationsModal.hidden = true;
+}
+
 let dmLastRead = loadJson(DM_LAST_READ_KEY, {}); // { [threadId]: lastReadTs }
 let avatarCache = loadJson(AVATAR_CACHE_KEY, {}); // { [username]: avatarUrl }
 
@@ -1627,7 +1746,7 @@ function initTapBlockerGuard(){
   const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
   if(!isTouch) return;
 
-  const ids = ["dmToggleBtn","groupDmToggleBtn","uiScaleBtn","openMembersBtn"];
+  const ids = ["dmToggleBtn","groupDmToggleBtn","notificationsBtn","openMembersBtn"];
   const testOnce = () => {
     for(const id of ids){
       const btn = document.getElementById(id);
@@ -1928,8 +2047,8 @@ if(faqTitleInput){
 }
 const channelsCloseBtn = document.getElementById("channelsCloseBtn");
 const membersCloseBtn  = document.getElementById("membersCloseBtn");
-const tabEdit = document.getElementById("tabEdit");
-const viewEdit = document.getElementById("viewEdit");
+const tabCustom = document.getElementById("tabCustom");
+const viewCustom = document.getElementById("viewCustom");
 
 const editAboutBtn = document.getElementById("editAboutBtn");
 const editThemesBtn = document.getElementById("editThemesBtn");
@@ -2437,6 +2556,8 @@ const profileSheetSub = document.getElementById("profileSheetSub");
 const profileSheetAge = document.getElementById("profileSheetAge");
 const profileSheetGender = document.getElementById("profileSheetGender");
 const profileSheetDetails = document.getElementById("profileSheetDetails");
+const profileMenu = document.getElementById("profileMenu");
+const profilePresenceDot = document.getElementById("profilePresenceDot");
 const mediaLightbox = document.getElementById("mediaLightbox");
 const mediaLightboxImg = document.getElementById("mediaLightboxImg");
 const mediaLightboxVideo = document.getElementById("mediaLightboxVideo");
@@ -2445,22 +2566,23 @@ const mediaLightboxClose = document.getElementById("mediaLightboxClose");
 // info
 const infoAge = document.getElementById("infoAge");
 const infoGender = document.getElementById("infoGender");
+const infoLanguage = document.getElementById("infoLanguage");
 const infoCreated = document.getElementById("infoCreated");
 const infoLastSeen = document.getElementById("infoLastSeen");
 const infoRoom = document.getElementById("infoRoom");
 const infoStatus = document.getElementById("infoStatus");
 
 // tabs/views
-const tabInfo = document.getElementById("tabInfo");
-const tabAbout = document.getElementById("tabAbout");
-const tabCustomize = document.getElementById("tabCustomize");
-const tabModeration = document.getElementById("tabModeration");
+const tabAccount = document.getElementById("tabAccount");
+const tabCustom = document.getElementById("tabCustom");
+const tabMore = document.getElementById("tabMore");
 const addFriendBtn = document.getElementById("addFriendBtn");
 
-const viewInfo = document.getElementById("viewInfo");
+const viewAccount = document.getElementById("viewAccount");
+const viewMore = document.getElementById("viewMore");
 const viewAbout = document.getElementById("viewAbout");
-const viewCustomize = document.getElementById("viewCustomize");
 const viewModeration = document.getElementById("viewModeration");
+const profileCustomEmpty = document.getElementById("profileCustomEmpty");
 
 const bioRender = document.getElementById("bioRender");
 const copyUsernameBtn = document.getElementById("copyUsernameBtn");
@@ -2513,12 +2635,16 @@ setMsgline(profileLikeMsg, "");
 setMsgline(mediaMsg, "");
 ensureVisibleOnFocus(editBio);
 ensureVisibleOnFocus(changelogBodyInput);
-const uiScaleBtn = document.getElementById("uiScaleBtn");
-const uiScalePanel = document.getElementById("uiScalePanel");
-const uiScaleCloseBtn = document.getElementById("uiScaleCloseBtn");
 const uiScaleRange = document.getElementById("uiScaleRange");
 const uiScaleValue = document.getElementById("uiScaleValue");
 const uiScaleResetBtn = document.getElementById("uiScaleResetBtn");
+const notificationsBtn = document.getElementById("notificationsBtn");
+const notificationsModal = document.getElementById("notificationsModal");
+const notificationsCloseBtn = document.getElementById("notificationsCloseBtn");
+const notificationsClearBtn = document.getElementById("notificationsClearBtn");
+const notificationsList = document.getElementById("notificationsList");
+const notificationsEmpty = document.getElementById("notificationsEmpty");
+const notificationsDot = document.getElementById("notificationsDot");
 
 let bioPreviewTimer = null;
 function renderBioPreview(){
@@ -6664,12 +6790,12 @@ dmUserBtn?.addEventListener("click", () => {
 });
 profileEditBtn?.addEventListener("click", () => {
   if (!currentProfileIsSelf) return;
-  setTab("edit");
+  setTab("custom");
   showEditPanel("about");
 });
 profileSettingsBtn?.addEventListener("click", async () => {
   if (!currentProfileIsSelf) return;
-  setTab("edit");
+  setTab("custom");
   showEditPanel("preferences");
   try { syncSoundPrefsUI(true); } catch {}
   await loadChatFxPrefs({ force: true });
@@ -6775,15 +6901,14 @@ function setTab(tab){
   for(const el of document.querySelectorAll(".tab")){
     el.classList.toggle("active", el.dataset.tab===tab);
   }
-  viewInfo.style.display = tab==="info" ? "block" : "none";
-  viewAbout.style.display = tab==="about" ? "block" : "none";
-  viewEdit.style.display = tab==="edit" ? "block" : "none";
-  viewModeration.style.display = tab==="moderation" ? "block" : "none";
-  if(tab === "edit") showEditPanel("about");
+  if (viewAccount) viewAccount.style.display = tab==="account" ? "block" : "none";
+  if (viewCustom) viewCustom.style.display = tab==="custom" ? "block" : "none";
+  if (viewMore) viewMore.style.display = tab==="more" ? "block" : "none";
+  if(tab === "custom" && currentProfileIsSelf) showEditPanel("about");
   syncProfileEditUi();
   focusActiveTab();
 }
-tabEdit.addEventListener("click", ()=>setTab("edit"));
+tabCustom?.addEventListener("click", ()=>setTab("custom"));
 
 function showEditPanel(which){
   const isAbout = which === "about";
@@ -6814,12 +6939,10 @@ wireComfortMode();
 wireChatFxPrefs();
 wireProfileAvatarActions();
 wireHeaderGradientInputs();
-tabInfo.addEventListener("click", ()=>setTab("info"));
-tabAbout.addEventListener("click", ()=>setTab("about"));
-tabCustomize?.addEventListener("click", ()=>setTab("customize"));
-tabModeration.addEventListener("click", async ()=>{
-  setTab("moderation");
-  await refreshLogs();
+tabAccount?.addEventListener("click", ()=>setTab("account"));
+tabMore?.addEventListener("click", async ()=>{
+  setTab("more");
+  if (viewModeration?.style.display !== "none") await refreshLogs();
 });
 
 // modal open/close
@@ -8845,30 +8968,6 @@ logoutBtn?.addEventListener("click", doLogout);
     uiScaleValue.textContent = Math.round(eff * 100) + "%";
   }
 
-  function openPanel(){
-    if(!uiScalePanel) return;
-    uiScalePanel.hidden = false;
-    syncUiScaleUi();
-  }
-  function closePanel(){
-    if(!uiScalePanel) return;
-    uiScalePanel.hidden = true;
-  }
-  function togglePanel(){
-    if(!uiScalePanel) return;
-    if(uiScalePanel.hidden) openPanel();
-    else closePanel();
-  }
-
-  uiScaleBtn?.addEventListener("click", (e)=>{ e.stopPropagation(); togglePanel(); });
-  uiScaleCloseBtn?.addEventListener("click", (e)=>{ e.stopPropagation(); closePanel(); });
-
-  document.addEventListener("click", (e)=>{
-    if(!uiScalePanel || uiScalePanel.hidden) return;
-    if(e.target && (uiScalePanel.contains(e.target) || uiScaleBtn?.contains(e.target))) return;
-    closePanel();
-  });
-
   uiScaleRange?.addEventListener("input", ()=>{
     const v = Number(uiScaleRange.value);
     applyUiScale(v);
@@ -8880,13 +8979,46 @@ logoutBtn?.addEventListener("click", doLogout);
     syncUiScaleUi();
   });
 
-  window.addEventListener("resize", ()=>{ if(!uiScalePanel?.hidden) syncUiScaleUi(); }, { passive:true });
+  window.addEventListener("resize", syncUiScaleUi, { passive:true });
+  syncUiScaleUi();
 })();
 
 logoutTopBtn?.addEventListener("click", doLogout);
 
+notificationsBtn?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  openNotificationsModal();
+});
+notificationsCloseBtn?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closeNotificationsModal();
+});
+notificationsClearBtn?.addEventListener("click", () => {
+  notifications = [];
+  saveNotifications();
+  renderNotifications();
+  updateNotificationsBadge();
+});
+notificationsModal?.addEventListener("click", (e) => {
+  if (e.target === notificationsModal) closeNotificationsModal();
+});
+notificationsList?.addEventListener("click", (e) => {
+  const row = e.target.closest("[data-notification-id]");
+  if (!row) return;
+  const item = notifications.find((n) => n.id === row.dataset.notificationId);
+  if (!item || !item.target) return;
+  if (item.target.startsWith("profile:")) {
+    const username = item.target.slice("profile:".length);
+    if (username) openMemberProfile(username);
+  }
+});
+
+renderNotifications();
+updateNotificationsBadge();
+
 // ---- profiles
 async function loadMyProfile(){
+  const priorRole = me?.role;
   const res=await fetch("/profile");
   if(!res.ok) return;
   const p=await res.json();
@@ -8906,6 +9038,9 @@ async function loadMyProfile(){
   renderLevelProgress(progression, true);
   renderVibeOptions(me.vibe_tags || []);
   if (editUsername) editUsername.value = "";
+  if (priorRole && priorRole !== p.role) {
+    pushNotification({ type: "system", text: `Role updated to ${p.role}.` });
+  }
 }
 
 function setMsgline(el, text){
@@ -9062,6 +9197,7 @@ function fillProfileUI(p, isSelf){
 
   infoAge.textContent = (p.age ?? "—");
   infoGender.textContent = (p.gender ?? "—");
+  if (infoLanguage) infoLanguage.textContent = (p.language ?? "—");
   infoCreated.textContent = fmtCreated(p.created_at);
   infoLastSeen.textContent = formatLastSeen(p.last_seen);
   infoRoom.textContent = p.current_room ? `#${p.current_room}` : (p.last_room ? `#${p.last_room}` : "—");
@@ -9122,6 +9258,7 @@ function fillProfileSheetHeader(p, isSelf){
   const statusLabel = normalizeStatusLabel(p.last_status, "");
   const status = statusLabel ? `• ${statusLabel}` : "";
   if (profileSheetSub) profileSheetSub.textContent = `${mood} ${status} ${room}`.trim();
+  updateProfilePresenceDot(statusLabel);
   renderVibeChips(profileSheetVibes, p.vibe_tags);
 
   // Stats (likes are real; stars show level)
@@ -9138,35 +9275,50 @@ function fillProfileSheetHeader(p, isSelf){
   }
 }
 
+function updateProfilePresenceDot(statusLabel){
+  if (!profilePresenceDot) return;
+  const raw = String(statusLabel || "").toLowerCase();
+  let status = "offline";
+  if (raw.includes("online")) status = "online";
+  else if (raw.includes("away")) status = "away";
+  else if (raw.includes("busy")) status = "busy";
+  else if (raw.includes("dnd")) status = "dnd";
+  else if (raw.includes("idle")) status = "idle";
+  else if (raw.includes("gaming")) status = "gaming";
+  else if (raw.includes("music")) status = "music";
+  else if (raw.includes("working")) status = "working";
+  else if (raw.includes("chatting")) status = "chatting";
+  else if (raw.includes("lurking")) status = "lurking";
+  profilePresenceDot.dataset.status = status;
+  profilePresenceDot.title = statusLabel || "Offline";
+  profilePresenceDot.style.display = "inline-flex";
+}
+
 function syncProfileEditUi(){
-  const showAvatarActions = currentProfileIsSelf && activeProfileTab === "edit";
+  const showAvatarActions = currentProfileIsSelf && activeProfileTab === "custom";
   if (profileSheetAvatarActions) profileSheetAvatarActions.style.display = showAvatarActions ? "flex" : "none";
 }
 
 function updateProfileActions({ isSelf = false, canModerate = false } = {}){
-  if (tabEdit) tabEdit.style.display = isSelf ? "" : "none";
-  if (viewEdit && !isSelf) viewEdit.style.display = "none";
+  if (profileMenu) profileMenu.style.display = isSelf ? "" : "none";
+  if (profileCustomEmpty) profileCustomEmpty.style.display = isSelf ? "none" : "";
   if (addFriendBtn) addFriendBtn.style.display = isSelf ? "none" : "";
-  setMsgline(profileActionMsg, "");
-  if (tabModeration) tabModeration.style.display = canModerate ? "" : "none";
+  if (viewModeration) viewModeration.style.display = canModerate ? "" : "none";
   if (actionsBtn) {
-    actionsBtn.textContent = "🛠 Actions";
+    actionsBtn.textContent = "🛡️";
     actionsBtn.style.display = (!isSelf && canModerate) ? "" : "none";
     actionsBtn.disabled = !modalCanModerate;
   }
   if (profileEditBtn) {
-    profileEditBtn.textContent = "✏️ Edit";
+    profileEditBtn.textContent = "✏️";
     profileEditBtn.style.display = isSelf ? "" : "none";
   }
   if (profileSettingsBtn) {
-    profileSettingsBtn.textContent = "⚙️ Settings";
+    profileSettingsBtn.textContent = "⚙️";
     profileSettingsBtn.style.display = isSelf ? "" : "none";
   }
-  const editActive = tabEdit?.classList.contains("active");
-  if(!isSelf && editActive){
-    setTab("info");
-  }
   syncProfileEditUi();
+  setMsgline(profileActionMsg, "");
 }
 
 function updateBanControlsVisibility(){
@@ -9980,8 +10132,8 @@ function wireProfileMenu(){
     if (!btn) return;
     const action = btn.dataset.action;
 
-    // Always ensure we're in the Edit tab when using this menu
-    setTab("edit");
+    // Always ensure we're in the Custom tab when using this menu
+    setTab("custom");
 
     if (action === "edit-about") return showEditPanel("about");
     if (action === "edit-themes") return showEditPanel("themes");
@@ -9989,7 +10141,7 @@ function wireProfileMenu(){
     if (action === "edit-gifts") return showEditPanel("gifts");
 
     if (action === "open-preferences"){
-      setTab("edit");
+      setTab("custom");
       showEditPanel("preferences");
       if (profileMsg) profileMsg.textContent = "";
       // Sync UI toggles
@@ -10004,7 +10156,7 @@ function wireProfileAvatarActions(){
   if (profileAvatarChangeBtn && !profileAvatarChangeBtn._wired){
     profileAvatarChangeBtn._wired = true;
     profileAvatarChangeBtn.addEventListener("click", () => {
-      setTab("edit");
+      setTab("custom");
       showEditPanel("about");
       // Open file picker for avatar
       try{ avatarFile?.click(); } catch {}
@@ -10092,7 +10244,7 @@ async function openMyProfile(){
 
   const canMod = (roleRank(me.role) >= roleRank("Moderator"));
   updateProfileActions({ isSelf: true, canModerate: canMod });
-  setTab("info");
+  setTab("account");
   openModal();
 }
 profileBtn.addEventListener("click", openMyProfile);
@@ -10117,6 +10269,7 @@ saveProfileBtn.addEventListener("click", async ()=>{
     return;
   }
   profileMsg.textContent="Saved!";
+  pushNotification({ type: "system", text: "Profile saved." });
   await loadMyProfile();
   socket?.emit("join room", { room: currentRoom, status: normalizeStatusLabel(statusSelect.value, "Online") });
   await openMyProfile();
@@ -10183,7 +10336,7 @@ async function openMemberProfile(username){
   if(modMsg) modMsg.textContent = "";
 
   updateProfileActions({ isSelf, canModerate: (roleRank(me.role) >= roleRank("Moderator")) });
-  setTab("info");
+  setTab("account");
   openModal();
 }
 

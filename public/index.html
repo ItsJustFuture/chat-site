@@ -311,7 +311,7 @@
             <div id="levelToast" class="levelToastInline" aria-live="polite">🎉 <span id="levelToastText">Level up!</span></div>
             <button class="iconBtn withBadge" id="dmToggleBtn" type="button" title="Direct messages">💬<span class="notifDot" id="dmBadgeDot" title="New DMs"></span></button>
             <button class="iconBtn withBadge" id="groupDmToggleBtn" type="button" title="Group DMs">👥<span class="notifDot" id="groupDmBadgeDot" title="New group DMs"></span></button>
-            <button class="iconBtn" id="uiScaleBtn" type="button" title="UI size">⚙️</button>
+            <button class="iconBtn withBadge" id="notificationsBtn" type="button" title="Notifications" aria-label="Notifications">🔔<span class="notifDot" id="notificationsDot" title="New notifications"></span></button>
             <button class="iconBtn mobOnly" id="openMembersBtn" type="button" title="Members">👥</button>
           </div>
         </div>
@@ -369,17 +369,19 @@
           </div>
         </div>
 
-<div class="uiScalePanel" id="uiScalePanel" hidden>
-  <div class="uiScaleHeader">
-    <strong>UI size</strong>
-    <button class="iconBtn smallIcon" id="uiScaleCloseBtn" type="button" aria-label="Close">✕</button>
-  </div>
-  <div class="uiScaleRow">
-    <input id="uiScaleRange" type="range" min="0.80" max="1.05" step="0.05" value="1" aria-label="UI size">
-    <div class="small muted" id="uiScaleValue">100%</div>
-  </div>
-  <div class="uiScaleActions">
-    <button class="btn secondary" id="uiScaleResetBtn" type="button">Auto</button>
+<div class="notificationsModal" id="notificationsModal" hidden>
+  <div class="modalCard notificationsCard">
+    <div class="modalTop">
+      <strong>Notifications</strong>
+      <button class="iconBtn" id="notificationsCloseBtn" type="button" aria-label="Close">✕</button>
+    </div>
+    <div class="modalBody">
+      <div class="notificationsActions">
+        <button class="btn secondary small" id="notificationsClearBtn" type="button">Clear all</button>
+      </div>
+      <div class="notificationsList" id="notificationsList"></div>
+      <div class="small muted" id="notificationsEmpty">No notifications yet. Mentions are coming soon.</div>
+    </div>
   </div>
 </div>
 
@@ -547,99 +549,94 @@
 
   <!-- PROFILE / MODAL -->
   <div id="modal">
-    <div class="modalCard">
-      <div class="modalTop">
-        <strong id="modalTitle">Profile</strong>
-        <button class="btn btnSecondary" id="closeModalBtn" type="button">Close</button>
-      </div>
-
-      <div class="modalBody">
-        <div class="small" id="modalMeta"></div>
-
-     
-        <!-- Profile sheet header (custom layout, not a clone) -->
-        <div class="profileSheetHero" id="profileSheetHero">
+    <div class="modalCard profileModalCard">
+      <div class="modalTop profileModalTop">
+        <!-- Profile sheet header (compact layout) -->
+        <div class="profileSheetHero compact" id="profileSheetHero">
           <div class="profileSheetBg" id="profileSheetBg"></div>
           <div class="profileSheetOverlay" id="profileSheetOverlay" aria-hidden="true"></div>
 
-          <div class="profileSheetContent">
-            <div class="profileSheetAvatarCard">
-              <div class="profileSheetAvatar" id="profileSheetAvatar"></div>
+          <div class="profileSheetContent compact">
+            <div class="profileAvatarWrap">
+              <div class="profileSheetAvatarCard">
+                <div class="profileSheetAvatar" id="profileSheetAvatar"></div>
 
-              <div class="profileSheetAvatarActions" id="profileSheetAvatarActions" style="display:none;">
-                <button class="iconPill" id="profileAvatarRemoveBtn" type="button" aria-label="Remove avatar">
-                  <span class="ico" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                  </span>
-                </button>
-                <button class="iconPill" id="profileAvatarChangeBtn" type="button" aria-label="Change avatar">
-                  <span class="ico" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h4l2-2h4l2 2h4v14H4V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" stroke="currentColor" stroke-width="2"/></svg>
-                  </span>
-                </button>
+                <div class="profileSheetAvatarActions" id="profileSheetAvatarActions" style="display:none;">
+                  <button class="iconPill" id="profileAvatarRemoveBtn" type="button" aria-label="Remove avatar">
+                    <span class="ico" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    </span>
+                  </button>
+                  <button class="iconPill" id="profileAvatarChangeBtn" type="button" aria-label="Change avatar">
+                    <span class="ico" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h4l2-2h4l2 2h4v14H4V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" stroke="currentColor" stroke-width="2"/></svg>
+                    </span>
+                  </button>
+                </div>
               </div>
+              <span class="profilePresenceDot" id="profilePresenceDot" aria-hidden="true"></span>
             </div>
 
             <div class="profileSheetMeta">
+              <span class="srOnly" id="modalTitle">Profile</span>
               <div class="profileSheetNameRow">
-                <span class="profileRoleChip" id="profileSheetRoleChip">Role</span>
                 <span class="profileSheetName" id="profileSheetName">—</span>
+                <span class="profileRoleChip" id="profileSheetRoleChip">Role</span>
               </div>
               <div class="profileSheetDetails" id="profileSheetDetails">
                 <span class="profileDetail" id="profileSheetAge" style="display:none;"></span>
                 <span class="profileDetail" id="profileSheetGender" style="display:none;"></span>
               </div>
+              <div class="profileSheetSub" id="profileSheetSub"></div>
+              <div class="vibeRow" id="profileSheetVibes"></div>
               <div class="profileSheetStats" id="profileSheetStats" style="display:none;">
                 <span class="statPill" id="profileSheetStars">⭐ 0</span>
                 <span class="statPill" id="profileSheetLikes">♡ 0</span>
               </div>
-              <div class="profileSheetSub" id="profileSheetSub"></div>
-              <div class="vibeRow" id="profileSheetVibes"></div>
+            </div>
+
+            <div class="profileHeaderActions">
+              <button class="iconBtn smallIcon" id="profileEditBtn" type="button" title="Edit profile" aria-label="Edit profile" style="display:none;">✏️</button>
+              <button class="iconBtn smallIcon" id="profileSettingsBtn" type="button" title="Preferences" aria-label="Preferences" style="display:none;">⚙️</button>
+              <button class="iconBtn smallIcon" id="actionsBtn" type="button" title="Moderation actions" aria-label="Moderation actions" style="display:none;">🛡️</button>
+              <button class="iconBtn smallIcon" id="closeModalBtn" type="button" aria-label="Close profile">✕</button>
             </div>
           </div>
         </div>
+      </div>
 
+      <div class="modalBody">
+        <div class="small" id="modalMeta"></div>
+
+        <div class="profileSticky">
           <div class="profileActions">
-            <div class="tabs profileActionTabs profileActionGrid" id="tabs">
-            <button class="tab active" data-tab="info" id="tabInfo" type="button">
-              <span class="tabIcon" aria-hidden="true">ℹ️</span>
-              <span class="tabLabel">Info</span>
-            </button>
-            <button class="tab" data-tab="about" id="tabAbout" type="button">
-              <span class="tabIcon" aria-hidden="true">📄</span>
-              <span class="tabLabel">About</span>
-            </button>
-            <button class="tab" data-tab="edit" id="tabEdit" type="button">
-              <span class="tabIcon" aria-hidden="true">✏️</span>
-              <span class="tabLabel">Edit</span>
-            </button>
-            <button class="tab" id="addFriendBtn" type="button" style="display:none;">
-              <span class="tabIcon" aria-hidden="true">🤝</span>
-              <span class="tabLabel">Add Friend</span>
-            </button>
-            <button class="tab" data-tab="moderation" id="tabModeration" type="button" style="display:none;">
-              <span class="tabIcon" aria-hidden="true">🛡️</span>
-              <span class="tabLabel">Mod</span>
-            </button>
-          </div>
-
-          <div class="profileQuickActions" id="profileQuickActions">
-            <div class="quickActionGroup">
-              <button class="btn btnSecondary" id="dmUserBtn" type="button">Message</button>
-              <button class="btn btnSecondary" id="likeProfileBtn" type="button">❤️ Like</button>
-              <button class="btn btnSecondary" id="actionsBtn" type="button" style="display:none;">🛠 Actions</button>
-              <button class="btn btnSecondary" id="profileEditBtn" type="button" style="display:none;">✏️ Edit</button>
-              <button class="btn btnSecondary" id="profileSettingsBtn" type="button" style="display:none;">⚙️ Settings</button>
-              <div class="badge" id="likeCount">0</div>
+            <div class="tabs profileActionTabs profileCompactTabs" id="tabs">
+              <button class="tab active" data-tab="account" id="tabAccount" type="button">Account</button>
+              <button class="tab" data-tab="custom" id="tabCustom" type="button">Custom</button>
+              <button class="tab" data-tab="more" id="tabMore" type="button">More</button>
             </div>
-            <button class="btn btnSecondary" id="copyUsernameBtn" type="button">Copy username</button>
+
+            <div class="profileQuickActions" id="profileQuickActions">
+              <div class="quickActionGroup">
+                <button class="btn btnSecondary" id="dmUserBtn" type="button">Message</button>
+                <button class="btn btnSecondary" id="addFriendBtn" type="button" style="display:none;">🤝 Add Friend</button>
+                <button class="btn btnSecondary" id="likeProfileBtn" type="button">❤️ Like</button>
+                <button class="btn btnSecondary" id="copyUsernameBtn" type="button">Copy username</button>
+                <div class="badge" id="likeCount">0</div>
+              </div>
+            </div>
+            <div class="msgline" id="profileActionMsg"></div>
+            <div class="msgline" id="profileLikeMsg"></div>
+            <div class="msgline" id="mediaMsg"></div>
           </div>
-          <div class="msgline" id="profileActionMsg"></div>
-          <div class="msgline" id="profileLikeMsg"></div>
-          <div class="msgline" id="mediaMsg"></div>
         </div>
 
-        <div id="viewEdit" style="display:none;">
+        <div id="viewCustom" style="display:none;">
+          <div class="profileCustomEmpty" id="profileCustomEmpty" style="display:none;">
+            <div class="panelBox">
+              <div class="small">Customisation settings are only available on your own profile.</div>
+            </div>
+          </div>
   <div class="profileMenu" id="profileMenu">
     <button class="profileMenuRow" type="button" data-action="edit-about">
       <span class="menuIcon" aria-hidden="true">
@@ -739,6 +736,24 @@
         <input id="prefComfortMode" type="checkbox">
       </div>
       <div class="small muted" id="prefComfortHelp">Softens glows, confetti, and motion-heavy animations.</div>
+
+      <div class="prefsSections" style="margin-top:12px;">
+        <details class="prefsSection" id="prefAppearanceSection">
+          <summary>Appearance</summary>
+          <div class="prefsContent">
+            <div class="field">
+              <label>UI scale</label>
+              <div class="uiScaleRow">
+                <input id="uiScaleRange" type="range" min="0.80" max="1.05" step="0.05" value="1" aria-label="UI size">
+                <div class="small muted" id="uiScaleValue">100%</div>
+              </div>
+              <div class="uiScaleActions">
+                <button class="btn secondary" id="uiScaleResetBtn" type="button">Auto</button>
+              </div>
+            </div>
+          </div>
+        </details>
+      </div>
     </div>
   </div>
 
@@ -890,43 +905,41 @@
   </div>
 </div>
         <div class="modalContent" id="modalContent">
-          <div id="viewInfo">
-            <div class="modalGrid">
-              <div>
-                <div class="sectionTitle">Details</div>
-                <div class="infoGrid">
-                  <div class="infoItem"><div class="k">Age</div><div class="v" id="infoAge">—</div></div>
-                  <div class="infoItem"><div class="k">Gender</div><div class="v" id="infoGender">—</div></div>
-                  <div class="infoItem"><div class="k">Created</div><div class="v" id="infoCreated">—</div></div>
-                  <div class="infoItem"><div class="k">Last seen</div><div class="v" id="infoLastSeen">—</div></div>
-                  <div class="infoItem"><div class="k">Current room</div><div class="v" id="infoRoom">—</div></div>
-                  <div class="infoItem"><div class="k">Status</div><div class="v" id="infoStatus">—</div></div>
-                </div>
+          <div id="viewAccount">
+            <div class="sectionTitle">Account</div>
+            <div class="profileInfoList">
+              <div class="profileInfoRow"><span class="infoIcon" aria-hidden="true">🎂</span><span class="infoLabel">Age</span><span class="infoValue" id="infoAge">—</span></div>
+              <div class="profileInfoRow"><span class="infoIcon" aria-hidden="true">🧭</span><span class="infoLabel">Gender</span><span class="infoValue" id="infoGender">—</span></div>
+              <div class="profileInfoRow"><span class="infoIcon" aria-hidden="true">🌐</span><span class="infoLabel">Language</span><span class="infoValue" id="infoLanguage">—</span></div>
+              <div class="profileInfoRow"><span class="infoIcon" aria-hidden="true">📅</span><span class="infoLabel">Member since</span><span class="infoValue" id="infoCreated">—</span></div>
+              <div class="profileInfoRow"><span class="infoIcon" aria-hidden="true">💬</span><span class="infoLabel">Current room</span><span class="infoValue" id="infoRoom">—</span></div>
+              <div class="profileInfoRow"><span class="infoIcon" aria-hidden="true">🕒</span><span class="infoLabel">Last seen</span><span class="infoValue" id="infoLastSeen">—</span></div>
+              <div class="profileInfoRow"><span class="infoIcon" aria-hidden="true">💫</span><span class="infoLabel">Status</span><span class="infoValue" id="infoStatus">—</span></div>
+            </div>
 
-                <div class="sectionTitle">Account Level</div>
-                <div class="panelBox" id="levelPanel">
-                  <div class="row" style="align-items:center; justify-content:space-between;">
-                    <div class="badge" id="levelBadge">Level 1</div>
-                    <div class="small" id="xpText">XP: 0 / 100</div>
-                  </div>
-                  <div class="progressShell">
-                    <div class="progressFill" id="xpProgress"></div>
-                  </div>
-                  <div class="small" id="xpNote">XP is only visible to you.</div>
-                </div>
+            <div class="sectionTitle">Account Level</div>
+            <div class="panelBox" id="levelPanel">
+              <div class="row" style="align-items:center; justify-content:space-between;">
+                <div class="badge" id="levelBadge">Level 1</div>
+                <div class="small" id="xpText">XP: 0 / 100</div>
+              </div>
+              <div class="progressShell">
+                <div class="progressFill" id="xpProgress"></div>
+              </div>
+              <div class="small" id="xpNote">XP is only visible to you.</div>
+            </div>
+          </div>
+
+          <div id="viewMore" style="display:none;">
+            <div id="viewAbout">
+              <div class="sectionTitle">Bio</div>
+              <div class="bioRender" id="bioRender">(no bio)</div>
+              <div class="small" style="margin-top:8px;">
+                BBCode: [b] [i] [u] [s] [quote] [code] [url=] [img]
               </div>
             </div>
-          </div>
 
-          <div id="viewAbout" style="display:none;">
-            <div class="sectionTitle">Bio</div>
-            <div class="bioRender" id="bioRender">(no bio)</div>
-            <div class="small" style="margin-top:8px;">
-              BBCode: [b] [i] [u] [s] [quote] [code] [url=] [img]
-            </div>
-          </div>
-
-          <div id="viewModeration" style="display:none;">
+            <div id="viewModeration" style="display:none;">
             <div class="sectionTitle">Moderation panel</div>
 
             <div class="panelBox modCard">
@@ -1039,6 +1052,7 @@
                   <tbody id="logsBody"></tbody>
                 </table>
               </div>
+            </div>
             </div>
           </div>
 
