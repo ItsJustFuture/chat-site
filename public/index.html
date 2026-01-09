@@ -22,7 +22,11 @@
       <div class="loginBrand">
         <div class="loginBadge">Welcome to</div>
         <h1 class="loginLogo">Banter <span class="amp">&amp;</span> Brats</h1>
-        <p class="loginTag">18+ community chat built for fun, and a little chaos.</p>
+        <p class="loginTag">18+ community chat built for rooms, DMs, and a little chaos.</p>
+        <ul class="loginFeatures">
+          <li>Pick rooms, hop into DMs, and keep tabs on reactions.</li>
+          <li>Track XP, gold, and shout-outs in leaderboards.</li>
+          <li>Keep it cozy with themes, vibes, and profile flair.</li>
         </ul>
       </div>
 
@@ -63,6 +67,51 @@
       </div>
     </div>
   </div>
+
+
+<!-- RESTRICTED (Kick/Ban) -->
+<div id="restrictedView" hidden>
+  <div class="restrictedShell">
+    <div class="restrictedCard">
+      <div class="restrictedIcon" aria-hidden="true">⚠️</div>
+      <h2 id="restrictedTitle">Restricted</h2>
+      <div class="restrictedSub" id="restrictedSub">You cannot access the chat right now.</div>
+
+      <div class="restrictedTimer" id="restrictedTimerWrap" hidden>
+        <div class="restrictedTimerLabel">You can re-enter in</div>
+        <div class="restrictedTimerValue" id="restrictedTimer">00:00:00</div>
+      </div>
+
+      <div class="restrictedReason">
+        <div class="small muted">Reason</div>
+        <div class="restrictedReasonText" id="restrictedReasonText">—</div>
+      </div>
+
+      <div class="restrictedAppeal">
+        <div class="restrictedAppealHeader">
+          <div class="title">Appeal</div>
+          <div class="small muted" id="appealStatusText">One ticket per user.</div>
+        </div>
+
+        <div class="appealThread" id="appealThread"></div>
+
+        <div class="appealComposer">
+          <textarea id="appealInput" rows="3" maxlength="2000" placeholder="Explain your appeal..."></textarea>
+          <div class="row" style="gap:10px; flex-wrap:wrap;">
+            <button class="btn" id="appealSendBtn" type="button">Send appeal</button>
+            <button class="btn secondary" id="appealRefreshBtn" type="button">Refresh</button>
+            <div class="msgline" id="appealMsg"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="gap:10px; justify-content:center; margin-top:14px;">
+        <button class="btn secondary" id="restrictedRecheckBtn" type="button">Re-check access</button>
+        <button class="btn danger" id="restrictedLogoutBtn" type="button">Logout</button>
+      </div>
+    </div>
+  </div>
+</div>
 
   <!-- APP -->
   <div id="chatView" hidden>
@@ -377,6 +426,7 @@
       <aside class="members drawer" id="membersPane">
   <div class="drawerHeader">
     <h3>Members</h3>
+    <button class="btn secondary small" id="appealsPanelBtn" type="button" hidden>Kick/Ban Appeals</button>
     <button class="iconBtn smallIcon" id="membersCloseBtn" type="button" title="Close">✕</button>
   </div>
         <div class="memberGold" id="memberGold" aria-live="polite"></div>
@@ -1034,5 +1084,62 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/app.js" defer></script>
+
+<!-- STAFF: Kick/Ban Appeals Panel -->
+<div class="appealsPanel" id="appealsPanel" hidden>
+  <div class="appealsPanelHeader">
+    <div>
+      <div class="title">Kick/Ban Appeals</div>
+      <div class="small muted">Open tickets from kicked/banned users.</div>
+    </div>
+    <button class="iconBtn" id="appealsCloseBtn" type="button" title="Close">✕</button>
+  </div>
+
+  <div class="appealsPanelBody">
+    <div class="appealsList" id="appealsList"></div>
+
+    <div class="appealsDetail" id="appealsDetail" hidden>
+      <div class="appealsDetailTop">
+        <div class="appealsDetailUser">
+          <div class="title" id="appealsDetailUser">—</div>
+          <div class="small muted" id="appealsDetailMeta">—</div>
+        </div>
+        <button class="btn secondary" id="appealsBackBtn" type="button">Back</button>
+      </div>
+
+      <div class="card">
+        <div class="small muted">Restriction reason</div>
+        <div id="appealsDetailReason" style="margin-top:6px;"></div>
+      </div>
+
+      <div class="card">
+        <div class="title">Moderation logs</div>
+        <div class="appealsModlogs" id="appealsModlogs"></div>
+      </div>
+
+      <div class="card">
+        <div class="title">Ticket</div>
+        <div class="appealThread staffThread" id="appealsThread"></div>
+        <textarea id="appealsReplyInput" rows="3" maxlength="2000" placeholder="Reply as staff..."></textarea>
+        <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:10px;">
+          <button class="btn" id="appealsReplyBtn" type="button">Send reply</button>
+          <div class="msgline" id="appealsReplyMsg"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="title">Actions</div>
+        <div class="row" style="gap:10px; flex-wrap:wrap; align-items:center;">
+          <label class="small muted">Kick duration</label>
+          <select id="appealsDurationSelect"></select>
+          <button class="btn secondary" id="appealsBanToKickBtn" type="button">Ban → Kick</button>
+          <button class="btn secondary" id="appealsUpdateKickBtn" type="button">Update kick</button>
+          <button class="btn danger" id="appealsUnlockBtn" type="button">Unban / Unlock</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
   </html>

@@ -1744,6 +1744,42 @@ let unseenMainMessages = 0;
 // ---- DOM
 const loginView = document.getElementById("loginView");
 const chatView = document.getElementById("chatView");
+const restrictedView = document.getElementById("restrictedView");
+
+const restrictedTitle = document.getElementById("restrictedTitle");
+const restrictedSub = document.getElementById("restrictedSub");
+const restrictedReasonText = document.getElementById("restrictedReasonText");
+const restrictedTimerWrap = document.getElementById("restrictedTimerWrap");
+const restrictedTimer = document.getElementById("restrictedTimer");
+const restrictedRecheckBtn = document.getElementById("restrictedRecheckBtn");
+const restrictedLogoutBtn = document.getElementById("restrictedLogoutBtn");
+
+const appealThread = document.getElementById("appealThread");
+const appealInput = document.getElementById("appealInput");
+const appealSendBtn = document.getElementById("appealSendBtn");
+const appealRefreshBtn = document.getElementById("appealRefreshBtn");
+const appealMsg = document.getElementById("appealMsg");
+const appealStatusText = document.getElementById("appealStatusText");
+
+const appealsPanelBtn = document.getElementById("appealsPanelBtn");
+const appealsPanel = document.getElementById("appealsPanel");
+const appealsCloseBtn = document.getElementById("appealsCloseBtn");
+const appealsList = document.getElementById("appealsList");
+const appealsDetail = document.getElementById("appealsDetail");
+const appealsBackBtn = document.getElementById("appealsBackBtn");
+const appealsDetailUser = document.getElementById("appealsDetailUser");
+const appealsDetailMeta = document.getElementById("appealsDetailMeta");
+const appealsDetailReason = document.getElementById("appealsDetailReason");
+const appealsModlogs = document.getElementById("appealsModlogs");
+const appealsThread = document.getElementById("appealsThread");
+const appealsReplyInput = document.getElementById("appealsReplyInput");
+const appealsReplyBtn = document.getElementById("appealsReplyBtn");
+const appealsReplyMsg = document.getElementById("appealsReplyMsg");
+const appealsDurationSelect = document.getElementById("appealsDurationSelect");
+const appealsBanToKickBtn = document.getElementById("appealsBanToKickBtn");
+const appealsUpdateKickBtn = document.getElementById("appealsUpdateKickBtn");
+const appealsUnlockBtn = document.getElementById("appealsUnlockBtn");
+
 const app = document.getElementById("app");
 const addRoomBtn = document.getElementById("addRoomBtn");
 const menuToggleBtn = document.getElementById("menuToggleBtn");
@@ -7967,18 +8003,26 @@ function setAuthUser(user){
   authUserState = user || null;
 }
 
+
 function setView(mode){
   if(!loginView || !chatView) return;
   document.body.classList.remove("auth-pending");
   if(mode === "login"){
     loginView.hidden = false;
     chatView.hidden = true;
+    if(restrictedView) restrictedView.hidden = true;
   }else if(mode === "chat"){
     loginView.hidden = true;
     chatView.hidden = false;
+    if(restrictedView) restrictedView.hidden = true;
+  }else if(mode === "restricted"){
+    loginView.hidden = true;
+    chatView.hidden = true;
+    if(restrictedView) restrictedView.hidden = false;
   }else{
     loginView.hidden = true;
     chatView.hidden = true;
+    if(restrictedView) restrictedView.hidden = true;
   }
 }
 
@@ -8048,6 +8092,343 @@ function initLoginUI(){
     requestAnimationFrame(()=> authUser?.focus?.());
   }
 }
+
+const KICK_LENGTH_OPTIONS = [
+  { label: "1 week", seconds: 7 * 24 * 60 * 60 },
+  { label: "5 days", seconds: 5 * 24 * 60 * 60 },
+  { label: "3 days", seconds: 3 * 24 * 60 * 60 },
+  { label: "2 days", seconds: 2 * 24 * 60 * 60 },
+  { label: "1 day", seconds: 1 * 24 * 60 * 60 },
+  { label: "12 hrs", seconds: 12 * 60 * 60 },
+  { label: "8 hrs", seconds: 8 * 60 * 60 },
+  { label: "3 hrs", seconds: 3 * 60 * 60 },
+  { label: "2 hrs", seconds: 2 * 60 * 60 },
+  { label: "1 hr", seconds: 60 * 60 },
+  { label: "45m", seconds: 45 * 60 },
+  { label: "30m", seconds: 30 * 60 },
+  { label: "15m", seconds: 15 * 60 },
+  { label: "10m", seconds: 10 * 60 },
+  { label: "5min", seconds: 5 * 60 },
+  { label: "1min", seconds: 60 },
+];
+
+function isStaffRole(role){
+  const r = String(role || "");
+  return ["Admin","Co owner","Owner"].includes(r) || r === "Moderator";
+}
+
+let restrictedCountdownTimer = null;
+let currentRestriction = null;
+let myAppeal = null;
+let myAppealMessages = [];
+
+function pad2(n){ return String(Math.max(0, n|0)).padStart(2, "0"); }
+
+function formatCountdown(ms){
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+}
+
+function renderAppealThread(targetEl, messages){
+  if(!targetEl) return;
+  targetEl.innerHTML = "";
+  const arr = Array.isArray(messages) ? messages : [];
+  if(!arr.length){
+    const empty = document.createElement("div");
+    empty.className = "small muted";
+    empty.textContent = "No messages yet.";
+    targetEl.appendChild(empty);
+    return;
+  }
+  for(const msg of arr){
+    const row = document.createElement("div");
+    row.className = "appealMsgRow " + (msg.author_role === "admin" ? "admin" : "user");
+    const meta = document.createElement("div");
+    meta.className = "appealMsgMeta";
+    const who = msg.author_name || (msg.author_role === "admin" ? "Staff" : "You");
+    meta.textContent = `${who} • ${formatChangelogDate(msg.created_at || msg.createdAt || Date.now())}`;
+    const body = document.createElement("div");
+    body.className = "appealMsgBody";
+    body.textContent = msg.message || "";
+    row.appendChild(meta);
+    row.appendChild(body);
+    targetEl.appendChild(row);
+  }
+  targetEl.scrollTop = targetEl.scrollHeight;
+}
+
+function showRestrictedView(restr){
+  currentRestriction = restr || { type:"none" };
+  const type = String(currentRestriction.type || "none");
+  const reason = String(currentRestriction.reason || "").trim() || "No reason provided.";
+  const expiresAt = currentRestriction.expiresAt != null ? Number(currentRestriction.expiresAt) : null;
+
+  if(type === "ban"){
+    if(restrictedTitle) restrictedTitle.textContent = "You’ve been banned";
+    if(restrictedSub) restrictedSub.textContent = "You can’t access the chat right now.";
+    if(restrictedTimerWrap) restrictedTimerWrap.hidden = true;
+  }else{
+    if(restrictedTitle) restrictedTitle.textContent = "You’ve been kicked";
+    if(restrictedSub) restrictedSub.textContent = "You’ll be able to re-enter after the timer ends.";
+    if(restrictedTimerWrap) restrictedTimerWrap.hidden = false;
+  }
+  if(restrictedReasonText) restrictedReasonText.textContent = reason;
+
+  if(restrictedCountdownTimer) clearInterval(restrictedCountdownTimer);
+  restrictedCountdownTimer = null;
+
+  if(type === "kick" && expiresAt){
+    const tick = () => {
+      const ms = expiresAt - Date.now();
+      if(restrictedTimer) restrictedTimer.textContent = formatCountdown(ms);
+      if(ms <= 0){
+        if(restrictedTimer) restrictedTimer.textContent = "00:00:00";
+        // auto re-check
+        doRestrictionRecheck();
+      }
+    };
+    tick();
+    restrictedCountdownTimer = setInterval(tick, 1000);
+  }
+
+  setView("restricted");
+}
+
+async function doRestrictionRecheck(){
+  if(appealMsg) appealMsg.textContent = "";
+  try{
+    const rRes = await fetch("/api/restriction", { credentials:"include" });
+    const r = await rRes.json().catch(()=>({type:"none"}));
+    if(r?.type && r.type !== "none"){
+      showRestrictedView(r);
+      await refreshMyAppeal();
+      return;
+    }
+    // no restriction -> boot normal chat
+    if(restrictedCountdownTimer) clearInterval(restrictedCountdownTimer);
+    restrictedCountdownTimer = null;
+    await initChatApp();
+  }catch(e){
+    if(appealMsg) appealMsg.textContent = "Could not re-check access.";
+  }
+}
+
+async function ensureRestrictedSocket(){
+  if(socket) return socket;
+  socket = io();
+  // If server emits restriction updates (e.g., staff changed it), keep UI in sync.
+  socket.on("restriction:status", (payload) => {
+    if(payload?.type && payload.type !== "none"){
+      showRestrictedView(payload);
+      refreshMyAppeal();
+    }else{
+      // unlocked
+      doRestrictionRecheck();
+    }
+  });
+  socket.on("connect_error", (err)=> {
+    console.warn("socket connect error", err?.message || err);
+  });
+  return socket;
+}
+
+async function refreshMyAppeal(){
+  await ensureRestrictedSocket();
+  return new Promise((resolve) => {
+    socket.emit("appeal:fetchMine", {}, (payload) => {
+      const appeal = payload?.appeal || null;
+      myAppeal = appeal;
+      myAppealMessages = payload?.messages || [];
+      renderAppealThread(appealThread, myAppealMessages);
+      if(appealStatusText){
+        if(myAppeal?.id) appealStatusText.textContent = "Ticket is open. Staff replies will show here.";
+        else appealStatusText.textContent = "One ticket per user.";
+      }
+      resolve(payload);
+    });
+  });
+}
+
+async function sendMyAppeal(){
+  const text = String(appealInput?.value || "").trim();
+  if(!text){
+    if(appealMsg) appealMsg.textContent = "Please type your appeal message.";
+    return;
+  }
+  if(appealMsg) appealMsg.textContent = "";
+  await ensureRestrictedSocket();
+
+  const eventName = myAppeal?.id ? "appeal:send" : "appeal:create";
+  socket.emit(eventName, { message: text }, (resp) => {
+    if(!resp?.ok){
+      if(appealMsg) appealMsg.textContent = resp?.error || "Appeal failed.";
+      return;
+    }
+    myAppeal = resp.appeal || myAppeal;
+    myAppealMessages = resp.messages || myAppealMessages;
+    renderAppealThread(appealThread, myAppealMessages);
+    if(appealInput) appealInput.value = "";
+    if(appealMsg) appealMsg.textContent = "Sent.";
+    setTimeout(()=>{ if(appealMsg?.textContent==="Sent.") appealMsg.textContent=""; }, 1500);
+  });
+}
+
+// Staff Appeals Panel (in-chat only)
+let staffAppeals = [];
+let activeAppealId = null;
+
+function initAppealsDurationSelect(){
+  if(!appealsDurationSelect) return;
+  appealsDurationSelect.innerHTML = "";
+  for(const opt of KICK_LENGTH_OPTIONS){
+    const o = document.createElement("option");
+    o.value = String(opt.seconds);
+    o.textContent = opt.label;
+    appealsDurationSelect.appendChild(o);
+  }
+  appealsDurationSelect.value = String(60 * 60); // default 1hr
+}
+
+function openAppealsPanel(){
+  if(!appealsPanel) return;
+  appealsPanel.hidden = false;
+  loadAppealsList();
+}
+function closeAppealsPanel(){
+  if(!appealsPanel) return;
+  appealsPanel.hidden = true;
+  activeAppealId = null;
+  if(appealsDetail) appealsDetail.hidden = true;
+}
+
+function renderAppealsList(items){
+  if(!appealsList) return;
+  appealsList.innerHTML = "";
+  const arr = Array.isArray(items) ? items : [];
+  if(!arr.length){
+    const empty = document.createElement("div");
+    empty.className = "card muted";
+    empty.textContent = "No open appeals.";
+    appealsList.appendChild(empty);
+    return;
+  }
+  for(const a of arr){
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "appealListItem";
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = a.username;
+    const meta = document.createElement("div");
+    meta.className = "small muted";
+    meta.textContent = `${String(a.restriction_type || "").toUpperCase()} • Updated ${formatChangelogDate(a.updated_at || a.updatedAt || a.created_at)}`;
+    card.appendChild(title);
+    card.appendChild(meta);
+    card.addEventListener("click", ()=> openAppealDetail(a.id));
+    appealsList.appendChild(card);
+  }
+}
+
+function renderModlogs(items){
+  if(!appealsModlogs) return;
+  appealsModlogs.innerHTML = "";
+  const arr = Array.isArray(items) ? items : [];
+  if(!arr.length){
+    const empty = document.createElement("div");
+    empty.className = "small muted";
+    empty.textContent = "No moderation logs yet.";
+    appealsModlogs.appendChild(empty);
+    return;
+  }
+  for(const m of arr){
+    const row = document.createElement("div");
+    row.className = "modlogRow";
+    const line = document.createElement("div");
+    line.className = "small";
+    const when = formatChangelogDate(m.created_at || m.createdAt || Date.now());
+    line.textContent = `${when} • ${m.action_type || m.actionType} • ${m.actor_username || m.actorUsername || "system"} • ${m.reason || ""}`;
+    row.appendChild(line);
+    appealsModlogs.appendChild(row);
+  }
+}
+
+function loadAppealsList(){
+  if(!socket) return;
+  socket.emit("appeals:list", {}, (resp) => {
+    if(!resp?.ok) return;
+    staffAppeals = resp.items || [];
+    renderAppealsList(staffAppeals);
+  });
+}
+
+function openAppealDetail(id){
+  activeAppealId = id;
+  if(appealsDetail) appealsDetail.hidden = false;
+  initAppealsDurationSelect();
+  socket.emit("appeals:read", { appealId: id }, (resp) => {
+    if(!resp?.ok) return;
+    const a = resp.appeal;
+    if(appealsDetailUser) appealsDetailUser.textContent = a.username;
+    const rtype = String(a.restriction_type || "").toUpperCase();
+    if(appealsDetailMeta) appealsDetailMeta.textContent = `${rtype} • Ticket #${a.id}`;
+    if(appealsDetailReason) appealsDetailReason.textContent = a.reason_at_time || "—";
+    renderAppealThread(appealsThread, resp.messages || []);
+    renderModlogs(resp.modlogs || []);
+  });
+}
+
+function staffReply(){
+  const text = String(appealsReplyInput?.value || "").trim();
+  if(!text || !activeAppealId) return;
+  if(appealsReplyMsg) appealsReplyMsg.textContent = "";
+  socket.emit("appeals:reply", { appealId: activeAppealId, message: text }, (resp) => {
+    if(!resp?.ok){
+      if(appealsReplyMsg) appealsReplyMsg.textContent = resp?.error || "Failed.";
+      return;
+    }
+    if(appealsReplyInput) appealsReplyInput.value = "";
+    if(appealsReplyMsg) appealsReplyMsg.textContent = "Sent.";
+    openAppealDetail(activeAppealId);
+  });
+}
+
+function staffAction(action){
+  if(!activeAppealId) return;
+  const dur = Number(appealsDurationSelect?.value || 3600);
+  socket.emit("appeals:action", { appealId: activeAppealId, action, durationSeconds: dur }, (resp) => {
+    if(!resp?.ok) return;
+    loadAppealsList();
+    if(appealsReplyMsg) appealsReplyMsg.textContent = "Updated.";
+    setTimeout(()=>{ if(appealsReplyMsg?.textContent==="Updated.") appealsReplyMsg.textContent=""; }, 1200);
+    openAppealDetail(activeAppealId);
+  });
+}
+
+function bindRestrictedUI(){
+  restrictedRecheckBtn?.addEventListener("click", doRestrictionRecheck);
+  restrictedLogoutBtn?.addEventListener("click", async ()=>{
+    try{ await fetch("/logout", { method:"POST", credentials:"include" }); }catch{}
+    setAuthUser(null);
+    initLoginUI();
+  });
+  appealRefreshBtn?.addEventListener("click", refreshMyAppeal);
+  appealSendBtn?.addEventListener("click", sendMyAppeal);
+}
+
+function bindStaffAppealsUI(){
+  appealsPanelBtn?.addEventListener("click", openAppealsPanel);
+  appealsCloseBtn?.addEventListener("click", closeAppealsPanel);
+  appealsBackBtn?.addEventListener("click", ()=>{ if(appealsDetail) appealsDetail.hidden = true; });
+  appealsReplyBtn?.addEventListener("click", staffReply);
+  appealsBanToKickBtn?.addEventListener("click", ()=> staffAction("ban_to_kick"));
+  appealsUpdateKickBtn?.addEventListener("click", ()=> staffAction("update_kick"));
+  appealsUnlockBtn?.addEventListener("click", ()=> staffAction("unlock"));
+}
+
+
 
 async function doLogin(){
   const username = authUser?.value?.trim() || "";
@@ -9699,6 +10080,10 @@ async function initChatApp(){
   setAuthUser(sessionUser);
   setView("chat");
 
+  // Staff-only: show appeals panel button in members drawer
+  if(appealsPanelBtn) appealsPanelBtn.hidden = !isStaffRole(me?.role);
+  initAppealsDurationSelect();
+
   await loadVibeTags();
   await loadThemePreference();
 
@@ -9720,6 +10105,15 @@ async function initChatApp(){
   socket.on("connect", () => {
     // Join initial room so history + realtime messages work reliably
     joinRoom(currentRoom);
+  });
+
+  socket.on("restriction:status", async (payload) => {
+    if(payload?.type && payload.type !== "none"){
+      try{ socket.disconnect(); }catch{}
+      await ensureRestrictedSocket();
+      showRestrictedView(payload);
+      await refreshMyAppeal();
+    }
   });
 
   socket.on("onlineUsers", (names) => {
@@ -10121,17 +10515,36 @@ socket.on("dm history", (payload = {}) => {
 }
 
 // boot: auth gate
+
 async function bootApp(){
   setView("loading");
+  bindRestrictedUI();
+  bindStaffAppealsUI();
+
   const sessionUser = await validateSession({ silent: true });
   if(sessionUser){
     me = sessionUser;
     setAuthUser(sessionUser);
+
+    // Gate entry behind kick/ban restrictions (so login doesn't show chat UI)
+    try{
+      const rRes = await fetch("/api/restriction", { credentials:"include" });
+      const r = await rRes.json().catch(()=>({ type:"none" }));
+      if(r?.type && r.type !== "none"){
+        // Connect socket only for appeals/status updates
+        await ensureRestrictedSocket();
+        showRestrictedView(r);
+        await refreshMyAppeal();
+        return;
+      }
+    }catch{}
+
     await initChatApp();
     return;
   }
   initLoginUI();
 }
+
 
 document.addEventListener("DOMContentLoaded", bootApp);
 

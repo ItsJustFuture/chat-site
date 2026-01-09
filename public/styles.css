@@ -5882,3 +5882,222 @@ main.chatMain {
 
 /* === Fix: upload preview should not reserve space when not in use === */
 #uploadPreview{ display:none; }
+
+
+/* ================================
+   Kick/Ban Restricted View + Appeals
+================================== */
+#restrictedView{
+  min-height: 100vh;
+  display: flex;
+}
+.restrictedShell{
+  width: 100%;
+  min-height: 100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding: 28px 16px;
+}
+.restrictedCard{
+  width: min(560px, 100%);
+  background: rgba(30,30,30,0.9);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 18px;
+  padding: 22px 18px;
+  box-shadow: 0 16px 60px rgba(0,0,0,0.45);
+  text-align:center;
+}
+.restrictedIcon{
+  font-size: 52px;
+  margin-bottom: 10px;
+}
+.restrictedSub{
+  opacity: 0.85;
+  margin-top: 6px;
+}
+.restrictedTimer{
+  margin-top: 18px;
+  padding: 14px 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+.restrictedTimerLabel{
+  font-size: 12px;
+  opacity: 0.75;
+}
+.restrictedTimerValue{
+  font-variant-numeric: tabular-nums;
+  font-size: 44px;
+  letter-spacing: 1px;
+  margin-top: 6px;
+}
+.restrictedReason{
+  margin-top: 18px;
+  text-align:left;
+  padding: 14px 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.restrictedReasonText{
+  margin-top: 8px;
+  word-break: break-word;
+}
+.restrictedAppeal{
+  margin-top: 18px;
+  text-align:left;
+  padding: 14px 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.restrictedAppealHeader{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:12px;
+}
+.appealThread{
+  margin-top: 10px;
+  max-height: 220px;
+  overflow:auto;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(0,0,0,0.18);
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.appealMsgRow{
+  padding: 8px 10px;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  background: rgba(255,255,255,0.04);
+}
+.appealMsgRow.admin{
+  background: rgba(110,180,255,0.10);
+  border: 1px solid rgba(110,180,255,0.14);
+}
+.appealMsgMeta{
+  font-size: 11px;
+  opacity: 0.7;
+}
+.appealMsgBody{
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.appealComposer textarea{
+  width: 100%;
+  margin-top: 10px;
+  resize: vertical;
+  min-height: 88px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(0,0,0,0.22);
+  color: inherit;
+  padding: 10px 12px;
+}
+.msgline{
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+/* Staff panel */
+.appealsPanel{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 9999;
+  display:flex;
+  flex-direction:column;
+}
+.appealsPanelHeader{
+  padding: 12px 14px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  background: rgba(20,20,20,0.92);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.appealsPanelBody{
+  flex: 1;
+  display:flex;
+  gap: 12px;
+  padding: 12px;
+  overflow:hidden;
+}
+.appealsList{
+  width: min(360px, 42%);
+  overflow:auto;
+  border-radius: 14px;
+  background: rgba(20,20,20,0.72);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 10px;
+}
+.appealListItem{
+  width:100%;
+  text-align:left;
+  padding: 12px 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  color: inherit;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+.appealListItem:hover{
+  background: rgba(255,255,255,0.06);
+}
+.appealsDetail{
+  flex:1;
+  overflow:auto;
+  border-radius: 14px;
+  background: rgba(20,20,20,0.72);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 12px;
+}
+.appealsDetailTop{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.appealsDetail textarea{
+  width: 100%;
+  resize: vertical;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(0,0,0,0.22);
+  color: inherit;
+  padding: 10px 12px;
+  margin-top: 10px;
+}
+.card{
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(0,0,0,0.16);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.appealsModlogs .modlogRow{
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(255,255,255,0.08);
+}
+.appealsModlogs .modlogRow:last-child{
+  border-bottom: none;
+}
+
+@media (max-width: 900px){
+  .appealsPanelBody{
+    flex-direction: column;
+  }
+  .appealsList{
+    width: 100%;
+    max-height: 40vh;
+  }
+  .appealsDetail{
+    width: 100%;
+  }
+}
