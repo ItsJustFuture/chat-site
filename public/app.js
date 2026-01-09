@@ -1910,7 +1910,7 @@ const draftDebounce = (()=> {
 })();
 
 const TONE_MENU_OPTIONS = Object.freeze([
-  { key: "", emoji: "🚫", name: "Clear tone (None)", description: "No tone" },
+  { key: "", emoji: "🚫", name: "None (clear tone)", description: "No tone" },
   ...TONE_OPTIONS
 ]);
 let openToneMenu = null;
@@ -1930,10 +1930,11 @@ function updateToneMenu(container, activeKey){
   if (!container) return;
   const btn = container.querySelector(".toneMenuBtn");
   if (btn) {
-    btn.textContent = toneMenuButtonLabel(activeKey);
+    btn.textContent = "▴";
     btn.title = toneMenuTooltip(activeKey);
     btn.setAttribute("aria-label", toneMenuButtonLabel(activeKey));
   }
+  container.classList.toggle("has-tone", !!activeKey);
   container.querySelectorAll(".toneMenuItem").forEach((item) => {
     const on = (item.dataset.tone || "") === (activeKey || "");
     item.classList.toggle("is-active", on);
@@ -8647,6 +8648,32 @@ async function saveChatFxPrefs(){
   }
 }
 
+const PERSONALISATION_SECTIONS_KEY = "ui.personalisation.openSections";
+function initPersonalisationSections(container){
+  if (!container) return;
+  const sections = Array.from(container.querySelectorAll(".prefsSection"));
+  if (!sections.length) return;
+  let stored = [];
+  try {
+    const raw = localStorage.getItem(PERSONALISATION_SECTIONS_KEY);
+    stored = raw ? JSON.parse(raw) : [];
+  } catch {
+    stored = [];
+  }
+  const storedSet = new Set(Array.isArray(stored) ? stored : []);
+  sections.forEach((section, idx) => {
+    const key = section.dataset.section || String(idx);
+    if (storedSet.size) section.open = storedSet.has(key);
+    section.addEventListener("toggle", () => {
+      const openKeys = sections
+        .filter((item) => item.open)
+        .map((item) => item.dataset.section)
+        .filter(Boolean);
+      try { localStorage.setItem(PERSONALISATION_SECTIONS_KEY, JSON.stringify(openKeys)); } catch {}
+    });
+  });
+}
+
 function wireChatFxPrefs(){
   if (!editPreferencesPanel || editPreferencesPanel._chatFxWired) return;
   editPreferencesPanel._chatFxWired = true;
@@ -8670,159 +8697,190 @@ function wireChatFxPrefs(){
           </div>
         </div>
       </div>
-      <div class="field polishPackField">
-        <div class="polishPackHeader">
-          <label style="margin:0;">Enable Polish Pack</label>
-          <input id="chatFxPolishPack" type="checkbox">
-        </div>
-        <div class="polishPackOptions">
-          <label><input id="chatFxPolishAuras" type="checkbox"> Avatar auras</label>
-          <label><input id="chatFxPolishAnimations" type="checkbox"> Animations</label>
-        </div>
-      </div>
-      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <label style="margin:0;">Enabled</label>
-        <input id="chatFxEnabled" type="checkbox">
-      </div>
-      <div class="field">
-        <label>Glow</label>
-        <select id="chatFxGlow">
-          <option value="off">Off</option>
-          <option value="soft">Soft</option>
-          <option value="neon">Neon</option>
-          <option value="strong">Strong</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>Font</label>
-        <select id="chatFxFont">
-          ${buildFontSelectOptionsHTML()}
-        </select>
-      </div>
-      <div class="field">
-        <label>Username font</label>
-        <select id="chatFxNameFont">
-          ${buildFontSelectOptionsHTML()}
-        </select>
-      </div>
-      <div class="field">
-        <label>Username color</label>
-        <div class="chatFxColorRow">
-          <input id="chatFxNameColorPick" type="color" value="#ffffff" aria-label="Pick username color">
-          <input id="chatFxNameColor" type="hidden" value="">
-          <button class="pillBtn" id="chatFxNameColorClear" type="button">Clear</button>
-        </div>
-        <div class="small">Leave blank to use the theme's default name colour.</div>
-      </div>
-      <div class="field">
-        <label>Bubble radius</label>
-        <div class="chatFxSliderRow">
-          <input id="chatFxRadius" type="range" min="6" max="28" step="1">
-          <span class="chatFxSliderValue" id="chatFxRadiusValue">14</span>
-        </div>
-      </div>
-      <div class="field">
-        <label>Border thickness</label>
-        <div class="chatFxSliderRow">
-          <input id="chatFxBorder" type="range" min="0" max="3" step="1">
-          <span class="chatFxSliderValue" id="chatFxBorderValue">0</span>
-        </div>
-      </div>
-      <div class="field">
-        <label>Glass opacity</label>
-        <div class="chatFxSliderRow">
-          <input id="chatFxGlass" type="range" min="0" max="1" step="0.05">
-          <span class="chatFxSliderValue" id="chatFxGlassValue">0</span>
-        </div>
-      </div>
-      <div class="field">
-        <label>Glass blur</label>
-        <div class="chatFxSliderRow">
-          <input id="chatFxBlur" type="range" min="0" max="16" step="1">
-          <span class="chatFxSliderValue" id="chatFxBlurValue">0</span>
-        </div>
-      </div>
-      <div class="field">
-        <label>Density</label>
-        <div class="chatFxDensityRow" id="chatFxDensity">
-          <button class="pillBtn" type="button" data-value="compact">Compact</button>
-          <button class="pillBtn" type="button" data-value="cozy">Cozy</button>
-          <button class="pillBtn" type="button" data-value="spacious">Spacious</button>
-        </div>
-      </div>
-      <div class="field">
-        <label>Accent color (optional)</label>
-        <input id="chatFxAccent" type="text" placeholder="#RRGGBB">
-        <div class="small">Leave blank to keep your theme accent.</div>
-      </div>
-      <div class="field">
-        <label>Bubble color (optional)</label>
-        <div class="chatFxColorRow">
-          <input id="chatFxBubbleColorPick" type="color" value="#2b2d31" aria-label="Pick bubble color">
-          <input id="chatFxBubbleColor" type="text" placeholder="#RRGGBB">
-          <button class="pillBtn" id="chatFxBubbleColorClear" type="button">Clear</button>
-        </div>
-        <div class="small">Leave blank to use the theme bubble colour.</div>
-      </div>
-      <div class="field">
-        <label>Text color (optional)</label>
-        <div class="chatFxColorRow">
-          <input id="chatFxTextColorPick" type="color" value="#ffffff" aria-label="Pick text color">
-          <input id="chatFxTextColor" type="text" placeholder="#RRGGBB">
-          <button class="pillBtn" id="chatFxTextColorClear" type="button">Clear</button>
-        </div>
-        <div class="small">Leave blank to use the theme's default message text.</div>
-      </div>
-      <div class="field">
-        <label>Message text style</label>
-        <div class="chatFxColorRow" style="justify-content:flex-start;">
-          <label style="display:flex; align-items:center; gap:6px;">
-            <input id="chatFxTextBold" type="checkbox"> Bold
-          </label>
-          <label style="display:flex; align-items:center; gap:6px;">
-            <input id="chatFxTextItalic" type="checkbox"> Italic
-          </label>
-        </div>
-      </div>
-      <div class="field">
-        <label>Text glow</label>
-        <select id="chatFxTextGlow">
-          <option value="off">Off</option>
-          <option value="soft">Soft</option>
-          <option value="neon">Neon</option>
-          <option value="strong">Strong</option>
-        </select>
-      </div>
-      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <label style="margin:0;">Text gradient</label>
-        <input id="chatFxTextGradientEnabled" type="checkbox">
-      </div>
-      <div class="field">
-        <label>Gradient color A</label>
-        <div class="chatFxColorRow">
-          <input id="chatFxTextGradientAPick" type="color" value="#7c4dff" aria-label="Pick gradient color A">
-          <input id="chatFxTextGradientA" type="text" placeholder="#RRGGBB">
-          <button class="pillBtn" id="chatFxTextGradientAClear" type="button">Clear</button>
-        </div>
-      </div>
-      <div class="field">
-        <label>Gradient color B</label>
-        <div class="chatFxColorRow">
-          <input id="chatFxTextGradientBPick" type="color" value="#00e5ff" aria-label="Pick gradient color B">
-          <input id="chatFxTextGradientB" type="text" placeholder="#RRGGBB">
-          <button class="pillBtn" id="chatFxTextGradientBClear" type="button">Clear</button>
-        </div>
-      </div>
-      <div class="field">
-        <label>Gradient angle</label>
-        <div class="chatFxSliderRow">
-          <input id="chatFxTextGradientAngle" type="range" min="0" max="360" step="1">
-          <span class="chatFxSliderValue" id="chatFxTextGradientAngleValue">135</span>
-        </div>
-      </div>
-      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <label style="margin:0;">Auto-contrast text</label>
-        <input id="chatFxAutoContrast" type="checkbox">
+      <div class="prefsSections">
+        <details class="prefsSection" data-section="text-fonts" open>
+          <summary>Text &amp; Fonts</summary>
+          <div class="prefsContent">
+            <div class="field">
+              <label>Font</label>
+              <select id="chatFxFont">
+                ${buildFontSelectOptionsHTML()}
+              </select>
+            </div>
+            <div class="field">
+              <label>Username font</label>
+              <select id="chatFxNameFont">
+                ${buildFontSelectOptionsHTML()}
+              </select>
+            </div>
+            <div class="field">
+              <label>Text color (optional)</label>
+              <div class="chatFxColorRow">
+                <input id="chatFxTextColorPick" type="color" value="#ffffff" aria-label="Pick text color">
+                <input id="chatFxTextColor" type="text" placeholder="#RRGGBB">
+                <button class="pillBtn" id="chatFxTextColorClear" type="button">Clear</button>
+              </div>
+              <div class="small">Leave blank to use the theme's default message text.</div>
+            </div>
+            <div class="field">
+              <label>Message text style</label>
+              <div class="chatFxColorRow" style="justify-content:flex-start;">
+                <label style="display:flex; align-items:center; gap:6px;">
+                  <input id="chatFxTextBold" type="checkbox"> Bold
+                </label>
+                <label style="display:flex; align-items:center; gap:6px;">
+                  <input id="chatFxTextItalic" type="checkbox"> Italic
+                </label>
+              </div>
+            </div>
+            <div class="field">
+              <label>Text glow</label>
+              <select id="chatFxTextGlow">
+                <option value="off">Off</option>
+                <option value="soft">Soft</option>
+                <option value="neon">Neon</option>
+                <option value="strong">Strong</option>
+              </select>
+            </div>
+            <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+              <label style="margin:0;">Text gradient</label>
+              <input id="chatFxTextGradientEnabled" type="checkbox">
+            </div>
+            <div class="field">
+              <label>Gradient color A</label>
+              <div class="chatFxColorRow">
+                <input id="chatFxTextGradientAPick" type="color" value="#7c4dff" aria-label="Pick gradient color A">
+                <input id="chatFxTextGradientA" type="text" placeholder="#RRGGBB">
+                <button class="pillBtn" id="chatFxTextGradientAClear" type="button">Clear</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>Gradient color B</label>
+              <div class="chatFxColorRow">
+                <input id="chatFxTextGradientBPick" type="color" value="#00e5ff" aria-label="Pick gradient color B">
+                <input id="chatFxTextGradientB" type="text" placeholder="#RRGGBB">
+                <button class="pillBtn" id="chatFxTextGradientBClear" type="button">Clear</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>Gradient angle</label>
+              <div class="chatFxSliderRow">
+                <input id="chatFxTextGradientAngle" type="range" min="0" max="360" step="1">
+                <span class="chatFxSliderValue" id="chatFxTextGradientAngleValue">135</span>
+              </div>
+            </div>
+            <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+              <label style="margin:0;">Auto-contrast text</label>
+              <input id="chatFxAutoContrast" type="checkbox">
+            </div>
+          </div>
+        </details>
+        <details class="prefsSection" data-section="bubbles" open>
+          <summary>Bubbles &amp; Chat Style</summary>
+          <div class="prefsContent">
+            <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+              <label style="margin:0;">Enabled</label>
+              <input id="chatFxEnabled" type="checkbox">
+            </div>
+            <div class="field">
+              <label>Glow</label>
+              <select id="chatFxGlow">
+                <option value="off">Off</option>
+                <option value="soft">Soft</option>
+                <option value="neon">Neon</option>
+                <option value="strong">Strong</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Bubble radius</label>
+              <div class="chatFxSliderRow">
+                <input id="chatFxRadius" type="range" min="6" max="28" step="1">
+                <span class="chatFxSliderValue" id="chatFxRadiusValue">14</span>
+              </div>
+            </div>
+            <div class="field">
+              <label>Border thickness</label>
+              <div class="chatFxSliderRow">
+                <input id="chatFxBorder" type="range" min="0" max="3" step="1">
+                <span class="chatFxSliderValue" id="chatFxBorderValue">0</span>
+              </div>
+            </div>
+            <div class="field">
+              <label>Glass opacity</label>
+              <div class="chatFxSliderRow">
+                <input id="chatFxGlass" type="range" min="0" max="1" step="0.05">
+                <span class="chatFxSliderValue" id="chatFxGlassValue">0</span>
+              </div>
+            </div>
+            <div class="field">
+              <label>Glass blur</label>
+              <div class="chatFxSliderRow">
+                <input id="chatFxBlur" type="range" min="0" max="16" step="1">
+                <span class="chatFxSliderValue" id="chatFxBlurValue">0</span>
+              </div>
+            </div>
+            <div class="field">
+              <label>Density</label>
+              <div class="chatFxDensityRow" id="chatFxDensity">
+                <button class="pillBtn" type="button" data-value="compact">Compact</button>
+                <button class="pillBtn" type="button" data-value="cozy">Cozy</button>
+                <button class="pillBtn" type="button" data-value="spacious">Spacious</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>Bubble color (optional)</label>
+              <div class="chatFxColorRow">
+                <input id="chatFxBubbleColorPick" type="color" value="#2b2d31" aria-label="Pick bubble color">
+                <input id="chatFxBubbleColor" type="text" placeholder="#RRGGBB">
+                <button class="pillBtn" id="chatFxBubbleColorClear" type="button">Clear</button>
+              </div>
+              <div class="small">Leave blank to use the theme bubble colour.</div>
+            </div>
+          </div>
+        </details>
+        <details class="prefsSection" data-section="theme-page">
+          <summary>Theme &amp; Page</summary>
+          <div class="prefsContent">
+            <div class="field">
+              <label>Accent color (optional)</label>
+              <input id="chatFxAccent" type="text" placeholder="#RRGGBB">
+              <div class="small">Leave blank to keep your theme accent.</div>
+            </div>
+          </div>
+        </details>
+        <details class="prefsSection" data-section="profile-identity">
+          <summary>Profile &amp; Identity</summary>
+          <div class="prefsContent">
+            <div class="field">
+              <label>Username color</label>
+              <div class="chatFxColorRow">
+                <input id="chatFxNameColorPick" type="color" value="#ffffff" aria-label="Pick username color">
+                <input id="chatFxNameColor" type="hidden" value="">
+                <button class="pillBtn" id="chatFxNameColorClear" type="button">Clear</button>
+              </div>
+              <div class="small">Leave blank to use the theme's default name colour.</div>
+            </div>
+            <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+              <label style="margin:0;">Avatar auras</label>
+              <input id="chatFxPolishAuras" type="checkbox">
+            </div>
+            <div class="small">Requires Polish Pack.</div>
+          </div>
+        </details>
+        <details class="prefsSection" data-section="advanced-accessibility">
+          <summary>Advanced / Accessibility</summary>
+          <div class="prefsContent">
+            <div class="field polishPackField">
+              <div class="polishPackHeader">
+                <label style="margin:0;">Enable Polish Pack</label>
+                <input id="chatFxPolishPack" type="checkbox">
+              </div>
+              <div class="polishPackOptions">
+                <label><input id="chatFxPolishAnimations" type="checkbox"> Animations</label>
+              </div>
+            </div>
+          </div>
+        </details>
       </div>
       <div class="chatFxActions">
         <div class="chatFxStatus" id="chatFxStatus"></div>
@@ -8832,6 +8890,7 @@ function wireChatFxPrefs(){
   `;
 
   editPreferencesPanel.appendChild(section);
+  initPersonalisationSections(section);
 
   const q = (sel) => section.querySelector(sel);
   chatFxPrefEls = {

@@ -1103,6 +1103,35 @@ const ALLOWED_THEMES = [
   "Pastel Light",
   "Paper / Parchment",
   "Sky Light",
+  "Cherry Blossom (Dark)",
+  "Cherry Blossom (Light)",
+  "420 Friendly (Light)",
+  "420 Friendly (Dark)",
+  "Aurora Night",
+  "Mint Soda",
+  "Lavender Fog",
+  "Crimson Noir",
+  "Ocean Mist",
+  "Deep Ocean",
+  "Sunlit Sand",
+  "Graphite",
+  "Forest Night",
+  "Retro Terminal",
+  "Desert Dusk",
+  "Arctic Light",
+  "Rose Quartz",
+  "Lemonade",
+  "Sunrise Sorbet",
+  "Cotton Candy Sky",
+  "Prismatic Pearl",
+  "Citrus Splash",
+  "Glacier Bloom",
+  "Aurora Pastel",
+  "Midnight Mirage",
+  "Neon Abyss",
+  "Velvet Galaxy",
+  "Obsidian Aurora",
+  "Iris & Lola Neon",
 ];
 
 // Passive gold accrues slowly over time. 5s ticks were far too fast.
@@ -5723,10 +5752,11 @@ function doJoin(room, status) {
             reply_to_id, reply_to_user, reply_to_text
      FROM messages
      WHERE (room=? OR room=?) AND deleted=0
-     ORDER BY ts ASC LIMIT 200`,
+     ORDER BY ts DESC LIMIT 200`,
     [room, legacyRoom],
     (_e, rows) => {
-      const baseHistory = (rows || []).map((r) => ({
+      // Query newest-first, then reverse so clients render oldest -> newest.
+      const baseHistory = (rows || []).reverse().map((r) => ({
         messageId: r.id,
         room: r.room,
         user: r.username,
