@@ -27,6 +27,61 @@ function safeString(value, fallback = "") {
   return String(value);
 }
 
+// ---- Toasts (lightweight inline confirmations)
+let toastStackEl = null;
+function ensureToastStack(){
+  if (toastStackEl) return toastStackEl;
+  const wrap = document.createElement("div");
+  wrap.className = "toastStack";
+  wrap.setAttribute("aria-live", "polite");
+  wrap.setAttribute("aria-atomic", "true");
+  wrap.id = "toastStack";
+  document.body.appendChild(wrap);
+  toastStackEl = wrap;
+  return toastStackEl;
+}
+function showToast(message, { actionLabel, actionFn, durationMs = 4200 } = {}){
+  const root = ensureToastStack();
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  const msg = document.createElement("div");
+  msg.className = "toastMessage";
+  msg.textContent = safeString(message, "");
+  toast.appendChild(msg);
+
+  if (actionLabel && typeof actionFn === "function") {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btnTertiary toastAction";
+    btn.textContent = actionLabel;
+    btn.addEventListener("click", () => {
+      try {
+        const result = actionFn();
+        if (result && typeof result.then === "function") {
+          result.catch(() => showToast("Couldn’t undo — try again."));
+        }
+      } catch {
+        showToast("Couldn’t undo — try again.");
+      }
+      toast.remove();
+    });
+    toast.appendChild(btn);
+  }
+
+  root.appendChild(toast);
+  const toasts = Array.from(root.querySelectorAll(".toast"));
+  if (toasts.length > 3) {
+    toasts.slice(0, toasts.length - 3).forEach((el) => el.remove());
+  }
+
+  const duration = Number(durationMs) || 4200;
+  const timer = setTimeout(() => toast.remove(), duration);
+  toast.addEventListener("mouseenter", () => clearTimeout(timer));
+  toast.addEventListener("mouseleave", () => setTimeout(() => toast.remove(), 1200));
+  return toast;
+}
+const toast = showToast;
+
 // ---- Scroll pinning scheduler (hoisted)
 // This function is referenced early (e.g. visualViewport listeners inside initLayoutMetrics).
 // It must be hoisted to avoid TDZ/ReferenceError when app.js is evaluated.
@@ -648,6 +703,7 @@ let currentRoom = "main";
 function displayRoomName(room){ return room==="diceroom" ? "Dice Room" : room; }
 
 let lastUsers = [];
+const roleCache = new Map();
 const reactionsCache = Object.create(null);
 const dmReactionsCache = Object.create(null);
 const dmReadCache = Object.create(null); // threadId -> { userId, messageId, ts }
@@ -1891,6 +1947,8 @@ const prefSoundSent = document.getElementById("prefSoundSent");
 const prefSoundReceive = document.getElementById("prefSoundReceive");
 const prefSoundReaction = document.getElementById("prefSoundReaction");
 const prefSoundStatus = document.getElementById("prefSoundStatus");
+const prefComfortMode = document.getElementById("prefComfortMode");
+const prefComfortHelp = document.getElementById("prefComfortHelp");
 
 
 const authForm = document.getElementById("authForm");
@@ -2299,6 +2357,8 @@ const dmUserBtn = document.getElementById("dmUserBtn");
 const dmInfoBtn = document.getElementById("dmInfoBtn");
 const dmSettingsBtn = document.getElementById("dmSettingsBtn");
 const likeProfileBtn = document.getElementById("likeProfileBtn");
+const profileEditBtn = document.getElementById("profileEditBtn");
+const profileSettingsBtn = document.getElementById("profileSettingsBtn");
 const likeCount = document.getElementById("likeCount");
 const profileLikeMsg = document.getElementById("profileLikeMsg");
 const leaderboardXp = document.getElementById("leaderboardXp");
@@ -2556,9 +2616,11 @@ const quickReason = document.getElementById("quickReason");
 const quickReasonPresets = document.getElementById("quickReasonPresets");
 const quickMuteMins = document.getElementById("quickMuteMins");
 const quickBanMins = document.getElementById("quickBanMins");
+const quickKickSeconds = document.getElementById("quickKickSeconds");
 const quickKickBtn = document.getElementById("quickKickBtn");
 const quickUnkickBtn = document.getElementById("quickUnkickBtn");
 const quickMuteBtn = document.getElementById("quickMuteBtn");
+const quickUnmuteBtn = document.getElementById("quickUnmuteBtn");
 const quickBanBtn = document.getElementById("quickBanBtn");
 const quickModMsg = document.getElementById("quickModMsg");
 
@@ -3420,6 +3482,16 @@ function avatarNode(url, fallbackText, role, presenceName){
   return buildFallback();
 }
 
+function updateRoleCache(username, role){
+  const key = normKey(username);
+  if (!key) return;
+  roleCache.set(key, role || "User");
+}
+function cachedRoleForUser(username){
+  const key = normKey(username);
+  return roleCache.get(key) || roleForUser(username);
+}
+
 function roleForUser(name){
   const n = String(name || "").toLowerCase();
   if (!n) return "member";
@@ -3879,6 +3951,28 @@ function queuePersistPrefs(partial){
   }, 800);
 }
 
+const COMFORT_MODE_KEY = "comfortMode";
+function readComfortModeStorage(){
+  const raw = localStorage.getItem(COMFORT_MODE_KEY);
+  if (raw === "1") return true;
+  if (raw === "0") return false;
+  return null;
+}
+function applyComfortMode(enabled, { persistLocal = true, persistServer = true } = {}){
+  const on = !!enabled;
+  document.body?.classList.toggle("comfortMode", on);
+  if (prefComfortMode) prefComfortMode.checked = on;
+  if (persistLocal) {
+    try { localStorage.setItem(COMFORT_MODE_KEY, on ? "1" : "0"); } catch {}
+  }
+  if (persistServer) queuePersistPrefs({ comfortMode: on });
+  if (prefComfortHelp) {
+    prefComfortHelp.textContent = on
+      ? "Comfort mode is on: animations and glows are softened."
+      : "Softens glows, confetti, and motion-heavy animations.";
+  }
+}
+
 function mergeChatFxDefaults(fx){
   const safe = (fx && typeof fx === "object") ? fx : {};
   const merged = { ...CHAT_FX_DEFAULTS, ...safe };
@@ -3986,6 +4080,13 @@ async function loadUserPrefs(){
     if (prefs.sound && typeof prefs.sound === "object") {
       Sound.importPrefs(prefs.sound);
       syncSoundPrefsUI(false);
+    }
+    const comfortPref = typeof prefs.comfortMode === "boolean" ? prefs.comfortMode : null;
+    const comfortStored = readComfortModeStorage();
+    const comfortEnabled = comfortPref ?? comfortStored ?? false;
+    applyComfortMode(comfortEnabled, { persistLocal: true, persistServer: false });
+    if (comfortPref == null && comfortStored != null) {
+      queuePersistPrefs({ comfortMode: comfortEnabled });
     }
     if (prefs.chatFx && typeof prefs.chatFx === "object") {
       applyChatFxPrefsFromServer(prefs.chatFx);
@@ -5104,6 +5205,7 @@ function renderMembers(users){
   refreshModTargetOptions(lastUsers);
   memberList.innerHTML="";
   lastUsers.forEach(u=>{
+    updateRoleCache(u.username || u.name, u.role);
     if (u?.chatFx) updateUserFxMap(u.name, u.chatFx);
     const row=document.createElement("div");
     row.className="mItem";
@@ -6560,6 +6662,18 @@ dmUserBtn?.addEventListener("click", () => {
     startDirectMessage(modalTargetUsername, modalTargetUserId);
   }
 });
+profileEditBtn?.addEventListener("click", () => {
+  if (!currentProfileIsSelf) return;
+  setTab("edit");
+  showEditPanel("about");
+});
+profileSettingsBtn?.addEventListener("click", async () => {
+  if (!currentProfileIsSelf) return;
+  setTab("edit");
+  showEditPanel("preferences");
+  try { syncSoundPrefsUI(true); } catch {}
+  await loadChatFxPrefs({ force: true });
+});
 
 // upload button icon -> open file picker
 pickFileBtn?.addEventListener("click", () => {
@@ -6696,6 +6810,7 @@ editDmBtn?.addEventListener("click", ()=>showEditPanel("dm"));
 // New profile edit menu + avatar action wiring
 wireProfileMenu();
 wireSoundPrefs();
+wireComfortMode();
 wireChatFxPrefs();
 wireProfileAvatarActions();
 wireHeaderGradientInputs();
@@ -8623,14 +8738,24 @@ function bindRoleDebugUI(){
   roleDebugUseSelectedBtn?.addEventListener("click", ()=>{
     if(roleDebugTarget) roleDebugTarget.value = (memberMenuUsername || memberMenuUser?.username || memberMenuUser?.name || "").trim();
   });
-  roleDebugApplyBtn?.addEventListener("click", ()=>{
+  roleDebugApplyBtn?.addEventListener("click", async ()=>{
     const target = (roleDebugTarget?.value || "").trim();
     const role = (roleDebugRole?.value || "").trim();
     if(!target){ if(roleDebugMsg) roleDebugMsg.textContent="Enter a username."; return; }
     if(!role){ if(roleDebugMsg) roleDebugMsg.textContent="Choose a role."; return; }
     if(!confirmModeration("role update", target)) return;
-    socket?.emit("mod set role", { username: target, role, reason: "" });
+    const prevRole = cachedRoleForUser(target);
+    const resp = await emitModWithAck("mod set role", { username: target, role, reason: "" });
+    if(!resp?.ok){ if(roleDebugMsg) roleDebugMsg.textContent = resp?.error || "Role update failed."; return; }
+    updateRoleCache(target, role);
     if(roleDebugMsg) roleDebugMsg.textContent="Role change sent.";
+    if (prevRole && prevRole !== role) {
+      showToast(`Role updated for ${target}`, {
+        actionLabel: "Undo",
+        actionFn: () => undoWithAck("mod set role", { username: target, role: prevRole, reason: "Undo role" }),
+        durationMs: 5200
+      });
+    }
   });
 }
 
@@ -8765,6 +8890,7 @@ async function loadMyProfile(){
   const res=await fetch("/profile");
   if(!res.ok) return;
   const p=await res.json();
+  updateRoleCache(p.username, p.role);
   modalTargetUserId = Number(p?.id) || null;
   me.username = p.username;
   me.role = p.role;
@@ -9023,11 +9149,31 @@ function updateProfileActions({ isSelf = false, canModerate = false } = {}){
   if (addFriendBtn) addFriendBtn.style.display = isSelf ? "none" : "";
   setMsgline(profileActionMsg, "");
   if (tabModeration) tabModeration.style.display = canModerate ? "" : "none";
+  if (actionsBtn) {
+    actionsBtn.textContent = "🛠 Actions";
+    actionsBtn.style.display = (!isSelf && canModerate) ? "" : "none";
+    actionsBtn.disabled = !modalCanModerate;
+  }
+  if (profileEditBtn) {
+    profileEditBtn.textContent = "✏️ Edit";
+    profileEditBtn.style.display = isSelf ? "" : "none";
+  }
+  if (profileSettingsBtn) {
+    profileSettingsBtn.textContent = "⚙️ Settings";
+    profileSettingsBtn.style.display = isSelf ? "" : "none";
+  }
   const editActive = tabEdit?.classList.contains("active");
   if(!isSelf && editActive){
     setTab("info");
   }
   syncProfileEditUi();
+}
+
+function updateBanControlsVisibility(){
+  const isAdminPlus = roleRank(me?.role || "User") >= roleRank("Admin");
+  if (quickBanBtn) quickBanBtn.style.display = isAdminPlus ? "" : "none";
+  if (modBanBtn) modBanBtn.style.display = isAdminPlus ? "" : "none";
+  if (modUnbanBtn) modUnbanBtn.style.display = isAdminPlus ? "" : "none";
 }
 
 function applyProfileMenuVisibility(){
@@ -9156,6 +9302,14 @@ function wireSoundPrefs(){
     Sound.set.setBool(k.KEY_REACTION, prefSoundReaction.checked);
     syncSoundPrefsUI(false);
     queuePersistPrefs({ sound: Sound.exportPrefs() });
+  });
+}
+
+function wireComfortMode(){
+  if (!prefComfortMode || prefComfortMode._wired) return;
+  prefComfortMode._wired = true;
+  prefComfortMode.addEventListener("change", () => {
+    applyComfortMode(prefComfortMode.checked, { persistLocal: true, persistServer: true });
   });
 }
 
@@ -9908,7 +10062,8 @@ async function openMyProfile(){
   }
   if(!res.ok) return;
   const p = await res.json();
-modalTargetUsername = p.username;
+  updateRoleCache(p.username, p.role);
+  modalTargetUsername = p.username;
   applyProgressionPayload(p);
 
   modalTitle.textContent="My Profile";
@@ -9921,6 +10076,7 @@ modalTargetUsername = p.username;
   modalCanModerate = false;
   if (actionsBtn) actionsBtn.style.display = "none";
   closeMemberActionsOverlay();
+  updateBanControlsVisibility();
 
   editMood.value=p.mood||"";
   if (editUsername) editUsername.value = "";
@@ -10014,10 +10170,13 @@ async function openMemberProfile(username){
   myProfileEdit.style.display = isSelf ? "block" : "none";
 
   const iCanMod = (roleRank(me.role) >= roleRank("Moderator")) && (roleRank(me.role) > roleRank(p.role));
+  modalCanModerate = iCanMod;
   memberActionsOverlay.style.display = iCanMod ? "block" : "none";
+  updateBanControlsVisibility();
   quickReason.value=""; quickModMsg.textContent="";
   if(quickMuteMins) quickMuteMins.value = quickMuteMins.querySelector("option")?.value || "10";
   if(quickBanMins) quickBanMins.value = quickBanMins.querySelector("option")?.value || "0";
+  if(quickKickSeconds) quickKickSeconds.value = quickKickSeconds.querySelector("option[selected]")?.value || quickKickSeconds.value || "300";
 
   setModTarget(username);
   if(modReason) modReason.value = "";
@@ -10112,42 +10271,105 @@ function ensureTarget(target){
   return null;
 }
 
-quickKickBtn.addEventListener("click", ()=>{
+function formatDurationLabel({ seconds = 0, minutes = 0 } = {}){
+  let totalSeconds = Number(seconds) || 0;
+  if (!totalSeconds && minutes) totalSeconds = Number(minutes) * 60;
+  if (!totalSeconds || totalSeconds <= 0) return "5 minutes";
+  if (totalSeconds < 60) return `${totalSeconds} seconds`;
+  const totalMinutes = Math.round(totalSeconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes} minute${totalMinutes === 1 ? "" : "s"}`;
+  const hours = Math.round(totalMinutes / 60);
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
+}
+
+function emitModWithAck(event, payload, { timeoutMs = 3500 } = {}){
+  return new Promise((resolve) => {
+    if (!socket) return resolve({ ok: false, error: "Disconnected." });
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({ ok: false, error: "No response." });
+    }, timeoutMs);
+    socket.emit(event, payload, (resp) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (resp && typeof resp.ok === "boolean") return resolve(resp);
+      resolve({ ok: true });
+    });
+  });
+}
+
+function undoWithAck(event, payload){
+  return emitModWithAck(event, payload).then((resp) => {
+    if (!resp?.ok) throw new Error(resp?.error || "Undo failed.");
+  });
+}
+
+quickKickBtn.addEventListener("click", async ()=>{
   const reason = (quickReason.value || "").trim();
   const err=requireReason(reason);
   if(err){ quickModMsg.textContent=err; return; }
   if(!modalTargetUsername){ quickModMsg.textContent="No target selected."; return; }
   if(!confirmModeration("kick", modalTargetUsername)) return;
-  socket?.emit("mod kick", { username: modalTargetUsername });
+  const durationSeconds = Number(quickKickSeconds?.value || 300);
+  const resp = await emitModWithAck("mod kick", { username: modalTargetUsername, reason, durationSeconds });
+  if(!resp?.ok){ quickModMsg.textContent = resp?.error || "Kick failed."; return; }
   quickModMsg.textContent="Kick sent.";
+  showToast(`Kicked ${modalTargetUsername} for ${formatDurationLabel({ seconds: durationSeconds })}`, {
+    actionLabel: "Undo",
+    actionFn: () => undoWithAck("mod unkick", { username: modalTargetUsername }),
+    durationMs: 5200
+  });
 });
 if(quickUnkickBtn){
-  quickUnkickBtn.addEventListener("click", ()=>{
+  quickUnkickBtn.addEventListener("click", async ()=>{
     if(!modalTargetUsername){ quickModMsg.textContent="No target selected."; return; }
     if(!confirmModeration("unkick", modalTargetUsername)) return;
-    socket?.emit("mod unkick", { username: modalTargetUsername });
+    const resp = await emitModWithAck("mod unkick", { username: modalTargetUsername });
+    if(!resp?.ok){ quickModMsg.textContent = resp?.error || "Unkick failed."; return; }
     quickModMsg.textContent="Unkick sent.";
   });
 }
+if(quickUnmuteBtn){
+  quickUnmuteBtn.addEventListener("click", async ()=>{
+    const reason = (quickReason.value || "").trim();
+    const err=requireReason(reason);
+    if(err){ quickModMsg.textContent=err; return; }
+    if(!modalTargetUsername){ quickModMsg.textContent="No target selected."; return; }
+    if(!confirmModeration("unmute", modalTargetUsername)) return;
+    const resp = await emitModWithAck("mod unmute", { username: modalTargetUsername, reason });
+    if(!resp?.ok){ quickModMsg.textContent = resp?.error || "Unmute failed."; return; }
+    quickModMsg.textContent="Unmute sent.";
+  });
+}
 
-quickMuteBtn.addEventListener("click", ()=>{
+quickMuteBtn.addEventListener("click", async ()=>{
   const reason = (quickReason.value || "").trim();
   const err=requireReason(reason);
   if(err){ quickModMsg.textContent=err; return; }
   if(!modalTargetUsername){ quickModMsg.textContent="No target selected."; return; }
   if(!confirmModeration("mute", modalTargetUsername)) return;
   const mins=Number(quickMuteMins.value || 10);
-  socket?.emit("mod mute", { username: modalTargetUsername, minutes: mins, reason });
+  const resp = await emitModWithAck("mod mute", { username: modalTargetUsername, minutes: mins, reason });
+  if(!resp?.ok){ quickModMsg.textContent = resp?.error || "Mute failed."; return; }
   quickModMsg.textContent="Mute sent.";
+  showToast(`Muted ${modalTargetUsername}`, {
+    actionLabel: "Undo",
+    actionFn: () => undoWithAck("mod unmute", { username: modalTargetUsername, reason: "Undo mute" }),
+    durationMs: 5200
+  });
 });
-quickBanBtn.addEventListener("click", ()=>{
+quickBanBtn.addEventListener("click", async ()=>{
   const reason = (quickReason.value || "").trim();
   const err=requireReason(reason);
   if(err){ quickModMsg.textContent=err; return; }
   if(!modalTargetUsername){ quickModMsg.textContent="No target selected."; return; }
   if(!confirmModeration("ban", modalTargetUsername)) return;
   const mins=Number(quickBanMins.value || 0);
-  socket?.emit("mod ban", { username: modalTargetUsername, minutes: mins, reason });
+  const resp = await emitModWithAck("mod ban", { username: modalTargetUsername, minutes: mins, reason });
+  if(!resp?.ok){ quickModMsg.textContent = resp?.error || "Ban failed."; return; }
   quickModMsg.textContent="Ban sent.";
 });
 
@@ -10156,7 +10378,7 @@ modRefreshTargetsBtn?.addEventListener("click", ()=>{
   refreshModTargetOptions(lastUsers);
   modMsg.textContent = "Online list refreshed.";
 });
-modKickBtn.addEventListener("click", ()=>{
+modKickBtn.addEventListener("click", async ()=>{
   const reason = (modReason.value || "").trim();
   const err=requireReason(reason);
   if(err){ modMsg.textContent=err; return; }
@@ -10164,10 +10386,17 @@ modKickBtn.addEventListener("click", ()=>{
   const targetErr = ensureTarget(target);
   if(targetErr){ modMsg.textContent = targetErr; return; }
   if(!confirmModeration("kick", target)) return;
-  socket?.emit("mod kick", { username: target });
+  const durationSeconds = 300;
+  const resp = await emitModWithAck("mod kick", { username: target, reason, durationSeconds });
+  if(!resp?.ok){ modMsg.textContent = resp?.error || "Kick failed."; return; }
   modMsg.textContent="Kick sent.";
+  showToast(`Kicked ${target} for ${formatDurationLabel({ seconds: durationSeconds })}`, {
+    actionLabel: "Undo",
+    actionFn: () => undoWithAck("mod unkick", { username: target }),
+    durationMs: 5200
+  });
 });
-modMuteBtn.addEventListener("click", ()=>{
+modMuteBtn.addEventListener("click", async ()=>{
   const reason = (modReason.value || "").trim();
   const err=requireReason(reason);
   if(err){ modMsg.textContent=err; return; }
@@ -10176,10 +10405,16 @@ modMuteBtn.addEventListener("click", ()=>{
   if(targetErr){ modMsg.textContent = targetErr; return; }
   if(!confirmModeration("mute", target)) return;
   const mins=Number(modMuteMins.value || 10);
-  socket?.emit("mod mute", { username: target, minutes: mins, reason });
+  const resp = await emitModWithAck("mod mute", { username: target, minutes: mins, reason });
+  if(!resp?.ok){ modMsg.textContent = resp?.error || "Mute failed."; return; }
   modMsg.textContent="Mute sent.";
+  showToast(`Muted ${target}`, {
+    actionLabel: "Undo",
+    actionFn: () => undoWithAck("mod unmute", { username: target, reason: "Undo mute" }),
+    durationMs: 5200
+  });
 });
-modBanBtn.addEventListener("click", ()=>{
+modBanBtn.addEventListener("click", async ()=>{
   const reason = (modReason.value || "").trim();
   const err=requireReason(reason);
   if(err){ modMsg.textContent=err; return; }
@@ -10188,10 +10423,11 @@ modBanBtn.addEventListener("click", ()=>{
   if(targetErr){ modMsg.textContent = targetErr; return; }
   if(!confirmModeration("ban", target)) return;
   const mins=Number(modBanMins.value || 0);
-  socket?.emit("mod ban", { username: target, minutes: mins, reason });
+  const resp = await emitModWithAck("mod ban", { username: target, minutes: mins, reason });
+  if(!resp?.ok){ modMsg.textContent = resp?.error || "Ban failed."; return; }
   modMsg.textContent="Ban sent.";
 });
-modUnmuteBtn.addEventListener("click", ()=>{
+modUnmuteBtn.addEventListener("click", async ()=>{
   const reason = (modReason.value || "").trim();
   const err=requireReason(reason);
   if(err){ modMsg.textContent=err; return; }
@@ -10199,10 +10435,11 @@ modUnmuteBtn.addEventListener("click", ()=>{
   const targetErr = ensureTarget(target);
   if(targetErr){ modMsg.textContent = targetErr; return; }
   if(!confirmModeration("unmute", target)) return;
-  socket?.emit("mod unmute", { username: target, reason });
+  const resp = await emitModWithAck("mod unmute", { username: target, reason });
+  if(!resp?.ok){ modMsg.textContent = resp?.error || "Unmute failed."; return; }
   modMsg.textContent="Unmute sent.";
 });
-modUnbanBtn.addEventListener("click", ()=>{
+modUnbanBtn.addEventListener("click", async ()=>{
   const reason = (modReason.value || "").trim();
   const err=requireReason(reason);
   if(err){ modMsg.textContent=err; return; }
@@ -10210,7 +10447,8 @@ modUnbanBtn.addEventListener("click", ()=>{
   const targetErr = ensureTarget(target);
   if(targetErr){ modMsg.textContent = targetErr; return; }
   if(!confirmModeration("unban", target)) return;
-  socket?.emit("mod unban", { username: target, reason });
+  const resp = await emitModWithAck("mod unban", { username: target, reason });
+  if(!resp?.ok){ modMsg.textContent = resp?.error || "Unban failed."; return; }
   modMsg.textContent="Unban sent.";
 });
 modWarnBtn.addEventListener("click", ()=>{
@@ -10230,7 +10468,7 @@ modOpenProfileBtn.addEventListener("click", async ()=>{
   if(targetErr){ modMsg.textContent = targetErr; return; }
   await openMemberProfile(target);
 });
-modSetRoleBtn.addEventListener("click", ()=>{
+modSetRoleBtn.addEventListener("click", async ()=>{
   // Role changes can be done without a reason.
   const reason = (modReason.value || "").trim();
   const target = selectedModTarget();
@@ -10238,8 +10476,19 @@ modSetRoleBtn.addEventListener("click", ()=>{
   if(targetErr){ modMsg.textContent = targetErr; return; }
   if(!modSetRole.value){ modMsg.textContent="Choose a role first."; return; }
   if(!confirmModeration("role update", target)) return;
-  socket?.emit("mod set role", { username: target, role: modSetRole.value, reason });
+  const prevRole = cachedRoleForUser(target);
+  const nextRole = modSetRole.value;
+  const resp = await emitModWithAck("mod set role", { username: target, role: nextRole, reason });
+  if(!resp?.ok){ modMsg.textContent = resp?.error || "Role update failed."; return; }
+  updateRoleCache(target, nextRole);
   modMsg.textContent="Role change sent.";
+  if (prevRole && prevRole !== nextRole) {
+    showToast(`Role updated for ${target}`, {
+      actionLabel: "Undo",
+      actionFn: () => undoWithAck("mod set role", { username: target, role: prevRole, reason: "Undo role" }),
+      durationMs: 5200
+    });
+  }
 });
 
 // logs

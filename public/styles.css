@@ -1816,9 +1816,23 @@ textarea{ min-height:90px; resize:vertical; }
   font-weight:900;
   line-height:1;
   user-select:none;
+  transition: transform 0.08s ease, opacity 0.12s ease, filter 0.12s ease, background 0.12s ease;
 }
 .btn.secondary{ background:var(--btnSecondaryBg); color:var(--btnSecondaryText); }
 .btn.danger{ background:var(--danger); color:var(--btnPrimaryText); }
+.btn.btnPrimary{ background:var(--btnPrimaryBg); color:var(--btnPrimaryText); }
+.btn.btnSecondary{ background:var(--btnSecondaryBg); color:var(--btnSecondaryText); }
+.btn.btnDanger{ background:var(--danger); color:var(--btnPrimaryText); }
+.btn.btnTertiary{
+  background:transparent;
+  color:var(--text);
+  border:1px solid var(--border);
+}
+.btn.btnPrimary:hover,
+.btn.btnSecondary:hover,
+.btn.btnDanger:hover{ filter: brightness(1.05); }
+.btn.btnTertiary:hover{ background:color-mix(in srgb, var(--panel) 75%, transparent); }
+.btn.btnTertiary:active{ opacity: 0.8; }
 .btn:active{ transform: translateY(1px); }
 
 .msgline{ margin-top:10px; font-size:12px; color:var(--muted); min-height:16px; white-space:pre-wrap; }
@@ -6216,6 +6230,63 @@ main.chatMain {
 #viewInfo .modalGrid{ grid-template-columns: 1fr; }
 @media (min-width: 900px){
   #viewInfo .infoGrid{ grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Toasts */
+.toastStack{
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 10000;
+  max-width: min(360px, 92vw);
+  pointer-events: none;
+}
+.toast{
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radiusMd);
+  box-shadow: var(--shadowSm);
+}
+.toastMessage{ font-size: 13px; color: var(--text); }
+.toastAction{ font-size: 12px; }
+@media (max-width: 640px){
+  .toastStack{ left: 12px; right: 12px; }
+}
+
+/* Comfort mode (reduced glow + motion) */
+body.comfortMode .neonBrand{ text-shadow: none; }
+body.comfortMode .bubble,
+body.comfortMode .dmBubble{
+  --fx-glow: 0;
+  --fx-text-glow: 0;
+}
+body.comfortMode .reactPill{ padding: 3px 6px; font-size: 11px; }
+body.comfortMode #confettiLayer,
+body.comfortMode #confettiLayer .confetti{ display: none; }
+body.comfortMode .clReactBtn.pop,
+body.comfortMode .faqReactionBtn.pop{ animation: none; }
+body.comfortMode .presenceAura{ box-shadow: none !important; }
+body.comfortMode .profileSheetOverlay,
+body.comfortMode .msg-new .bubble,
+body.comfortMode .msg-new .dmBubble{
+  animation-duration: 0.12s;
+  transition-duration: 0.12s;
+}
+body.comfortMode[data-theme="Iris & Lola Neon"] .irisLolaHeart,
+body.comfortMode[data-theme="Iris & Lola Neon"].iris-lola-together::before,
+body.comfortMode[data-theme="Iris & Lola Neon"] .chat::before,
+body.comfortMode[data-theme="Iris & Lola Neon"] .chat::after{
+  animation: none !important;
+  filter: none !important;
 }
 
 

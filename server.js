@@ -6932,25 +6932,31 @@ socket.on("status change", ({ status }) => {
 
   // ---- Kick / Mute / Ban + Unmute/Unban/Warn + Set role
   
-socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300 } = {}) => {
+socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300 } = {}, ack) => {
+  const respond = (payload) => { if (typeof ack === "function") ack(payload); };
   const room = socket.currentRoom;
-  if (!room) return;
+  if (!room) return respond({ ok: false, error: "No active room." });
 
   const actorRole = socket.request.session.user.role;
-  if (!requireMinRole(actorRole, "Moderator")) return;
+  if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
 
   username = sanitizeUsername(username);
-  if (!username) return;
+  if (!username) return respond({ ok: false, error: "Invalid username." });
 
   db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
-    if (!target) return;
-    if (!canModerate(actorRole, target.role)) return;
+    if (!target) return respond({ ok: false, error: "User not found." });
+    if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
     // Persist restriction + log
     const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
     const why = String(reason || "").slice(0, 180) || "Kicked by staff";
-    const dur = Number(durationSeconds) || 300;
-    const { expiresAt } = await setKickEverywhere(target.username, actorName, why, dur);
+    const dur = clamp(Number(durationSeconds) || 300, 30, 7 * 24 * 60 * 60);
+    let expiresAt = null;
+    try {
+      ({ expiresAt } = await setKickEverywhere(target.username, actorName, why, dur));
+    } catch {
+      return respond({ ok: false, error: "Kick failed." });
+    }
 
     // Notify + disconnect
     const sid = socketIdByUserId.get(target.id);
@@ -6961,25 +6967,31 @@ socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300 } = 
 
     io.to(room).emit("system", `${username} was kicked.`);
     logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: target.username, room, details: `duration=${dur}s reason=${why}` });
+    respond({ ok: true, username: target.username, durationSeconds: dur });
   });
 });
 
-socket.on("mod unkick", async ({ username } = {}) => {
+socket.on("mod unkick", async ({ username } = {}, ack) => {
+  const respond = (payload) => { if (typeof ack === "function") ack(payload); };
   const room = socket.currentRoom;
-  if (!room) return;
+  if (!room) return respond({ ok: false, error: "No active room." });
 
   const actorRole = socket.request.session.user.role;
-  if (!requireMinRole(actorRole, "Moderator")) return;
+  if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
 
   username = sanitizeUsername(username);
-  if (!username) return;
+  if (!username) return respond({ ok: false, error: "Invalid username." });
 
   db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
-    if (!target) return;
-    if (!canModerate(actorRole, target.role)) return;
+    if (!target) return respond({ ok: false, error: "User not found." });
+    if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
     const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
-    await clearRestrictionEverywhere(target.username, actorName, "unkick");
+    try{
+      await clearRestrictionEverywhere(target.username, actorName, "unkick");
+    }catch{
+      return respond({ ok: false, error: "Unkick failed." });
+    }
 
     // Notify target (if online)
     const sid = socketIdByUserId.get(target.id);
@@ -6987,25 +6999,28 @@ socket.on("mod unkick", async ({ username } = {}) => {
       io.to(sid).emit("restriction:status", { type: "none", reason: "", expiresAt: null, now: Date.now() });
     }
 
+    emitOnlineUsers();
     io.to(room).emit("system message", { text: `${target.username} has been un-kicked by ${actorName}.` });
+    respond({ ok: true, username: target.username });
   });
 });
 
 
-  socket.on("mod mute", ({ username, minutes = 10, reason = "" }) => {
+  socket.on("mod mute", ({ username, minutes = 10, reason = "" } = {}, ack) => {
+    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
     const room = socket.currentRoom;
-    if (!room) return;
+    if (!room) return respond({ ok: false, error: "No active room." });
 
     const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Moderator")) return;
+    if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
 
     username = sanitizeUsername(username);
     const mins = clamp(minutes, 1, 1440);
     const expiresAt = Date.now() + mins * 60 * 1000;
 
     db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
-      if (!target) return;
-      if (!canModerate(actorRole, target.role)) return;
+      if (!target) return respond({ ok: false, error: "User not found." });
+      if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
       db.run(
         `INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id, created_at)
@@ -7021,25 +7036,27 @@ socket.on("mod unkick", async ({ username } = {}) => {
             room,
             details: `minutes=${mins} reason=${String(reason || "").slice(0, 180)}`,
           });
+          respond({ ok: true, username: target.username, minutes: mins });
         }
       );
     });
   });
 
-  socket.on("mod ban", ({ username, minutes = 0, reason = "" }) => {
+  socket.on("mod ban", ({ username, minutes = 0, reason = "" } = {}, ack) => {
+    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
     const room = socket.currentRoom;
-    if (!room) return;
+    if (!room) return respond({ ok: false, error: "No active room." });
 
     const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Admin")) return;
+    if (!requireMinRole(actorRole, "Admin")) return respond({ ok: false, error: "Not permitted." });
 
     username = sanitizeUsername(username);
     const mins = Number(minutes);
     const expiresAt = Number.isFinite(mins) && mins > 0 ? Date.now() + mins * 60 * 1000 : null;
 
     db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
-      if (!target) return;
-      if (!canModerate(actorRole, target.role)) return;
+      if (!target) return respond({ ok: false, error: "User not found." });
+      if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
       db.run(
         `INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id, created_at)
@@ -7068,21 +7085,23 @@ if (sid) {
             room,
             details: expiresAt ? `minutes=${mins}` : `permanent reason=${String(reason || "").slice(0, 180)}`,
           });
+          respond({ ok: true, username, minutes: mins });
         }
       );
     });
   });
 
-  socket.on("mod unmute", ({ username, reason = "" }) => {
+  socket.on("mod unmute", ({ username, reason = "" } = {}, ack) => {
+    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
     const room = socket.currentRoom;
-    if (!room) return;
+    if (!room) return respond({ ok: false, error: "No active room." });
     const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Moderator")) return;
+    if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
 
     username = sanitizeUsername(username);
     db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
-      if (!target) return;
-      if (!canModerate(actorRole, target.role)) return;
+      if (!target) return respond({ ok: false, error: "User not found." });
+      if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
       db.run("DELETE FROM punishments WHERE user_id=? AND type='mute'", [target.id], () => {
         io.to(room).emit("system", `${username} was unmuted.`);
@@ -7094,20 +7113,22 @@ if (sid) {
           room,
           details: String(reason || "").slice(0, 180),
         });
+        respond({ ok: true, username: target.username });
       });
     });
   });
 
-  socket.on("mod unban", ({ username, reason = "" }) => {
+  socket.on("mod unban", ({ username, reason = "" } = {}, ack) => {
+    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
     const room = socket.currentRoom;
-    if (!room) return;
+    if (!room) return respond({ ok: false, error: "No active room." });
     const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Admin")) return;
+    if (!requireMinRole(actorRole, "Admin")) return respond({ ok: false, error: "Not permitted." });
 
     username = sanitizeUsername(username);
     db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
-      if (!target) return;
-      if (!canModerate(actorRole, target.role)) return;
+      if (!target) return respond({ ok: false, error: "User not found." });
+      if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
       db.run("DELETE FROM punishments WHERE user_id=? AND type='ban'", [target.id], () => {
         io.to(room).emit("system", `${username} was unbanned.`);
@@ -7126,6 +7147,7 @@ if (sid) {
           room,
           details: String(reason || "").slice(0, 180),
         });
+        respond({ ok: true, username: target.username });
       });
     });
   });
@@ -7388,9 +7410,10 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
     });
   });
 
-  socket.on("mod set role", ({ username, role, reason = "" }) => {
+  socket.on("mod set role", ({ username, role, reason = "" } = {}, ack) => {
+    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
     const room = socket.currentRoom;
-    if (!room) return;
+    if (!room) return respond({ ok: false, error: "No active room." });
 
     const actor = socket.user;
     const actorRole = godmodeUsers.has(actor.id)
@@ -7398,34 +7421,34 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
       : (socket.user?.role || socket.request?.session?.user?.role || "User");
 
     // Admin+ can update roles via the moderation panel.
-    if (!requireMinRole(actorRole, "Admin")) return;
+    if (!requireMinRole(actorRole, "Admin")) return respond({ ok: false, error: "Not permitted." });
 
     const rawName = String(username || "").trim().slice(0, 64);
     const sanitized = sanitizeUsername(rawName);
     role = String(role || "").trim();
 
     const normalizedRole = ROLES.find((r) => r.toLowerCase() === role.toLowerCase());
-    if (!normalizedRole) return;
+    if (!normalizedRole) return respond({ ok: false, error: "Invalid role." });
     role = normalizedRole;
 
     const lookupName = rawName || sanitized;
-    if (!lookupName) return;
+    if (!lookupName) return respond({ ok: false, error: "Invalid username." });
 
     findUserByMention(lookupName, (_e, found) => {
       if (!found) {
         io.to(socket.id).emit("system", `User not found: ${lookupName}`);
-        return;
+        return respond({ ok: false, error: "User not found." });
       }
 
       const target = { id: found.id, username: found.username, oldRole: found.role };
 
       // Permission checks: you can only modify users below you.
-      if (actorRole !== "Owner" && !canModerate(actorRole, target.oldRole)) return;
+      if (actorRole !== "Owner" && !canModerate(actorRole, target.oldRole)) return respond({ ok: false, error: "Not permitted." });
 
       // Prevent non-owners from assigning roles at/above themselves (or Admin+).
       if (actorRole !== "Owner") {
-        if (roleRank(role) >= roleRank(actorRole)) return;
-        if (roleRank(role) >= roleRank("Admin")) return;
+        if (roleRank(role) >= roleRank(actorRole)) return respond({ ok: false, error: "Not permitted." });
+        if (roleRank(role) >= roleRank("Admin")) return respond({ ok: false, error: "Not permitted." });
       }
 
       setRoleEverywhere(target.id, target.username, role).then(() => {
@@ -7450,8 +7473,10 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
 
         io.to(room).emit("system", `${target.username} role set to ${role}.${reason ? "" : ""}`);
         emitUserList(room);
+        respond({ ok: true, username: target.username, role });
       }).catch((e) => {
         console.error("[mod set role]", e);
+        respond({ ok: false, error: "Role update failed." });
       });
     });
   });
