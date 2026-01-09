@@ -3007,6 +3007,7 @@ body:not(.polish-pack) .tonePicker{
   z-index: 400;
 }
 .modalCard{
+  position: relative;
   display: flex;
   flex-direction: column;
   max-height: calc(var(--vvhPx) - 20px);
@@ -6204,3 +6205,17 @@ main.chatMain {
   display:flex;
   flex-direction:column;
 }
+
+
+/* Profile Info tab: no inline moderator tools; use full width */
+#viewInfo .modalGrid{ grid-template-columns: 1fr; }
+@media (min-width: 900px){
+  #viewInfo .infoGrid{ grid-template-columns: repeat(3, 1fr); }
+}
+
+
+/* Inline staff actions overlay inside profile modal */
+.inlineModalOverlay{ position:absolute; inset:0; background: color-mix(in srgb, var(--bg) 55%, transparent); display:none; align-items:center; justify-content:center; padding:14px; z-index: 5; }
+.inlineModalOverlay.show{ display:flex; }
+.inlineModalCard{ width: min(820px, calc(100% - 10px)); max-height: calc(100% - 10px); overflow:auto; -webkit-overflow-scrolling: touch; }
+.inlineModalHeader{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
