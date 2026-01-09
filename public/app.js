@@ -646,7 +646,14 @@ const CHAT_FX_DEFAULTS = Object.freeze({
   bubbleColor: "",
   textColor: "",
   nameColor: "",
-  autoContrast: false
+  autoContrast: false,
+  textBold: false,
+  textItalic: false,
+  textGlow: "off",
+  textGradientEnabled: false,
+  textGradientA: "",
+  textGradientB: "",
+  textGradientAngle: 135
 });
 const CHAT_FX_FONT_STACKS = Object.freeze({
   system: "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
@@ -687,7 +694,54 @@ const CHAT_FX_FONT_STACKS = Object.freeze({
   pressstart: "\"Press Start 2P\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
   cinzel: "\"Cinzel\", Georgia, \"Times New Roman\", Times, serif",
   gothicA1: "\"Gothic A1\", system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
-  metalmania: "\"Metal Mania\", system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif"
+  metalmania: "\"Metal Mania\", system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+  orbitron: "\"Orbitron\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  oxanium: "\"Oxanium\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  audiowide: "\"Audiowide\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  rajdhani: "\"Rajdhani\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  chakrapetch: "\"Chakra Petch\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  sharetechmono: "\"Share Tech Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+  electrolize: "\"Electrolize\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  quantico: "\"Quantico\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  turretroad: "\"Turret Road\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  syncopate: "\"Syncopate\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  bungee: "\"Bungee\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  bungeeinline: "\"Bungee Inline\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  bungeeshade: "\"Bungee Shade\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  monoton: "\"Monoton\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  righteous: "\"Righteous\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  luckiestguy: "\"Luckiest Guy\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  lilitaone: "\"Lilita One\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  blackopsone: "\"Black Ops One\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  rubikglitch: "\"Rubik Glitch\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  fascinateinline: "\"Fascinate Inline\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  vt323: "\"VT323\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+  silkscreen: "\"Silkscreen\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+  pixelifysans: "\"Pixelify Sans\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+  tiny5: "\"Tiny5\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+  fredoka: "\"Fredoka\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  baloo2: "\"Baloo 2\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  bubblegumsans: "\"Bubblegum Sans\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  chewy: "\"Chewy\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  sniglet: "\"Sniglet\", \"Segoe UI\", system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-serif",
+  cormorantgaramond: "\"Cormorant Garamond\", Georgia, \"Times New Roman\", Times, serif",
+  ebgaramond: "\"EB Garamond\", Georgia, \"Times New Roman\", Times, serif",
+  bodonimoda: "\"Bodoni Moda\", Georgia, \"Times New Roman\", Times, serif",
+  prata: "\"Prata\", Georgia, \"Times New Roman\", Times, serif",
+  marcellus: "\"Marcellus\", Georgia, \"Times New Roman\", Times, serif",
+  kaushanscript: "\"Kaushan Script\", \"Segoe UI\", system-ui, -apple-system, cursive",
+  greatvibes: "\"Great Vibes\", \"Segoe UI\", system-ui, -apple-system, cursive",
+  allura: "\"Allura\", \"Segoe UI\", system-ui, -apple-system, cursive",
+  sacramento: "\"Sacramento\", \"Segoe UI\", system-ui, -apple-system, cursive",
+  satisfy: "\"Satisfy\", \"Segoe UI\", system-ui, -apple-system, cursive",
+  yellowtail: "\"Yellowtail\", \"Segoe UI\", system-ui, -apple-system, cursive",
+  marckscript: "\"Marck Script\", \"Segoe UI\", system-ui, -apple-system, cursive",
+  unifrakturcook: "\"UnifrakturCook\", \"Times New Roman\", Times, serif",
+  unifrakturmaguntia: "\"UnifrakturMaguntia\", \"Times New Roman\", Times, serif",
+  pirataone: "\"Pirata One\", \"Times New Roman\", Times, serif",
+  newrocker: "\"New Rocker\", \"Times New Roman\", Times, serif",
+  eater: "\"Eater\", \"Times New Roman\", Times, serif",
+  nosifer: "\"Nosifer\", \"Times New Roman\", Times, serif"
 });
 
 // A large, categorized font catalog. We lazy-load Google Fonts on demand so we can
@@ -766,6 +820,88 @@ const CHAT_FX_FONT_CATALOG = Object.freeze([
     items: [
       { key: "metalmania", label: "Metal Mania" }
     ]
+  },
+  {
+    label: "Cyber / Sci-Fi",
+    items: [
+      { key: "orbitron", label: "Orbitron" },
+      { key: "oxanium", label: "Oxanium" },
+      { key: "audiowide", label: "Audiowide" },
+      { key: "rajdhani", label: "Rajdhani" },
+      { key: "chakrapetch", label: "Chakra Petch" },
+      { key: "sharetechmono", label: "Share Tech Mono" },
+      { key: "electrolize", label: "Electrolize" },
+      { key: "quantico", label: "Quantico" },
+      { key: "turretroad", label: "Turret Road" },
+      { key: "syncopate", label: "Syncopate" }
+    ]
+  },
+  {
+    label: "Neon / Display",
+    items: [
+      { key: "bungee", label: "Bungee" },
+      { key: "bungeeinline", label: "Bungee Inline" },
+      { key: "bungeeshade", label: "Bungee Shade" },
+      { key: "monoton", label: "Monoton" },
+      { key: "righteous", label: "Righteous" },
+      { key: "luckiestguy", label: "Luckiest Guy" },
+      { key: "lilitaone", label: "Lilita One" },
+      { key: "blackopsone", label: "Black Ops One" },
+      { key: "rubikglitch", label: "Rubik Glitch" },
+      { key: "fascinateinline", label: "Fascinate Inline" }
+    ]
+  },
+  {
+    label: "Gothic / Metal",
+    items: [
+      { key: "unifrakturcook", label: "UnifrakturCook" },
+      { key: "unifrakturmaguntia", label: "UnifrakturMaguntia" },
+      { key: "pirataone", label: "Pirata One" },
+      { key: "newrocker", label: "New Rocker" },
+      { key: "eater", label: "Eater" },
+      { key: "nosifer", label: "Nosifer" }
+    ]
+  },
+  {
+    label: "Retro / Arcade",
+    items: [
+      { key: "vt323", label: "VT323" },
+      { key: "silkscreen", label: "Silkscreen" },
+      { key: "pixelifysans", label: "Pixelify Sans" },
+      { key: "tiny5", label: "Tiny5" }
+    ]
+  },
+  {
+    label: "Cute / Bubble",
+    items: [
+      { key: "fredoka", label: "Fredoka" },
+      { key: "baloo2", label: "Baloo 2" },
+      { key: "bubblegumsans", label: "Bubblegum Sans" },
+      { key: "chewy", label: "Chewy" },
+      { key: "sniglet", label: "Sniglet" }
+    ]
+  },
+  {
+    label: "Elegant / Luxury",
+    items: [
+      { key: "cormorantgaramond", label: "Cormorant Garamond" },
+      { key: "ebgaramond", label: "EB Garamond" },
+      { key: "bodonimoda", label: "Bodoni Moda" },
+      { key: "prata", label: "Prata" },
+      { key: "marcellus", label: "Marcellus" }
+    ]
+  },
+  {
+    label: "Handwriting (Stylish)",
+    items: [
+      { key: "kaushanscript", label: "Kaushan Script" },
+      { key: "greatvibes", label: "Great Vibes" },
+      { key: "allura", label: "Allura" },
+      { key: "sacramento", label: "Sacramento" },
+      { key: "satisfy", label: "Satisfy" },
+      { key: "yellowtail", label: "Yellowtail" },
+      { key: "marckscript", label: "Marck Script" }
+    ]
   }
 ]);
 
@@ -807,7 +943,54 @@ const CHAT_FX_GOOGLE_FAMILIES = Object.freeze({
   pressstart: "Press+Start+2P",
   cinzel: "Cinzel:wght@400;600;700",
   gothicA1: "Gothic+A1:wght@400;600;700",
-  metalmania: "Metal+Mania"
+  metalmania: "Metal+Mania",
+  orbitron: "Orbitron:wght@400;500;600;700",
+  oxanium: "Oxanium:wght@400;500;600;700",
+  audiowide: "Audiowide",
+  rajdhani: "Rajdhani:wght@400;500;600;700",
+  chakrapetch: "Chakra+Petch:wght@400;500;600;700",
+  sharetechmono: "Share+Tech+Mono",
+  electrolize: "Electrolize",
+  quantico: "Quantico:wght@400;700",
+  turretroad: "Turret+Road:wght@400;500;700",
+  syncopate: "Syncopate:wght@400;700",
+  bungee: "Bungee",
+  bungeeinline: "Bungee+Inline",
+  bungeeshade: "Bungee+Shade",
+  monoton: "Monoton",
+  righteous: "Righteous",
+  luckiestguy: "Luckiest+Guy",
+  lilitaone: "Lilita+One",
+  blackopsone: "Black+Ops+One",
+  rubikglitch: "Rubik+Glitch",
+  fascinateinline: "Fascinate+Inline",
+  vt323: "VT323",
+  silkscreen: "Silkscreen:wght@400;700",
+  pixelifysans: "Pixelify+Sans:wght@400;500;600;700",
+  tiny5: "Tiny5",
+  fredoka: "Fredoka:wght@400;500;600;700",
+  baloo2: "Baloo+2:wght@400;500;600;700",
+  bubblegumsans: "Bubblegum+Sans",
+  chewy: "Chewy",
+  sniglet: "Sniglet:wght@400;800",
+  cormorantgaramond: "Cormorant+Garamond:wght@400;500;600;700",
+  ebgaramond: "EB+Garamond:wght@400;500;600;700",
+  bodonimoda: "Bodoni+Moda:wght@400;500;600;700",
+  prata: "Prata",
+  marcellus: "Marcellus",
+  kaushanscript: "Kaushan+Script",
+  greatvibes: "Great+Vibes",
+  allura: "Allura",
+  sacramento: "Sacramento",
+  satisfy: "Satisfy",
+  yellowtail: "Yellowtail",
+  marckscript: "Marck+Script",
+  unifrakturcook: "UnifrakturCook:wght@700",
+  unifrakturmaguntia: "UnifrakturMaguntia",
+  pirataone: "Pirata+One",
+  newrocker: "New+Rocker",
+  eater: "Eater",
+  nosifer: "Nosifer"
 });
 
 const _loadedGoogleFonts = new Set();
@@ -946,6 +1129,18 @@ function normalizeChatFxGlow(input){
   return CHAT_FX_DEFAULTS.glow;
 }
 
+function normalizeChatFxTextGlow(input){
+  const raw = String(input || "").trim().toLowerCase();
+  if (raw === "soft" || raw === "neon" || raw === "strong" || raw === "off") return raw;
+  return CHAT_FX_DEFAULTS.textGlow;
+}
+
+function normalizeChatFxBool(input, fallback = false){
+  if (input === true) return true;
+  if (input === false) return false;
+  return fallback;
+}
+
 function normalizeChatFxNumber(input, fallback, min, max){
   const n = Number(input);
   if (!Number.isFinite(n)) return fallback;
@@ -980,6 +1175,13 @@ function normalizeChatFxNameColor(input){
   return "";
 }
 
+function normalizeChatFxGradientColor(input){
+  if (!input) return "";
+  const raw = String(input).trim();
+  if (/^#[0-9a-f]{6}$/i.test(raw)) return raw;
+  return "";
+}
+
 function normalizeChatFx(input){
   const fx = (input && typeof input === "object") ? input : {};
   const enabled = fx.enabled !== false;
@@ -1003,7 +1205,14 @@ function normalizeChatFx(input){
     bubbleColor: normalizeChatFxBubbleColor(bubbleColorRaw),
     textColor: normalizeChatFxTextColor(fx.textColor),
     nameColor: normalizeChatFxNameColor(nameColorRaw),
-    autoContrast: fx.autoContrast === true
+    autoContrast: fx.autoContrast === true,
+    textBold: normalizeChatFxBool(fx.textBold, CHAT_FX_DEFAULTS.textBold),
+    textItalic: normalizeChatFxBool(fx.textItalic, CHAT_FX_DEFAULTS.textItalic),
+    textGlow: normalizeChatFxTextGlow(fx.textGlow),
+    textGradientEnabled: normalizeChatFxBool(fx.textGradientEnabled, CHAT_FX_DEFAULTS.textGradientEnabled),
+    textGradientA: normalizeChatFxGradientColor(fx.textGradientA),
+    textGradientB: normalizeChatFxGradientColor(fx.textGradientB),
+    textGradientAngle: normalizeChatFxNumber(fx.textGradientAngle, CHAT_FX_DEFAULTS.textGradientAngle, 0, 360)
   };
 }
 
@@ -1115,6 +1324,8 @@ function applyChatFxToBubble(bubble, fx, options = {}){
   const effective = resolved.enabled ? resolved : CHAT_FX_DEFAULTS;
   const glowMap = { off: 0, soft: 0.4, neon: 0.8, strong: 1.15 };
   const glowValue = glowMap[effective.glow] ?? 0;
+  const textGlowMap = { off: 0, soft: 0.35, neon: 0.8, strong: 1.2 };
+  const textGlowValue = textGlowMap[effective.textGlow] ?? 0;
 
   // Lazy-load any selected Google fonts.
   ensureGoogleFontLoaded(effective.font);
@@ -1142,6 +1353,16 @@ function applyChatFxToBubble(bubble, fx, options = {}){
   // If the user has set a bubble background colour, prefer that for auto-contrast.
   const autoColor = autoContrast ? (bubbleBg ? pickAutoContrastFromHex(bubbleBg) : pickAutoContrastTextColor(bubble)) : "";
   bubble.style.setProperty("--fx-text", textOverride || autoColor || "");
+  bubble.style.setProperty("--fx-text-weight", effective.textBold ? "700" : "400");
+  bubble.style.setProperty("--fx-text-style", effective.textItalic ? "italic" : "normal");
+  bubble.style.setProperty("--fx-text-glow", String(textGlowValue));
+  const gradientEnabled = !!effective.textGradientEnabled;
+  const gradientA = effective.textGradientA || "var(--fx-accent, var(--accent))";
+  const gradientB = effective.textGradientB || "#00e5ff";
+  bubble.style.setProperty("--fx-text-grad-a", gradientA);
+  bubble.style.setProperty("--fx-text-grad-b", gradientB);
+  bubble.style.setProperty("--fx-text-grad-angle", `${effective.textGradientAngle}deg`);
+  bubble.classList.toggle("fx-textGradient", gradientEnabled);
   bubble.classList.toggle("fx-autoContrast", autoContrast);
   bubble.style.setProperty("--fx-radius", `${effective.radius}px`);
   bubble.style.setProperty("--fx-radius-grouped", `${radiusGrouped}px`);
@@ -7858,7 +8079,18 @@ function setChatFxControlsDisabled(disabled){
     chatFxPrefEls.glass,
     chatFxPrefEls.blur,
     chatFxPrefEls.accent,
-    chatFxPrefEls.nameColorPick
+    chatFxPrefEls.nameColorPick,
+    chatFxPrefEls.textBold,
+    chatFxPrefEls.textItalic,
+    chatFxPrefEls.textGlow,
+    chatFxPrefEls.textGradientEnabled,
+    chatFxPrefEls.textGradientA,
+    chatFxPrefEls.textGradientAPick,
+    chatFxPrefEls.textGradientAClear,
+    chatFxPrefEls.textGradientB,
+    chatFxPrefEls.textGradientBPick,
+    chatFxPrefEls.textGradientBClear,
+    chatFxPrefEls.textGradientAngle
   ];
   controls.forEach((el) => {
     if (el) el.disabled = disabled;
@@ -7898,11 +8130,19 @@ function syncChatFxControls(fx){
   if (chatFxPrefEls.textColor) chatFxPrefEls.textColor.value = resolved.textColor || "";
   if (chatFxPrefEls.nameColor) chatFxPrefEls.nameColor.value = resolved.nameColor || "";
   if (chatFxPrefEls.autoContrast) chatFxPrefEls.autoContrast.checked = !!resolved.autoContrast;
+  if (chatFxPrefEls.textBold) chatFxPrefEls.textBold.checked = !!resolved.textBold;
+  if (chatFxPrefEls.textItalic) chatFxPrefEls.textItalic.checked = !!resolved.textItalic;
+  if (chatFxPrefEls.textGlow) chatFxPrefEls.textGlow.value = resolved.textGlow;
+  if (chatFxPrefEls.textGradientEnabled) chatFxPrefEls.textGradientEnabled.checked = !!resolved.textGradientEnabled;
+  if (chatFxPrefEls.textGradientA) chatFxPrefEls.textGradientA.value = resolved.textGradientA || "";
+  if (chatFxPrefEls.textGradientB) chatFxPrefEls.textGradientB.value = resolved.textGradientB || "";
+  if (chatFxPrefEls.textGradientAngle) chatFxPrefEls.textGradientAngle.value = String(resolved.textGradientAngle);
   setChatFxDensityButtons(resolved.density);
   updateChatFxSliderValue(chatFxPrefEls.radiusValue, resolved.radius);
   updateChatFxSliderValue(chatFxPrefEls.borderValue, resolved.border);
   updateChatFxSliderValue(chatFxPrefEls.glassValue, resolved.glass, 2);
   updateChatFxSliderValue(chatFxPrefEls.blurValue, resolved.blur);
+  updateChatFxSliderValue(chatFxPrefEls.textGradientAngleValue, resolved.textGradientAngle);
   setChatFxControlsDisabled(!resolved.enabled);
 
   // Keep color pickers in sync (they can't be blank, so use fallbacks when empty/invalid)
@@ -7918,6 +8158,14 @@ function syncChatFxControls(fx){
     if (chatFxPrefEls.nameColorPick) {
       const v = String(resolved.nameColor || "").trim();
       chatFxPrefEls.nameColorPick.value = /^#[0-9a-f]{6}$/i.test(v) ? v : "#ffffff";
+    }
+    if (chatFxPrefEls.textGradientAPick) {
+      const v = String(resolved.textGradientA || "").trim();
+      chatFxPrefEls.textGradientAPick.value = /^#[0-9a-f]{6}$/i.test(v) ? v : "#7c4dff";
+    }
+    if (chatFxPrefEls.textGradientBPick) {
+      const v = String(resolved.textGradientB || "").trim();
+      chatFxPrefEls.textGradientBPick.value = /^#[0-9a-f]{6}$/i.test(v) ? v : "#00e5ff";
     }
   } catch {}
 }
@@ -7938,7 +8186,14 @@ function readChatFxFormRaw(){
     bubbleColor: (chatFxPrefEls.bubbleColor?.value || "").trim(),
     textColor: (chatFxPrefEls.textColor?.value || "").trim(),
     nameColor: (chatFxPrefEls.nameColor?.value || "").trim(),
-    autoContrast: !!chatFxPrefEls.autoContrast?.checked
+    autoContrast: !!chatFxPrefEls.autoContrast?.checked,
+    textBold: !!chatFxPrefEls.textBold?.checked,
+    textItalic: !!chatFxPrefEls.textItalic?.checked,
+    textGlow: chatFxPrefEls.textGlow?.value || CHAT_FX_DEFAULTS.textGlow,
+    textGradientEnabled: !!chatFxPrefEls.textGradientEnabled?.checked,
+    textGradientA: (chatFxPrefEls.textGradientA?.value || "").trim(),
+    textGradientB: (chatFxPrefEls.textGradientB?.value || "").trim(),
+    textGradientAngle: Number(chatFxPrefEls.textGradientAngle?.value)
   };
 }
 
@@ -7956,6 +8211,7 @@ function handleChatFxInput(){
   updateChatFxSliderValue(chatFxPrefEls.borderValue, normalized.border);
   updateChatFxSliderValue(chatFxPrefEls.glassValue, normalized.glass, 2);
   updateChatFxSliderValue(chatFxPrefEls.blurValue, normalized.blur);
+  updateChatFxSliderValue(chatFxPrefEls.textGradientAngleValue, normalized.textGradientAngle);
   updateChatFxPreview(normalized);
   setChatFxControlsDisabled(!normalized.enabled);
 }
@@ -8109,6 +8365,53 @@ function wireChatFxPrefs(){
         </div>
         <div class="small">Leave blank to use the theme's default message text.</div>
       </div>
+      <div class="field">
+        <label>Message text style</label>
+        <div class="chatFxColorRow" style="justify-content:flex-start;">
+          <label style="display:flex; align-items:center; gap:6px;">
+            <input id="chatFxTextBold" type="checkbox"> Bold
+          </label>
+          <label style="display:flex; align-items:center; gap:6px;">
+            <input id="chatFxTextItalic" type="checkbox"> Italic
+          </label>
+        </div>
+      </div>
+      <div class="field">
+        <label>Text glow</label>
+        <select id="chatFxTextGlow">
+          <option value="off">Off</option>
+          <option value="soft">Soft</option>
+          <option value="neon">Neon</option>
+          <option value="strong">Strong</option>
+        </select>
+      </div>
+      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <label style="margin:0;">Text gradient</label>
+        <input id="chatFxTextGradientEnabled" type="checkbox">
+      </div>
+      <div class="field">
+        <label>Gradient color A</label>
+        <div class="chatFxColorRow">
+          <input id="chatFxTextGradientAPick" type="color" value="#7c4dff" aria-label="Pick gradient color A">
+          <input id="chatFxTextGradientA" type="text" placeholder="#RRGGBB">
+          <button class="pillBtn" id="chatFxTextGradientAClear" type="button">Clear</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Gradient color B</label>
+        <div class="chatFxColorRow">
+          <input id="chatFxTextGradientBPick" type="color" value="#00e5ff" aria-label="Pick gradient color B">
+          <input id="chatFxTextGradientB" type="text" placeholder="#RRGGBB">
+          <button class="pillBtn" id="chatFxTextGradientBClear" type="button">Clear</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Gradient angle</label>
+        <div class="chatFxSliderRow">
+          <input id="chatFxTextGradientAngle" type="range" min="0" max="360" step="1">
+          <span class="chatFxSliderValue" id="chatFxTextGradientAngleValue">135</span>
+        </div>
+      </div>
       <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
         <label style="margin:0;">Auto-contrast text</label>
         <input id="chatFxAutoContrast" type="checkbox">
@@ -8147,6 +8450,18 @@ function wireChatFxPrefs(){
     nameColorPick: q("#chatFxNameColorPick"),
     nameColorClear: q("#chatFxNameColorClear"),
     autoContrast: q("#chatFxAutoContrast"),
+    textBold: q("#chatFxTextBold"),
+    textItalic: q("#chatFxTextItalic"),
+    textGlow: q("#chatFxTextGlow"),
+    textGradientEnabled: q("#chatFxTextGradientEnabled"),
+    textGradientA: q("#chatFxTextGradientA"),
+    textGradientAPick: q("#chatFxTextGradientAPick"),
+    textGradientAClear: q("#chatFxTextGradientAClear"),
+    textGradientB: q("#chatFxTextGradientB"),
+    textGradientBPick: q("#chatFxTextGradientBPick"),
+    textGradientBClear: q("#chatFxTextGradientBClear"),
+    textGradientAngle: q("#chatFxTextGradientAngle"),
+    textGradientAngleValue: q("#chatFxTextGradientAngleValue"),
     saveBtn: q("#chatFxSaveBtn"),
     status: q("#chatFxStatus"),
     densityRow: q("#chatFxDensity")
@@ -8167,6 +8482,13 @@ function wireChatFxPrefs(){
   chatFxPrefEls.bubbleColor?.addEventListener("input", handleChatFxInput);
   chatFxPrefEls.textColor?.addEventListener("input", handleChatFxInput);
   chatFxPrefEls.autoContrast?.addEventListener("change", handleChatFxInput);
+  chatFxPrefEls.textBold?.addEventListener("change", handleChatFxInput);
+  chatFxPrefEls.textItalic?.addEventListener("change", handleChatFxInput);
+  chatFxPrefEls.textGlow?.addEventListener("change", handleChatFxInput);
+  chatFxPrefEls.textGradientEnabled?.addEventListener("change", handleChatFxInput);
+  chatFxPrefEls.textGradientA?.addEventListener("input", handleChatFxInput);
+  chatFxPrefEls.textGradientB?.addEventListener("input", handleChatFxInput);
+  chatFxPrefEls.textGradientAngle?.addEventListener("input", handleChatFxInput);
   chatFxPrefEls.accent?.addEventListener("blur", () => {
     const normalized = normalizeChatFx(readChatFxFormRaw());
     if (chatFxPrefEls?.accent) chatFxPrefEls.accent.value = normalized.accent || "";
@@ -8185,6 +8507,24 @@ function wireChatFxPrefs(){
   chatFxPrefEls.textColor?.addEventListener("blur", () => {
     const normalized = normalizeChatFx(readChatFxFormRaw());
     if (chatFxPrefEls?.textColor) chatFxPrefEls.textColor.value = normalized.textColor || "";
+    handleChatFxInput();
+  });
+  chatFxPrefEls.textGradientA?.addEventListener("blur", () => {
+    const normalized = normalizeChatFx(readChatFxFormRaw());
+    if (chatFxPrefEls?.textGradientA) chatFxPrefEls.textGradientA.value = normalized.textGradientA || "";
+    if (chatFxPrefEls?.textGradientAPick) {
+      const v = String(normalized.textGradientA || "").trim();
+      if (/^#[0-9a-f]{6}$/i.test(v)) chatFxPrefEls.textGradientAPick.value = v;
+    }
+    handleChatFxInput();
+  });
+  chatFxPrefEls.textGradientB?.addEventListener("blur", () => {
+    const normalized = normalizeChatFx(readChatFxFormRaw());
+    if (chatFxPrefEls?.textGradientB) chatFxPrefEls.textGradientB.value = normalized.textGradientB || "";
+    if (chatFxPrefEls?.textGradientBPick) {
+      const v = String(normalized.textGradientB || "").trim();
+      if (/^#[0-9a-f]{6}$/i.test(v)) chatFxPrefEls.textGradientBPick.value = v;
+    }
     handleChatFxInput();
   });
 
@@ -8231,6 +8571,38 @@ function wireChatFxPrefs(){
   chatFxPrefEls.textColorClear?.addEventListener("click", () => {
     if (chatFxPrefEls?.textColor) chatFxPrefEls.textColor.value = "";
     syncPickerFromText(chatFxPrefEls?.textColor, chatFxPrefEls?.textColorPick, "#ffffff");
+    handleChatFxInput();
+  });
+
+  // Text gradient color pickers
+  if (chatFxPrefEls.textGradientAPick && chatFxPrefEls.textGradientA){
+    syncPickerFromText(chatFxPrefEls.textGradientA, chatFxPrefEls.textGradientAPick, "#7c4dff");
+    chatFxPrefEls.textGradientAPick.addEventListener("input", () => {
+      syncTextFromPicker(chatFxPrefEls.textGradientA, chatFxPrefEls.textGradientAPick);
+      handleChatFxInput();
+    });
+    chatFxPrefEls.textGradientA.addEventListener("input", () => {
+      syncPickerFromText(chatFxPrefEls.textGradientA, chatFxPrefEls.textGradientAPick, "#7c4dff");
+    });
+  }
+  chatFxPrefEls.textGradientAClear?.addEventListener("click", () => {
+    if (chatFxPrefEls?.textGradientA) chatFxPrefEls.textGradientA.value = "";
+    syncPickerFromText(chatFxPrefEls?.textGradientA, chatFxPrefEls?.textGradientAPick, "#7c4dff");
+    handleChatFxInput();
+  });
+  if (chatFxPrefEls.textGradientBPick && chatFxPrefEls.textGradientB){
+    syncPickerFromText(chatFxPrefEls.textGradientB, chatFxPrefEls.textGradientBPick, "#00e5ff");
+    chatFxPrefEls.textGradientBPick.addEventListener("input", () => {
+      syncTextFromPicker(chatFxPrefEls.textGradientB, chatFxPrefEls.textGradientBPick);
+      handleChatFxInput();
+    });
+    chatFxPrefEls.textGradientB.addEventListener("input", () => {
+      syncPickerFromText(chatFxPrefEls.textGradientB, chatFxPrefEls.textGradientBPick, "#00e5ff");
+    });
+  }
+  chatFxPrefEls.textGradientBClear?.addEventListener("click", () => {
+    if (chatFxPrefEls?.textGradientB) chatFxPrefEls.textGradientB.value = "";
+    syncPickerFromText(chatFxPrefEls?.textGradientB, chatFxPrefEls?.textGradientBPick, "#00e5ff");
     handleChatFxInput();
   });
 
