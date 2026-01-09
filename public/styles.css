@@ -2672,26 +2672,95 @@ body.dice-room .sys .diceFace{
   outline:none;
 }
 .tonePicker{
+  position:relative;
   display:flex;
   align-items:center;
-  gap:6px;
-  padding:4px 6px;
-  border-radius:999px;
+  flex-shrink:0;
+}
+.toneMenuBtn{
   border:1px solid var(--border);
   background:color-mix(in srgb, var(--panel) 85%, transparent);
-}
-.toneBtn{
-  border:none;
-  background:transparent;
+  color:var(--text);
   cursor:pointer;
-  font-size:16px;
-  line-height:1;
-  padding:2px 4px;
-  border-radius:8px;
+  font-size:13px;
+  font-weight:800;
+  line-height:1.1;
+  padding:8px 12px;
+  border-radius:999px;
+  min-height:38px;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
 }
-.toneBtn.active{
-  background:color-mix(in srgb, var(--accent) 30%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+.tonePicker.is-open .toneMenuBtn{
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.toneMenuPanel{
+  position:absolute;
+  right:0;
+  bottom:calc(100% + 8px);
+  min-width:220px;
+  max-width:min(280px, 90vw);
+  padding:8px;
+  border-radius:14px;
+  border:1px solid var(--border);
+  background:var(--panel);
+  box-shadow:var(--shadowLg);
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  opacity:0;
+  transform:translateY(6px);
+  pointer-events:none;
+  z-index:180;
+  transition:opacity .15s ease, transform .15s ease;
+}
+.tonePicker.is-open .toneMenuPanel{
+  opacity:1;
+  transform:translateY(0);
+  pointer-events:auto;
+}
+.toneMenuItem{
+  border:1px solid transparent;
+  background:transparent;
+  color:var(--text);
+  cursor:pointer;
+  border-radius:12px;
+  padding:8px 10px;
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  text-align:left;
+  font-size:13px;
+}
+.toneMenuItem:hover{
+  background:color-mix(in srgb, var(--panel2) 90%, transparent);
+  border-color:var(--border);
+}
+.toneMenuItem.is-active{
+  background:color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color:color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.toneMenuEmoji{
+  font-size:16px;
+  line-height:1.2;
+}
+.toneMenuText{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+.toneMenuName{
+  font-weight:800;
+}
+.toneMenuDesc{
+  font-size:11px;
+  color:var(--muted);
+}
+@media (prefers-reduced-motion: reduce){
+  .toneMenuPanel{
+    transition:none;
+  }
 }
 body:not(.polish-pack) .tonePicker{
   display:none;
