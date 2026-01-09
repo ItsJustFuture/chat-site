@@ -3070,7 +3070,7 @@ body:not(.polish-pack) .tonePicker{
 }
 .profileModalTop{
   margin-bottom: 0;
-  padding: 12px 12px 0;
+  padding: 0;
 }
 .profileModalCard .modalBody{
   padding: 0 12px 12px;
@@ -5384,12 +5384,14 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
 .profileSheetHero{
   position: relative;
   margin: 0;
-  border-radius: 14px;
+  border-radius: 14px 14px 0 0;
   overflow: hidden;
   border: 1px solid rgba(255,255,255,.08);
   background: rgba(0,0,0,.25);
   color: var(--profileHeaderText, #fff);
   min-height: 120px;
+  width: 100%;
+  max-width: 100%;
   --profileHeaderTextShadow: 0 1px 4px rgba(0,0,0,.6);
   --profileHeaderText: #fff;
   --profileHeaderPillBg: rgba(0,0,0,.32);
@@ -5448,6 +5450,21 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   padding: 10px 12px;
 }
 .profileAvatarWrap{ position: relative; display: grid; place-items: center; }
+.profileLevelRing{
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--profileHeaderText, #fff);
+  background:
+    radial-gradient(circle at center, rgba(0,0,0,0.55) 55%, transparent 56%),
+    conic-gradient(var(--accent, #ff4f6d) var(--levelProgress, 0%), rgba(255,255,255,0.18) 0);
+  border: 1px solid rgba(255,255,255,0.35);
+  text-shadow: var(--profileHeaderTextShadow, 0 1px 4px rgba(0,0,0,.6));
+}
 .profileSheetAvatarCard{
   width: 82px;
   height: 82px;
@@ -5790,15 +5807,16 @@ body.polish-pack.polish-animations .msg-new .dmBubble{
   }
 
   /* Keep the main room composer pinned on desktop layouts */
-  .chat{
-    display:flex;
-    flex-direction:column;
-    min-height:0;
+  .chatMain,
+  main.chatMain{
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    height: 100%;
+    min-height: 0;
   }
   .msgs{
-    flex:1 1 auto;
     min-height:0;
-    overflow:auto;
+    overflow-y:auto;
   }
   .inputBar{
     position: relative;

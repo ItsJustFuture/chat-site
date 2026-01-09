@@ -4989,7 +4989,9 @@ app.delete("/profile/avatar", requireLogin, async (req, res) => {
   });
 });
 
-// ---- Uploads (10MB max). VIP can upload mp4/mov, everyone can upload images.
+// ---- Uploads (25MB images/gifs, 100MB videos). VIP can upload videos, everyone can upload images.
+const MAX_IMAGE_GIF_BYTES = 25 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 const chatUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
@@ -4998,30 +5000,56 @@ const chatUpload = multer({
       cb(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`);
     },
   }),
-  limits: { fileSize: 25 * 1024 * 1024 },
+  limits: { fileSize: MAX_VIDEO_BYTES },
 });
 
-app.post("/upload", requireLogin, chatUpload.single("file"), (req, res) => {
-  if (!req.file) return res.status(400).send("No file");
+app.post("/upload", requireLogin, (req, res) => {
+  chatUpload.single("file")(req, res, (err) => {
+    if (err) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res.status(413).json({ message: "File too large (max 100MB)." });
+      }
+      return res.status(400).json({ message: err.message || "Upload failed." });
+    }
+    if (!req.file) return res.status(400).send("No file");
 
-  const mime = String(req.file.mimetype || "");
-  const role = req.session.user.role;
+    const mime = String(req.file.mimetype || "");
+    const role = req.session.user.role;
 
-  const isImage = /^image\//i.test(mime);
-  const isVideo = /^(video\/mp4|video\/quicktime)$/i.test(mime);
+    const isImage = /^image\//i.test(mime);
+    const isVideo = /^video\//i.test(mime);
 
-  if (!isImage && !isVideo) return res.status(400).json({ message: "File type not allowed" });
+    const cleanupUpload = () => {
+      try { fs.unlinkSync(path.join(UPLOADS_DIR, req.file.filename)); } catch {}
+    };
 
-  if (isVideo && !requireMinRole(role, "VIP")) {
-    return res.status(403).json({ message: "VIP required for video uploads" });
-  }
+    if (!isImage && !isVideo) {
+      cleanupUpload();
+      return res.status(400).json({ message: "File type not allowed" });
+    }
 
-  const url = `/uploads/${req.file.filename}`;
-  return res.json({
-    url,
-    mime,
-    size: req.file.size,
-    type: isImage ? "image" : "video",
+    if (isImage && req.file.size > MAX_IMAGE_GIF_BYTES) {
+      cleanupUpload();
+      return res.status(413).json({ message: "Image/GIF too large (max 25MB)." });
+    }
+
+    if (isVideo && req.file.size > MAX_VIDEO_BYTES) {
+      cleanupUpload();
+      return res.status(413).json({ message: "Video too large (max 100MB)." });
+    }
+
+    if (isVideo && !requireMinRole(role, "VIP")) {
+      cleanupUpload();
+      return res.status(403).json({ message: "VIP required for video uploads" });
+    }
+
+    const url = `/uploads/${req.file.filename}`;
+    return res.json({
+      url,
+      mime,
+      size: req.file.size,
+      type: isImage ? "image" : "video",
+    });
   });
 });
 
