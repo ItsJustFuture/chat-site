@@ -369,6 +369,71 @@ try {
       console.warn("[pg-schema] failed to read users.created_at type", e?.message || e);
     }
 
+
+
+// --- Kick/Ban restrictions + appeals (persistent)
+try {
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS user_restrictions (
+      username TEXT PRIMARY KEY,
+      restriction_type TEXT NOT NULL DEFAULT 'none', -- 'none'|'kick'|'ban'
+      reason TEXT,
+      set_by TEXT,
+      set_at BIGINT NOT NULL,
+      expires_at BIGINT,
+      updated_at BIGINT NOT NULL
+    )
+  `);
+
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS moderation_actions (
+      id SERIAL PRIMARY KEY,
+      target_username TEXT NOT NULL,
+      actor_username TEXT,
+      action_type TEXT NOT NULL,
+      reason TEXT,
+      duration_seconds INTEGER,
+      expires_at BIGINT,
+      created_at BIGINT NOT NULL
+    )
+  `);
+
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS appeals (
+      id SERIAL PRIMARY KEY,
+      username TEXT NOT NULL,
+      restriction_type TEXT NOT NULL, -- 'kick'|'ban'
+      reason_at_time TEXT,
+      status TEXT NOT NULL DEFAULT 'open', -- 'open'|'resolved'|'closed'
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
+      last_admin_reply_at BIGINT,
+      last_user_reply_at BIGINT
+    )
+  `);
+  await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_appeals_status ON appeals(status)`);
+  await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_appeals_username ON appeals(username)`);
+
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS appeal_messages (
+      id SERIAL PRIMARY KEY,
+      appeal_id INTEGER NOT NULL REFERENCES appeals(id) ON DELETE CASCADE,
+      author_role TEXT NOT NULL, -- 'user'|'admin'
+      author_name TEXT,
+      message TEXT NOT NULL,
+      created_at BIGINT NOT NULL
+    )
+  `);
+  await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_appeal_messages_appeal ON appeal_messages(appeal_id)`);
+
+  // Single OPEN appeal per user (best-effort; if already exists, ignore)
+  try {
+    await pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_open_appeal_per_user ON appeals(username) WHERE status='open'`);
+  } catch {}
+} catch (e) {
+  console.warn("[pg-init] restrictions/appeals tables failed:", e?.message || e);
+}
+
     PG_READY = true;
     PG_INIT_ERROR = null;
     console.log("Postgres tables ready");
@@ -3644,6 +3709,18 @@ app.get("/me", async (req, res) => {
 
 // Back-compat alias used by some clients
 app.get("/api/me", (req, res) => res.redirect(307, "/me"));
+
+app.get("/api/restriction", async (req, res) => {
+  try {
+    const username = req.session?.user?.username;
+    if (!username) return res.json({ type: "none" });
+    const r = await getRestrictionByUsername(username);
+    res.json({ type: r.type || "none", reason: r.reason || "", expiresAt: r.expiresAt || null, now: Date.now() });
+  } catch (e) {
+    res.json({ type: "none" });
+  }
+});
+
 app.get("/api/vibes", (_req, res) => {
   res.json({ limit: VIBE_TAG_LIMIT, vibes: VIBE_TAGS });
 });
@@ -5393,6 +5470,319 @@ function isPunished(userId, type, cb) {
   );
 }
 
+
+// ---- Kick/Ban restrictions (persistent) + Appeals
+const KICK_LENGTH_OPTIONS = [
+  { label: "1 week", seconds: 7 * 24 * 60 * 60 },
+  { label: "5 days", seconds: 5 * 24 * 60 * 60 },
+  { label: "3 days", seconds: 3 * 24 * 60 * 60 },
+  { label: "2 days", seconds: 2 * 24 * 60 * 60 },
+  { label: "1 day", seconds: 1 * 24 * 60 * 60 },
+  { label: "12 hrs", seconds: 12 * 60 * 60 },
+  { label: "8 hrs", seconds: 8 * 60 * 60 },
+  { label: "3 hrs", seconds: 3 * 60 * 60 },
+  { label: "2 hrs", seconds: 2 * 60 * 60 },
+  { label: "1 hr", seconds: 60 * 60 },
+  { label: "45m", seconds: 45 * 60 },
+  { label: "30m", seconds: 30 * 60 },
+  { label: "15m", seconds: 15 * 60 },
+  { label: "10m", seconds: 10 * 60 },
+  { label: "5min", seconds: 5 * 60 },
+  { label: "1min", seconds: 60 },
+];
+
+function normalizeRestrictionType(t){
+  const x = String(t || "").toLowerCase();
+  if (x === "kick") return "kick";
+  if (x === "ban") return "ban";
+  return "none";
+}
+
+async function getRestrictionByUsername(username){
+  const u = String(username || "").trim();
+  if(!u) return { type:"none" };
+
+  // PG first
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query(
+        "SELECT restriction_type, reason, expires_at, set_at FROM user_restrictions WHERE lower(username)=lower($1) LIMIT 1",
+        [u]
+      );
+      const r = rows?.[0];
+      if (r) {
+        const type = normalizeRestrictionType(r.restriction_type);
+        const expiresAt = r.expires_at != null ? Number(r.expires_at) : null;
+        if (type === "kick" && expiresAt && expiresAt <= Date.now()) {
+          await clearRestrictionEverywhere(u, "system", "kick expired");
+          return { type: "none" };
+        }
+        return { type, reason: r.reason || "", expiresAt: expiresAt || null, setAt: r.set_at ? Number(r.set_at) : null };
+      }
+      return { type: "none" };
+    }
+  } catch (e) {
+    console.warn("[restriction][pg] get failed", e?.message || e);
+  }
+
+  // SQLite fallback
+  try {
+    const row = await dbGetAsync(
+      "SELECT restriction_type, reason, expires_at, set_at FROM user_restrictions WHERE lower(username)=lower(?) LIMIT 1",
+      [u]
+    );
+    if (!row) return { type:"none" };
+    const type = normalizeRestrictionType(row.restriction_type);
+    const expiresAt = row.expires_at != null ? Number(row.expires_at) : null;
+    if (type === "kick" && expiresAt && expiresAt <= Date.now()) {
+      await clearRestrictionEverywhere(u, "system", "kick expired");
+      return { type:"none" };
+    }
+    return { type, reason: row.reason || "", expiresAt: expiresAt || null, setAt: row.set_at ? Number(row.set_at) : null };
+  } catch (e) {
+    console.warn("[restriction][sqlite] get failed", e?.message || e);
+    return { type:"none" };
+  }
+}
+
+async function logModerationAction({ targetUsername, actorUsername, actionType, reason, durationSeconds = null, expiresAt = null }){
+  const now = Date.now();
+  const tUser = String(targetUsername || "").trim();
+  const aUser = actorUsername ? String(actorUsername) : null;
+  const act = String(actionType || "").trim();
+  const why = reason ? String(reason).slice(0, 600) : "";
+  try {
+    await dbRunAsync(
+      `INSERT INTO moderation_actions (target_username, actor_username, action_type, reason, duration_seconds, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [tUser, aUser, act, why, durationSeconds, expiresAt, now]
+    );
+  } catch {}
+  try {
+    if (PG_READY) {
+      await pgPool.query(
+        `INSERT INTO moderation_actions (target_username, actor_username, action_type, reason, duration_seconds, expires_at, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [tUser, aUser, act, why, durationSeconds, expiresAt, now]
+      );
+    }
+  } catch {}
+}
+
+async function upsertRestrictionEverywhere(username, { type, reason = "", setBy = "", expiresAt = null }){
+  const u = String(username || "").trim();
+  const now = Date.now();
+  const t = normalizeRestrictionType(type);
+  const exp = expiresAt != null ? Number(expiresAt) : null;
+
+  // SQLite
+  try {
+    await dbRunAsync(
+      `INSERT INTO user_restrictions (username, restriction_type, reason, set_by, set_at, expires_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(username) DO UPDATE SET
+         restriction_type=excluded.restriction_type,
+         reason=excluded.reason,
+         set_by=excluded.set_by,
+         set_at=excluded.set_at,
+         expires_at=excluded.expires_at,
+         updated_at=excluded.updated_at`,
+      [u, t, String(reason || "").slice(0, 800), String(setBy || "").slice(0, 120), now, exp, now]
+    );
+  } catch (e) {
+    console.warn("[restriction][sqlite] upsert failed", e?.message || e);
+  }
+
+  // PG
+  try {
+    if (PG_READY) {
+      await pgPool.query(
+        `INSERT INTO user_restrictions (username, restriction_type, reason, set_by, set_at, expires_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (username) DO UPDATE SET
+           restriction_type=EXCLUDED.restriction_type,
+           reason=EXCLUDED.reason,
+           set_by=EXCLUDED.set_by,
+           set_at=EXCLUDED.set_at,
+           expires_at=EXCLUDED.expires_at,
+           updated_at=EXCLUDED.updated_at`,
+        [u, t, String(reason || "").slice(0, 800), String(setBy || "").slice(0, 120), now, exp, now]
+      );
+    }
+  } catch (e) {
+    console.warn("[restriction][pg] upsert failed", e?.message || e);
+  }
+}
+
+async function clearRestrictionEverywhere(username, actorUsername = "system", reason = ""){
+  await upsertRestrictionEverywhere(username, { type:"none", reason:"", setBy: actorUsername, expiresAt: null });
+  await logModerationAction({ targetUsername: username, actorUsername, actionType: "unlock", reason });
+}
+
+async function setKickEverywhere(username, actorUsername, reason, durationSeconds){
+  const dur = Math.max(60, Math.min(Number(durationSeconds) || 60, 7*24*60*60));
+  const expiresAt = Date.now() + dur*1000;
+  await upsertRestrictionEverywhere(username, { type:"kick", reason, setBy: actorUsername, expiresAt });
+  await logModerationAction({ targetUsername: username, actorUsername, actionType: "kick", reason, durationSeconds: dur, expiresAt });
+  return { expiresAt };
+}
+
+async function setBanEverywhere(username, actorUsername, reason){
+  await upsertRestrictionEverywhere(username, { type:"ban", reason, setBy: actorUsername, expiresAt: null });
+  await logModerationAction({ targetUsername: username, actorUsername, actionType: "ban", reason });
+}
+
+// Appeals
+async function findOpenAppeal(username){
+  const u = String(username || "").trim();
+  if(!u) return null;
+  // PG first
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query(
+        "SELECT * FROM appeals WHERE lower(username)=lower($1) AND status='open' ORDER BY created_at DESC LIMIT 1",
+        [u]
+      );
+      return rows?.[0] || null;
+    }
+  } catch {}
+  try {
+    const row = await dbGetAsync(
+      "SELECT * FROM appeals WHERE lower(username)=lower(?) AND status='open' ORDER BY created_at DESC LIMIT 1",
+      [u]
+    );
+    return row || null;
+  } catch {
+    return null;
+  }
+}
+
+async function createAppeal(username, restrictionType, reasonAtTime){
+  const now = Date.now();
+  const u = String(username || "").trim();
+  const t = normalizeRestrictionType(restrictionType);
+  const r = String(reasonAtTime || "").slice(0, 800);
+  // SQLite
+  try {
+    const res = await dbRunAsync(
+      `INSERT INTO appeals (username, restriction_type, reason_at_time, status, created_at, updated_at, last_admin_reply_at, last_user_reply_at)
+       VALUES (?, ?, ?, 'open', ?, ?, NULL, ?)`,
+      [u, t === "ban" ? "ban" : "kick", r, now, now, now]
+    );
+    return { id: res.lastID, username: u, restriction_type: t, reason_at_time: r, status:"open", created_at: now, updated_at: now };
+  } catch (e) {
+    // If it failed (maybe due to partial unique index in PG only), just fall back to find open
+  }
+  // PG
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query(
+        `INSERT INTO appeals (username, restriction_type, reason_at_time, status, created_at, updated_at, last_admin_reply_at, last_user_reply_at)
+         VALUES ($1,$2,$3,'open',$4,$5,NULL,$6)
+         RETURNING *`,
+        [u, t === "ban" ? "ban" : "kick", r, now, now, now]
+      );
+      return rows?.[0] || null;
+    }
+  } catch {}
+  return await findOpenAppeal(u);
+}
+
+async function addAppealMessage(appealId, { authorRole, authorName, message }){
+  const now = Date.now();
+  const msg = String(message || "").trim().slice(0, 2000);
+  if (!msg) return;
+  const role = authorRole === "admin" ? "admin" : "user";
+  const name = authorName ? String(authorName).slice(0, 120) : null;
+
+  // SQLite
+  try {
+    await dbRunAsync(
+      `INSERT INTO appeal_messages (appeal_id, author_role, author_name, message, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [appealId, role, name, msg, now]
+    );
+    await dbRunAsync(
+      `UPDATE appeals SET updated_at=?, ${role === "admin" ? "last_admin_reply_at" : "last_user_reply_at"}=? WHERE id=?`,
+      [now, now, appealId]
+    );
+  } catch {}
+
+  // PG
+  try {
+    if (PG_READY) {
+      await pgPool.query(
+        `INSERT INTO appeal_messages (appeal_id, author_role, author_name, message, created_at)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [appealId, role, name, msg, now]
+      );
+      const col = role === "admin" ? "last_admin_reply_at" : "last_user_reply_at";
+      await pgPool.query(`UPDATE appeals SET updated_at=$1, ${col}=$2 WHERE id=$3`, [now, now, appealId]);
+    }
+  } catch {}
+}
+
+async function getAppealThread(appealId){
+  // PG first
+  try {
+    if (PG_READY) {
+      const { rows: msgs } = await pgPool.query(
+        "SELECT * FROM appeal_messages WHERE appeal_id=$1 ORDER BY created_at ASC",
+        [appealId]
+      );
+      return msgs || [];
+    }
+  } catch {}
+  try {
+    return await dbAllAsync(
+      "SELECT * FROM appeal_messages WHERE appeal_id=? ORDER BY created_at ASC",
+      [appealId]
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function listOpenAppeals(){
+  // PG first
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query(
+        "SELECT * FROM appeals WHERE status='open' ORDER BY updated_at DESC LIMIT 200"
+      );
+      return rows || [];
+    }
+  } catch {}
+  try {
+    return await dbAllAsync("SELECT * FROM appeals WHERE status='open' ORDER BY updated_at DESC LIMIT 200");
+  } catch {
+    return [];
+  }
+}
+
+async function getModerationLogsForUser(username, limit=200){
+  const u = String(username || "").trim();
+  const lim = Math.max(10, Math.min(Number(limit)||200, 500));
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query(
+        "SELECT * FROM moderation_actions WHERE lower(target_username)=lower($1) ORDER BY created_at DESC LIMIT $2",
+        [u, lim]
+      );
+      return rows || [];
+    }
+  } catch {}
+  try {
+    return await dbAllAsync(
+      "SELECT * FROM moderation_actions WHERE lower(target_username)=lower(?) ORDER BY created_at DESC LIMIT ?",
+      [u, lim]
+    );
+  } catch {
+    return [];
+  }
+}
+
+
 // ---- Socket auth middleware (session)
 io.use((socket, next) => {
   const fakeRes = socket.request.res || {
@@ -5506,8 +5896,22 @@ io.on("connection", (socket) => {
     chatFx: sanitizeChatFx(sessUser.chatFx),
   };
 
+
+
+// --- Enforce kick/ban restrictions immediately on connect
+socket.restriction = { type: "none" };
+(async () => {
+  try {
+    const r = await getRestrictionByUsername(socket.user.username);
+    socket.restriction = r || { type: "none" };
+    if (r?.type && r.type !== "none") {
+      io.to(socket.id).emit("restriction:status", { type: r.type, reason: r.reason || "", expiresAt: r.expiresAt || null, now: Date.now() });
+    }
+  } catch {}
+})();
+
   // Track global online usernames (for private theme "together online" effects)
-  if (socket.user?.username) ONLINE_USERS.add(socket.user.username);
+  if (socket.user?.username && socket.restriction?.type === 'none') ONLINE_USERS.add(socket.user.username);
   emitOnlineUsers();
 // Enforce single active connection per user (prevents duplicate presence)
 const existingSid = socketIdByUserId.get(socket.user.id);
@@ -6499,24 +6903,38 @@ socket.on("status change", ({ status }) => {
   });
 
   // ---- Kick / Mute / Ban + Unmute/Unban/Warn + Set role
-  socket.on("mod kick", ({ username }) => {
-    const room = socket.currentRoom;
-    if (!room) return;
+  
+socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300 } = {}) => {
+  const room = socket.currentRoom;
+  if (!room) return;
 
-    const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Moderator")) return;
+  const actorRole = socket.request.session.user.role;
+  if (!requireMinRole(actorRole, "Moderator")) return;
 
-    username = sanitizeUsername(username);
-    db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
-      if (!target) return;
-      if (!canModerate(actorRole, target.role)) return;
+  username = sanitizeUsername(username);
+  if (!username) return;
 
-      const sid = socketIdByUserId.get(target.id);
-      if (sid) io.sockets.sockets.get(sid)?.disconnect(true);
+  db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
+    if (!target) return;
+    if (!canModerate(actorRole, target.role)) return;
 
-      io.to(room).emit("system", `${username} was kicked.`);
-      logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: target.username, room });
-    });
+    // Persist restriction + log
+    const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
+    const why = String(reason || "").slice(0, 180) || "Kicked by staff";
+    const dur = Number(durationSeconds) || 300;
+    const { expiresAt } = await setKickEverywhere(target.username, actorName, why, dur);
+
+    // Notify + disconnect
+    const sid = socketIdByUserId.get(target.id);
+    if (sid) {
+      io.to(sid).emit("restriction:status", { type: "kick", reason: why, expiresAt, now: Date.now() });
+      io.sockets.sockets.get(sid)?.disconnect(true);
+    }
+
+    io.to(room).emit("system", `${username} was kicked.`);
+    logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: target.username, room, details: `duration=${dur}s reason=${why}` });
+  });
+});
   });
 
   socket.on("mod mute", ({ username, minutes = 10, reason = "" }) => {
@@ -6577,8 +6995,15 @@ socket.on("status change", ({ status }) => {
             "system",
             `${username} was banned${expiresAt ? ` for ${mins} minutes` : " permanently"}.`
           );
-          const sid = socketIdByUserId.get(target.id);
-          if (sid) io.sockets.sockets.get(sid)?.disconnect(true);
+const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
+const why = String(reason || "").slice(0, 180) || "Banned by staff";
+// Persist ban restriction for the restriction/appeals system (in addition to legacy punishments table)
+setBanEverywhere(username, actorName, why).catch(()=>{});
+const sid = socketIdByUserId.get(target.id);
+if (sid) {
+  io.to(sid).emit("restriction:status", { type: "ban", reason: why, expiresAt: null, now: Date.now() });
+  io.sockets.sockets.get(sid)?.disconnect(true);
+}
 
           logModAction({
             actor: socket.user,
@@ -6631,6 +7056,13 @@ socket.on("status change", ({ status }) => {
 
       db.run("DELETE FROM punishments WHERE user_id=? AND type='ban'", [target.id], () => {
         io.to(room).emit("system", `${username} was unbanned.`);
+// Clear persistent restriction as well
+const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
+clearRestrictionEverywhere(username, actorName, String(reason || "").slice(0, 180) || "unban").catch(()=>{});
+const sid = socketIdByUserId.get(target.id);
+if (sid) {
+  io.to(sid).emit("restriction:status", { type: "none", reason: "", expiresAt: null, now: Date.now() });
+}
         logModAction({
           actor: socket.user,
           action: "UNBAN",
@@ -6642,6 +7074,166 @@ socket.on("status change", ({ status }) => {
       });
     });
   });
+
+
+// ---- Appeals (user + admin)
+socket.on("restriction:check", async (_payload, ack) => {
+  const username = socket.user?.username;
+  const r = await getRestrictionByUsername(username);
+  const payload = { type: r.type || "none", reason: r.reason || "", expiresAt: r.expiresAt || null, now: Date.now() };
+  if (typeof ack === "function") ack(payload);
+  else socket.emit("restriction:status", payload);
+});
+
+socket.on("appeal:fetchMine", async (_payload, ack) => {
+  const username = socket.user?.username;
+  const r = await getRestrictionByUsername(username);
+  const open = await findOpenAppeal(username);
+  let messages = [];
+  if (open?.id) messages = await getAppealThread(open.id);
+  const payload = { restriction: { type: r.type || "none", reason: r.reason || "", expiresAt: r.expiresAt || null, now: Date.now() }, appeal: open || null, messages };
+  if (typeof ack === "function") ack(payload);
+  else socket.emit("appeal:mine", payload);
+});
+
+socket.on("appeal:create", async ({ message } = {}, ack) => {
+  const username = socket.user?.username;
+  const r = await getRestrictionByUsername(username);
+  if (!username) return typeof ack === "function" ? ack({ ok: false, error: "Not authenticated" }) : null;
+  if (!r?.type || r.type === "none") return typeof ack === "function" ? ack({ ok: false, error: "No active kick/ban." }) : null;
+
+  let open = await findOpenAppeal(username);
+  if (!open) open = await createAppeal(username, r.type, r.reason || "");
+  if (!open?.id) return typeof ack === "function" ? ack({ ok: false, error: "Failed to create appeal." }) : null;
+
+  await addAppealMessage(open.id, { authorRole: "user", authorName: username, message: String(message || "").slice(0, 2000) });
+  const messages = await getAppealThread(open.id);
+
+  // Notify staff
+  io.emit("appeals:updated");
+
+  if (typeof ack === "function") ack({ ok: true, appeal: open, messages });
+});
+
+socket.on("appeal:send", async ({ message } = {}, ack) => {
+  const username = socket.user?.username;
+  if (!username) return typeof ack === "function" ? ack({ ok: false, error: "Not authenticated" }) : null;
+  const open = await findOpenAppeal(username);
+  if (!open?.id) return typeof ack === "function" ? ack({ ok: false, error: "No open appeal." }) : null;
+
+  await addAppealMessage(open.id, { authorRole: "user", authorName: username, message: String(message || "").slice(0, 2000) });
+  const messages = await getAppealThread(open.id);
+
+  io.emit("appeals:updated");
+
+  if (typeof ack === "function") ack({ ok: true, appeal: open, messages });
+});
+
+function isAppealsStaff(role){
+  return requireMinRole(role, "Admin") || requireMinRole(role, "Co owner") || requireMinRole(role, "Owner");
+}
+
+socket.on("appeals:list", async (_payload, ack) => {
+  const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
+  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
+  const items = await listOpenAppeals();
+  if (typeof ack === "function") ack({ ok: true, items });
+});
+
+socket.on("appeals:read", async ({ appealId } = {}, ack) => {
+  const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
+  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
+
+  const id = Number(appealId);
+  if (!Number.isFinite(id)) return typeof ack === "function" ? ack({ ok: false, error: "Invalid appeal" }) : null;
+
+  let appeal = null;
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query("SELECT * FROM appeals WHERE id=$1 LIMIT 1", [id]);
+      appeal = rows?.[0] || null;
+    }
+  } catch {}
+  if (!appeal) {
+    try { appeal = await dbGetAsync("SELECT * FROM appeals WHERE id=? LIMIT 1", [id]); } catch {}
+  }
+  if (!appeal) return typeof ack === "function" ? ack({ ok: false, error: "Not found" }) : null;
+
+  const messages = await getAppealThread(id);
+  const modlogs = await getModerationLogsForUser(appeal.username, 200);
+  const restriction = await getRestrictionByUsername(appeal.username);
+
+  if (typeof ack === "function") ack({ ok: true, appeal, messages, modlogs, restriction });
+});
+
+socket.on("appeals:reply", async ({ appealId, message } = {}, ack) => {
+  const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
+  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
+
+  const id = Number(appealId);
+  if (!Number.isFinite(id)) return typeof ack === "function" ? ack({ ok: false, error: "Invalid appeal" }) : null;
+
+  const actorName = socket.user?.username || "staff";
+  await addAppealMessage(id, { authorRole: "admin", authorName: actorName, message: String(message || "").slice(0, 2000) });
+  io.emit("appeals:updated");
+  if (typeof ack === "function") ack({ ok: true });
+});
+
+socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, ack) => {
+  const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
+  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
+
+  const id = Number(appealId);
+  if (!Number.isFinite(id)) return typeof ack === "function" ? ack({ ok: false, error: "Invalid appeal" }) : null;
+
+  // Load appeal
+  let appeal = null;
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query("SELECT * FROM appeals WHERE id=$1 LIMIT 1", [id]);
+      appeal = rows?.[0] || null;
+    }
+  } catch {}
+  if (!appeal) {
+    try { appeal = await dbGetAsync("SELECT * FROM appeals WHERE id=? LIMIT 1", [id]); } catch {}
+  }
+  if (!appeal) return typeof ack === "function" ? ack({ ok: false, error: "Not found" }) : null;
+
+  const actorName = socket.user?.username || "staff";
+  const act = String(action || "");
+
+  if (act === "unlock" || act === "unban") {
+    await clearRestrictionEverywhere(appeal.username, actorName, "staff unlock");
+    // also clear legacy ban punishment if exists (best-effort)
+    try {
+      const urow = await dbGetAsync("SELECT id FROM users WHERE lower(username)=lower(?)", [appeal.username]);
+      if (urow?.id) dbRunAsync("DELETE FROM punishments WHERE user_id=? AND type='ban'", [urow.id]).catch(()=>{});
+    } catch {}
+  } else if (act === "ban_to_kick") {
+    const dur = Number(durationSeconds) || 3600;
+    const { expiresAt } = await setKickEverywhere(appeal.username, actorName, "ban converted to kick", dur);
+    // notify target if online
+    const tid = await dbGetAsync("SELECT id FROM users WHERE lower(username)=lower(?)", [appeal.username]).catch(()=>null);
+    const sid = tid?.id ? socketIdByUserId.get(tid.id) : null;
+    if (sid) io.to(sid).emit("restriction:status", { type: "kick", reason: "Ban converted to kick", expiresAt, now: Date.now() });
+  } else if (act === "update_kick") {
+    const dur = Number(durationSeconds) || 3600;
+    const { expiresAt } = await setKickEverywhere(appeal.username, actorName, "kick duration updated", dur);
+    const tid = await dbGetAsync("SELECT id FROM users WHERE lower(username)=lower(?)", [appeal.username]).catch(()=>null);
+    const sid = tid?.id ? socketIdByUserId.get(tid.id) : null;
+    if (sid) io.to(sid).emit("restriction:status", { type: "kick", reason: "Kick updated", expiresAt, now: Date.now() });
+  }
+
+  // Optionally resolve appeal
+  try {
+    const now = Date.now();
+    await dbRunAsync("UPDATE appeals SET status='resolved', updated_at=? WHERE id=?", [now, id]).catch(()=>{});
+    if (PG_READY) await pgPool.query("UPDATE appeals SET status='resolved', updated_at=$1 WHERE id=$2", [now, id]).catch(()=>{});
+  } catch {}
+
+  io.emit("appeals:updated");
+  if (typeof ack === "function") ack({ ok: true });
+});
 
   socket.on("mod warn", ({ username, reason = "" }) => {
     const room = socket.currentRoom;
@@ -6764,7 +7356,6 @@ socket.on("status change", ({ status }) => {
       }
       emitUserList(room);
     }
-  });
   });
 
   // ---- Start

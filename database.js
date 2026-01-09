@@ -207,6 +207,62 @@ async function runSqliteMigrations() {
     )
   `);
 
+
+// --- Kick/Ban restrictions + appeals (persistent)
+await run(`
+  CREATE TABLE IF NOT EXISTS user_restrictions (
+    username TEXT PRIMARY KEY,
+    restriction_type TEXT NOT NULL DEFAULT 'none', -- 'none'|'kick'|'ban'
+    reason TEXT,
+    set_by TEXT,
+    set_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    updated_at INTEGER NOT NULL
+  )
+`);
+
+await run(`
+  CREATE TABLE IF NOT EXISTS moderation_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_username TEXT NOT NULL,
+    actor_username TEXT,
+    action_type TEXT NOT NULL,
+    reason TEXT,
+    duration_seconds INTEGER,
+    expires_at INTEGER,
+    created_at INTEGER NOT NULL
+  )
+`);
+
+await run(`
+  CREATE TABLE IF NOT EXISTS appeals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    restriction_type TEXT NOT NULL, -- 'kick'|'ban'
+    reason_at_time TEXT,
+    status TEXT NOT NULL DEFAULT 'open', -- 'open'|'resolved'|'closed'
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    last_admin_reply_at INTEGER,
+    last_user_reply_at INTEGER
+  )
+`);
+await run(`CREATE INDEX IF NOT EXISTS idx_appeals_status ON appeals(status)`);
+await run(`CREATE INDEX IF NOT EXISTS idx_appeals_username ON appeals(username)`);
+
+await run(`
+  CREATE TABLE IF NOT EXISTS appeal_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    appeal_id INTEGER NOT NULL,
+    author_role TEXT NOT NULL, -- 'user'|'admin'
+    author_name TEXT,
+    message TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (appeal_id) REFERENCES appeals(id) ON DELETE CASCADE
+  )
+`);
+await run(`CREATE INDEX IF NOT EXISTS idx_appeal_messages_appeal ON appeal_messages(appeal_id)`);
+
   await run(`
     CREATE TABLE IF NOT EXISTS profile_likes (
       user_id INTEGER NOT NULL,
