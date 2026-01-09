@@ -560,7 +560,10 @@ const CHAT_FX_DEFAULTS = Object.freeze({
   textGradientEnabled: false,
   textGradientA: null,
   textGradientB: null,
-  textGradientAngle: 135
+  textGradientAngle: 135,
+  polishPack: true,
+  polishAuras: true,
+  polishAnimations: true
 });
 const CHAT_FX_GLOWS = new Set(["off", "soft", "neon", "strong"]);
 const CHAT_FX_TEXT_GLOWS = new Set(["off", "soft", "neon", "strong"]);
@@ -666,8 +669,17 @@ function sanitizeChatFx(raw) {
   if (Number.isFinite(Number(raw.textGradientAngle))) {
     out.textGradientAngle = clamp(raw.textGradientAngle, 0, 360);
   }
+  if (typeof raw.polishPack === "boolean") out.polishPack = raw.polishPack;
+  if (typeof raw.polishAuras === "boolean") out.polishAuras = raw.polishAuras;
+  if (typeof raw.polishAnimations === "boolean") out.polishAnimations = raw.polishAnimations;
 
   return out;
+}
+
+const TONE_KEYS = new Set(["chill", "joke", "sarcastic", "serious"]);
+function sanitizeTone(input) {
+  const key = String(input || "").trim().toLowerCase();
+  return TONE_KEYS.has(key) ? key : null;
 }
 function avatarUrlFromRow(row) {
   if (!row) return null;
@@ -5658,7 +5670,7 @@ function doJoin(room, status) {
   // Backward-compatible room history: older builds stored rooms with a leading '#'.
   const legacyRoom = `#${room}`;
   db.all(
-    `SELECT id, room, username, role, avatar, text, ts, attachment_url, attachment_type, attachment_mime, attachment_size,
+    `SELECT id, room, username, role, avatar, text, tone, ts, attachment_url, attachment_type, attachment_mime, attachment_size,
             reply_to_id, reply_to_user, reply_to_text
      FROM messages
      WHERE (room=? OR room=?) AND deleted=0
@@ -5672,6 +5684,7 @@ function doJoin(room, status) {
         role: r.role,
         avatar: r.avatar || "",
         text: (r.text || ""),
+        tone: r.tone || "",
         ts: r.ts,
         attachmentUrl: r.attachment_url || "",
         attachmentType: r.attachment_type || "",
@@ -5755,7 +5768,7 @@ if (!room) {
       socket.join(`dm:${tid}`);
 
       db.all(
-        `SELECT id, thread_id, user_id, username, text, ts, edited_at, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_mime, attachment_type, attachment_size FROM dm_messages WHERE thread_id=? AND deleted=0 ORDER BY ts DESC LIMIT 50`,
+        `SELECT id, thread_id, user_id, username, text, tone, ts, edited_at, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_mime, attachment_type, attachment_size FROM dm_messages WHERE thread_id=? AND deleted=0 ORDER BY ts DESC LIMIT 50`,
         [tid],
         (_e, rows) => {
           const msgs = (rows || []).reverse().map((r) => ({
@@ -5765,6 +5778,7 @@ if (!room) {
             userId: r.user_id,
             user: r.username,
             text: r.text,
+            tone: r.tone || "",
             ts: r.ts,
             editedAt: r.edited_at || 0,
             replyToId: r.reply_to_id || null,
@@ -5862,10 +5876,11 @@ if (!room) {
     try { socket.dmThreads?.delete(tid); } catch {}
   });
 
-socket.on("dm message", ({ threadId, text, replyToId, attachment }) => {
+socket.on("dm message", ({ threadId, text, replyToId, attachment, tone }) => {
     const tid = Number(threadId);
     const body = String(text || "").trim().slice(0, 800);
     const att = attachment && typeof attachment === "object" ? attachment : null;
+    const toneKey = sanitizeTone(tone);
 
     // Allow messages with either text or an image attachment
     if (!Number.isInteger(tid) || (!body && !att)) return;
@@ -5895,9 +5910,23 @@ socket.on("dm message", ({ threadId, text, replyToId, attachment }) => {
         const replyPk = Number.isInteger(replyMeta.id) ? replyMeta.id : null;
 
         db.run(
-          `INSERT INTO dm_messages (thread_id, user_id, username, text, ts, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_mime, attachment_type, attachment_size)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [tid, socket.user.id, socket.user.username, body, ts, replyPk, replyUser, replyText],
+          `INSERT INTO dm_messages (thread_id, user_id, username, text, tone, ts, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_mime, attachment_type, attachment_size)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            tid,
+            socket.user.id,
+            socket.user.username,
+            body,
+            toneKey,
+            ts,
+            replyPk,
+            replyUser,
+            replyText,
+            attUrl,
+            attMime,
+            attType,
+            attSize,
+          ],
           function (insertErr) {
             if (insertErr) return;
             const payload = {
@@ -5906,13 +5935,14 @@ socket.on("dm message", ({ threadId, text, replyToId, attachment }) => {
               userId: socket.user.id,
               user: socket.user.username,
               text: body,
+              tone: toneKey || "",
               ts,
-                          attachmentUrl: attUrl,
-            attachmentMime: attMime,
-            attachmentType: attType,
-            attachmentSize: attSize,
+              attachmentUrl: attUrl,
+              attachmentMime: attMime,
+              attachmentType: attType,
+              attachmentSize: attSize,
               chatFx: sanitizeChatFx(socket.user.chatFx),
-replyToId: replyPk,
+              replyToId: replyPk,
               replyToUser: replyUser || "",
               replyToText: replyText || "",
             };
@@ -6062,6 +6092,7 @@ socket.on("status change", ({ status }) => {
         const attachmentType = String(payload?.attachmentType || "").slice(0, 20);
         const attachmentMime = String(payload?.attachmentMime || "").slice(0, 60);
         const attachmentSize = Number(payload?.attachmentSize || 0) || 0;
+        const tone = sanitizeTone(payload?.tone);
 
         awardPassiveGold(socket.user.id);
 
@@ -6099,8 +6130,8 @@ socket.on("status change", ({ status }) => {
               const tsNow = Date.now();
 
               db.run(
-                `INSERT INTO messages (room, user_id, username, role, avatar, text, ts, attachment_url, attachment_type, attachment_mime, attachment_size, reply_to_id, reply_to_user, reply_to_text)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                `INSERT INTO messages (room, user_id, username, role, avatar, text, tone, ts, attachment_url, attachment_type, attachment_mime, attachment_size, reply_to_id, reply_to_user, reply_to_text)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                   room,
                   socket.user.id,
@@ -6108,6 +6139,7 @@ socket.on("status change", ({ status }) => {
                   socket.user.role,
                   socket.user.avatar || "",
                   text,
+                  tone,
                   tsNow,
                   attachmentUrl || null,
                   attachmentType || null,
@@ -6127,6 +6159,7 @@ socket.on("status change", ({ status }) => {
                     role: socket.user.role,
                     avatar: socket.user.avatar || "",
                     text,
+                    tone: tone || "",
                     ts: tsNow,
                     attachmentUrl: attachmentUrl || "",
                     attachmentType: attachmentType || "",

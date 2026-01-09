@@ -2404,6 +2404,23 @@ body.dice-room .sys .diceFace{
 /* Right-align self bubbles without forcing them to stretch. */
 .msgItem.self .bubble{ align-self:flex-end; }
 
+@media (hover:hover) and (pointer:fine){
+  body.polish-pack .msgItem .bubble,
+  body.polish-pack .dmRow .dmBubble{
+    outline: 1px solid transparent;
+    outline-offset: -1px;
+    transition: outline-color 160ms ease;
+  }
+  body.polish-pack .msgItem:hover .bubble,
+  body.polish-pack .dmRow:hover .dmBubble{
+    outline-color: color-mix(in srgb, var(--fx-accent, var(--accent)) 22%, transparent);
+  }
+  body.polish-pack .msgItem.hasReacts:hover .bubble,
+  body.polish-pack .dmRow.hasReacts:hover .dmBubble{
+    outline-color: color-mix(in srgb, var(--fx-accent, var(--accent)) 42%, transparent);
+  }
+}
+
 /* Message meta (name/time) */
 .msgItem .meta{
   display:flex;
@@ -2416,9 +2433,35 @@ body.dice-room .sys .diceFace{
   font-family: var(--fx-name-font-family, inherit);
   color: var(--fx-name-color, inherit);
 }
+.msgItem .name .unameText[data-role="owner"],
+.dmMetaUser[data-role="owner"]{
+  text-shadow: 0 0 6px rgba(120, 255, 180, 0.45), 0 0 12px rgba(120, 255, 180, 0.22);
+}
+.msgItem .name .unameText[data-role="coowner"],
+.dmMetaUser[data-role="coowner"]{
+  text-shadow: 0 0 6px rgba(200, 150, 255, 0.45), 0 0 12px rgba(255, 120, 220, 0.25);
+}
+.msgItem .name .unameText[data-role="admin"],
+.dmMetaUser[data-role="admin"],
+.msgItem .name .unameText[data-role="moderator"],
+.dmMetaUser[data-role="moderator"]{
+  background-image: linear-gradient(transparent 70%, rgba(255, 215, 120, 0.75) 70%);
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  padding-bottom: 1px;
+}
+.msgItem .name .unameText[data-role="vip"],
+.dmMetaUser[data-role="vip"]{
+  text-shadow: 0 0 4px rgba(120, 200, 255, 0.45), 0 0 9px rgba(120, 200, 255, 0.25);
+}
 .msgItem .time{
   font-size: var(--fx-time-size, 11px);
   opacity: .65;
+}
+.toneBadge{
+  margin-left:6px;
+  font-size:12px;
+  opacity:0.78;
 }
 
 /* Reactions are OUTSIDE the bubble (inside .msgMain) */
@@ -2480,7 +2523,9 @@ body.dice-room .sys .diceFace{
   font-style: var(--fx-text-style, normal);
   text-shadow:
     0 0 calc(var(--fx-text-glow, 0) * 6px) color-mix(in srgb, var(--fx-accent, var(--accent)) 60%, transparent),
-    0 0 calc(var(--fx-text-glow, 0) * 14px) color-mix(in srgb, var(--fx-accent, var(--accent)) 35%, transparent);
+    0 0 calc(var(--fx-text-glow, 0) * 14px) color-mix(in srgb, var(--fx-accent, var(--accent)) 35%, transparent),
+    var(--fx-contrast-shadow, 0 0 0 transparent);
+  -webkit-text-stroke: var(--fx-contrast-stroke, 0px) var(--fx-contrast-stroke-color, transparent);
 }
 .bubble.fx-textGradient .text,
 .dmBubble.fx-textGradient .text{
@@ -2621,6 +2666,31 @@ body.dice-room .sys .diceFace{
   background:var(--inputBg);
   color:var(--inputText);
   outline:none;
+}
+.tonePicker{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 6px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  background:color-mix(in srgb, var(--panel) 85%, transparent);
+}
+.toneBtn{
+  border:none;
+  background:transparent;
+  cursor:pointer;
+  font-size:16px;
+  line-height:1;
+  padding:2px 4px;
+  border-radius:8px;
+}
+.toneBtn.active{
+  background:color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+body:not(.polish-pack) .tonePicker{
+  display:none;
 }
 #fileInput{
   position:absolute;
@@ -2940,6 +3010,29 @@ body.dice-room .sys .diceFace{
   justify-content:space-between;
   gap:12px;
   margin-top:8px;
+}
+.polishPackField{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  padding:10px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background:color-mix(in srgb, var(--panel) 80%, transparent);
+}
+.polishPackHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  font-weight:700;
+}
+.polishPackOptions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  font-size:12px;
+  color:var(--muted);
 }
 .chatFxStatus{
   font-size:12px;
@@ -4953,19 +5046,42 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
   font-size: 14px;
   color: #fff;
 }
-.presenceAura{
+body.polish-pack .presenceAura{
+  position:relative;
+  isolation:isolate;
+}
+body.polish-pack.polish-auras .presenceAura::after{
+  content:"";
+  position:absolute;
+  inset:2px;
+  border-radius:inherit;
   box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
-  transition: box-shadow 140ms ease, transform 140ms ease;
+  pointer-events:none;
+  transition: box-shadow 180ms ease, opacity 180ms ease;
 }
-.presenceAura.isOnline{ box-shadow: 0 0 0 2px rgba(0, 220, 130, 0.28); }
-.presenceAura.isIdle{ box-shadow: 0 0 0 2px rgba(255, 200, 80, 0.24); }
-.presenceAura.isActiveDm{ box-shadow: 0 0 0 2px rgba(120, 180, 255, 0.32); }
+body.polish-pack.polish-auras .presenceAura.isOnline::after{
+  box-shadow: 0 0 0 2px rgba(0, 220, 130, 0.28), 0 0 8px rgba(0, 220, 130, 0.18);
+}
+body.polish-pack.polish-auras .presenceAura.isIdle::after{
+  box-shadow: 0 0 0 2px rgba(255, 200, 80, 0.22), 0 0 6px rgba(255, 200, 80, 0.14);
+  opacity:0.75;
+}
+body.polish-pack.polish-auras .presenceAura.isActiveDm::after{
+  box-shadow: 0 0 0 2px rgba(120, 180, 255, 0.3), 0 0 7px rgba(120, 180, 255, 0.18);
+}
 @keyframes auraPulse{
-  0%{ box-shadow: 0 0 0 2px rgba(140, 200, 255, 0.25); }
-  50%{ box-shadow: 0 0 0 3px rgba(140, 200, 255, 0.16); }
-  100%{ box-shadow: 0 0 0 2px rgba(140, 200, 255, 0.25); }
+  0%{ box-shadow: 0 0 0 2px rgba(140, 200, 255, 0.25), 0 0 8px rgba(140, 200, 255, 0.18); }
+  50%{ box-shadow: 0 0 0 3px rgba(140, 200, 255, 0.16), 0 0 10px rgba(140, 200, 255, 0.14); }
+  100%{ box-shadow: 0 0 0 2px rgba(140, 200, 255, 0.25), 0 0 8px rgba(140, 200, 255, 0.18); }
 }
-.presenceAura.isTyping{ animation: auraPulse 1.2s ease-in-out infinite; }
+body.polish-pack.polish-auras .presenceAura.isTyping::after{
+  animation: auraPulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce){
+  body.polish-pack.polish-auras .presenceAura.isTyping::after{
+    animation:none;
+  }
+}
 
 
 /* ==== Profile sheet modal (custom, not a clone) ==== */
@@ -5243,9 +5359,21 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 body.kb-open .typing,
 body.kb-open #typing{ display:none !important; }
 
-@keyframes msgPop{ from{ opacity:0; transform: translateY(4px) scale(.98); } to{ opacity:1; transform:none; } }
-.msg-appear{ animation: msgPop 160ms ease; }
-.msg-appear .bubble, .msg-appear .dmBubble{ animation: msgPop 160ms ease; }
+@keyframes msgArrival{
+  from{ opacity:0; transform: scale(0.985); }
+  to{ opacity:1; transform: scale(1); }
+}
+body.polish-pack.polish-animations .msg-new .bubble,
+body.polish-pack.polish-animations .msg-new .dmBubble{
+  animation: msgArrival 160ms ease;
+  transform-origin: center;
+}
+@media (prefers-reduced-motion: reduce){
+  body.polish-pack.polish-animations .msg-new .bubble,
+  body.polish-pack.polish-animations .msg-new .dmBubble{
+    animation:none;
+  }
+}
 
 
 /* === DM bubble sizing & alignment FIX === */

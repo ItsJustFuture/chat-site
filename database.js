@@ -153,6 +153,7 @@ async function runSqliteMigrations() {
       role TEXT NOT NULL,
       avatar TEXT,
       text TEXT,
+      tone TEXT,
       ts INTEGER NOT NULL,
       deleted INTEGER NOT NULL DEFAULT 0,
       attachment_url TEXT,
@@ -167,6 +168,7 @@ async function runSqliteMigrations() {
     ["reply_to_user", "reply_to_user TEXT"],
     ["reply_to_text", "reply_to_text TEXT"],
     ["edited_at", "edited_at INTEGER"],
+    ["tone", "tone TEXT"],
   ]);
 
   await run(`
@@ -314,6 +316,7 @@ async function runSqliteMigrations() {
       user_id INTEGER NOT NULL,
       username TEXT NOT NULL,
       text TEXT,
+      tone TEXT,
       ts INTEGER NOT NULL,
       deleted INTEGER NOT NULL DEFAULT 0
     )
@@ -324,6 +327,7 @@ async function runSqliteMigrations() {
     ["reply_to_user", "reply_to_user TEXT"],
     ["reply_to_text", "reply_to_text TEXT"],
     ["edited_at", "edited_at INTEGER"],
+    ["tone", "tone TEXT"],
     ["attachment_url", "attachment_url TEXT"],
     ["attachment_mime", "attachment_mime TEXT"],
     ["attachment_type", "attachment_type TEXT"],

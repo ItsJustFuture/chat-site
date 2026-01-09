@@ -653,8 +653,17 @@ const CHAT_FX_DEFAULTS = Object.freeze({
   textGradientEnabled: false,
   textGradientA: "",
   textGradientB: "",
-  textGradientAngle: 135
+  textGradientAngle: 135,
+  polishPack: true,
+  polishAuras: true,
+  polishAnimations: true
 });
+const TONE_OPTIONS = Object.freeze([
+  { key: "chill", emoji: "😌", label: "Chill" },
+  { key: "joke", emoji: "😂", label: "Joke" },
+  { key: "sarcastic", emoji: "🙃", label: "Sarcastic" },
+  { key: "serious", emoji: "⚠️", label: "Serious" }
+]);
 const CHAT_FX_FONT_STACKS = Object.freeze({
   system: "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
   inter: "\"Inter\", system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
@@ -1212,7 +1221,10 @@ function normalizeChatFx(input){
     textGradientEnabled: normalizeChatFxBool(fx.textGradientEnabled, CHAT_FX_DEFAULTS.textGradientEnabled),
     textGradientA: normalizeChatFxGradientColor(fx.textGradientA),
     textGradientB: normalizeChatFxGradientColor(fx.textGradientB),
-    textGradientAngle: normalizeChatFxNumber(fx.textGradientAngle, CHAT_FX_DEFAULTS.textGradientAngle, 0, 360)
+    textGradientAngle: normalizeChatFxNumber(fx.textGradientAngle, CHAT_FX_DEFAULTS.textGradientAngle, 0, 360),
+    polishPack: normalizeChatFxBool(fx.polishPack, CHAT_FX_DEFAULTS.polishPack),
+    polishAuras: normalizeChatFxBool(fx.polishAuras, CHAT_FX_DEFAULTS.polishAuras),
+    polishAnimations: normalizeChatFxBool(fx.polishAnimations, CHAT_FX_DEFAULTS.polishAnimations)
   };
 }
 
@@ -1318,6 +1330,81 @@ function pickAutoContrastFromHex(hex){
   return lum > 0.52 ? "#000000" : "#ffffff";
 }
 
+function contrastRatio(colorA, colorB){
+  const l1 = relativeLuminance(colorA);
+  const l2 = relativeLuminance(colorB);
+  const lighter = Math.max(l1, l2);
+  const darker = Math.min(l1, l2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function clearContrastReinforcement(bubble){
+  if (!bubble) return;
+  bubble.classList.remove("fx-contrastBoost");
+  bubble.style.removeProperty("--fx-contrast-shadow");
+  bubble.style.removeProperty("--fx-contrast-stroke");
+  bubble.style.removeProperty("--fx-contrast-stroke-color");
+}
+
+function applyContrastReinforcement(bubble){
+  if (!bubble) return;
+  if (!isPolishPackEnabled()) {
+    clearContrastReinforcement(bubble);
+    return;
+  }
+  const bg = hexToRgbTuple(bubble.dataset.fxBubbleColor) || parseCssRgbToTuple(getComputedStyle(bubble).backgroundColor);
+  if (!bg) {
+    clearContrastReinforcement(bubble);
+    return;
+  }
+
+  const candidates = [];
+  if (bubble.classList.contains("fx-textGradient")) {
+    const gradA = hexToRgbTuple(bubble.dataset.fxTextGradA);
+    const gradB = hexToRgbTuple(bubble.dataset.fxTextGradB);
+    if (gradA) candidates.push(gradA);
+    if (gradB) candidates.push(gradB);
+  }
+
+  const directText = hexToRgbTuple(bubble.dataset.fxTextColor);
+  if (directText) candidates.push(directText);
+
+  if (!candidates.length) {
+    const textEl = bubble.querySelector(".text") || bubble;
+    const computed = parseCssRgbToTuple(getComputedStyle(textEl).color);
+    if (computed && (computed.a == null || computed.a >= 0.2)) candidates.push(computed);
+  }
+
+  if (!candidates.length) {
+    clearContrastReinforcement(bubble);
+    return;
+  }
+
+  const minRatio = Math.min(...candidates.map((c) => contrastRatio(c, bg)));
+  if (minRatio >= 3.2) {
+    clearContrastReinforcement(bubble);
+    return;
+  }
+
+  const sample = candidates[0];
+  const lightText = relativeLuminance(sample) > 0.5;
+  const shadowColor = lightText ? "rgba(0,0,0,0.48)" : "rgba(255,255,255,0.45)";
+  const strokeColor = lightText ? "rgba(0,0,0,0.5)" : "rgba(255,255,255,0.5)";
+  bubble.classList.add("fx-contrastBoost");
+  bubble.style.setProperty("--fx-contrast-shadow", `0 1px 2px ${shadowColor}`);
+  bubble.style.setProperty("--fx-contrast-stroke", "0.35px");
+  bubble.style.setProperty("--fx-contrast-stroke-color", strokeColor);
+}
+
+function updateContrastReinforcementAll(){
+  document.querySelectorAll(".bubble, .dmBubble").forEach((bubble) => applyContrastReinforcement(bubble));
+}
+
+function queueContrastReinforcement(bubble){
+  if (!bubble) return;
+  requestAnimationFrame(() => applyContrastReinforcement(bubble));
+}
+
 function applyChatFxToBubble(bubble, fx, options = {}){
   if (!bubble) return;
   const resolved = normalizeChatFx(fx);
@@ -1353,6 +1440,8 @@ function applyChatFxToBubble(bubble, fx, options = {}){
   // If the user has set a bubble background colour, prefer that for auto-contrast.
   const autoColor = autoContrast ? (bubbleBg ? pickAutoContrastFromHex(bubbleBg) : pickAutoContrastTextColor(bubble)) : "";
   bubble.style.setProperty("--fx-text", textOverride || autoColor || "");
+  bubble.dataset.fxTextColor = textOverride || autoColor || "";
+  bubble.dataset.fxBubbleColor = bubbleBg || "";
   bubble.style.setProperty("--fx-text-weight", effective.textBold ? "700" : "400");
   bubble.style.setProperty("--fx-text-style", effective.textItalic ? "italic" : "normal");
   bubble.style.setProperty("--fx-text-glow", String(textGlowValue));
@@ -1362,6 +1451,8 @@ function applyChatFxToBubble(bubble, fx, options = {}){
   bubble.style.setProperty("--fx-text-grad-a", gradientA);
   bubble.style.setProperty("--fx-text-grad-b", gradientB);
   bubble.style.setProperty("--fx-text-grad-angle", `${effective.textGradientAngle}deg`);
+  bubble.dataset.fxTextGradA = gradientA;
+  bubble.dataset.fxTextGradB = gradientB;
   bubble.classList.toggle("fx-textGradient", gradientEnabled);
   bubble.classList.toggle("fx-autoContrast", autoContrast);
   bubble.style.setProperty("--fx-radius", `${effective.radius}px`);
@@ -1774,9 +1865,44 @@ const draftDebounce = (()=> {
   };
 })();
 
+function updateTonePicker(container, activeKey){
+  if (!container) return;
+  container.querySelectorAll("button[data-tone]").forEach((btn) => {
+    const on = btn.dataset.tone === activeKey;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
+function initTonePicker(container, getTone, setTone){
+  if (!container) return;
+  container.innerHTML = "";
+  TONE_OPTIONS.forEach((tone) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "toneBtn";
+    btn.dataset.tone = tone.key;
+    btn.textContent = tone.emoji;
+    btn.title = tone.label;
+    btn.setAttribute("aria-label", tone.label);
+    btn.addEventListener("click", () => {
+      const current = getTone();
+      const next = current === tone.key ? "" : tone.key;
+      setTone(next);
+      updateTonePicker(container, next);
+    });
+    container.appendChild(btn);
+  });
+  updateTonePicker(container, getTone());
+}
+
 const msgInput = document.getElementById("msgInput");
 const sendBtn = document.getElementById("sendBtn");
 const searchInput = document.getElementById("searchInput");
+const tonePicker = document.getElementById("tonePicker");
+const dmTonePicker = document.getElementById("dmTonePicker");
+let activeTone = "";
+let activeDmTone = "";
 msgInput?.addEventListener("input", ()=>draftDebounce(saveRoomDraft));
 
 const chatShell = document.querySelector("main.chat");
@@ -2942,6 +3068,11 @@ function roleKey(role){
   return "member";
 }
 
+function toneMeta(toneKey){
+  if (!toneKey) return null;
+  return TONE_OPTIONS.find((tone) => tone.key === toneKey) || null;
+}
+
 function presenceFlags(username, explicitStatus){
   const key = normKey(username);
   const u = (lastUsers || []).find((user) => normKey(user?.name) === key || normKey(user?.username) === key);
@@ -2952,21 +3083,35 @@ function presenceFlags(username, explicitStatus){
   return { status, isIdle, isTyping, isActiveDm };
 }
 
+function resolvePresenceAuraTarget(el){
+  if (!el) return null;
+  if (el.classList?.contains("msgAvatar") || el.classList?.contains("dmAvatar") || el.classList?.contains("avatar") || el.classList?.contains("dmMetaAvatar")) {
+    return el;
+  }
+  return el.closest?.(".msgAvatar, .dmAvatar, .avatar, .dmMetaAvatar") || el;
+}
+
 function applyPresenceAura(el, username, opts = {}){
-  if (!el || !el.classList) return;
-  const key = normKey(username || opts.username || "");
-  if (key) el.dataset.username = key;
+  const target = resolvePresenceAuraTarget(el);
+  if (!target || !target.classList) return;
+  const key = normKey(username || opts.username || target.dataset.username || "");
+  if (key) target.dataset.username = key;
+  if (!isPolishAurasEnabled()) {
+    target.classList.remove("presenceAura", "isTyping", "isActiveDm", "isIdle", "isOnline");
+    delete target.dataset.status;
+    return;
+  }
   const { status, isIdle, isTyping, isActiveDm } = presenceFlags(key, opts.status);
-  el.classList.add("presenceAura");
-  el.classList.toggle("isTyping", !!isTyping);
-  el.classList.toggle("isActiveDm", !!isActiveDm);
-  el.classList.toggle("isIdle", !!isIdle);
-  el.classList.toggle("isOnline", !isIdle);
-  if (status) el.dataset.status = status;
+  target.classList.add("presenceAura");
+  target.classList.toggle("isTyping", !!isTyping);
+  target.classList.toggle("isActiveDm", !!isActiveDm);
+  target.classList.toggle("isIdle", !!isIdle);
+  target.classList.toggle("isOnline", !isIdle);
+  if (status) target.dataset.status = status;
 }
 
 function updatePresenceAuras(){
-  document.querySelectorAll(".presenceAura").forEach((el)=>{
+  document.querySelectorAll(".presenceAura, .msgAvatar, .dmAvatar, .avatar, .dmMetaAvatar").forEach((el)=>{
     const name = el.dataset.username || el.getAttribute("data-username") || el.getAttribute("alt") || "";
     applyPresenceAura(el, name);
   });
@@ -3476,6 +3621,47 @@ function mergeChatFxDefaults(fx){
   return normalizeChatFx(merged);
 }
 
+function isPolishPackEnabled(){
+  const body = document.body;
+  if (body) return body.classList.contains("polish-pack");
+  return chatFxPrefs?.polishPack !== false;
+}
+
+function isPolishAurasEnabled(){
+  const body = document.body;
+  if (body) return body.classList.contains("polish-auras");
+  return isPolishPackEnabled() && chatFxPrefs?.polishAuras !== false;
+}
+
+function isPolishAnimationsEnabled(){
+  const body = document.body;
+  if (body) return body.classList.contains("polish-animations");
+  return isPolishPackEnabled() && chatFxPrefs?.polishAnimations !== false && !PREFERS_REDUCED_MOTION;
+}
+
+function updatePolishPackClasses(fx = chatFxPrefs){
+  const body = document.body;
+  if (!body) return;
+  const normalized = normalizeChatFx(fx);
+  const pack = normalized.polishPack !== false;
+  const auras = pack && normalized.polishAuras !== false;
+  const anim = pack && normalized.polishAnimations !== false && !PREFERS_REDUCED_MOTION;
+  body.classList.toggle("polish-pack", pack);
+  body.classList.toggle("polish-auras", auras);
+  body.classList.toggle("polish-animations", anim);
+
+  if (!auras) {
+    document.querySelectorAll(".presenceAura").forEach((el) => {
+      el.classList.remove("presenceAura", "isTyping", "isActiveDm", "isIdle", "isOnline");
+      delete el.dataset.status;
+    });
+  } else {
+    updatePresenceAuras();
+  }
+
+  updateContrastReinforcementAll();
+}
+
 function applyChatFxPrefsFromServer(fx){
   chatFxPrefs = mergeChatFxDefaults(fx);
   chatFxPrefsLoaded = true;
@@ -3488,6 +3674,7 @@ function applyChatFxPrefsFromServer(fx){
     updateChatFxPreview(chatFxPrefs);
     chatFxDraft = { ...chatFxPrefs };
   }
+  updatePolishPackClasses();
 }
 
 async function loadChatFxPrefs({ force = false } = {}){
@@ -3987,10 +4174,13 @@ try{
   const bubbleEl = item.querySelector(".bubble");
   applyChatFxToBubble(bubbleEl, resolvedFx, { groupBody: body });
   body.appendChild(item);
+  queueContrastReinforcement(bubbleEl);
 
   if (m.__fresh) {
-    item.classList.add("msg-appear");
-    setTimeout(() => item.classList.remove("msg-appear"), 220);
+    if (isPolishAnimationsEnabled()) {
+      item.classList.add("msg-new");
+      setTimeout(() => item.classList.remove("msg-new"), 220);
+    }
     delete m.__fresh;
   }
 
@@ -4041,12 +4231,15 @@ function buildMainMsgItem(m, opts){
 
   const name = document.createElement("div");
   name.className = "name";
+  const roleTag = roleKey(m.role);
+  name.dataset.role = roleTag;
   if (showHeader) {
     const ico = document.createElement("span");
     ico.className = "roleIco";
     ico.textContent = `${roleIcon(m.role)} `;
     const uname = document.createElement("span");
     uname.className = "unameText";
+    uname.dataset.role = roleTag;
     uname.textContent = String(m.user || "");
     name.appendChild(ico);
     name.appendChild(uname);
@@ -4055,6 +4248,15 @@ function buildMainMsgItem(m, opts){
   const time = document.createElement("div");
   time.className = "time";
   time.textContent = formatTime(m.ts);
+  const tone = toneMeta(m.tone || m.toneKey);
+  if (tone) {
+    const toneEl = document.createElement("span");
+    toneEl.className = "toneBadge";
+    toneEl.textContent = tone.emoji;
+    toneEl.title = tone.label;
+    toneEl.setAttribute("aria-label", `${tone.label} tone`);
+    time.appendChild(toneEl);
+  }
 
   // Edited indicator
   const editedAt = m.editedAt || m.edited_at || 0;
@@ -5417,6 +5619,7 @@ function renderDmMessages(threadId){
     const u = document.createElement("span");
     u.className = "dmMetaUser";
     u.textContent = m.user || "";
+    u.dataset.role = roleKey(m.role || roleForUser(m.user));
 
     if (gClass !== " g-start" && gClass !== " g-solo") {
       u.textContent = ""; // grouped: avoid repeating the username
@@ -5425,6 +5628,15 @@ function renderDmMessages(threadId){
     const t = document.createElement("span");
     t.className = "dmMetaTime";
     t.textContent = m.ts ? new Date(m.ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) : "";
+    const tone = toneMeta(m.tone || m.toneKey);
+    if (tone) {
+      const toneEl = document.createElement("span");
+      toneEl.className = "toneBadge";
+      toneEl.textContent = tone.emoji;
+      toneEl.title = tone.label;
+      toneEl.setAttribute("aria-label", `${tone.label} tone`);
+      t.appendChild(toneEl);
+    }
 
     const dmEditedAt = m.editedAt || m.edited_at || 0;
     if (dmEditedAt) {
@@ -5462,6 +5674,7 @@ function renderDmMessages(threadId){
 
     // Only the bubble stack goes into the row (actions are inside bubbleWrap).
     row.appendChild(bubbleWrap);
+    queueContrastReinforcement(bubble);
 
     // Mobile/desktop: tap/click the bubble to toggle actions (parity with main chat)
     const toggleActions = (e) => {
@@ -5480,8 +5693,10 @@ function renderDmMessages(threadId){
     bubble.addEventListener("touchstart", toggleActions, { passive:false });
 
     if (m.__fresh) {
-      row.classList.add("msg-appear");
-      setTimeout(() => row.classList.remove("msg-appear"), 220);
+      if (isPolishAnimationsEnabled()) {
+        row.classList.add("msg-new");
+        setTimeout(() => row.classList.remove("msg-new"), 220);
+      }
       delete m.__fresh;
     }
     dmMessagesEl.appendChild(row);
@@ -5673,7 +5888,8 @@ function sendDmMessage(){
     threadId: activeDmId,
     text: txt,
     replyToId: dmReplyTarget?.id || null,
-    attachment: att ? { url: att.url, mime: att.mime, type: att.type, size: att.size } : null
+    attachment: att ? { url: att.url, mime: att.mime, type: att.type, size: att.size } : null,
+    tone: activeDmTone || ""
   });
 
   if (Sound.shouldSent()) Sound.cues.sent();
@@ -5681,6 +5897,8 @@ function sendDmMessage(){
   dmText.value = "";
   dmPendingAttachment = null;
   setDmReplyTarget(null);
+  activeDmTone = "";
+  updateTonePicker(dmTonePicker, activeDmTone);
   // Clear any "ready" notice
   setDmNotice("");
 }
@@ -7460,6 +7678,9 @@ function setDmReplyTarget(target){
   }
 }
 
+initTonePicker(tonePicker, () => activeTone, (next) => { activeTone = next; });
+initTonePicker(dmTonePicker, () => activeDmTone, (next) => { activeDmTone = next; });
+
 // typing/send
 let typingDebounce=null;
 const TYPING_PHRASES = [
@@ -7509,13 +7730,16 @@ async function sendMessage(){
       attachmentUrl: attachment?.url || "",
       attachmentType: attachment?.type || "",
       attachmentMime: attachment?.mime || "",
-      attachmentSize: attachment?.size || 0
+      attachmentSize: attachment?.size || 0,
+      tone: activeTone || ""
     });
 
     if (Sound.shouldSent()) Sound.cues.sent();
 
     msgInput.value="";
     setReplyTarget(null);
+    activeTone = "";
+    updateTonePicker(tonePicker, activeTone);
     socket.emit("stop typing");
 
     // keep focus on mobile
@@ -8137,6 +8361,9 @@ function syncChatFxControls(fx){
   if (chatFxPrefEls.textGradientA) chatFxPrefEls.textGradientA.value = resolved.textGradientA || "";
   if (chatFxPrefEls.textGradientB) chatFxPrefEls.textGradientB.value = resolved.textGradientB || "";
   if (chatFxPrefEls.textGradientAngle) chatFxPrefEls.textGradientAngle.value = String(resolved.textGradientAngle);
+  if (chatFxPrefEls.polishPack) chatFxPrefEls.polishPack.checked = !!resolved.polishPack;
+  if (chatFxPrefEls.polishAuras) chatFxPrefEls.polishAuras.checked = !!resolved.polishAuras;
+  if (chatFxPrefEls.polishAnimations) chatFxPrefEls.polishAnimations.checked = !!resolved.polishAnimations;
   setChatFxDensityButtons(resolved.density);
   updateChatFxSliderValue(chatFxPrefEls.radiusValue, resolved.radius);
   updateChatFxSliderValue(chatFxPrefEls.borderValue, resolved.border);
@@ -8193,7 +8420,10 @@ function readChatFxFormRaw(){
     textGradientEnabled: !!chatFxPrefEls.textGradientEnabled?.checked,
     textGradientA: (chatFxPrefEls.textGradientA?.value || "").trim(),
     textGradientB: (chatFxPrefEls.textGradientB?.value || "").trim(),
-    textGradientAngle: Number(chatFxPrefEls.textGradientAngle?.value)
+    textGradientAngle: Number(chatFxPrefEls.textGradientAngle?.value),
+    polishPack: !!chatFxPrefEls.polishPack?.checked,
+    polishAuras: !!chatFxPrefEls.polishAuras?.checked,
+    polishAnimations: !!chatFxPrefEls.polishAnimations?.checked
   };
 }
 
@@ -8212,6 +8442,7 @@ function handleChatFxInput(){
   updateChatFxSliderValue(chatFxPrefEls.glassValue, normalized.glass, 2);
   updateChatFxSliderValue(chatFxPrefEls.blurValue, normalized.blur);
   updateChatFxSliderValue(chatFxPrefEls.textGradientAngleValue, normalized.textGradientAngle);
+  updatePolishPackClasses(normalized);
   updateChatFxPreview(normalized);
   setChatFxControlsDisabled(!normalized.enabled);
 }
@@ -8222,11 +8453,13 @@ function applyChatFxToSelfBubbles(fx){
   document.querySelectorAll(".msgItem.self .bubble").forEach((bubble) => {
     const groupBody = bubble.closest(".msgGroupBody");
     applyChatFxToBubble(bubble, normalized, { groupBody });
+    queueContrastReinforcement(bubble);
   });
   document.querySelectorAll(".dmRow.self").forEach((row) => {
     const bubble = row.querySelector(".dmBubble");
     const wrap = row.querySelector(".dmBubbleWrap");
     applyChatFxToBubble(bubble, normalized, { dmRow: row, dmWrap: wrap });
+    queueContrastReinforcement(bubble);
   });
 }
 
@@ -8270,6 +8503,16 @@ function wireChatFxPrefs(){
             </div>
             <div class="text">Your message preview bubble.</div>
           </div>
+        </div>
+      </div>
+      <div class="field polishPackField">
+        <div class="polishPackHeader">
+          <label style="margin:0;">Enable Polish Pack</label>
+          <input id="chatFxPolishPack" type="checkbox">
+        </div>
+        <div class="polishPackOptions">
+          <label><input id="chatFxPolishAuras" type="checkbox"> Avatar auras</label>
+          <label><input id="chatFxPolishAnimations" type="checkbox"> Animations</label>
         </div>
       </div>
       <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
@@ -8462,6 +8705,9 @@ function wireChatFxPrefs(){
     textGradientBClear: q("#chatFxTextGradientBClear"),
     textGradientAngle: q("#chatFxTextGradientAngle"),
     textGradientAngleValue: q("#chatFxTextGradientAngleValue"),
+    polishPack: q("#chatFxPolishPack"),
+    polishAuras: q("#chatFxPolishAuras"),
+    polishAnimations: q("#chatFxPolishAnimations"),
     saveBtn: q("#chatFxSaveBtn"),
     status: q("#chatFxStatus"),
     densityRow: q("#chatFxDensity")
@@ -8489,6 +8735,9 @@ function wireChatFxPrefs(){
   chatFxPrefEls.textGradientA?.addEventListener("input", handleChatFxInput);
   chatFxPrefEls.textGradientB?.addEventListener("input", handleChatFxInput);
   chatFxPrefEls.textGradientAngle?.addEventListener("input", handleChatFxInput);
+  chatFxPrefEls.polishPack?.addEventListener("change", handleChatFxInput);
+  chatFxPrefEls.polishAuras?.addEventListener("change", handleChatFxInput);
+  chatFxPrefEls.polishAnimations?.addEventListener("change", handleChatFxInput);
   chatFxPrefEls.accent?.addEventListener("blur", () => {
     const normalized = normalizeChatFx(readChatFxFormRaw());
     if (chatFxPrefEls?.accent) chatFxPrefEls.accent.value = normalized.accent || "";
