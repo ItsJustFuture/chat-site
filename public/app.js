@@ -680,10 +680,10 @@ const CHAT_FX_DEFAULTS = Object.freeze({
   polishAnimations: true
 });
 const TONE_OPTIONS = Object.freeze([
-  { key: "chill", emoji: "😌", label: "Chill" },
-  { key: "joke", emoji: "😂", label: "Joke" },
-  { key: "sarcastic", emoji: "🙃", label: "Sarcastic" },
-  { key: "serious", emoji: "⚠️", label: "Serious" }
+  { key: "chill", emoji: "😌", name: "Chill", description: "Relaxed / friendly" },
+  { key: "joke", emoji: "😂", name: "Joke", description: "Joking / playful" },
+  { key: "sarcastic", emoji: "🙃", name: "Sarcastic", description: "Sarcasm" },
+  { key: "serious", emoji: "⚠️", name: "Serious", description: "Serious / important" }
 ]);
 const CHAT_FX_FONT_STACKS = Object.freeze({
   system: "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
@@ -1909,35 +1909,144 @@ const draftDebounce = (()=> {
   };
 })();
 
-function updateTonePicker(container, activeKey){
+const TONE_MENU_OPTIONS = Object.freeze([
+  { key: "", emoji: "🚫", name: "Clear tone (None)", description: "No tone" },
+  ...TONE_OPTIONS
+]);
+let openToneMenu = null;
+let toneMenuListenersBound = false;
+
+function toneMenuButtonLabel(toneKey){
+  const tone = toneMeta(toneKey);
+  return tone ? `Tone: ${tone.name} ${tone.emoji}` : "Tone: None";
+}
+
+function toneMenuTooltip(toneKey){
+  const tone = toneMeta(toneKey);
+  return tone ? `Tone: ${tone.name} — ${tone.description}` : "Tone: None";
+}
+
+function updateToneMenu(container, activeKey){
   if (!container) return;
-  container.querySelectorAll("button[data-tone]").forEach((btn) => {
-    const on = btn.dataset.tone === activeKey;
-    btn.classList.toggle("active", on);
-    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  const btn = container.querySelector(".toneMenuBtn");
+  if (btn) {
+    btn.textContent = toneMenuButtonLabel(activeKey);
+    btn.title = toneMenuTooltip(activeKey);
+    btn.setAttribute("aria-label", toneMenuButtonLabel(activeKey));
+  }
+  container.querySelectorAll(".toneMenuItem").forEach((item) => {
+    const on = (item.dataset.tone || "") === (activeKey || "");
+    item.classList.toggle("is-active", on);
+    item.setAttribute("aria-checked", on ? "true" : "false");
   });
 }
 
-function initTonePicker(container, getTone, setTone){
+function closeToneMenu(menu){
+  if (!menu) return;
+  menu.container.classList.remove("is-open");
+  menu.button.setAttribute("aria-expanded", "false");
+  menu.panel.setAttribute("aria-hidden", "true");
+  if (openToneMenu === menu) openToneMenu = null;
+}
+
+function openToneMenuPanel(menu){
+  if (!menu) return;
+  if (openToneMenu && openToneMenu !== menu) closeToneMenu(openToneMenu);
+  menu.container.classList.add("is-open");
+  menu.button.setAttribute("aria-expanded", "true");
+  menu.panel.setAttribute("aria-hidden", "false");
+  openToneMenu = menu;
+}
+
+function toggleToneMenu(menu){
+  if (!menu) return;
+  const isOpen = menu.container.classList.contains("is-open");
+  if (isOpen) closeToneMenu(menu);
+  else openToneMenuPanel(menu);
+}
+
+function bindToneMenuListeners(){
+  if (toneMenuListenersBound) return;
+  toneMenuListenersBound = true;
+  document.addEventListener("pointerdown", (e) => {
+    if (!openToneMenu) return;
+    if (openToneMenu.container.contains(e.target)) return;
+    closeToneMenu(openToneMenu);
+  }, true);
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !openToneMenu) return;
+    closeToneMenu(openToneMenu);
+  });
+}
+
+function initToneMenu(container, getTone, setTone){
   if (!container) return;
   container.innerHTML = "";
-  TONE_OPTIONS.forEach((tone) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "toneBtn";
-    btn.dataset.tone = tone.key;
-    btn.textContent = tone.emoji;
-    btn.title = tone.label;
-    btn.setAttribute("aria-label", tone.label);
-    btn.addEventListener("click", () => {
-      const current = getTone();
-      const next = current === tone.key ? "" : tone.key;
-      setTone(next);
-      updateTonePicker(container, next);
-    });
-    container.appendChild(btn);
+  container.classList.add("toneMenu");
+
+  const menuId = `${container.id || "tone"}Menu`;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "toneMenuBtn";
+  button.setAttribute("aria-expanded", "false");
+  button.setAttribute("aria-controls", menuId);
+  button.setAttribute("aria-haspopup", "menu");
+
+  const panel = document.createElement("div");
+  panel.className = "toneMenuPanel";
+  panel.id = menuId;
+  panel.setAttribute("role", "menu");
+  panel.setAttribute("aria-hidden", "true");
+
+  TONE_MENU_OPTIONS.forEach((tone) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "toneMenuItem";
+    item.dataset.tone = tone.key;
+    item.setAttribute("role", "menuitemradio");
+    item.setAttribute("aria-checked", "false");
+
+    const emoji = document.createElement("span");
+    emoji.className = "toneMenuEmoji";
+    emoji.textContent = tone.emoji;
+
+    const textWrap = document.createElement("span");
+    textWrap.className = "toneMenuText";
+
+    const name = document.createElement("span");
+    name.className = "toneMenuName";
+    name.textContent = tone.name;
+
+    const desc = document.createElement("span");
+    desc.className = "toneMenuDesc";
+    desc.textContent = tone.description;
+
+    textWrap.appendChild(name);
+    textWrap.appendChild(desc);
+    item.appendChild(emoji);
+    item.appendChild(textWrap);
+    panel.appendChild(item);
   });
-  updateTonePicker(container, getTone());
+
+  const menuState = { container, button, panel };
+  button.addEventListener("click", (e) => {
+    e.preventDefault();
+    toggleToneMenu(menuState);
+  });
+
+  panel.addEventListener("click", (e) => {
+    const item = e.target.closest(".toneMenuItem");
+    if (!item) return;
+    const next = item.dataset.tone || "";
+    setTone(next);
+    updateToneMenu(container, next);
+    closeToneMenu(menuState);
+  });
+
+  container.appendChild(button);
+  container.appendChild(panel);
+  updateToneMenu(container, getTone());
+  bindToneMenuListeners();
 }
 
 const msgInput = document.getElementById("msgInput");
@@ -4311,8 +4420,9 @@ function buildMainMsgItem(m, opts){
     const toneEl = document.createElement("span");
     toneEl.className = "toneBadge";
     toneEl.textContent = tone.emoji;
-    toneEl.title = tone.label;
-    toneEl.setAttribute("aria-label", `${tone.label} tone`);
+    const toneLabel = `Tone: ${tone.name} — ${tone.description}`;
+    toneEl.title = toneLabel;
+    toneEl.setAttribute("aria-label", toneLabel);
     time.appendChild(toneEl);
   }
 
@@ -5687,8 +5797,9 @@ function renderDmMessages(threadId){
       const toneEl = document.createElement("span");
       toneEl.className = "toneBadge";
       toneEl.textContent = tone.emoji;
-      toneEl.title = tone.label;
-      toneEl.setAttribute("aria-label", `${tone.label} tone`);
+      const toneLabel = `Tone: ${tone.name} — ${tone.description}`;
+      toneEl.title = toneLabel;
+      toneEl.setAttribute("aria-label", toneLabel);
       t.appendChild(toneEl);
     }
 
@@ -5952,7 +6063,7 @@ function sendDmMessage(){
   dmPendingAttachment = null;
   setDmReplyTarget(null);
   activeDmTone = "";
-  updateTonePicker(dmTonePicker, activeDmTone);
+  updateToneMenu(dmTonePicker, activeDmTone);
   // Clear any "ready" notice
   setDmNotice("");
 }
@@ -7732,8 +7843,8 @@ function setDmReplyTarget(target){
   }
 }
 
-initTonePicker(tonePicker, () => activeTone, (next) => { activeTone = next; });
-initTonePicker(dmTonePicker, () => activeDmTone, (next) => { activeDmTone = next; });
+initToneMenu(tonePicker, () => activeTone, (next) => { activeTone = next; });
+initToneMenu(dmTonePicker, () => activeDmTone, (next) => { activeDmTone = next; });
 
 // typing/send
 let typingDebounce=null;
@@ -7793,7 +7904,7 @@ async function sendMessage(){
     msgInput.value="";
     setReplyTarget(null);
     activeTone = "";
-    updateTonePicker(tonePicker, activeTone);
+    updateToneMenu(tonePicker, activeTone);
     socket.emit("stop typing");
 
     // keep focus on mobile
