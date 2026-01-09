@@ -135,6 +135,12 @@ async function pgEnsureEpochMsBigint(tableName, columnName) {
 
   if (udt === "int8" || dataType === "bigint") return;
 
+  // If the column has a default that can't be cast to BIGINT (common on legacy timestamp defaults),
+  // the ALTER TYPE will fail. Drop the default first (best-effort).
+  try {
+    await pgPool.query(`ALTER TABLE ${tableName} ALTER COLUMN ${columnName} DROP DEFAULT`);
+  } catch (_) {}
+
   if (udt === "timestamp" || udt === "timestamptz" || dataType.includes("timestamp")) {
     await pgPool.query(
       `ALTER TABLE ${tableName}
@@ -1278,9 +1284,6 @@ function buildXpUpdateFields(newXp, opts = {}, forPg = false) {
 
   if (lastMessageXpAt != null) {
     sets.push(forPg ? `"lastMessageXpAt" = $${idx}` : "lastMessageXpAt = ?");
-    params.push(lastMessageXpAt);
-    idx += 1;
-    sets.push(forPg ? `"lastXpMessageAt" = $${idx}` : "lastXpMessageAt = ?");
     params.push(lastMessageXpAt);
     idx += 1;
   }
@@ -6935,7 +6938,6 @@ socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300 } = 
     logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: target.username, room, details: `duration=${dur}s reason=${why}` });
   });
 });
-  });
 
   socket.on("mod mute", ({ username, minutes = 10, reason = "" }) => {
     const room = socket.currentRoom;
@@ -7358,21 +7360,23 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
     }
   });
 
-  // ---- Start
-  Promise.allSettled([migrationsReady, pgInitPromise]).then((results) => {
-    const [sqliteResult, pgResult] = results;
-    if (sqliteResult.status === "rejected") {
-      console.error("[startup] SQLite migration failed", sqliteResult.reason);
-      process.exit(1);
-    }
-    if (pgResult.status === "rejected") {
-      console.error("[startup] Postgres init failed", pgResult.reason);
-    }
+});
 
-    httpServer.listen(PORT, () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
+// ---- Start
+Promise.allSettled([migrationsReady, pgInitPromise]).then((results) => {
+  const [sqliteResult, pgResult] = results;
+  if (sqliteResult.status === "rejected") {
+    console.error("[startup] SQLite migration failed", sqliteResult.reason);
+    process.exit(1);
+  }
+  if (pgResult.status === "rejected") {
+    console.error("[startup] Postgres init failed", pgResult.reason);
+  }
+
+  httpServer.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
   });
+});
 
 
 function areIrisAndLolaOnline() {
