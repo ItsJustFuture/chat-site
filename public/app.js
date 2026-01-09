@@ -1742,7 +1742,8 @@ let dmPinned = true;
 let unseenMainMessages = 0;
 
 // ---- DOM
-const authWrap = document.getElementById("authWrap");
+const loginView = document.getElementById("loginView");
+const chatView = document.getElementById("chatView");
 const app = document.getElementById("app");
 const addRoomBtn = document.getElementById("addRoomBtn");
 const menuToggleBtn = document.getElementById("menuToggleBtn");
@@ -1837,9 +1838,11 @@ const prefSoundReaction = document.getElementById("prefSoundReaction");
 const prefSoundStatus = document.getElementById("prefSoundStatus");
 
 
+const authForm = document.getElementById("authForm");
 const authUser = document.getElementById("authUser");
 const authPass = document.getElementById("authPass");
 const authMsg = document.getElementById("authMsg");
+const authValidation = document.getElementById("authValidation");
 const loginBtn = document.getElementById("loginBtn");
 const regBtn = document.getElementById("regBtn");
 const togglePassBtn = document.getElementById("togglePassBtn");
@@ -7949,9 +7952,52 @@ statusSelect.addEventListener("change", ()=>{
 });
 
 // ---- auth helpers
+let authUserState = null;
+let authHandlersBound = false;
+
+function getAuthUser(){
+  return authUserState;
+}
+
+function isAuthenticated(){
+  return !!authUserState;
+}
+
+function setAuthUser(user){
+  authUserState = user || null;
+}
+
+function setView(mode){
+  if(!loginView || !chatView) return;
+  document.body.classList.remove("auth-pending");
+  if(mode === "login"){
+    loginView.hidden = false;
+    chatView.hidden = true;
+  }else if(mode === "chat"){
+    loginView.hidden = true;
+    chatView.hidden = false;
+  }else{
+    loginView.hidden = true;
+    chatView.hidden = true;
+  }
+}
+
+function setAuthLoading(loading, message = ""){
+  if(authMsg) authMsg.textContent = message;
+  if(authValidation && !loading && message) authValidation.textContent = "";
+  if(loginBtn) loginBtn.disabled = loading;
+  if(regBtn) regBtn.disabled = loading;
+  if(authUser) authUser.disabled = loading;
+  if(authPass) authPass.disabled = loading;
+}
+
+function setAuthValidation(message = ""){
+  if(authValidation) authValidation.textContent = message;
+}
+
 async function api(path, options){
   try{
-  const res = await fetch(path, { credentials: "include", ...options });
+    const res = await fetch(path, { credentials: "include", ...options });
     const text=await res.text().catch(()=> "");
     return {res, text};
   }catch{
@@ -7959,38 +8005,114 @@ async function api(path, options){
   }
 }
 
+async function validateSession({ silent = false } = {}){
+  let meRes;
+  try{
+    // Explicit credentials prevents edge cases where the session cookie isn't sent.
+    meRes = await fetch("/me", { credentials: "include" });
+  }catch(err){
+    console.error("Failed to reach /me:", err);
+    if(!silent && authMsg) authMsg.textContent = "Unable to reach the server. Please try again.";
+    return null;
+  }
+
+  if(!meRes?.ok){
+    if(!silent && authMsg) authMsg.textContent = "Please login.";
+    return null;
+  }
+
+  try{
+    const payload = await meRes.json();
+    return payload || null;
+  }catch(err){
+    console.error("Invalid /me response:", err);
+    if(!silent && authMsg) authMsg.textContent = "Server response was invalid. Please refresh and try again.";
+    return null;
+  }
+}
+
+function initLoginUI(){
+  setView("login");
+  setAuthLoading(false, "");
+  setAuthValidation("");
+  if(!authHandlersBound){
+    authHandlersBound = true;
+    authForm?.addEventListener("submit", (e)=>{
+      e.preventDefault();
+      doLogin();
+    });
+    loginBtn?.addEventListener("click", (e)=>{ e?.preventDefault?.(); doLogin(); });
+    regBtn?.addEventListener("click", (e)=>{ e?.preventDefault?.(); doRegister(); });
+  }
+  if(authUser && !isAuthenticated()){
+    requestAnimationFrame(()=> authUser?.focus?.());
+  }
+}
+
 async function doLogin(){
-  authMsg.textContent="Logging in...";
+  const username = authUser?.value?.trim() || "";
+  const password = authPass?.value || "";
+  if(!username){
+    setAuthValidation("Please enter your username.");
+    authUser?.focus();
+    return;
+  }
+  if(!password){
+    setAuthValidation("Please enter your password.");
+    authPass?.focus();
+    return;
+  }
+  setAuthValidation("");
+  setAuthLoading(true, "Logging in...");
   const {res,text}=await api("/login",{
     method:"POST", headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({username:authUser.value, password:authPass.value})
+    body:JSON.stringify({username, password})
   });
-  if(!res.ok){ authMsg.textContent=text||"Login failed."; return; }
-  await startApp();
+  if(!res.ok){
+    setAuthLoading(false, text||"Login failed.");
+    return;
+  }
+  await initChatApp();
+  setAuthLoading(false, "");
 }
+
 async function doRegister(){
-  authMsg.textContent="Registering...";
+  const username = authUser?.value?.trim() || "";
+  const password = authPass?.value || "";
+  if(!username){
+    setAuthValidation("Please choose a username.");
+    authUser?.focus();
+    return;
+  }
+  if(!password){
+    setAuthValidation("Please choose a password.");
+    authPass?.focus();
+    return;
+  }
+  setAuthValidation("");
+  setAuthLoading(true, "Registering...");
   const {res,text}=await api("/register",{
     method:"POST", headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({username:authUser.value, password:authPass.value})
+    body:JSON.stringify({username, password})
   });
-  if(!res.ok){ authMsg.textContent=text||"Register failed."; return; }
-  authMsg.textContent="Registered! Now click Login.";
-}
-// Bind auth handlers defensively so a missing/renamed DOM id can't break boot.
-loginBtn?.addEventListener("click", (e)=>{ e?.preventDefault?.(); doLogin(); });
-regBtn?.addEventListener("click", (e)=>{ e?.preventDefault?.(); doRegister(); });
-authPass?.addEventListener("keydown", (e)=>{
-  if(e.key === "Enter"){
-    e.preventDefault();
-    doLogin();
+  if(!res.ok){
+    setAuthLoading(false, text||"Register failed.");
+    return;
   }
-});
+  setAuthLoading(false, "Registered! Now click Join chat.");
+}
 
 async function doLogout(){
   // Explicitly include credentials so the session cookie is always sent.
-  await fetch("/logout", {method:"POST", credentials:"include"});
-  location.reload();
+  await fetch("/logout", {method:"POST", credentials:"include"}).catch(()=>{});
+  setAuthUser(null);
+  me = null;
+  if(socket){
+    try { socket.removeAllListeners(); } catch {}
+    try { socket.disconnect(); } catch {}
+  }
+  setView("login");
+  initLoginUI();
 }
 logoutBtn?.addEventListener("click", doLogout);
 
@@ -9566,37 +9688,19 @@ async function refreshLogs(){
 refreshLogsBtn.addEventListener("click", refreshLogs);
 
 // start app
-async function startApp(){
-  let meRes;
-  try{
-    // Explicit credentials prevents edge cases where the session cookie isn't sent.
-    meRes = await fetch("/me", { credentials: "include" });
-  }catch(err){
-    console.error("Failed to reach /me:", err);
-    authMsg.textContent = "Unable to reach the server. Please try again.";
+async function initChatApp(){
+  const sessionUser = await validateSession();
+  if(!sessionUser){
+    initLoginUI();
     return;
   }
 
-  if(!meRes?.ok){
-    authMsg.textContent = "Please login.";
-    return;
-  }
-
-  try{
-    me = await meRes.json();
-  }catch(err){
-    console.error("Invalid /me response:", err);
-    authMsg.textContent = "Server response was invalid. Please refresh and try again.";
-    return;
-  }
-
-  if(!me){ authMsg.textContent="Please login."; return; }
+  me = sessionUser;
+  setAuthUser(sessionUser);
+  setView("chat");
 
   await loadVibeTags();
   await loadThemePreference();
-
-    authWrap.style.display="none";
-    app.style.display="flex";
 
   await loadMyProfile();
   await loadUserPrefs();
@@ -10016,22 +10120,20 @@ socket.on("dm history", (payload = {}) => {
   });
 }
 
-// boot: if already logged in, auto start
-(async function boot(){
-  try{
-    const res = await fetch("/me", { credentials: "include" });
-    if(!res.ok) return;
-
-    me = await res.json();
-    if(me){
-      authWrap.style.display="none";
-      app.style.display="flex";
-      await startApp();
-    }
-  }catch(err){
-    console.warn("Skipping auto-start due to /me failure", err);
+// boot: auth gate
+async function bootApp(){
+  setView("loading");
+  const sessionUser = await validateSession({ silent: true });
+  if(sessionUser){
+    me = sessionUser;
+    setAuthUser(sessionUser);
+    await initChatApp();
+    return;
   }
-})();
+  initLoginUI();
+}
+
+document.addEventListener("DOMContentLoaded", bootApp);
 
 // profile button also closes drawers
 profileBtn.addEventListener("click", () => { closeDrawers(); });
