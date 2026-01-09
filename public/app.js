@@ -1,14 +1,3 @@
-//
-if (quickUnkickBtn){
-  quickUnkickBtn.addEventListener("click", ()=>{
-    if(!modalTargetUsername){ if(quickModMsg) quickModMsg.textContent="No target selected."; return; }
-    if(!confirmModeration("unkick", modalTargetUsername)) return;
-    socket?.emit("mod unkick", { username: modalTargetUsername });
-    if(quickModMsg) quickModMsg.textContent="Unkick sent.";
-  });
-}
-
- public/app.js
 "use strict";
 
 // Debug hook: enable tap hit-testing logs by setting `window.__TAP_DEBUG__ = true` in the console.
@@ -10132,6 +10121,15 @@ quickKickBtn.addEventListener("click", ()=>{
   socket?.emit("mod kick", { username: modalTargetUsername });
   quickModMsg.textContent="Kick sent.";
 });
+if(quickUnkickBtn){
+  quickUnkickBtn.addEventListener("click", ()=>{
+    if(!modalTargetUsername){ quickModMsg.textContent="No target selected."; return; }
+    if(!confirmModeration("unkick", modalTargetUsername)) return;
+    socket?.emit("mod unkick", { username: modalTargetUsername });
+    quickModMsg.textContent="Unkick sent.";
+  });
+}
+
 quickMuteBtn.addEventListener("click", ()=>{
   const reason = (quickReason.value || "").trim();
   const err=requireReason(reason);
