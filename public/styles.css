@@ -3044,10 +3044,18 @@ body:not(.polish-pack) .tonePicker{
   .modalBody{
     padding: 0 18px 18px;
   }
+  .profileModalCard .modalBody{
+    padding: 0 18px 18px;
+  }
+  .profileSticky{
+    margin: 0 -18px;
+    padding-left: 18px;
+    padding-right: 18px;
+  }
   .profileSheetHero{
     margin-top: 0;
   }
-  .profileSheetName{ font-size: 24px; }
+  .profileSheetName{ font-size: 20px; }
   .tabs{ gap: 8px; }
 }
 .modalTop{ display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;flex-shrink: 0; }
@@ -3060,6 +3068,54 @@ body:not(.polish-pack) .tonePicker{
   /* iOS: ensure the scroll container is actually allowed to pan */
   touch-action: pan-y;
 }
+.profileModalTop{
+  margin-bottom: 0;
+  padding: 12px 12px 0;
+}
+.profileModalCard .modalBody{
+  padding: 0 12px 12px;
+}
+.notificationsModal{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  z-index: 400;
+}
+.notificationsCard{
+  width: min(640px, calc(100vw - 36px));
+}
+.notificationsActions{ display:flex; justify-content:flex-end; margin-bottom:10px; }
+.notificationsList{ display:flex; flex-direction:column; gap:12px; }
+.notificationsGroup{ display:flex; flex-direction:column; gap:8px; }
+.notificationsGroupTitle{
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.notificationsRow{
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform .12s ease, background .12s ease;
+}
+.notificationsRow:active{ transform: scale(0.98); }
+.notificationsIcon{ font-size: 16px; }
+.notificationsText{ font-size: 13px; }
+.notificationsTime{ font-size: 11px; color: var(--muted); white-space: nowrap; }
 .modalContent{ flex:1 1 auto; overflow:auto; -webkit-overflow-scrolling: touch; padding-right:2px; min-height:0; }
 .tabs{
   display:flex;
@@ -5327,19 +5383,22 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
 /* ==== Profile sheet modal (custom, not a clone) ==== */
 .profileSheetHero{
   position: relative;
-  margin: 10px 0 6px;
-  border-radius: 16px;
+  margin: 0;
+  border-radius: 14px;
   overflow: hidden;
   border: 1px solid rgba(255,255,255,.08);
   background: rgba(0,0,0,.25);
   color: var(--profileHeaderText, #fff);
+  min-height: 120px;
   --profileHeaderTextShadow: 0 1px 4px rgba(0,0,0,.6);
   --profileHeaderText: #fff;
   --profileHeaderPillBg: rgba(0,0,0,.32);
   --profileHeaderPillBorder: rgba(255,255,255,.18);
 }
 .profileSheetBg{
-  height: 170px;
+  position: absolute;
+  inset: 0;
+  height: 100%;
   background: var(--profileHeaderBg, linear-gradient(135deg, rgba(255,106,43,.75), rgba(43,15,8,.85)));
   filter: saturate(1.08);
   background-repeat: no-repeat;
@@ -5377,19 +5436,22 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   .profileSheetOverlay{ animation: none !important; transition: none !important; }
 }
 .profileSheetContent{
-  display: grid;
-  grid-template-columns: 110px 1fr;
-  gap: 14px;
-  padding: 14px;
-  margin-top: -64px;
-  align-items: center;
   position: relative;
   z-index: 1;
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  align-items: center;
+  flex-wrap: wrap;
 }
+.profileSheetContent.compact{
+  padding: 10px 12px;
+}
+.profileAvatarWrap{ position: relative; display: grid; place-items: center; }
 .profileSheetAvatarCard{
-  width: 110px;
-  height: 110px;
-  border-radius: 18px;
+  width: 82px;
+  height: 82px;
+  border-radius: 16px;
   overflow: hidden;
   border: 2px solid rgba(255,255,255,.14);
   background: rgba(0,0,0,.40);
@@ -5414,6 +5476,27 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   background: rgba(0,0,0,.45);
   border-radius: 14px;
 }
+.profilePresenceDot{
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid rgba(0,0,0,.5);
+  background: #7f8c8d;
+  box-shadow: 0 0 8px rgba(0,0,0,.35);
+}
+.profilePresenceDot[data-status="online"]{ background: #3bd16f; }
+.profilePresenceDot[data-status="away"]{ background: #f5c542; }
+.profilePresenceDot[data-status="busy"],
+.profilePresenceDot[data-status="dnd"]{ background: #ef4444; }
+.profilePresenceDot[data-status="idle"]{ background: #f59e0b; }
+.profilePresenceDot[data-status="gaming"]{ background: #8b5cf6; }
+.profilePresenceDot[data-status="music"]{ background: #22c55e; }
+.profilePresenceDot[data-status="working"]{ background: #38bdf8; }
+.profilePresenceDot[data-status="chatting"]{ background: #60a5fa; }
+.profilePresenceDot[data-status="lurking"]{ background: #a3a3a3; }
 .iconPill{
   flex: 1;
   display: inline-flex;
@@ -5431,12 +5514,12 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
 .vibeRow{ display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
 .vibeChip{ background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.08); padding:2px 8px; border-radius:999px; font-size:11px; line-height:1.2; color:var(--text,#fff); }
 .vibeChip.mini{ font-size:10px; opacity:0.85; }
-.profileSheetMeta{ color: var(--profileHeaderText, #fff); padding-bottom: 6px; text-shadow: var(--profileHeaderTextShadow, none); }
+.profileSheetMeta{ color: var(--profileHeaderText, #fff); padding-bottom: 6px; text-shadow: var(--profileHeaderTextShadow, none); flex: 1; min-width: 0; }
 .profileSheetNameRow{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-.profileSheetName{ font-size: 22px; font-weight: 800; letter-spacing: .2px; text-shadow: var(--profileHeaderTextShadow, none); }
+.profileSheetName{ font-size: 18px; font-weight: 800; letter-spacing: .2px; text-shadow: var(--profileHeaderTextShadow, none); }
 .profileRoleChip{
-  font-size: 12px;
-  padding: 6px 10px;
+  font-size: 11px;
+  padding: 4px 8px;
   border-radius: 999px;
   border: 1px solid var(--profileHeaderPillBorder, rgba(255,255,255,.18));
   background: var(--profileHeaderPillBg, rgba(255,255,255,.08));
@@ -5447,10 +5530,10 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   display:flex;
   gap:8px;
   flex-wrap:wrap;
-  margin-top:6px;
+  margin-top:4px;
 }
 .profileDetail{
-  padding:6px 10px;
+  padding:4px 8px;
   border-radius:12px;
   border:1px solid var(--profileHeaderPillBorder, rgba(255,255,255,.12));
   background: var(--profileHeaderPillBg, rgba(0,0,0,.28));
@@ -5459,7 +5542,7 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   text-shadow: var(--profileHeaderTextShadow, none);
 }
 .profileSheetSub{
-  margin-top: 6px;
+  margin-top: 4px;
   font-size: 12px;
   opacity: .9;
   text-shadow: var(--profileHeaderTextShadow, none);
@@ -5472,7 +5555,7 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   opacity: .95;
 }
 .statPill{
-  padding: 6px 10px;
+  padding: 4px 8px;
   border-radius: 999px;
   border: 1px solid var(--profileHeaderPillBorder, rgba(255,255,255,.12));
   background: var(--profileHeaderPillBg, rgba(0,0,0,.25));
@@ -5480,25 +5563,62 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   color: var(--profileHeaderText, #fff);
   text-shadow: var(--profileHeaderTextShadow, none);
 }
+.profileHeaderActions{
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-self: flex-start;
+}
+.profileHeaderActions .iconBtn{
+  height: 30px;
+  width: 30px;
+  padding: 0;
+  font-size: 16px;
+}
 
 .profileActions{ display:flex; flex-direction:column; gap:8px; margin:6px 0 6px; }
-.profileActionTabs{ width:100%; flex-wrap:nowrap; display:grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap:8px; margin:6px 0 4px; }
-.profileActionTabs .tab{
-  aspect-ratio: 1;
-  min-height: 78px;
+.profileActionTabs{ width:100%; flex-wrap:nowrap; display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:6px; margin:6px 0 4px; }
+.profileCompactTabs .tab{
+  min-height: 34px;
   flex: 1 1 auto;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-size: 11px;
-  line-height: 1.2;
+  font-size: 12px;
+  padding: 6px 8px;
 }
-.profileActionTabs .tab .tabIcon{ font-size: 20px; }
-.profileActionTabs .tab .tabLabel{ white-space: normal; opacity: .9; font-weight: 800; }
+.profileCompactTabs .tab:active{ transform: scale(0.98); }
 .profileQuickActions{ display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
 .quickActionGroup{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .quickActionGroup .badge{ height:100%; display:flex; align-items:center; justify-content:center; }
+
+.profileSticky{
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--panel);
+  padding-top: 6px;
+  margin: 0 -12px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.profileInfoList{
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.profileInfoRow{
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.06);
+  background: rgba(255,255,255,.03);
+}
+.profileInfoRow .infoIcon{ font-size: 14px; opacity: .8; }
+.profileInfoRow .infoLabel{ font-size: 12px; color: var(--muted); font-weight: 700; }
+.profileInfoRow .infoValue{ font-size: 12px; font-weight: 800; }
+.profileCustomEmpty .panelBox{ border-style: dashed; }
 
 .profileMenu{
   display: grid;
@@ -5559,14 +5679,14 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
 }
 
 @media (max-width: 760px){
-  .profileSheetBg{ height: 150px; }
+  .profileSheetBg{ height: 100%; }
   .profileSheetContent{
-    grid-template-columns: 96px 1fr;
-    margin-top: -56px;
-    padding: 12px;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 10px;
   }
-  .profileSheetAvatarCard{ width: 96px; height: 96px; border-radius: 16px; }
-  .profileSheetName{ font-size: 20px; }
+  .profileSheetAvatarCard{ width: 72px; height: 72px; border-radius: 14px; }
+  .profileHeaderActions{ align-self: stretch; justify-content: flex-end; }
   .profileMenuRow{ grid-template-columns: 42px 1fr auto; }
   .profileMenu{ margin-bottom: calc(12px + env(safe-area-inset-bottom)); }
 }
