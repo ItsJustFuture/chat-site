@@ -2671,6 +2671,17 @@ body.dice-room .sys .diceFace{
   color:var(--inputText);
   outline:none;
 }
+.inputBar #sendBtn,
+.dmInput #dmSendBtn{
+  order:4;
+  border-top-right-radius:0;
+  border-bottom-right-radius:0;
+}
+.inputBar .tonePicker,
+.dmInput .tonePicker{
+  order:5;
+  margin-left:-10px;
+}
 .tonePicker{
   position:relative;
   display:flex;
@@ -2678,22 +2689,28 @@ body.dice-room .sys .diceFace{
   flex-shrink:0;
 }
 .toneMenuBtn{
-  border:1px solid var(--border);
-  background:color-mix(in srgb, var(--panel) 85%, transparent);
-  color:var(--text);
+  border:0;
+  background:var(--btnPrimaryBg);
+  color:var(--btnPrimaryText);
   cursor:pointer;
-  font-size:13px;
+  font-size:14px;
   font-weight:800;
-  line-height:1.1;
-  padding:8px 12px;
-  border-radius:999px;
+  line-height:1;
+  padding:0 10px;
+  border-radius:0 var(--radiusMd) var(--radiusMd) 0;
   min-height:38px;
+  min-width:36px;
   display:inline-flex;
   align-items:center;
+  justify-content:center;
   gap:6px;
+  border-left:1px solid color-mix(in srgb, var(--btnPrimaryText) 25%, transparent);
 }
 .tonePicker.is-open .toneMenuBtn{
   box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.tonePicker.has-tone .toneMenuBtn{
+  box-shadow:0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 .toneMenuPanel{
   position:absolute;
@@ -3043,6 +3060,42 @@ body:not(.polish-pack) .tonePicker{
 .panelBox{ background:var(--panel2); border:1px solid var(--border); border-radius:14px; padding:10px; }
 .panelBox .badge{ background:var(--accent); color:var(--btnPrimaryText); }
 .panelBox .small{ color:var(--muted); }
+.prefsSections{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  margin-top:6px;
+}
+.prefsSection{
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:color-mix(in srgb, var(--panel) 82%, transparent);
+  padding:0;
+}
+.prefsSection summary{
+  list-style:none;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  min-height:40px;
+  padding:10px 12px;
+  font-weight:800;
+}
+.prefsSection summary::-webkit-details-marker{ display:none; }
+.prefsSection summary::after{
+  content:"▾";
+  font-size:14px;
+  color:var(--muted);
+  transition:transform .15s ease;
+}
+.prefsSection[open] summary::after{ transform:rotate(180deg); }
+.prefsContent{
+  padding:0 12px 12px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
 .chatFxPreview{
   margin-bottom:12px;
   padding:12px;
