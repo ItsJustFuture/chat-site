@@ -436,6 +436,45 @@ try {
   try {
     await pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_open_appeal_per_user ON appeals(username) WHERE status='open'`);
   } catch {}
+
+  // --- Referrals tables (moderator -> admin escalation)
+  try {
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS referrals (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL,
+        referred_by TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        notes TEXT,
+        status TEXT NOT NULL DEFAULT 'open', -- 'open'|'acted'|'dismissed'
+        action_by TEXT,
+        action_type TEXT, -- 'ban'|'kick'|'dismiss'
+        action_minutes INTEGER,
+        action_reason TEXT,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
+      )
+    `);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_referrals_status ON referrals(status)`);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_referrals_username ON referrals(username)`);
+
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS referral_messages (
+        id SERIAL PRIMARY KEY,
+        referral_id INTEGER NOT NULL REFERENCES referrals(id) ON DELETE CASCADE,
+        author_role TEXT NOT NULL, -- 'user'|'staff'
+        author_name TEXT,
+        message TEXT NOT NULL,
+        created_at BIGINT NOT NULL
+      )
+    `);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_referral_messages_referral ON referral_messages(referral_id)`);
+  } catch {}
+
+
+  // Seed role presets for Role Debug panel
+  try { await ensureRolePresetsSeeded(); } catch {}
+
 } catch (e) {
   console.warn("[pg-init] restrictions/appeals tables failed:", e?.message || e);
 }
@@ -925,6 +964,261 @@ async function pgUpsertFromSqliteRow(row) {
   return pgRowToUser(rows[0]);
 }
   const ROLES = ["Guest", "User", "VIP", "Moderator", "Admin", "Co-owner", "Owner"];
+
+// --- Permissions (Role presets + per-user overrides) -------------------------
+// NOTE: Role hierarchy still exists (ROLES), but specific actions must pass permission checks.
+// Role presets are editable via the Role Debug panel (Owner/Co-owner).
+const ALL_PERMS = [
+  // Moderation
+  "mod:kick",
+  "mod:ban",
+  "mod:mute",
+  "mod:warn",
+  "mod:delete",
+  "mod:unban",
+  "mod:unmute",
+  // Referrals
+  "mod:referralSubmit",
+  "mod:referralAction",
+  // Tickets / panels
+  "tickets:appeals",
+  "tickets:referrals",
+  "tickets:appealCreate",
+  "tickets:appealReadMine",
+  // Site tools
+  "site:roleManage",
+  "site:settingsLite",
+  "site:settings",
+  "site:maintenance",
+  // Debug
+  "debug:roles",
+  // QoL
+  "chat:deleteSelf",
+];
+
+const FIXED_ROLES = {
+  "iri": "Owner",
+  "lola henderson": "Co-owner",
+  "amelia": "Co-owner",
+  "ally": "Admin",
+};
+
+const DEFAULT_ROLE_PRESETS = {
+  "Guest": [],
+  "User": [],
+  "VIP": ["chat:deleteSelf"],
+  "Moderator": ["mod:kick","mod:mute","mod:warn","mod:delete","mod:unmute","mod:referralSubmit","tickets:appealCreate","tickets:appealReadMine"],
+  "Admin": ["mod:kick","mod:ban","mod:mute","mod:warn","mod:delete","mod:unban","mod:unmute","mod:referralAction","tickets:appeals","tickets:referrals"],
+  "Co-owner": ["site:roleManage","site:settingsLite","mod:kick","mod:ban","mod:mute","mod:warn","mod:delete","mod:unban","mod:unmute","mod:referralAction","tickets:appeals","tickets:referrals","debug:roles"],
+  "Owner": ["site:roleManage","site:settings","site:maintenance","mod:kick","mod:ban","mod:mute","mod:warn","mod:delete","mod:unban","mod:unmute","mod:referralAction","tickets:appeals","tickets:referrals","debug:roles"],
+};
+
+let rolePresetsCache = null; // { role -> perms[] }
+const userOverridesCache = new Map(); // lower(username) -> { allow:[], deny:[] }
+
+function normalizeRole(input, fallback = "User") {
+  const raw = String(input || "").trim();
+  const found = ROLES.find((r) => r.toLowerCase() === raw.toLowerCase());
+  return found || fallback;
+}
+
+function normalizePermList(list) {
+  const arr = Array.isArray(list) ? list : [];
+  const set = new Set();
+  for (const p of arr) {
+    const key = String(p || "").trim();
+    if (ALL_PERMS.includes(key)) set.add(key);
+  }
+  return Array.from(set);
+}
+
+function applyOverrides(basePerms, override) {
+  const set = new Set(basePerms || []);
+  if (override?.deny) for (const p of override.deny) set.delete(p);
+  if (override?.allow) for (const p of override.allow) set.add(p);
+  return Array.from(set);
+}
+
+async function ensureFixedRole(username) {
+  const key = String(username || "").trim().toLowerCase();
+  const fixed = FIXED_ROLES[key];
+  if (!fixed) return null;
+  // Update SQLite best-effort
+  try { await dbRunAsync("UPDATE users SET role=? WHERE lower(username)=lower(?)", [fixed, username]); } catch {}
+  // Update Postgres best-effort
+  try {
+    await pgPool.query("UPDATE users SET role=$1 WHERE lower(username)=lower($2)", [fixed, username]);
+  } catch {}
+  return fixed;
+}
+
+async function pgEnsureRoleDebugTables() {
+  try {
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS role_presets (
+        role TEXT PRIMARY KEY,
+        perms JSONB NOT NULL,
+        updated_at BIGINT NOT NULL
+      )
+    `);
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS user_perm_overrides (
+        username TEXT PRIMARY KEY,
+        allow JSONB NOT NULL DEFAULT '[]'::jsonb,
+        deny JSONB NOT NULL DEFAULT '[]'::jsonb,
+        updated_at BIGINT NOT NULL
+      )
+    `);
+  } catch {}
+}
+
+async function loadRolePresets() {
+  // Start from defaults, overlay DB values
+  const merged = JSON.parse(JSON.stringify(DEFAULT_ROLE_PRESETS));
+  try {
+    const r = await pgPool.query("SELECT role, perms FROM role_presets");
+    for (const row of r.rows || []) {
+      const role = normalizeRole(row.role, null);
+      if (!role) continue;
+      merged[role] = normalizePermList(row.perms);
+    }
+  } catch {
+    // SQLite fallback
+    try {
+      const rows = await dbAllAsync("SELECT role, perms_json FROM role_presets");
+      for (const row of rows || []) {
+        const role = normalizeRole(row.role, null);
+        if (!role) continue;
+        let parsed = [];
+        try { parsed = JSON.parse(row.perms_json || "[]"); } catch {}
+        merged[role] = normalizePermList(parsed);
+      }
+    } catch {}
+  }
+  rolePresetsCache = merged;
+  return merged;
+}
+
+async function ensureRolePresetsSeeded() {
+  await pgEnsureRoleDebugTables();
+  const now = Date.now();
+  // Seed PG
+  try {
+    const r = await pgPool.query("SELECT role FROM role_presets LIMIT 1");
+    if (!r.rows || r.rows.length === 0) {
+      for (const [role, perms] of Object.entries(DEFAULT_ROLE_PRESETS)) {
+        await pgPool.query(
+          "INSERT INTO role_presets (role, perms, updated_at) VALUES ($1,$2,$3) ON CONFLICT (role) DO NOTHING",
+          [role, JSON.stringify(perms), now]
+        );
+      }
+    }
+  } catch {
+    // Seed SQLite
+    try {
+      const r = await dbGetAsync("SELECT role FROM role_presets LIMIT 1");
+      if (!r) {
+        for (const [role, perms] of Object.entries(DEFAULT_ROLE_PRESETS)) {
+          await dbRunAsync(
+            "INSERT OR IGNORE INTO role_presets (role, perms_json, updated_at) VALUES (?,?,?)",
+            [role, JSON.stringify(perms), now]
+          );
+        }
+      }
+    } catch {}
+  }
+  await loadRolePresets();
+}
+
+async function getUserOverride(username) {
+  const key = String(username || "").trim().toLowerCase();
+  if (!key) return { allow: [], deny: [] };
+  if (userOverridesCache.has(key)) return userOverridesCache.get(key);
+  let ov = { allow: [], deny: [] };
+  try {
+    const r = await pgPool.query("SELECT allow, deny FROM user_perm_overrides WHERE lower(username)=lower($1)", [username]);
+    if (r.rows && r.rows[0]) {
+      ov = { allow: normalizePermList(r.rows[0].allow), deny: normalizePermList(r.rows[0].deny) };
+    }
+  } catch {
+    try {
+      const row = await dbGetAsync("SELECT allow_json, deny_json FROM user_perm_overrides WHERE lower(username)=lower(?)", [username]);
+      if (row) {
+        let a=[], d=[];
+        try { a = JSON.parse(row.allow_json || "[]"); } catch {}
+        try { d = JSON.parse(row.deny_json || "[]"); } catch {}
+        ov = { allow: normalizePermList(a), deny: normalizePermList(d) };
+      }
+    } catch {}
+  }
+  userOverridesCache.set(key, ov);
+  return ov;
+}
+
+async function setUserOverride(username, allow, deny) {
+  const key = String(username || "").trim();
+  if (!key) return;
+  const now = Date.now();
+  const ov = { allow: normalizePermList(allow), deny: normalizePermList(deny) };
+  userOverridesCache.set(key.toLowerCase(), ov);
+  try {
+    await pgPool.query(
+      `INSERT INTO user_perm_overrides (username, allow, deny, updated_at)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (username) DO UPDATE SET allow=EXCLUDED.allow, deny=EXCLUDED.deny, updated_at=EXCLUDED.updated_at`,
+      [key, JSON.stringify(ov.allow), JSON.stringify(ov.deny), now]
+    );
+    return;
+  } catch {}
+  try {
+    await dbRunAsync(
+      `INSERT OR REPLACE INTO user_perm_overrides (username, allow_json, deny_json, updated_at)
+       VALUES (?,?,?,?)`,
+      [key, JSON.stringify(ov.allow), JSON.stringify(ov.deny), now]
+    );
+  } catch {}
+}
+
+async function setRolePreset(role, perms) {
+  const r = normalizeRole(role);
+  const now = Date.now();
+  const list = normalizePermList(perms);
+  rolePresetsCache = rolePresetsCache || JSON.parse(JSON.stringify(DEFAULT_ROLE_PRESETS));
+  rolePresetsCache[r] = list;
+  try {
+    await pgPool.query(
+      `INSERT INTO role_presets (role, perms, updated_at)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (role) DO UPDATE SET perms=EXCLUDED.perms, updated_at=EXCLUDED.updated_at`,
+      [r, JSON.stringify(list), now]
+    );
+    return;
+  } catch {}
+  try {
+    await dbRunAsync(
+      `INSERT OR REPLACE INTO role_presets (role, perms_json, updated_at) VALUES (?,?,?)`,
+      [r, JSON.stringify(list), now]
+    );
+  } catch {}
+}
+
+async function computePermsForUser(username, role) {
+  const fixed = await ensureFixedRole(username);
+  const effectiveRole = fixed || normalizeRole(role);
+  if (!rolePresetsCache) await ensureRolePresetsSeeded();
+  const basePerms = rolePresetsCache?.[effectiveRole] || DEFAULT_ROLE_PRESETS[effectiveRole] || [];
+  const ov = await getUserOverride(username);
+  const perms = applyOverrides(basePerms, ov);
+  return { role: effectiveRole, perms };
+}
+
+function hasPerm(socket, perm) {
+  const p = String(perm || "").trim();
+  if (!p) return false;
+  const list = socket.user?.perms || socket.request?.session?.user?.perms || [];
+  return Array.isArray(list) && list.includes(p);
+}
+
 function roleRank(role) {
   const idx = ROLES.indexOf(role);
   return idx === -1 ? 1 : idx;
@@ -3473,10 +3767,13 @@ app.post("/register", async (req, res) => {
     }
 
     // 3) Create session
+    const effective = await computePermsForUser(user.username, user.role);
+    user.role = effective.role;
     req.session.user = {
       id: user.id,
       username: user.username,
-      role: user.role,
+      role: effective.role,
+      perms: effective.perms,
       theme: sanitizeThemeNameServer(user.theme),
       avatar: user.avatar || "",
       avatar_updated: user.avatar_updated ?? null,
@@ -3535,10 +3832,13 @@ app.post("/login", async (req, res) => {
       // IMPORTANT: In Postgres we primarily store avatars in avatar_bytes/avatar_updated.
       // If we only read the legacy "avatar" column here, the session will have an empty avatar
       // and the UI will look like the profile "didn't save" after refresh.
+      const effective = await computePermsForUser(pgUser.username, pgUser.role);
+      pgUser.role = effective.role;
       req.session.user = {
         id: pgUser.id,
         username: pgUser.username,
-        role: pgUser.role,
+        role: effective.role,
+        perms: effective.perms,
         theme,
         avatar: avatarUrlFromRow(pgUser) || "",
         avatar_updated: pgUser.avatar_updated ?? pgUser.avatarUpdated ?? null,
@@ -3621,7 +3921,8 @@ app.post("/login", async (req, res) => {
       ]
     ).catch((e) => console.error("PG mirror on login failed:", e));
 
-    req.session.user = { id: row.id, username: row.username, role: row.role, theme, avatar: avatarUrlFromRow(row) || "", avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? null };
+    req.session.user = { id: row.id, username: row.username, role: effective.role,
+      perms: effective.perms, theme, avatar: avatarUrlFromRow(row) || "", avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? null };
 
     await dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]).catch(() => {});
     await awardLoginXp(row.id, row.role);
@@ -3680,10 +3981,13 @@ app.get("/me", async (req, res) => {
       } catch (_) {}
 
       const computedAvatar = avatarUrlFromRow(srow) || "";
+      const effective = await computePermsForUser(srow.username, srow.role);
+      srow.role = effective.role;
       req.session.user = {
         id: srow.id,
         username: srow.username,
-        role: srow.role,
+        role: effective.role,
+        perms: effective.perms,
         theme,
         avatar: computedAvatar || prevAvatar,
         avatar_updated: srow.avatar_updated ?? srow.avatarUpdated ?? prevAvatarUpdated,
@@ -3695,10 +3999,13 @@ app.get("/me", async (req, res) => {
     if (!row.theme) await pgPool.query("UPDATE users SET theme = $1 WHERE id = $2", [theme, row.id]);
 
     const computedAvatar = avatarUrlFromRow(row) || "";
+    const effective = await computePermsForUser(row.username, row.role);
+    row.role = effective.role;
     req.session.user = {
       id: row.id,
       username: row.username,
-      role: row.role,
+      role: effective.role,
+      perms: effective.perms,
       theme,
       avatar: computedAvatar || prevAvatar,
       avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? prevAvatarUpdated,
@@ -5899,6 +6206,26 @@ io.on("connection", (socket) => {
     chatFx: sanitizeChatFx(sessUser.chatFx),
   };
 
+  // Compute effective role + perms (includes fixed-role enforcement + user overrides)
+  (async () => {
+    try {
+      const effective = await computePermsForUser(socket.user.username, socket.user.role);
+      socket.user.role = effective.role;
+      socket.user.perms = effective.perms;
+      // Keep session in sync so client refreshes keep permissions.
+      if (socket.request?.session?.user) {
+        socket.request.session.user.role = effective.role;
+        socket.request.session.user.perms = effective.perms;
+        socket.request.session.save(() => {});
+      }
+      io.to(socket.id).emit("perms:mine", { role: effective.role, perms: effective.perms, allPerms: ALL_PERMS });
+    } catch {
+      io.to(socket.id).emit("perms:mine", { role: socket.user.role, perms: [], allPerms: ALL_PERMS });
+    }
+  })();
+
+
+
 
 
 // --- Enforce kick/ban restrictions immediately on connect
@@ -7131,20 +7458,20 @@ socket.on("appeal:send", async ({ message } = {}, ack) => {
   if (typeof ack === "function") ack({ ok: true, appeal: open, messages });
 });
 
-function isAppealsStaff(role){
-  return requireMinRole(role, "Admin") || requireMinRole(role, "Co owner") || requireMinRole(role, "Owner");
+function isAppealsStaffSocket(socket){
+  return hasPerm(socket, "tickets:appeals") || hasPerm(socket, "debug:roles") || hasPerm(socket, "site:roleManage");
 }
 
 socket.on("appeals:list", async (_payload, ack) => {
   const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
-  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
+  if (!isAppealsStaffSocket(socket)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
   const items = await listOpenAppeals();
   if (typeof ack === "function") ack({ ok: true, items });
 });
 
 socket.on("appeals:read", async ({ appealId } = {}, ack) => {
   const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
-  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
+  if (!isAppealsStaffSocket(socket)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
 
   const id = Number(appealId);
   if (!Number.isFinite(id)) return typeof ack === "function" ? ack({ ok: false, error: "Invalid appeal" }) : null;
@@ -7170,7 +7497,7 @@ socket.on("appeals:read", async ({ appealId } = {}, ack) => {
 
 socket.on("appeals:reply", async ({ appealId, message } = {}, ack) => {
   const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
-  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
+  if (!isAppealsStaffSocket(socket)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
 
   const id = Number(appealId);
   if (!Number.isFinite(id)) return typeof ack === "function" ? ack({ ok: false, error: "Invalid appeal" }) : null;
@@ -7183,7 +7510,7 @@ socket.on("appeals:reply", async ({ appealId, message } = {}, ack) => {
 
 socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, ack) => {
   const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
-  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
+  if (!isAppealsStaffSocket(socket)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
 
   const id = Number(appealId);
   if (!Number.isFinite(id)) return typeof ack === "function" ? ack({ ok: false, error: "Invalid appeal" }) : null;
@@ -7237,6 +7564,209 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
   if (typeof ack === "function") ack({ ok: true });
 });
 
+
+// --- Referrals (Moderators escalate to Admin+) --------------------------------
+async function createReferral({ username, referredBy, reason, notes = "" }) {
+  const u = String(username || "").trim();
+  const by = String(referredBy || "").trim();
+  const r = String(reason || "").trim().slice(0, 800);
+  const n = String(notes || "").trim().slice(0, 1200);
+  const now = Date.now();
+  if (!u || !by || !r) return null;
+
+  // PG first
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query(
+        `INSERT INTO referrals (username, referred_by, reason, notes, status, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,'open',$5,$5)
+         RETURNING *`,
+        [u, by, r, n, now]
+      );
+      return rows?.[0] || null;
+    }
+  } catch {}
+  // SQLite fallback
+  try {
+    const runRes = await dbRunAsync(
+      `INSERT INTO referrals (username, referred_by, reason, notes, status, created_at, updated_at)
+       VALUES (?,?,?,?, 'open', ?, ?)`,
+      [u, by, r, n, now, now]
+    );
+    const row = await dbGetAsync("SELECT * FROM referrals WHERE id=?", [runRes.lastID]);
+    return row || null;
+  } catch {}
+  return null;
+}
+
+async function listOpenReferrals() {
+  // PG first
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query(
+        "SELECT * FROM referrals WHERE status='open' ORDER BY created_at DESC LIMIT 200"
+      );
+      return rows || [];
+    }
+  } catch {}
+  try {
+    const rows = await dbAllAsync("SELECT * FROM referrals WHERE status='open' ORDER BY created_at DESC LIMIT 200");
+    return rows || [];
+  } catch {}
+  return [];
+}
+
+async function readReferral(id) {
+  const rid = Number(id);
+  if (!Number.isFinite(rid)) return null;
+  // PG first
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query("SELECT * FROM referrals WHERE id=$1", [rid]);
+      const referral = rows?.[0] || null;
+      if (!referral) return null;
+      const { rows: msgs } = await pgPool.query(
+        "SELECT * FROM referral_messages WHERE referral_id=$1 ORDER BY created_at ASC",
+        [rid]
+      );
+      return { referral, messages: msgs || [] };
+    }
+  } catch {}
+  try {
+    const referral = await dbGetAsync("SELECT * FROM referrals WHERE id=?", [rid]);
+    if (!referral) return null;
+    const messages = await dbAllAsync(
+      "SELECT * FROM referral_messages WHERE referral_id=? ORDER BY created_at ASC",
+      [rid]
+    );
+    return { referral, messages: messages || [] };
+  } catch {}
+  return null;
+}
+
+async function addReferralMessage({ referralId, authorRole, authorName, message }) {
+  const rid = Number(referralId);
+  if (!Number.isFinite(rid)) return false;
+  const now = Date.now();
+  const role = String(authorRole || "").trim().slice(0, 32) || "staff";
+  const name = String(authorName || "").trim().slice(0, 64);
+  const msg = String(message || "").trim().slice(0, 2000);
+  if (!msg) return false;
+
+  try {
+    if (PG_READY) {
+      await pgPool.query(
+        "INSERT INTO referral_messages (referral_id, author_role, author_name, message, created_at) VALUES ($1,$2,$3,$4,$5)",
+        [rid, role, name, msg, now]
+      );
+      await pgPool.query("UPDATE referrals SET updated_at=$1 WHERE id=$2", [now, rid]).catch(()=>{});
+      return true;
+    }
+  } catch {}
+  try {
+    await dbRunAsync(
+      "INSERT INTO referral_messages (referral_id, author_role, author_name, message, created_at) VALUES (?,?,?,?,?)",
+      [rid, role, name, msg, now]
+    );
+    await dbRunAsync("UPDATE referrals SET updated_at=? WHERE id=?", [now, rid]).catch(()=>{});
+    return true;
+  } catch {}
+  return false;
+}
+
+async function actionReferral({ id, actorUsername, actionType, minutes = 0, reason = "" }) {
+  const rid = Number(id);
+  const now = Date.now();
+  if (!Number.isFinite(rid)) return false;
+
+  const action = String(actionType || "").trim();
+  const mins = Number(minutes) || 0;
+  const why = String(reason || "").trim().slice(0, 800);
+  const actor = String(actorUsername || "").trim().slice(0, 64);
+
+  // Load referral
+  const pack = await readReferral(rid);
+  const referral = pack?.referral;
+  if (!referral) return false;
+
+  // Apply moderation action
+  if (action === "ban") {
+    await setBanEverywhere(referral.username, actor, why || referral.reason || "Referred for ban");
+  } else if (action === "kick") {
+    // minutes -> seconds, clamp to 1 week
+    const secs = Math.max(60, Math.min(7 * 24 * 3600, Math.floor(mins * 60)));
+    await setKickEverywhere(referral.username, actor, why || referral.reason || "Referred for kick", secs);
+  }
+
+  // Mark referral
+  try {
+    if (PG_READY) {
+      await pgPool.query(
+        `UPDATE referrals SET status=$1, action_by=$2, action_type=$3, action_minutes=$4, action_reason=$5, updated_at=$6 WHERE id=$7`,
+        [action === "dismiss" ? "dismissed" : "acted", actor, action, mins || null, why || null, now, rid]
+      );
+      return true;
+    }
+  } catch {}
+  try {
+    await dbRunAsync(
+      `UPDATE referrals SET status=?, action_by=?, action_type=?, action_minutes=?, action_reason=?, updated_at=? WHERE id=?`,
+      [action === "dismiss" ? "dismissed" : "acted", actor, action, mins || null, why || null, now, rid]
+    );
+    return true;
+  } catch {}
+  return false;
+}
+
+function isReferralStaffSocket(socket){
+  return hasPerm(socket, "tickets:referrals") || hasPerm(socket, "mod:referralAction") || hasPerm(socket, "debug:roles");
+}
+
+socket.on("referrals:submit", async ({ username, reason = "", notes = "" } = {}, ack) => {
+  if (!hasPerm(socket, "mod:referralSubmit")) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+  const actor = socket.user?.username || socket.request?.session?.user?.username || "unknown";
+  const created = await createReferral({ username: sanitizeUsername(username), referredBy: actor, reason, notes });
+  if (!created) return typeof ack === "function" ? ack({ ok:false, error:"Failed to create referral" }) : null;
+  io.emit("referrals:updated");
+  return typeof ack === "function" ? ack({ ok:true, referral: created }) : null;
+});
+
+socket.on("referrals:list", async (_payload, ack) => {
+  if (!isReferralStaffSocket(socket)) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+  const items = await listOpenReferrals();
+  return typeof ack === "function" ? ack({ ok:true, items }) : null;
+});
+
+socket.on("referrals:read", async ({ id } = {}, ack) => {
+  if (!isReferralStaffSocket(socket)) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+  const pack = await readReferral(id);
+  if (!pack) return typeof ack === "function" ? ack({ ok:false, error:"Not found" }) : null;
+  return typeof ack === "function" ? ack({ ok:true, referral: pack.referral, messages: pack.messages }) : null;
+});
+
+socket.on("referrals:reply", async ({ id, message } = {}, ack) => {
+  if (!isReferralStaffSocket(socket)) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+  const actor = socket.user?.username || socket.request?.session?.user?.username || "staff";
+  await addReferralMessage({ referralId: id, authorRole: "staff", authorName: actor, message });
+  io.emit("referrals:updated");
+  return typeof ack === "function" ? ack({ ok:true }) : null;
+});
+
+socket.on("referrals:action", async ({ id, actionType, minutes = 0, reason = "" } = {}, ack) => {
+  if (!isReferralStaffSocket(socket)) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+
+  const action = String(actionType || "").trim();
+  if (action === "ban" && !hasPerm(socket, "mod:ban")) return typeof ack === "function" ? ack({ ok:false, error:"Missing ban permission" }) : null;
+  if (action === "kick" && !hasPerm(socket, "mod:kick")) return typeof ack === "function" ? ack({ ok:false, error:"Missing kick permission" }) : null;
+
+  const actor = socket.user?.username || socket.request?.session?.user?.username || "staff";
+  const ok = await actionReferral({ id, actorUsername: actor, actionType: action, minutes, reason });
+  if (!ok) return typeof ack === "function" ? ack({ ok:false, error:"Action failed" }) : null;
+  io.emit("referrals:updated");
+  return typeof ack === "function" ? ack({ ok:true }) : null;
+});
+
+
   socket.on("mod warn", ({ username, reason = "" }) => {
     const room = socket.currentRoom;
     if (!room) return;
@@ -7269,8 +7799,8 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
       ? "Owner"
       : (socket.user?.role || socket.request?.session?.user?.role || "User");
 
-    // Admin+ can update roles via the moderation panel.
-    if (!requireMinRole(actorRole, "Admin")) return;
+    // Role changes are a site tool (Owner/Co-owner by default; editable via presets)
+    if (!hasPerm(socket, "site:roleManage")) return;
 
     const rawName = String(username || "").trim().slice(0, 64);
     const sanitized = sanitizeUsername(rawName);
@@ -7281,6 +7811,17 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
     role = normalizedRole;
 
     const lookupName = rawName || sanitized;
+    const fixed = FIXED_ROLES[String(lookupName || "").trim().toLowerCase()];
+    if (fixed) {
+      // These accounts are pinned to a specific role; never allow changes.
+      io.to(socket.id).emit("system", `${lookupName} is pinned to ${fixed} and cannot be changed.`);
+      return;
+    }
+
+    // Co-owners can assign up to Admin (cannot assign Owner/Co-owner)
+    if (normalizeRole(actorRole) === "Co-owner" && (role === "Owner" || role === "Co-owner")) return;
+
+
     if (!lookupName) return;
 
     findUserByMention(lookupName, (_e, found) => {
@@ -7328,7 +7869,105 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
     });
   });
 
-  socket.on("disconnect", () => {
+  
+// --- Role Debug panel (Owner/Co-owner by default; customizable via presets)
+socket.on("debug:users", async (_payload, ack) => {
+  if (!hasPerm(socket, "debug:roles")) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+
+  // Pull from PG if available else SQLite
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query("SELECT username, role FROM users ORDER BY lower(username) ASC LIMIT 1000");
+      return typeof ack === "function" ? ack({ ok:true, users: rows || [] }) : null;
+    }
+  } catch {}
+  try {
+    const rows = await dbAllAsync("SELECT username, role FROM users ORDER BY lower(username) ASC LIMIT 1000");
+    return typeof ack === "function" ? ack({ ok:true, users: rows || [] }) : null;
+  } catch {}
+  return typeof ack === "function" ? ack({ ok:false, error:"Failed" }) : null;
+});
+
+socket.on("debug:getRolePresets", async (_payload, ack) => {
+  if (!hasPerm(socket, "debug:roles")) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+  if (!rolePresetsCache) await ensureRolePresetsSeeded();
+  return typeof ack === "function" ? ack({ ok:true, presets: rolePresetsCache, allPerms: ALL_PERMS }) : null;
+});
+
+async function pushPermsToOnlineUser(username) {
+  const name = String(username || "").trim();
+  if (!name) return;
+  for (const s of io.sockets.sockets.values()) {
+    const u = s.user?.username;
+    if (u && u.toLowerCase() === name.toLowerCase()) {
+      const effective = await computePermsForUser(s.user.username, s.user.role);
+      s.user.role = effective.role;
+      s.user.perms = effective.perms;
+      if (s.request?.session?.user) {
+        s.request.session.user.role = effective.role;
+        s.request.session.user.perms = effective.perms;
+        s.request.session.save(() => {});
+      }
+      io.to(s.id).emit("perms:mine", { role: effective.role, perms: effective.perms, allPerms: ALL_PERMS });
+    }
+  }
+}
+
+socket.on("debug:setRolePreset", async ({ role, perms } = {}, ack) => {
+  if (!hasPerm(socket, "debug:roles")) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+  await setRolePreset(role, perms);
+  // Push updated perms to all online users (cheap enough for small communities)
+  for (const s of io.sockets.sockets.values()) {
+    if (s.user?.username) await pushPermsToOnlineUser(s.user.username);
+  }
+  io.emit("debug:presetsUpdated");
+  return typeof ack === "function" ? ack({ ok:true }) : null;
+});
+
+socket.on("debug:setUserOverride", async ({ username, allow = [], deny = [] } = {}, ack) => {
+  if (!hasPerm(socket, "debug:roles")) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+
+  const target = String(username || "").trim();
+  if (!target) return typeof ack === "function" ? ack({ ok:false, error:"Missing username" }) : null;
+
+  // Never allow overrides for pinned accounts (keeps your core staff stable)
+  if (FIXED_ROLES[target.toLowerCase()]) {
+    return typeof ack === "function" ? ack({ ok:false, error:"Pinned account cannot be overridden" }) : null;
+  }
+
+  await setUserOverride(target, allow, deny);
+  await pushPermsToOnlineUser(target);
+  return typeof ack === "function" ? ack({ ok:true }) : null;
+});
+
+socket.on("debug:setUserRole", async ({ username, role } = {}, ack) => {
+  if (!hasPerm(socket, "debug:roles") || !hasPerm(socket, "site:roleManage"))
+    return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+
+  const target = String(username || "").trim();
+  const desired = normalizeRole(role);
+
+  if (!target) return typeof ack === "function" ? ack({ ok:false, error:"Missing username" }) : null;
+
+  if (FIXED_ROLES[target.toLowerCase()]) {
+    return typeof ack === "function" ? ack({ ok:false, error:"Pinned account cannot be changed" }) : null;
+  }
+
+  // Co-owner cannot assign Owner/Co-owner
+  const actorRole = normalizeRole(socket.user?.role || socket.request?.session?.user?.role || "User");
+  if (actorRole === "Co-owner" && (desired === "Owner" || desired === "Co-owner")) {
+    return typeof ack === "function" ? ack({ ok:false, error:"Co-owner cannot assign Owner/Co-owner" }) : null;
+  }
+
+  // Update DB everywhere
+  await setRoleEverywhere(null, target, desired);
+  await pushPermsToOnlineUser(target);
+
+  return typeof ack === "function" ? ack({ ok:true }) : null;
+});
+
+
+socket.on("disconnect", () => {
     // socket.user is attached after successful auth; guard for anonymous / early disconnects
     if (socket.user?.username) ONLINE_USERS.delete(socket.user.username);
     emitOnlineUsers();

@@ -428,7 +428,90 @@ await run(`CREATE INDEX IF NOT EXISTS idx_appeal_messages_appeal ON appeal_messa
        WHERE is_group = 0 AND user_low IS NOT NULL AND user_high IS NOT NULL`
   );
 
+
+  // --- Role presets + user permission overrides (for Role Debug panel)
+  await run(`
+    CREATE TABLE IF NOT EXISTS role_presets (
+      role TEXT PRIMARY KEY,
+      perms_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS user_perm_overrides (
+      username TEXT PRIMARY KEY,
+      allow_json TEXT NOT NULL DEFAULT '[]',
+      deny_json TEXT NOT NULL DEFAULT '[]',
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
+  // --- Referrals (moderator -> admin escalation) — SQLite fallback/dev
+  await run(`
+    CREATE TABLE IF NOT EXISTS referrals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL,
+      referred_by TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'open', -- 'open'|'acted'|'dismissed'
+      action_by TEXT,
+      action_type TEXT, -- 'ban'|'kick'|'dismiss'
+      action_minutes INTEGER,
+      action_reason TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS referral_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      referral_id INTEGER NOT NULL,
+      author_role TEXT NOT NULL, -- 'user'|'staff'
+      author_name TEXT,
+      message TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (referral_id) REFERENCES referrals(id) ON DELETE CASCADE
+    )
+  `);
+
+  await run(`CREATE INDEX IF NOT EXISTS idx_referrals_status ON referrals(status)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_referrals_username ON referrals(username)`);
+
+
+  // Seed role presets once (Role Debug panel can edit later)
+  const defaultPresets = {
+    "Guest": [],
+    "User": [],
+    "VIP": ["chat:deleteSelf"],
+    "Moderator": ["mod:kick","mod:mute","mod:warn","mod:delete","mod:unmute","mod:referralSubmit","tickets:appealCreate","tickets:appealReadMine"],
+    "Admin": ["mod:kick","mod:ban","mod:mute","mod:warn","mod:delete","mod:unban","mod:unmute","mod:referralAction","tickets:appeals","tickets:referrals"],
+    "Co-owner": ["site:roleManage","site:settingsLite","mod:kick","mod:ban","mod:mute","mod:warn","mod:delete","mod:unban","mod:unmute","mod:referralAction","tickets:appeals","tickets:referrals","debug:roles"],
+    "Owner": ["site:roleManage","site:settings","site:maintenance","mod:kick","mod:ban","mod:mute","mod:warn","mod:delete","mod:unban","mod:unmute","mod:referralAction","tickets:appeals","tickets:referrals","debug:roles"]
+  };
+
+  const presetRows = await new Promise((resolve) => {
+    db.all("SELECT role FROM role_presets LIMIT 1", [], (_e, rows) => resolve(rows || []));
+  });
+
+  if (!presetRows || presetRows.length === 0) {
+    const now = Date.now();
+    for (const [role, perms] of Object.entries(defaultPresets)) {
+      await run(
+        "INSERT OR REPLACE INTO role_presets (role, perms_json, updated_at) VALUES (?, ?, ?)",
+        [role, JSON.stringify(perms), now]
+      );
+    }
+  }
+
+
+
+  // --- Fixed role assignments
   await run("UPDATE users SET role='Owner' WHERE lower(username)='iri'");
+  await run("UPDATE users SET role='Co-owner' WHERE lower(username) IN ('lola henderson','amelia')");
+  await run("UPDATE users SET role='Admin' WHERE lower(username)='ally'");
 }
 
 const migrationsReady = runSqliteMigrations();
