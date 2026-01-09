@@ -6964,43 +6964,35 @@ socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300 } = 
   });
 });
 
-  
+socket.on("mod unkick", async ({ username } = {}) => {
+  const room = socket.currentRoom;
+  if (!room) return;
 
-  socket.on("mod unkick", async ({ username, reason = "" } = {}, ack) => {
-    const room = socket.currentRoom;
-    // room may be null if staff uses global panel; allow anyway
-    const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Moderator")) return;
+  const actorRole = socket.request.session.user.role;
+  if (!requireMinRole(actorRole, "Moderator")) return;
 
-    username = sanitizeUsername(username);
-    if (!username) return;
+  username = sanitizeUsername(username);
+  if (!username) return;
 
-    db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
-      if (!target) return;
-      if (!canModerate(actorRole, target.role)) return;
+  db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
+    if (!target) return;
+    if (!canModerate(actorRole, target.role)) return;
 
-      const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
-      const why = String(reason || "").slice(0, 180) || "Unkicked by staff";
-      try {
-        await clearRestrictionEverywhere(target.username, actorName, why);
-      } catch (e) {
-        if (typeof ack === "function") ack({ ok: false, error: "Failed to unkick" });
-        return;
-      }
+    const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
+    await clearRestrictionEverywhere(target.username, actorName, "unkick");
 
-      // Notify target if connected (including restricted socket)
-      const sid = socketIdByUserId.get(target.id);
-      if (sid) {
-        io.to(sid).emit("restriction:status", { type: "none", reason: "", expiresAt: null, now: Date.now() });
-      }
+    // Notify target (if online)
+    const sid = socketIdByUserId.get(target.id);
+    if (sid) {
+      io.to(sid).emit("restriction:status", { type: "none", reason: "", expiresAt: null, now: Date.now() });
+    }
 
-      if (room) io.to(room).emit("system", `${username} was unkicked.`);
-      logModAction({ actor: socket.user, action: "UNKICK", targetUserId: target.id, targetUsername: target.username, room: room || "", details: why });
-      if (typeof ack === "function") ack({ ok: true });
-    });
+    io.to(room).emit("system message", { text: `${target.username} has been un-kicked by ${actorName}.` });
   });
+});
 
-socket.on("mod mute", ({ username, minutes = 10, reason = "" }) => {
+
+  socket.on("mod mute", ({ username, minutes = 10, reason = "" }) => {
     const room = socket.currentRoom;
     if (!room) return;
 

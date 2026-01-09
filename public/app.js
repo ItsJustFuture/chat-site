@@ -1,4 +1,14 @@
-// public/app.js
+//
+if (quickUnkickBtn){
+  quickUnkickBtn.addEventListener("click", ()=>{
+    if(!modalTargetUsername){ if(quickModMsg) quickModMsg.textContent="No target selected."; return; }
+    if(!confirmModeration("unkick", modalTargetUsername)) return;
+    socket?.emit("mod unkick", { username: modalTargetUsername });
+    if(quickModMsg) quickModMsg.textContent="Unkick sent.";
+  });
+}
+
+ public/app.js
 "use strict";
 
 // Debug hook: enable tap hit-testing logs by setting `window.__TAP_DEBUG__ = true` in the console.
@@ -1762,9 +1772,29 @@ const appealMsg = document.getElementById("appealMsg");
 const appealStatusText = document.getElementById("appealStatusText");
 
 const appealsPanelBtn = document.getElementById("appealsPanelBtn");
+const referralsPanelBtn = document.getElementById("referralsPanelBtn");
+const roleDebugPanelBtn = document.getElementById("roleDebugPanelBtn");
 const appealsPanel = document.getElementById("appealsPanel");
+const referralsPanel = document.getElementById("referralsPanel");
+const roleDebugPanel = document.getElementById("roleDebugPanel");
 const appealsCloseBtn = document.getElementById("appealsCloseBtn");
 const appealsList = document.getElementById("appealsList");
+const referralsCloseBtn = document.getElementById("referralsCloseBtn");
+const referralsRefreshBtn = document.getElementById("referralsRefreshBtn");
+const referralsList = document.getElementById("referralsList");
+const referralsDetailUser = document.getElementById("referralsDetailUser");
+const referralsDetailMeta = document.getElementById("referralsDetailMeta");
+const referralsDetailReason = document.getElementById("referralsDetailReason");
+const referralsCopyUserBtn = document.getElementById("referralsCopyUserBtn");
+const referralsMarkDoneBtn = document.getElementById("referralsMarkDoneBtn");
+const referralsActionMsg = document.getElementById("referralsActionMsg");
+
+const roleDebugCloseBtn = document.getElementById("roleDebugCloseBtn");
+const roleDebugTarget = document.getElementById("roleDebugTarget");
+const roleDebugRole = document.getElementById("roleDebugRole");
+const roleDebugApplyBtn = document.getElementById("roleDebugApplyBtn");
+const roleDebugUseSelectedBtn = document.getElementById("roleDebugUseSelectedBtn");
+const roleDebugMsg = document.getElementById("roleDebugMsg");
 const appealsDetail = document.getElementById("appealsDetail");
 const appealsBackBtn = document.getElementById("appealsBackBtn");
 const appealsDetailUser = document.getElementById("appealsDetailUser");
@@ -1907,6 +1937,7 @@ const memberMenu = document.getElementById("memberMenu");
 const memberMenuName = document.getElementById("memberMenuName");
 const memberViewProfileBtn = document.getElementById("memberViewProfileBtn");
 const memberDmBtn = document.getElementById("memberDmBtn");
+const memberReferBtn = document.getElementById("memberReferBtn");
 const commandPopup = document.getElementById("commandPopup");
 const commandPopupTitle = document.getElementById("commandPopupTitle");
 const commandPopupBody = document.getElementById("commandPopupBody");
@@ -2526,16 +2557,54 @@ if(editBio){
   editBio.addEventListener("input", scheduleBioPreview, { passive:true });
 }
 
-// member quick mod
-const memberModTools = document.getElementById("memberModTools");
+// member quick mod / actions overlay (staff)
+const actionsBtn = document.getElementById("actionsBtn");
+const inlineMemberActionsShade = document.getElementById("inlineMemberActionsShade");
+const memberActionsOverlay = document.getElementById("memberActionsOverlay");
+const closeMemberActionsBtn = document.getElementById("closeMemberActionsBtn");
+
 const quickReason = document.getElementById("quickReason");
 const quickReasonPresets = document.getElementById("quickReasonPresets");
 const quickMuteMins = document.getElementById("quickMuteMins");
 const quickBanMins = document.getElementById("quickBanMins");
 const quickKickBtn = document.getElementById("quickKickBtn");
+const quickUnkickBtn = document.getElementById("quickUnkickBtn");
 const quickMuteBtn = document.getElementById("quickMuteBtn");
 const quickBanBtn = document.getElementById("quickBanBtn");
 const quickModMsg = document.getElementById("quickModMsg");
+
+let modalCanModerate = false;
+
+function openMemberActionsOverlay(){
+  if (!inlineMemberActionsShade || !memberActionsOverlay) return;
+  if (!modalTargetUsername || !modalCanModerate) return;
+  inlineMemberActionsShade.style.display = "flex";
+  memberActionsOverlay.style.display = "block";
+  if (quickModMsg) quickModMsg.textContent = "";
+  try { quickReason?.focus(); } catch {}
+}
+
+function closeMemberActionsOverlay(){
+  if (memberActionsOverlay) memberActionsOverlay.style.display = "none";
+  if (inlineMemberActionsShade) inlineMemberActionsShade.style.display = "none";
+}
+
+// Actions button wiring (staff quick menu)
+if (actionsBtn && !actionsBtn._wired){
+  actionsBtn._wired = true;
+  actionsBtn.addEventListener("click", openMemberActionsOverlay);
+}
+if (closeMemberActionsBtn && !closeMemberActionsBtn._wired){
+  closeMemberActionsBtn._wired = true;
+  closeMemberActionsBtn.addEventListener("click", closeMemberActionsOverlay);
+}
+if (inlineMemberActionsShade && !inlineMemberActionsShade._wired){
+  inlineMemberActionsShade._wired = true;
+  inlineMemberActionsShade.addEventListener("click", (e)=>{
+    if (e.target === inlineMemberActionsShade) closeMemberActionsOverlay();
+  });
+}
+
 
 // moderation panel
 const modUserSelect = document.getElementById("modUserSelect");
@@ -4890,6 +4959,24 @@ memberViewProfileBtn?.addEventListener("click", ()=>{
 });
 memberDmBtn?.addEventListener("click", ()=>{
   const uname = (memberMenuUsername || memberMenuUser?.username || memberMenuUser?.name || "").trim();
+
+memberReferBtn?.addEventListener("click", ()=>{
+  const target = (memberMenuUsername || memberMenuUser?.username || memberMenuUser?.name || "").trim();
+  if(!target) return;
+  const reason = prompt(`Referral reason for ${target}:`, "") || "";
+  const clean = reason.trim();
+  if(!clean){ return; }
+  if(!confirmModeration("referral", target)) return;
+  socket?.emit("referrals:create", { username: target, reason: clean }, (resp)=>{
+    if(resp?.ok){
+      toast?.(`Referral sent for ${target}.`);
+    }else{
+      toast?.(resp?.error || "Failed to send referral.");
+    }
+  });
+  closeMemberMenu();
+});
+
   if (uname) startDirectMessage(uname);
   closeMemberMenu();
 });
@@ -4904,6 +4991,11 @@ function openMemberMenu(user, anchor){
 
   memberMenuUser = user;
   memberMenuUsername = user?.username || user?.name || "";
+  // Show "Refer ban" for Moderators (they cannot ban directly)
+  if(memberReferBtn){
+    const isSelf = (memberMenuUsername && me?.username && memberMenuUsername.toLowerCase()===me.username.toLowerCase());
+    memberReferBtn.style.display = (!isSelf && (me?.role==="Moderator")) ? "inline-flex" : "none";
+  }
   if (memberMenuName) memberMenuName.textContent = `${roleIcon(user.role)} ${user.name}`;
   memberMenu.classList.add("open");
 
@@ -8438,6 +8530,121 @@ function bindStaffAppealsUI(){
 }
 
 
+// Referrals (moderator -> admin review)
+let staffReferrals = [];
+let activeReferralId = null;
+
+function openReferralsPanel(){
+  if(!referralsPanel) return;
+  referralsPanel.hidden = false;
+  loadReferralsList();
+}
+function closeReferralsPanel(){
+  if(!referralsPanel) return;
+  referralsPanel.hidden = true;
+  activeReferralId = null;
+  if(referralsActionMsg) referralsActionMsg.textContent = "";
+}
+function loadReferralsList(){
+  if(!socket) return;
+  socket.emit("referrals:list", {}, (resp)=>{
+    if(!resp?.ok) return;
+    staffReferrals = resp.items || [];
+    renderReferralsList(staffReferrals);
+  });
+}
+function renderReferralsList(items){
+  if(!referralsList) return;
+  referralsList.innerHTML = "";
+  const arr = Array.isArray(items) ? items : [];
+  if(!arr.length){
+    const empty = document.createElement("div");
+    empty.className = "card muted";
+    empty.textContent = "No open referrals.";
+    referralsList.appendChild(empty);
+    return;
+  }
+  for(const r of arr){
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "appealsCard";
+    const when = r.created_at ? new Date(r.created_at).toLocaleString() : "";
+    card.innerHTML = `
+      <div class="appealsCardTop">
+        <div class="appealsCardUser">${escapeHtml(r.target_username || "")}</div>
+        <div class="small muted">${escapeHtml(when)}</div>
+      </div>
+      <div class="small muted">from ${escapeHtml(r.from_username || "")} (${escapeHtml(r.from_role || "")})</div>
+      <div class="appealsCardReason">${escapeHtml(String(r.reason||"").slice(0,160))}</div>
+    `;
+    card.addEventListener("click", ()=> openReferralDetail(r.id));
+    referralsList.appendChild(card);
+  }
+}
+function openReferralDetail(id){
+  activeReferralId = id;
+  const r = (staffReferrals||[]).find(x=>String(x.id)===String(id));
+  if(!r) return;
+  if(referralsDetailUser) referralsDetailUser.textContent = r.target_username || "Referral";
+  if(referralsDetailMeta){
+    const when = r.created_at ? new Date(r.created_at).toLocaleString() : "";
+    referralsDetailMeta.textContent = `${when} • from ${r.from_username || ""} (${r.from_role || ""})`;
+  }
+  if(referralsDetailReason) referralsDetailReason.textContent = r.reason || "";
+  if(referralsActionMsg) referralsActionMsg.textContent = "";
+}
+function resolveReferral(){
+  if(!activeReferralId) return;
+  socket?.emit("referrals:resolve", { id: activeReferralId }, (resp)=>{
+    if(!resp?.ok){
+      if(referralsActionMsg) referralsActionMsg.textContent = resp?.error || "Failed to resolve.";
+      return;
+    }
+    if(referralsActionMsg) referralsActionMsg.textContent = "Marked done.";
+    loadReferralsList();
+  });
+}
+function bindReferralsUI(){
+  referralsPanelBtn?.addEventListener("click", openReferralsPanel);
+  referralsCloseBtn?.addEventListener("click", closeReferralsPanel);
+  referralsRefreshBtn?.addEventListener("click", loadReferralsList);
+  referralsCopyUserBtn?.addEventListener("click", ()=>{
+    const r = (staffReferrals||[]).find(x=>String(x.id)===String(activeReferralId));
+    const uname = r?.target_username || "";
+    if(uname) navigator.clipboard?.writeText(uname);
+    if(referralsActionMsg) referralsActionMsg.textContent = uname ? "Copied." : "";
+  });
+  referralsMarkDoneBtn?.addEventListener("click", resolveReferral);
+}
+
+// Role Debug (quick role setter)
+function openRoleDebugPanel(){
+  if(!roleDebugPanel) return;
+  roleDebugPanel.hidden = false;
+  if(roleDebugMsg) roleDebugMsg.textContent = "";
+}
+function closeRoleDebugPanel(){
+  if(!roleDebugPanel) return;
+  roleDebugPanel.hidden = true;
+  if(roleDebugMsg) roleDebugMsg.textContent = "";
+}
+function bindRoleDebugUI(){
+  roleDebugPanelBtn?.addEventListener("click", openRoleDebugPanel);
+  roleDebugCloseBtn?.addEventListener("click", closeRoleDebugPanel);
+  roleDebugUseSelectedBtn?.addEventListener("click", ()=>{
+    if(roleDebugTarget) roleDebugTarget.value = (memberMenuUsername || memberMenuUser?.username || memberMenuUser?.name || "").trim();
+  });
+  roleDebugApplyBtn?.addEventListener("click", ()=>{
+    const target = (roleDebugTarget?.value || "").trim();
+    const role = (roleDebugRole?.value || "").trim();
+    if(!target){ if(roleDebugMsg) roleDebugMsg.textContent="Enter a username."; return; }
+    if(!role){ if(roleDebugMsg) roleDebugMsg.textContent="Choose a role."; return; }
+    if(!confirmModeration("role update", target)) return;
+    socket?.emit("mod set role", { username: target, role, reason: "" });
+    if(roleDebugMsg) roleDebugMsg.textContent="Role change sent.";
+  });
+}
+
 
 async function doLogin(){
   const username = authUser?.value?.trim() || "";
@@ -9722,7 +9929,9 @@ modalTargetUsername = p.username;
   syncCustomizationUI();
 
   myProfileEdit.style.display="block";
-  memberModTools.style.display="none";
+  modalCanModerate = false;
+  if (actionsBtn) actionsBtn.style.display = "none";
+  closeMemberActionsOverlay();
 
   editMood.value=p.mood||"";
   if (editUsername) editUsername.value = "";
@@ -9801,63 +10010,33 @@ async function openMemberProfile(username){
   modalTargetUsername = username;
   closeDrawers();
 
-  try {
-    const res = await fetch("/profile/" + encodeURIComponent(username));
-    if (!res.ok) {
-      // Still open the modal so the user gets feedback instead of "nothing happens".
-      modalTitle.textContent = "Profile";
-      modalMeta.textContent = "";
-      setTab("info");
-      openModal();
-      setMsgline(profileActionMsg, "Could not load profile.");
-      return;
-    }
+  const res=await fetch("/profile/" + encodeURIComponent(username));
+  if(!res.ok) return;
+  const p=await res.json();
+  modalTargetUserId = Number(p?.id) || null;
+  const isSelf = isSelfProfile(p);
+  if (isSelf) applyProgressionPayload(p);
 
-    const p = await res.json().catch(() => null);
-    if (!p) {
-      modalTitle.textContent = "Profile";
-      modalMeta.textContent = "";
-      setTab("info");
-      openModal();
-      setMsgline(profileActionMsg, "Could not load profile.");
-      return;
-    }
+  modalTitle.textContent="Member Profile";
+  modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
+  fillProfileUI(p, isSelf);
+  syncCustomizationUI();
 
-    modalTargetUserId = Number(p?.id) || null;
-    const isSelf = isSelfProfile(p);
-    if (isSelf) applyProgressionPayload(p);
+  myProfileEdit.style.display = isSelf ? "block" : "none";
 
-    modalTitle.textContent = "Member Profile";
-    modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
-    fillProfileUI(p, isSelf);
-    syncCustomizationUI();
+  const iCanMod = (roleRank(me.role) >= roleRank("Moderator")) && (roleRank(me.role) > roleRank(p.role));
+  memberActionsOverlay.style.display = iCanMod ? "block" : "none";
+  quickReason.value=""; quickModMsg.textContent="";
+  if(quickMuteMins) quickMuteMins.value = quickMuteMins.querySelector("option")?.value || "10";
+  if(quickBanMins) quickBanMins.value = quickBanMins.querySelector("option")?.value || "0";
 
-    if (myProfileEdit) myProfileEdit.style.display = isSelf ? "block" : "none";
+  setModTarget(username);
+  if(modReason) modReason.value = "";
+  if(modMsg) modMsg.textContent = "";
 
-    const canModerate = (roleRank(me.role) >= roleRank("Moderator"));
-    const iCanMod = canModerate && (roleRank(me.role) > roleRank(p.role));
-    if (memberModTools) memberModTools.style.display = iCanMod ? "block" : "none";
-
-    if (quickReason) quickReason.value = "";
-    if (quickModMsg) quickModMsg.textContent = "";
-    if (quickMuteMins) quickMuteMins.value = quickMuteMins.querySelector("option")?.value || "10";
-    if (quickBanMins) quickBanMins.value = quickBanMins.querySelector("option")?.value || "0";
-
-    setModTarget(username);
-    if (modReason) modReason.value = "";
-    if (modMsg) modMsg.textContent = "";
-
-    updateProfileActions({ isSelf, canModerate });
-    setTab("info");
-    openModal();
-  } catch (err) {
-    console.error("openMemberProfile failed", err);
-    modalTitle.textContent = "Profile";
-    modalMeta.textContent = "";
-    setTab("info");
-    openModal();
-    setMsgline(profileActionMsg, "Could not load profile.");
-  }
+  updateProfileActions({ isSelf, canModerate: (roleRank(me.role) >= roleRank("Moderator")) });
+  setTab("info");
+  openModal();
 }
 
 likeProfileBtn?.addEventListener("click", async () => {
@@ -10119,8 +10298,12 @@ async function initChatApp(){
   setAuthUser(sessionUser);
   setView("chat");
 
-  // Staff-only: show appeals panel button in members drawer
+  // Staff-only: show staff buttons in members drawer
   if(appealsPanelBtn) appealsPanelBtn.hidden = !isStaffRole(me?.role);
+  // Referrals are for Admin+ review (mods create them)
+  if(referralsPanelBtn) referralsPanelBtn.hidden = !(me?.role==="Admin" || me?.role==="Co-owner" || me?.role==="Owner");
+  // Role debug is for Owner/Co-Owner (and Admin as fallback)
+  if(roleDebugPanelBtn) roleDebugPanelBtn.hidden = !(me?.role==="Owner" || me?.role==="Co-owner" || me?.role==="Admin");
   initAppealsDurationSelect();
 
   await loadVibeTags();
@@ -10559,6 +10742,8 @@ async function bootApp(){
   setView("loading");
   bindRestrictedUI();
   bindStaffAppealsUI();
+  bindReferralsUI();
+  bindRoleDebugUI();
 
   const sessionUser = await validateSession({ silent: true });
   if(sessionUser){
