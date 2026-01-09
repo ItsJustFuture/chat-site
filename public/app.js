@@ -3730,15 +3730,37 @@ function handleCommandResponse(payload){
 function escapeRegex(str){
   return String(str || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
-function applyMentions(text){
+function applyMentions(text, { linkifyText = false } = {}){
   const safe = escapeHtml(text);
   const names = new Set((lastUsers || []).map((u) => u.username || u.name));
   if (me?.username) names.add(me.username);
   const list = Array.from(names).filter(Boolean);
-  if (!list.length) return safe;
-  const pattern = list.map(escapeRegex).join("|");
-  const re = new RegExp(`@(${pattern})(?=$|[^\\S]|[.,!?:;])`, "gi");
-  return safe.replace(re, (m)=>`<span class="mention">${m}</span>`);
+  let output = safe;
+  if (list.length) {
+    const pattern = list.map(escapeRegex).join("|");
+    const re = new RegExp(`@(${pattern})(?=$|[^\\S]|[.,!?:;])`, "gi");
+    output = safe.replace(re, (m)=>`<span class="mention">${m}</span>`);
+  }
+  return linkifyText ? linkify(output) : output;
+}
+function hasMention(text, username){
+  const name = String(username || "").trim();
+  if (!name) return false;
+  const pattern = new RegExp(`(^|[^\\w])@${escapeRegex(name)}(?=$|[^\\w])`, "i");
+  return pattern.test(String(text || ""));
+}
+
+const MESSAGE_HIGHLIGHT_MS = PREFERS_REDUCED_MOTION ? 1 : 1400;
+function focusMainMessage(messageId){
+  if (!messageId) return false;
+  const target = document.querySelector(`.msgItem[data-mid="${escapeSelectorValue(messageId)}"]`);
+  if (!target) return false;
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  target.classList.remove("msg-mention-hit");
+  void target.offsetWidth;
+  target.classList.add("msg-mention-hit");
+  setTimeout(() => target.classList.remove("msg-mention-hit"), MESSAGE_HIGHLIGHT_MS);
+  return true;
 }
 function isNearBottom(el, threshold = 120){
   if(!el) return true;
@@ -4599,6 +4621,7 @@ function addMessage(m){
   const senderName = String(m.user ?? m.username ?? m.from ?? m.sender ?? "");
   const senderRole = String(m.role ?? m.userRole ?? "");
   const isSelf = !!(senderName && me && (senderName === me.username));
+  const rawText = String((m.text ?? m.message ?? m.msg ?? "") || "");
   if (m?.chatFx) updateUserFxMap(senderName, m.chatFx);
   const resolvedFx = resolveChatFx(m, senderName);
 
@@ -4666,6 +4689,16 @@ try{
   applyChatFxToBubble(bubbleEl, resolvedFx, { groupBody: body });
   body.appendChild(item);
   queueContrastReinforcement(bubbleEl);
+
+  if (m.__fresh && !isSelf && hasMention(rawText, me?.username)) {
+    const snippet = rawText.trim().slice(0, 140);
+    const suffix = snippet ? `: ${snippet}` : "";
+    pushNotification({
+      type: "mention",
+      text: `${senderName} mentioned you${suffix}`,
+      target: `message:${mid}`
+    });
+  }
 
   if (m.__fresh) {
     if (isPolishAnimationsEnabled()) {
@@ -4779,7 +4812,7 @@ function buildMainMsgItem(m, opts){
   if(displayText.trim()){
     const text = document.createElement("div");
     text.className = "text";
-    text.innerHTML = linkify(escapeHtml(displayText)).replace(/\n/g, "<br/>");
+    text.innerHTML = applyMentions(displayText, { linkifyText: true }).replace(/\n/g, "<br/>");
     bubble.appendChild(text);
   }
 
@@ -4995,7 +5028,7 @@ function startMainEdit(messageId, currentText, itemEl, bubbleEl){
     socket?.emit("edit message", { messageId, text: next });
     box.remove();
     if(textEl){
-      textEl.innerHTML = linkify(escapeHtml(next)).replace(/\n/g, "<br/>");
+      textEl.innerHTML = applyMentions(next, { linkifyText: true }).replace(/\n/g, "<br/>");
       textEl.style.display = "";
     }
   };
@@ -9010,6 +9043,10 @@ notificationsList?.addEventListener("click", (e) => {
     const username = item.target.slice("profile:".length);
     if (username) openMemberProfile(username);
   }
+  if (item.target.startsWith("message:")) {
+    const messageId = item.target.slice("message:".length);
+    if (focusMainMessage(messageId)) closeNotificationsModal();
+  }
 });
 
 renderNotifications();
@@ -10910,7 +10947,7 @@ socket.on("disconnect", (reason) => {
       const self = String(me?.username || "");
       if (from && self && from !== self) {
         const txt = String(m?.text || "");
-        const mentioned = self && txt.toLowerCase().includes("@"+self.toLowerCase());
+        const mentioned = hasMention(txt, self);
         let played = false;
         if (Sound.shouldReceive()) { Sound.cues.receive(); played = true; }
         if (mentioned && Sound.shouldMention()) Sound.cues.mention();
@@ -10955,7 +10992,7 @@ socket.on("disconnect", (reason) => {
     if (item) {
       const bubble = item.querySelector(".bubble");
       const textEl = bubble?.querySelector(".text");
-      if (textEl) textEl.innerHTML = linkify(escapeHtml(safeString(payload.text, ""))).replace(/\n/g, "<br/>");
+      if (textEl) textEl.innerHTML = applyMentions(safeString(payload.text, ""), { linkifyText: true }).replace(/\n/g, "<br/>");
       const timeEl = bubble?.querySelector(".time");
       if (timeEl && !timeEl.querySelector(".editedTag")) {
         const ed = document.createElement("span");
@@ -11049,7 +11086,7 @@ socket.on("dm history", (payload = {}) => {
       const from = String(m?.user || "");
       if (self && from && from !== self) {
         const txt = String(m?.text || "");
-        const mentioned = self && txt.toLowerCase().includes("@"+self.toLowerCase());
+        const mentioned = hasMention(txt, self);
         let played = false;
         if (Sound.shouldReceive()) { Sound.cues.receive(); played = true; }
         if (mentioned && Sound.shouldMention()) Sound.cues.mention();
