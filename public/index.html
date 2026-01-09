@@ -427,6 +427,8 @@
   <div class="drawerHeader">
     <h3>Members</h3>
     <button class="btn secondary small" id="appealsPanelBtn" type="button" hidden>Kick/Ban Appeals</button>
+    <button class="btn secondary small" id="referralsPanelBtn" type="button" hidden>Referrals</button>
+    <button class="btn secondary small" id="roleDebugBtn" type="button" hidden>Role Debug</button>
     <button class="iconBtn smallIcon" id="membersCloseBtn" type="button" title="Close">✕</button>
   </div>
         <div class="memberGold" id="memberGold" aria-live="polite"></div>
@@ -975,6 +977,11 @@
                 <textarea id="modReason" rows="2" placeholder="Choose a preset and add details (required)"></textarea>
               </div>
 
+              <div class="field" id="modReferralNotesField" style="margin-top:8px;" hidden>
+                <label>Referral note (optional)</label>
+                <textarea id="modReferralNotes" rows="2" maxlength="1200" placeholder="Any concerns or context for Admin+..."></textarea>
+              </div>
+
               <div class="modGrid">
                 <div class="field">
                   <label>Mute length</label>
@@ -1003,6 +1010,7 @@
                 <button class="btn secondary" id="modWarnBtn" type="button">Warn</button>
                 <button class="btn secondary" id="modMuteBtn" type="button">Mute</button>
                 <button class="btn danger" id="modBanBtn" type="button">Ban</button>
+                <button class="btn secondary" id="modReferralBtn" type="button">Referral</button>
                 <button class="btn secondary" id="modUnmuteBtn" type="button">Unmute</button>
                 <button class="btn secondary" id="modUnbanBtn" type="button">Unban</button>
               </div>
@@ -1137,6 +1145,118 @@
           <button class="btn danger" id="appealsUnlockBtn" type="button">Unban / Unlock</button>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- STAFF: Referrals Panel -->
+<div class="appealsPanel" id="referralsPanel" hidden>
+  <div class="appealsPanelHeader">
+    <div>
+      <div class="title">Referrals</div>
+      <div class="small muted">Moderator referrals that need Admin+ action.</div>
+    </div>
+    <button class="iconBtn" id="referralsCloseBtn" type="button" title="Close">✕</button>
+  </div>
+
+  <div class="appealsPanelBody">
+    <div class="appealsList" id="referralsList"></div>
+
+    <div class="appealsDetail" id="referralsDetail" hidden>
+      <div class="appealsDetailTop">
+        <div class="appealsDetailUser">
+          <div class="title" id="referralsDetailUser">—</div>
+          <div class="small muted" id="referralsDetailMeta">—</div>
+        </div>
+        <button class="btn secondary small" id="referralsBackBtn" type="button">Back</button>
+      </div>
+
+      <div class="appealsDetailBlock">
+        <div class="small muted">Reason</div>
+        <div class="appealsReason" id="referralsDetailReason">—</div>
+      </div>
+
+      <div class="appealsDetailBlock">
+        <div class="small muted">Moderator notes</div>
+        <div class="appealsReason" id="referralsDetailNotes">—</div>
+      </div>
+
+      <div class="appealsDetailBlock">
+        <div class="small muted">Thread</div>
+        <div class="appealsThread" id="referralsThread"></div>
+      </div>
+
+      <div class="appealsReplyRow">
+        <textarea id="referralsReplyInput" rows="3" maxlength="2000" placeholder="Internal note / reply..."></textarea>
+        <button class="btn" id="referralsReplyBtn" type="button">Send</button>
+      </div>
+
+      <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:10px;">
+        <select class="select" id="referralsDurationSelect">
+          <option value="0">Permanent</option>
+          <option value="60">1 hour</option>
+          <option value="180">3 hours</option>
+          <option value="360">6 hours</option>
+          <option value="720">12 hours</option>
+          <option value="1440">1 day</option>
+          <option value="4320">3 days</option>
+          <option value="10080">1 week</option>
+        </select>
+        <button class="btn danger" id="referralsBanBtn" type="button">Ban</button>
+        <button class="btn" id="referralsKickBtn" type="button">Kick</button>
+        <button class="btn secondary" id="referralsDismissBtn" type="button">Dismiss</button>
+        <div class="small muted" id="referralsReplyMsg"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- STAFF: Role Debug Panel -->
+<div class="roleDebugPanel" id="roleDebugPanel" hidden>
+  <div class="appealsPanelHeader">
+    <div>
+      <div class="title">Role Debug</div>
+      <div class="small muted">Manage roles and permissions (presets + per-user overrides).</div>
+    </div>
+    <button class="iconBtn" id="roleDebugCloseBtn" type="button" title="Close">✕</button>
+  </div>
+
+  <div class="roleDebugTabs">
+    <button class="btn secondary small" id="roleDebugTabUsers" type="button">Users</button>
+    <button class="btn secondary small" id="roleDebugTabRoles" type="button">Role presets</button>
+  </div>
+
+  <div class="roleDebugBody">
+    <div class="roleDebugUsers" id="roleDebugUsers">
+      <input class="input" id="roleDebugSearch" placeholder="Search user..." />
+      <div class="roleDebugGrid">
+        <div class="roleDebugList" id="roleDebugUserList"></div>
+        <div class="roleDebugDetail" id="roleDebugUserDetail" hidden>
+          <div class="title" id="roleDebugUserName">—</div>
+          <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:8px;">
+            <select class="select" id="roleDebugRoleSelect"></select>
+            <button class="btn" id="roleDebugSaveRoleBtn" type="button">Save role</button>
+          </div>
+
+          <div class="small muted" style="margin-top:10px;">User overrides (Allow / Deny)</div>
+          <div class="roleDebugPerms" id="roleDebugUserPerms"></div>
+
+          <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:10px;">
+            <button class="btn" id="roleDebugSaveOverrideBtn" type="button">Save overrides</button>
+            <div class="small muted" id="roleDebugUserMsg"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="roleDebugRoles" id="roleDebugRoles" hidden>
+      <div class="row" style="gap:10px; flex-wrap:wrap;">
+        <select class="select" id="roleDebugPresetRoleSelect"></select>
+        <button class="btn" id="roleDebugSavePresetBtn" type="button">Save preset</button>
+        <div class="small muted" id="roleDebugPresetMsg"></div>
+      </div>
+      <div class="roleDebugPerms" id="roleDebugPresetPerms"></div>
     </div>
   </div>
 </div>
