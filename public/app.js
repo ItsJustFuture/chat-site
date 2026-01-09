@@ -9406,7 +9406,7 @@ function wireChatFxPrefs(){
         </div>
       </div>
       <div class="prefsSections">
-        <details class="prefsSection" data-section="text-fonts" open>
+        <details class="prefsSection" data-section="text-fonts">
           <summary>Text &amp; Fonts</summary>
           <div class="prefsContent">
             <div class="field">
@@ -9483,7 +9483,7 @@ function wireChatFxPrefs(){
             </div>
           </div>
         </details>
-        <details class="prefsSection" data-section="bubbles" open>
+        <details class="prefsSection" data-section="bubbles">
           <summary>Bubbles &amp; Chat Style</summary>
           <div class="prefsContent">
             <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">

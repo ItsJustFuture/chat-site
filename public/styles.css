@@ -6219,3 +6219,9 @@ main.chatMain {
 .inlineModalOverlay.show{ display:flex; }
 .inlineModalCard{ width: min(820px, calc(100% - 10px)); max-height: calc(100% - 10px); overflow:auto; -webkit-overflow-scrolling: touch; }
 .inlineModalHeader{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+
+
+/* Fix: ensure modal body can scroll consistently (profile modal) */
+#modal .modalCard{
+  height: min(calc(var(--vvhPx) - 20px), calc(100vh - 20px));
+}
