@@ -427,6 +427,8 @@
   <div class="drawerHeader">
     <h3>Members</h3>
     <button class="btn secondary small" id="appealsPanelBtn" type="button" hidden>Appeals</button>
+    <button class="btn secondary small" id="referralsPanelBtn" type="button" hidden>Referrals</button>
+    <button class="btn secondary small" id="roleDebugPanelBtn" type="button" hidden>Role debug</button>
     <button class="iconBtn smallIcon" id="membersCloseBtn" type="button" title="Close">✕</button>
   </div>
         <div class="memberGold" id="memberGold" aria-live="polite"></div>
@@ -439,6 +441,7 @@
           <div class="memberMenuActions">
             <button class="btn secondary" id="memberViewProfileBtn" type="button">View profile</button>
             <button class="btn" id="memberDmBtn" type="button">DM</button>
+            <button class="btn secondary" id="memberReferBtn" type="button" style="display:none;">Refer ban</button>
           </div>
         </div>
       </aside>
@@ -1137,6 +1140,87 @@
           <button class="btn danger" id="appealsUnlockBtn" type="button">Unban / Unlock</button>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- STAFF: Referrals Panel -->
+<div class="referralsPanel" id="referralsPanel" hidden>
+  <div class="appealsPanelHeader">
+    <div>
+      <div class="title">Referrals</div>
+      <div class="small muted">Moderator requests for admin review.</div>
+    </div>
+    <div class="appealsPanelHeaderActions">
+      <button class="btn secondary small" id="referralsRefreshBtn" type="button">Refresh</button>
+      <button class="iconBtn" id="referralsCloseBtn" type="button" title="Close">✕</button>
+    </div>
+  </div>
+  <div class="appealsPanelBody">
+    <div class="appealsSplit">
+      <div class="appealsList" id="referralsList"></div>
+      <div class="appealsDetail" id="referralsDetail">
+        <div class="card">
+          <div class="title" id="referralsDetailUser">Select a referral</div>
+          <div class="small muted" id="referralsDetailMeta"></div>
+        </div>
+
+        <div class="card">
+          <div class="small muted">Reason</div>
+          <div id="referralsDetailReason" style="margin-top:6px;"></div>
+        </div>
+
+        <div class="card">
+          <div class="title">Actions</div>
+          <div class="small muted" style="margin-bottom:10px;">Resolve the referral once handled.</div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button class="btn secondary small" id="referralsCopyUserBtn" type="button">Copy username</button>
+            <button class="btn secondary small" id="referralsMarkDoneBtn" type="button">Mark done</button>
+          </div>
+          <div class="msgline" id="referralsActionMsg" style="margin-top:8px;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- STAFF: Role Debug Panel -->
+<div class="roleDebugPanel" id="roleDebugPanel" hidden>
+  <div class="appealsPanelHeader">
+    <div>
+      <div class="title">Role debug</div>
+      <div class="small muted">Quickly set a user's role (Owner/Co-Owner/Admin/Moderator/VIP/User/Guest).</div>
+    </div>
+    <div class="appealsPanelHeaderActions">
+      <button class="iconBtn" id="roleDebugCloseBtn" type="button" title="Close">✕</button>
+    </div>
+  </div>
+  <div class="appealsPanelBody">
+    <div class="card">
+      <div class="small muted">Target user</div>
+      <input class="input" id="roleDebugTarget" placeholder="username" autocomplete="off" style="margin-top:6px;">
+      <div class="small muted" style="margin-top:10px;">Role</div>
+      <select class="select" id="roleDebugRole" style="margin-top:6px;">
+        <option value="">Choose role…</option>
+        <option>Owner</option>
+        <option>Co-owner</option>
+        <option>Admin</option>
+        <option>Moderator</option>
+        <option>VIP</option>
+        <option>User</option>
+        <option>Guest</option>
+      </select>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+        <button class="btn" id="roleDebugApplyBtn" type="button">Apply</button>
+        <button class="btn secondary" id="roleDebugUseSelectedBtn" type="button">Use selected member</button>
+      </div>
+      <div class="msgline" id="roleDebugMsg" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="title">Tip</div>
+      <div class="small muted">This uses the same server-side permissions as normal moderation tools, so only authorized roles can make changes.</div>
     </div>
   </div>
 </div>
