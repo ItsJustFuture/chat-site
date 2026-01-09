@@ -1762,47 +1762,6 @@ const appealMsg = document.getElementById("appealMsg");
 const appealStatusText = document.getElementById("appealStatusText");
 
 const appealsPanelBtn = document.getElementById("appealsPanelBtn");
-const referralsPanelBtn = document.getElementById("referralsPanelBtn");
-const referralsPanel = document.getElementById("referralsPanel");
-const referralsCloseBtn = document.getElementById("referralsCloseBtn");
-const referralsList = document.getElementById("referralsList");
-const referralsDetail = document.getElementById("referralsDetail");
-const referralsBackBtn = document.getElementById("referralsBackBtn");
-const referralsDetailUser = document.getElementById("referralsDetailUser");
-const referralsDetailMeta = document.getElementById("referralsDetailMeta");
-const referralsDetailReason = document.getElementById("referralsDetailReason");
-const referralsDetailNotes = document.getElementById("referralsDetailNotes");
-const referralsThread = document.getElementById("referralsThread");
-const referralsReplyInput = document.getElementById("referralsReplyInput");
-const referralsReplyBtn = document.getElementById("referralsReplyBtn");
-const referralsReplyMsg = document.getElementById("referralsReplyMsg");
-const referralsDurationSelect = document.getElementById("referralsDurationSelect");
-const referralsBanBtn = document.getElementById("referralsBanBtn");
-const referralsKickBtn = document.getElementById("referralsKickBtn");
-const referralsDismissBtn = document.getElementById("referralsDismissBtn");
-
-const roleDebugBtn = document.getElementById("roleDebugBtn");
-const roleDebugPanel = document.getElementById("roleDebugPanel");
-const roleDebugCloseBtn = document.getElementById("roleDebugCloseBtn");
-const roleDebugTabUsers = document.getElementById("roleDebugTabUsers");
-const roleDebugTabRoles = document.getElementById("roleDebugTabRoles");
-const roleDebugUsers = document.getElementById("roleDebugUsers");
-const roleDebugRoles = document.getElementById("roleDebugRoles");
-const roleDebugSearch = document.getElementById("roleDebugSearch");
-const roleDebugUserList = document.getElementById("roleDebugUserList");
-const roleDebugUserDetail = document.getElementById("roleDebugUserDetail");
-const roleDebugUserName = document.getElementById("roleDebugUserName");
-const roleDebugRoleSelect = document.getElementById("roleDebugRoleSelect");
-const roleDebugSaveRoleBtn = document.getElementById("roleDebugSaveRoleBtn");
-const roleDebugUserPerms = document.getElementById("roleDebugUserPerms");
-const roleDebugSaveOverrideBtn = document.getElementById("roleDebugSaveOverrideBtn");
-const roleDebugUserMsg = document.getElementById("roleDebugUserMsg");
-
-const roleDebugPresetRoleSelect = document.getElementById("roleDebugPresetRoleSelect");
-const roleDebugPresetPerms = document.getElementById("roleDebugPresetPerms");
-const roleDebugSavePresetBtn = document.getElementById("roleDebugSavePresetBtn");
-const roleDebugPresetMsg = document.getElementById("roleDebugPresetMsg");
-
 const appealsPanel = document.getElementById("appealsPanel");
 const appealsCloseBtn = document.getElementById("appealsCloseBtn");
 const appealsList = document.getElementById("appealsList");
@@ -2587,9 +2546,6 @@ const modBanMins = document.getElementById("modBanMins");
 const modKickBtn = document.getElementById("modKickBtn");
 const modMuteBtn = document.getElementById("modMuteBtn");
 const modBanBtn = document.getElementById("modBanBtn");
-const modReferralBtn = document.getElementById("modReferralBtn");
-const modReferralNotesField = document.getElementById("modReferralNotesField");
-const modReferralNotes = document.getElementById("modReferralNotes");
 const modUnmuteBtn = document.getElementById("modUnmuteBtn");
 const modUnbanBtn = document.getElementById("modUnbanBtn");
 const modWarnBtn = document.getElementById("modWarnBtn");
@@ -8165,6 +8121,9 @@ let restrictedCountdownTimer = null;
 let currentRestriction = null;
 let myAppeal = null;
 let myAppealMessages = [];
+// Dedicated socket for the restricted (kicked/banned) screen.
+// Keeps appeals working even if the main chat socket was force-disconnected.
+let restrictedSocket = null;
 
 function pad2(n){ return String(Math.max(0, n|0)).padStart(2, "0"); }
 
@@ -8261,10 +8220,16 @@ async function doRestrictionRecheck(){
 }
 
 async function ensureRestrictedSocket(){
-  if(socket) return socket;
-  socket = io();
+  // Recreate if missing or disconnected.
+  if(restrictedSocket && restrictedSocket.connected) return restrictedSocket;
+  if(restrictedSocket && !restrictedSocket.connected){
+    try{ restrictedSocket.disconnect(); }catch{}
+    restrictedSocket = null;
+  }
+
+  restrictedSocket = io();
   // If server emits restriction updates (e.g., staff changed it), keep UI in sync.
-  socket.on("restriction:status", (payload) => {
+  restrictedSocket.on("restriction:status", (payload) => {
     if(payload?.type && payload.type !== "none"){
       showRestrictedView(payload);
       refreshMyAppeal();
@@ -8273,16 +8238,16 @@ async function ensureRestrictedSocket(){
       doRestrictionRecheck();
     }
   });
-  socket.on("connect_error", (err)=> {
+  restrictedSocket.on("connect_error", (err)=> {
     console.warn("socket connect error", err?.message || err);
   });
-  return socket;
+  return restrictedSocket;
 }
 
 async function refreshMyAppeal(){
   await ensureRestrictedSocket();
   return new Promise((resolve) => {
-    socket.emit("appeal:fetchMine", {}, (payload) => {
+    restrictedSocket.emit("appeal:fetchMine", {}, (payload) => {
       const appeal = payload?.appeal || null;
       myAppeal = appeal;
       myAppealMessages = payload?.messages || [];
@@ -8306,7 +8271,7 @@ async function sendMyAppeal(){
   await ensureRestrictedSocket();
 
   const eventName = myAppeal?.id ? "appeal:send" : "appeal:create";
-  socket.emit(eventName, { message: text }, (resp) => {
+  restrictedSocket.emit(eventName, { message: text }, (resp) => {
     if(!resp?.ok){
       if(appealMsg) appealMsg.textContent = resp?.error || "Appeal failed.";
       return;
@@ -8347,392 +8312,6 @@ function closeAppealsPanel(){
   activeAppealId = null;
   if(appealsDetail) appealsDetail.hidden = true;
 }
-
-
-// --- Referrals Panel -------------------------------------------------------
-let activeReferralId = null;
-let _referralsCache = [];
-
-function openReferralsPanel(){
-  if(!referralsPanel) return;
-  referralsPanel.hidden = false;
-  loadReferralsList();
-}
-function closeReferralsPanel(){
-  if(!referralsPanel) return;
-  referralsPanel.hidden = true;
-  activeReferralId = null;
-  if(referralsDetail) referralsDetail.hidden = true;
-}
-
-function loadReferralsList(){
-  if(!socket) return;
-  socket.emit("referrals:list", {}, (res) => {
-    if(!res?.ok) return;
-    _referralsCache = Array.isArray(res.items) ? res.items : [];
-    renderReferralsList(_referralsCache);
-  });
-}
-
-function renderReferralsList(items){
-  if(!referralsList) return;
-  referralsList.innerHTML = "";
-  const arr = Array.isArray(items) ? items : [];
-  if(!arr.length){
-    const empty = document.createElement("div");
-    empty.className = "card muted";
-    empty.textContent = "No open referrals.";
-    referralsList.appendChild(empty);
-    return;
-  }
-  for(const r of arr){
-    const row = document.createElement("div");
-    row.className = "appealsListItem";
-    const title = document.createElement("div");
-    title.className = "title";
-    title.textContent = r.username || "—";
-    const meta = document.createElement("div");
-    meta.className = "small muted";
-    meta.textContent = `Referred by ${r.referred_by || "?"}`;
-    row.appendChild(title);
-    row.appendChild(meta);
-    row.addEventListener("click", ()=> openReferralDetail(r.id));
-    referralsList.appendChild(row);
-  }
-}
-
-function openReferralDetail(id){
-  activeReferralId = id;
-  if(referralsDetail) referralsDetail.hidden = false;
-  if(referralsReplyMsg) referralsReplyMsg.textContent = "";
-  if(referralsReplyInput) referralsReplyInput.value = "";
-  if(!socket) return;
-  socket.emit("referrals:read", { id }, (res) => {
-    if(!res?.ok) return;
-    const ref = res.referral || {};
-    referralsDetailUser && (referralsDetailUser.textContent = ref.username || "—");
-    referralsDetailMeta && (referralsDetailMeta.textContent = `Referred by ${ref.referred_by || "?"} • ${new Date(ref.created_at || Date.now()).toLocaleString()}`);
-    referralsDetailReason && (referralsDetailReason.textContent = ref.reason || "—");
-    referralsDetailNotes && (referralsDetailNotes.textContent = ref.notes || "—");
-    renderReferralThread(res.messages || []);
-  });
-}
-
-function renderReferralThread(msgs){
-  if(!referralsThread) return;
-  referralsThread.innerHTML = "";
-  const arr = Array.isArray(msgs) ? msgs : [];
-  if(!arr.length){
-    const empty = document.createElement("div");
-    empty.className = "small muted";
-    empty.textContent = "No messages yet.";
-    referralsThread.appendChild(empty);
-    return;
-  }
-  for(const m of arr){
-    const b = document.createElement("div");
-    b.className = "appealsMsg";
-    const who = document.createElement("div");
-    who.className = "small muted";
-    who.textContent = `${m.author_name || "staff"} • ${new Date(m.created_at || Date.now()).toLocaleString()}`;
-    const body = document.createElement("div");
-    body.textContent = m.message || "";
-    b.appendChild(who);
-    b.appendChild(body);
-    referralsThread.appendChild(b);
-  }
-  referralsThread.scrollTop = referralsThread.scrollHeight;
-}
-
-function referralsStaffReply(){
-  const msg = (referralsReplyInput?.value || "").trim();
-  if(!msg || !activeReferralId) return;
-  referralsReplyBtn && (referralsReplyBtn.disabled = true);
-  socket.emit("referrals:reply", { id: activeReferralId, message: msg }, (res) => {
-    referralsReplyBtn && (referralsReplyBtn.disabled = false);
-    if(!res?.ok){ referralsReplyMsg && (referralsReplyMsg.textContent = res?.error || "Failed"); return; }
-    referralsReplyInput && (referralsReplyInput.value = "");
-    openReferralDetail(activeReferralId);
-  });
-}
-
-function referralsStaffAction(actionType){
-  if(!activeReferralId) return;
-  const minutes = Number(referralsDurationSelect?.value || 0) || 0;
-  const reason = (referralsDetailReason?.textContent || "").slice(0, 800);
-  socket.emit("referrals:action", { id: activeReferralId, actionType, minutes, reason }, (res) => {
-    if(!res?.ok){ referralsReplyMsg && (referralsReplyMsg.textContent = res?.error || "Action failed"); return; }
-    referralsReplyMsg && (referralsReplyMsg.textContent = "Done.");
-    loadReferralsList();
-    if(referralsDetail) referralsDetail.hidden = true;
-  });
-}
-
-// --- Role Debug Panel ------------------------------------------------------
-let _debugAllPerms = [];
-let _debugPresets = {};
-let _debugUsers = [];
-let _debugSelectedUser = null;
-let _debugUserAllow = new Set();
-let _debugUserDeny = new Set();
-let _debugPresetPerms = new Set();
-
-function hasPermClient(p){
-  return Array.isArray(me?.perms) && me.perms.includes(p);
-}
-
-function updateStaffButtons(){
-  // Staff panels
-  if(appealsPanelBtn) appealsPanelBtn.hidden = !hasPermClient("tickets:appeals");
-  if(referralsPanelBtn) referralsPanelBtn.hidden = !hasPermClient("tickets:referrals");
-  if(roleDebugBtn) roleDebugBtn.hidden = !hasPermClient("debug:roles");
-
-}
-
-function updateModPanelButtons(){
-  // Moderation modal buttons
-  const canBan = hasPermClient("mod:ban");
-  const canKick = hasPermClient("mod:kick");
-  const canMute = hasPermClient("mod:mute");
-  const canWarn = hasPermClient("mod:warn");
-  const canUnban = hasPermClient("mod:unban");
-  const canUnmute = hasPermClient("mod:unmute");
-  const canReferral = hasPermClient("mod:referralSubmit");
-
-  if(modBanBtn) modBanBtn.style.display = canBan ? "" : "none";
-  if(modBanMins) modBanMins.parentElement.style.display = canBan ? "" : "none";
-
-  if(modKickBtn) modKickBtn.style.display = canKick ? "" : "none";
-  if(modMuteBtn) modMuteBtn.style.display = canMute ? "" : "none";
-  if(modMuteMins) modMuteMins.parentElement.style.display = canMute ? "" : "none";
-
-  if(modWarnBtn) modWarnBtn.style.display = canWarn ? "" : "none";
-  if(modUnbanBtn) modUnbanBtn.style.display = canUnban ? "" : "none";
-  if(modUnmuteBtn) modUnmuteBtn.style.display = canUnmute ? "" : "none";
-
-  if(modReferralBtn) modReferralBtn.style.display = canReferral ? "" : "none";
-  if(modReferralNotesField) modReferralNotesField.hidden = !canReferral;
-}
-
-function openRoleDebug(){
-  if(!roleDebugPanel) return;
-  roleDebugPanel.hidden = false;
-  showRoleDebugTab("users");
-  loadRoleDebugData();
-}
-function closeRoleDebug(){
-  if(!roleDebugPanel) return;
-  roleDebugPanel.hidden = true;
-}
-
-function showRoleDebugTab(tab){
-  const isUsers = tab === "users";
-  roleDebugUsers && (roleDebugUsers.hidden = !isUsers);
-  roleDebugRoles && (roleDebugRoles.hidden = isUsers);
-}
-
-function loadRoleDebugData(){
-  if(!socket) return;
-  socket.emit("debug:getRolePresets", {}, (res) => {
-    if(!res?.ok) return;
-    _debugAllPerms = Array.isArray(res.allPerms) ? res.allPerms : [];
-    _debugPresets = res.presets || {};
-    hydrateRolePresetSelectors();
-    renderPresetEditor();
-  });
-  socket.emit("debug:users", {}, (res) => {
-    if(!res?.ok) return;
-    _debugUsers = Array.isArray(res.users) ? res.users : [];
-    renderUserList();
-  });
-}
-
-function hydrateRolePresetSelectors(){
-  const roles = ["Guest","User","VIP","Moderator","Admin","Co-owner","Owner"];
-  if(roleDebugPresetRoleSelect){
-    roleDebugPresetRoleSelect.innerHTML = "";
-    for(const r of roles){
-      const o = document.createElement("option");
-      o.value = r; o.textContent = r;
-      roleDebugPresetRoleSelect.appendChild(o);
-    }
-  }
-  if(roleDebugRoleSelect){
-    roleDebugRoleSelect.innerHTML = "";
-    for(const r of roles){
-      const o = document.createElement("option");
-      o.value = r; o.textContent = r;
-      roleDebugRoleSelect.appendChild(o);
-    }
-  }
-}
-
-function renderUserList(){
-  if(!roleDebugUserList) return;
-  const q = (roleDebugSearch?.value || "").trim().toLowerCase();
-  const arr = _debugUsers.filter(u => !q || String(u.username||"").toLowerCase().includes(q));
-  roleDebugUserList.innerHTML = "";
-  for(const u of arr){
-    const item = document.createElement("div");
-    item.className = "item" + (_debugSelectedUser?.username === u.username ? " active" : "");
-    const title = document.createElement("div");
-    title.textContent = u.username;
-    const meta = document.createElement("div");
-    meta.className = "small muted";
-    meta.textContent = u.role || "User";
-    item.appendChild(title);
-    item.appendChild(meta);
-    item.addEventListener("click", ()=> selectDebugUser(u));
-    roleDebugUserList.appendChild(item);
-  }
-}
-
-function selectDebugUser(u){
-  _debugSelectedUser = u;
-  roleDebugUserDetail && (roleDebugUserDetail.hidden = false);
-  roleDebugUserName && (roleDebugUserName.textContent = u.username);
-  roleDebugRoleSelect && (roleDebugRoleSelect.value = u.role || "User");
-  // Start with empty overrides; you can set allow/deny visually
-  _debugUserAllow = new Set();
-  _debugUserDeny = new Set();
-  roleDebugUserMsg && (roleDebugUserMsg.textContent = "");
-  renderUserOverridesEditor();
-  renderUserList();
-}
-
-function groupPerms(perms){
-  const groups = {
-    "Moderation": [],
-    "Referrals": [],
-    "Tickets": [],
-    "Site tools": [],
-    "Debug": [],
-    "Chat": [],
-  };
-  for(const p of perms){
-    if(p.startsWith("mod:")) groups["Moderation"].push(p);
-    else if(p.startsWith("tickets:")) groups["Tickets"].push(p);
-    else if(p.startsWith("site:")) groups["Site tools"].push(p);
-    else if(p.startsWith("debug:")) groups["Debug"].push(p);
-    else if(p.startsWith("chat:")) groups["Chat"].push(p);
-    else groups["Referrals"].push(p);
-  }
-  return groups;
-}
-
-function renderPermEditor(container, allowSet, denySet, currentRolePerms){
-  if(!container) return;
-  container.innerHTML = "";
-  const groups = groupPerms(_debugAllPerms);
-  for(const [gname, plist] of Object.entries(groups)){
-    if(!plist.length) continue;
-    const box = document.createElement("div");
-    box.className = "roleDebugPermGroup";
-    const gt = document.createElement("div");
-    gt.className = "groupTitle";
-    gt.textContent = gname;
-    box.appendChild(gt);
-    for(const p of plist){
-      const row = document.createElement("div");
-      row.className = "roleDebugPermRow";
-      const left = document.createElement("div");
-      left.innerHTML = `<div style="font-weight:600;">${p}</div><div class="small muted">${currentRolePerms?.has(p) ? "Enabled by role" : "Off by role"}</div>`;
-      const toggles = document.createElement("div");
-      toggles.className = "toggles";
-      const allow = document.createElement("label");
-      const deny = document.createElement("label");
-      allow.innerHTML = `<input type="checkbox"> Allow`;
-      deny.innerHTML = `<input type="checkbox"> Deny`;
-      const allowCb = allow.querySelector("input");
-      const denyCb = deny.querySelector("input");
-      allowCb.checked = allowSet.has(p);
-      denyCb.checked = denySet.has(p);
-      allowCb.addEventListener("change", () => {
-        if(allowCb.checked){ allowSet.add(p); denySet.delete(p); denyCb.checked = false; }
-        else allowSet.delete(p);
-      });
-      denyCb.addEventListener("change", () => {
-        if(denyCb.checked){ denySet.add(p); allowSet.delete(p); allowCb.checked = false; }
-        else denySet.delete(p);
-      });
-      toggles.appendChild(allow);
-      toggles.appendChild(deny);
-      row.appendChild(left);
-      row.appendChild(toggles);
-      box.appendChild(row);
-    }
-    container.appendChild(box);
-  }
-}
-
-function renderUserOverridesEditor(){
-  if(!_debugSelectedUser) return;
-  const role = roleDebugRoleSelect?.value || _debugSelectedUser.role || "User";
-  const rolePerms = new Set((_debugPresets?.[role] || []));
-  renderPermEditor(roleDebugUserPerms, _debugUserAllow, _debugUserDeny, rolePerms);
-}
-
-function renderPresetEditor(){
-  const role = roleDebugPresetRoleSelect?.value || "User";
-  _debugPresetPerms = new Set((_debugPresets?.[role] || []));
-  if(!roleDebugPresetPerms) return;
-  roleDebugPresetPerms.innerHTML = "";
-  const groups = groupPerms(_debugAllPerms);
-  for(const [gname, plist] of Object.entries(groups)){
-    if(!plist.length) continue;
-    const box = document.createElement("div");
-    box.className = "roleDebugPermGroup";
-    const gt = document.createElement("div");
-    gt.className = "groupTitle";
-    gt.textContent = gname;
-    box.appendChild(gt);
-    for(const p of plist){
-      const row = document.createElement("div");
-      row.className = "roleDebugPermRow";
-      const left = document.createElement("div");
-      left.innerHTML = `<div style="font-weight:600;">${p}</div>`;
-      const right = document.createElement("label");
-      right.innerHTML = `<input type="checkbox"> Enabled`;
-      const cb = right.querySelector("input");
-      cb.checked = _debugPresetPerms.has(p);
-      cb.addEventListener("change", () => {
-        if(cb.checked) _debugPresetPerms.add(p);
-        else _debugPresetPerms.delete(p);
-      });
-      row.appendChild(left);
-      row.appendChild(right);
-      box.appendChild(row);
-    }
-    roleDebugPresetPerms.appendChild(box);
-  }
-}
-
-function savePreset(){
-  const role = roleDebugPresetRoleSelect?.value || "User";
-  roleDebugPresetMsg && (roleDebugPresetMsg.textContent = "Saving...");
-  socket.emit("debug:setRolePreset", { role, perms: Array.from(_debugPresetPerms) }, (res) => {
-    roleDebugPresetMsg && (roleDebugPresetMsg.textContent = res?.ok ? "Saved." : (res?.error || "Failed"));
-    if(res?.ok) loadRoleDebugData();
-  });
-}
-
-function saveUserRole(){
-  if(!_debugSelectedUser) return;
-  roleDebugUserMsg && (roleDebugUserMsg.textContent = "Saving role...");
-  socket.emit("debug:setUserRole", { username: _debugSelectedUser.username, role: roleDebugRoleSelect?.value }, (res) => {
-    roleDebugUserMsg && (roleDebugUserMsg.textContent = res?.ok ? "Role saved." : (res?.error || "Failed"));
-    if(res?.ok) loadRoleDebugData();
-  });
-}
-
-function saveUserOverrides(){
-  if(!_debugSelectedUser) return;
-  roleDebugUserMsg && (roleDebugUserMsg.textContent = "Saving overrides...");
-  socket.emit("debug:setUserOverride", { username: _debugSelectedUser.username, allow: Array.from(_debugUserAllow), deny: Array.from(_debugUserDeny) }, (res) => {
-    roleDebugUserMsg && (roleDebugUserMsg.textContent = res?.ok ? "Overrides saved." : (res?.error || "Failed"));
-  });
-}
-
 
 function renderAppealsList(items){
   if(!appealsList) return;
@@ -8856,29 +8435,7 @@ function bindStaffAppealsUI(){
   appealsBanToKickBtn?.addEventListener("click", ()=> staffAction("ban_to_kick"));
   appealsUpdateKickBtn?.addEventListener("click", ()=> staffAction("update_kick"));
   appealsUnlockBtn?.addEventListener("click", ()=> staffAction("unlock"));
-
-  // Referrals
-  referralsPanelBtn?.addEventListener("click", openReferralsPanel);
-  referralsCloseBtn?.addEventListener("click", closeReferralsPanel);
-  referralsBackBtn?.addEventListener("click", ()=>{ if(referralsDetail) referralsDetail.hidden = true; });
-  referralsReplyBtn?.addEventListener("click", referralsStaffReply);
-  referralsBanBtn?.addEventListener("click", ()=> referralsStaffAction("ban"));
-  referralsKickBtn?.addEventListener("click", ()=> referralsStaffAction("kick"));
-  referralsDismissBtn?.addEventListener("click", ()=> referralsStaffAction("dismiss"));
-
-  // Role Debug
-  roleDebugBtn?.addEventListener("click", openRoleDebug);
-  roleDebugCloseBtn?.addEventListener("click", closeRoleDebug);
-  roleDebugTabUsers?.addEventListener("click", ()=> showRoleDebugTab("users"));
-  roleDebugTabRoles?.addEventListener("click", ()=> showRoleDebugTab("roles"));
-  roleDebugSearch?.addEventListener("input", renderUserList);
-  roleDebugRoleSelect?.addEventListener("change", renderUserOverridesEditor);
-  roleDebugPresetRoleSelect?.addEventListener("change", renderPresetEditor);
-  roleDebugSavePresetBtn?.addEventListener("click", savePreset);
-  roleDebugSaveRoleBtn?.addEventListener("click", saveUserRole);
-  roleDebugSaveOverrideBtn?.addEventListener("click", saveUserOverrides);
 }
-
 
 
 
@@ -10427,22 +9984,6 @@ modBanBtn.addEventListener("click", ()=>{
   socket?.emit("mod ban", { username: target, minutes: mins, reason });
   modMsg.textContent="Ban sent.";
 });
-
-modReferralBtn?.addEventListener("click", ()=>{
-  const reason = (modReason.value || "").trim();
-  const err=requireReason(reason);
-  if(err){ modMsg.textContent=err; return; }
-  const target = selectedModTarget();
-  const targetErr = ensureTarget(target);
-  if(targetErr){ modMsg.textContent = targetErr; return; }
-  if(!confirmModeration("referral", target)) return;
-  const notes = (modReferralNotes?.value || "").trim();
-  socket?.emit("referrals:submit", { username: target, reason, notes }, (res)=>{
-    if(!res?.ok){ modMsg.textContent = res?.error || "Referral failed."; return; }
-    modMsg.textContent="Referral sent to Admin+.";
-    if(modReferralNotes) modReferralNotes.value = "";
-  });
-});
 modUnmuteBtn.addEventListener("click", ()=>{
   const reason = (modReason.value || "").trim();
   const err=requireReason(reason);
@@ -10573,26 +10114,6 @@ async function initChatApp(){
   socket.on("connect", () => {
     // Join initial room so history + realtime messages work reliably
     joinRoom(currentRoom);
-
-  socket.on("perms:mine", (payload) => {
-    if(!payload) return;
-    me = me || {};
-    if(payload.role) me.role = payload.role;
-    me.perms = Array.isArray(payload.perms) ? payload.perms : [];
-    updateStaffButtons();
-    updateModPanelButtons();
-  });
-
-  socket.on("appeals:updated", () => {
-    if(appealsPanel && !appealsPanel.hidden) loadAppealsList();
-  });
-  socket.on("referrals:updated", () => {
-    if(referralsPanel && !referralsPanel.hidden) loadReferralsList();
-  });
-  socket.on("debug:presetsUpdated", () => {
-    if(roleDebugPanel && !roleDebugPanel.hidden) loadRoleDebugData();
-  });
-
   });
 
   socket.on("restriction:status", async (payload) => {
