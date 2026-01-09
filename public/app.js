@@ -1901,11 +1901,18 @@ function updateIrisLolaTogetherClass() {
 const DEFAULT_THEME = "Minimal Dark";
 let currentTheme = document.body?.getAttribute("data-theme") || DEFAULT_THEME;
 let themeFilter = "all";
+const MAX_IMAGE_GIF_BYTES = 25 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
 let modalTargetUsername = null;
 let modalTargetUserId = null;
 let pendingFile = null;
+let roomPendingAttachment = null;
 let dmPendingAttachment = null;
+let roomUploadToken = null;
+let dmUploadToken = null;
+let roomUploading = false;
+let dmUploading = false;
 let uploadXhr = null;
 let memberMenuUser = null;
 let memberMenuUsername = "";
@@ -2443,28 +2450,35 @@ dmText?.addEventListener("input", ()=>draftDebounce(saveDmDraft));
 // Ensure DM quick bars start closed on load (safety net in case markup defaults are changed)
 hideAllDmQuickBars();
 
-// DM image upload (images only)
+// DM media upload
 dmPickFileBtn?.addEventListener("click", () => { dmFileInput?.click(); });
 dmFileInput?.addEventListener("change", async () => {
   const file = dmFileInput.files && dmFileInput.files[0] ? dmFileInput.files[0] : null;
   if(!file) return;
   // reset input so the same file can be re-selected
   try{ dmFileInput.value = ""; }catch{}
-  if(!/^image\//i.test(String(file.type||""))){
-    setDmNotice("Images only for DMs.");
+  dmPendingAttachment = null;
+  const validation = validateUploadFile(file);
+  if(!validation.ok){
+    setDmNotice(validation.message || "File not allowed.");
     return;
   }
-  if(file.size > (10*1024*1024)){
-    setDmNotice("Image too large (max 10MB).");
-    return;
-  }
+  dmUploadToken = `${Date.now()}-${Math.random()}`;
+  const token = dmUploadToken;
+  setDmUploadingState(true);
   try{
-    setDmNotice("Uploading image…");
+    setDmNotice("Uploading media…");
     const up = await uploadChatFileWithProgress(file);
+    if(token !== dmUploadToken) return;
     dmPendingAttachment = { url: up.url, mime: up.mime, type: up.type, size: up.size };
-    setDmNotice("Image ready. Press Send.");
+    dmUploadToken = null;
+    setDmUploadingState(false);
+    sendDmMessage();
   }catch(e){
+    if(token !== dmUploadToken) return;
+    dmUploadToken = null;
     dmPendingAttachment = null;
+    setDmUploadingState(false);
     setDmNotice(String(e?.message || "Upload failed."));
   }
 });
@@ -2547,6 +2561,7 @@ const profileSheetBg = document.getElementById("profileSheetBg");
 const profileSheetAvatar = document.getElementById("profileSheetAvatar");
 const profileSheetAvatarActions = document.getElementById("profileSheetAvatarActions");
 const profileSheetName = document.getElementById("profileSheetName");
+const profileSheetNameRow = document.querySelector(".profileSheetNameRow");
 const profileSheetRoleChip = document.getElementById("profileSheetRoleChip");
 const profileSheetStats = document.getElementById("profileSheetStats");
 const profileSheetStars = document.getElementById("profileSheetStars");
@@ -2588,6 +2603,7 @@ const copyUsernameBtn = document.getElementById("copyUsernameBtn");
 const mediaMsg = document.getElementById("mediaMsg");
 const profileActionMsg = document.getElementById("profileActionMsg");
 const customizeMsg = document.getElementById("customizeMsg");
+const levelPanel = document.getElementById("levelPanel");
 const levelBadge = document.getElementById("levelBadge");
 const xpText = document.getElementById("xpText");
 const xpProgress = document.getElementById("xpProgress");
@@ -3343,6 +3359,32 @@ function fmtCreated(ts){
   const d = new Date(ts);
   if(Number.isNaN(d.getTime())) return String(ts);
   return d.toLocaleString();
+}
+function formatMemberSince(value){
+  if(value == null || value === "") return "—";
+  let date = null;
+  if(typeof value === "number"){
+    const ms = value < 1e12 ? value * 1000 : value;
+    date = new Date(ms);
+  }else if(typeof value === "string"){
+    const trimmed = value.trim();
+    if(!trimmed) return "—";
+    const asNum = Number(trimmed);
+    if(Number.isFinite(asNum)){
+      const ms = asNum < 1e12 ? asNum * 1000 : asNum;
+      date = new Date(ms);
+    }else{
+      date = new Date(trimmed);
+    }
+  }else{
+    date = new Date(NaN);
+  }
+
+  if(!date || Number.isNaN(date.getTime())) return "—";
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(date.getFullYear());
+  return `${dd}/${mm}/${yyyy}`;
 }
 function bytesToNice(n){
   n = Number(n||0);
@@ -6428,6 +6470,7 @@ function sendDmMessage(){
   if (!activeDmId) return;
   const txt = (dmText?.value || "").trim();
   const att = dmPendingAttachment;
+  if (dmUploading && !att) return;
   if (!txt && !att) return;
 
   socket?.emit("dm message", {
@@ -6850,6 +6893,28 @@ pickFileBtn?.addEventListener("click", () => {
 });
 
 // upload preview
+function validateUploadFile(file){
+  const mime = String(file?.type || "");
+  const isImage = /^image\//i.test(mime);
+  const isVideo = /^video\//i.test(mime);
+  if(!isImage && !isVideo){
+    return { ok: false, message: "Only images, GIFs, or videos are allowed." };
+  }
+  const maxBytes = isVideo ? MAX_VIDEO_BYTES : MAX_IMAGE_GIF_BYTES;
+  if(file.size > maxBytes){
+    const label = isVideo ? "video" : "image/GIF";
+    return { ok: false, message: `Max ${label} size is ${bytesToNice(maxBytes)}.` };
+  }
+  return { ok: true, isImage, isVideo, maxBytes };
+}
+function setRoomUploadingState(isUploading){
+  roomUploading = isUploading;
+  if(sendBtn) sendBtn.disabled = isUploading;
+}
+function setDmUploadingState(isUploading){
+  dmUploading = isUploading;
+  if(dmSendBtn) dmSendBtn.disabled = isUploading;
+}
 function showUploadPreview(file){
   pendingFile = file;
   uploadPreview.style.display = "flex";
@@ -6886,16 +6951,36 @@ function clearUploadPreview(){
 fileInput.addEventListener("change", () => {
   const f=fileInput.files?.[0];
   if(!f) return clearUploadPreview();
-  if(f.size > 10*1024*1024){
-    addSystem("Max upload size is 10MB.");
+  roomPendingAttachment = null;
+  const validation = validateUploadFile(f);
+  if(!validation.ok){
+    addSystem(validation.message || "File not allowed.");
     fileInput.value="";
     return clearUploadPreview();
   }
   showUploadPreview(f);
+  roomUploadToken = `${Date.now()}-${Math.random()}`;
+  const token = roomUploadToken;
+  setRoomUploadingState(true);
+  uploadChatFileWithProgress(f).then((up) => {
+    if(token !== roomUploadToken) return;
+    roomPendingAttachment = { url: up.url, mime: up.mime, type: up.type, size: up.size };
+    roomUploadToken = null;
+    setRoomUploadingState(false);
+    sendMessage();
+  }).catch((e) => {
+    if(token !== roomUploadToken) return;
+    roomUploadToken = null;
+    setRoomUploadingState(false);
+    addSystem(`Upload failed: ${e?.message || "Upload failed."}`);
+  });
 });
 cancelUploadBtn.addEventListener("click", () => {
   if(uploadXhr){ uploadXhr.abort(); uploadXhr=null; addSystem("Upload canceled."); }
   fileInput.value="";
+  roomUploadToken = null;
+  roomPendingAttachment = null;
+  setRoomUploadingState(false);
   clearUploadPreview();
 });
 function uploadChatFileWithProgress(file){
@@ -8269,15 +8354,15 @@ async function sendMessage(){
   if(!socket) return;
   const text = msgInput.value || "";
   const file = pendingFile;
-  if(!text.trim() && !file) return;
+  const attachmentReady = roomPendingAttachment;
+  if(roomUploading && !attachmentReady) return;
+  if(!text.trim() && !file && !attachmentReady) return;
 
   try{
-    let attachment=null;
-    if(file){
+    let attachment = attachmentReady;
+    if(!attachment && file){
       addSystem(`Uploading ${file.name}...`);
       attachment = await uploadChatFileWithProgress(file);
-      fileInput.value="";
-      clearUploadPreview();
     }
 
     socket.emit("chat message", {
@@ -8293,6 +8378,11 @@ async function sendMessage(){
     if (Sound.shouldSent()) Sound.cues.sent();
 
     msgInput.value="";
+    fileInput.value="";
+    clearUploadPreview();
+    roomPendingAttachment = null;
+    roomUploadToken = null;
+    setRoomUploadingState(false);
     setReplyTarget(null);
     activeTone = "";
     updateToneMenu(tonePicker, activeTone);
@@ -9233,8 +9323,11 @@ function fillProfileUI(p, isSelf){
 
   infoAge.textContent = (p.age ?? "—");
   infoGender.textContent = (p.gender ?? "—");
-  if (infoLanguage) infoLanguage.textContent = (p.language ?? "—");
-  infoCreated.textContent = fmtCreated(p.created_at);
+  if (infoLanguage){
+    const langRow = infoLanguage.closest(".profileInfoRow");
+    if (langRow) langRow.style.display = "none";
+  }
+  infoCreated.textContent = formatMemberSince(p.created_at);
   infoLastSeen.textContent = formatLastSeen(p.last_seen);
   infoRoom.textContent = p.current_room ? `#${p.current_room}` : (p.last_room ? `#${p.last_room}` : "—");
   const statusLabel = normalizeStatusLabel(p.last_status, "");
@@ -9249,6 +9342,11 @@ function fillProfileUI(p, isSelf){
   renderVibeChips(profileVibes, p.vibe_tags);
   fillProfileSheetHeader(p, isSelf);
   syncProfileEditUi();
+  if (levelPanel){
+    levelPanel.style.display = "none";
+    const title = levelPanel.previousElementSibling;
+    if (title && title.classList.contains("sectionTitle")) title.style.display = "none";
+  }
 }
 
 
@@ -9269,6 +9367,25 @@ function fillProfileSheetHeader(p, isSelf){
   if (profileSheetRoleChip){
     profileSheetRoleChip.textContent = p.role ? `${roleIcon(p.role)} ${p.role}` : "User";
     profileSheetRoleChip.style.color = roleBadgeColor(p.role || "User");
+  }
+  if (profileSheetNameRow){
+    let ring = profileSheetNameRow.querySelector(".profileLevelRing");
+    if (!ring){
+      ring = document.createElement("span");
+      ring.className = "profileLevelRing";
+      ring.setAttribute("aria-label", "Account level");
+      profileSheetNameRow.insertBefore(ring, profileSheetNameRow.firstChild);
+    }
+    const levelVal = deriveProfileLevel(p);
+    ring.textContent = Number.isFinite(levelVal) ? levelVal.toLocaleString() : "—";
+    const xpInto = (typeof p?.xpIntoLevel === "number") ? p.xpIntoLevel : (isSelf ? progression?.xpIntoLevel : null);
+    const xpNext = (typeof p?.xpForNextLevel === "number") ? p.xpForNextLevel : (isSelf ? progression?.xpForNextLevel : null);
+    if (typeof xpInto === "number" && typeof xpNext === "number" && xpNext > 0) {
+      const pct = Math.max(0, Math.min(100, (xpInto / xpNext) * 100));
+      ring.style.setProperty("--levelProgress", `${pct}%`);
+    } else {
+      ring.style.removeProperty("--levelProgress");
+    }
   }
 
   // Age + gender
