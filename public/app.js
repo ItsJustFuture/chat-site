@@ -2047,7 +2047,6 @@ if(faqTitleInput){
 }
 const channelsCloseBtn = document.getElementById("channelsCloseBtn");
 const membersCloseBtn  = document.getElementById("membersCloseBtn");
-const tabCustom = document.getElementById("tabCustom");
 const viewCustom = document.getElementById("viewCustom");
 
 const editAboutBtn = document.getElementById("editAboutBtn");
