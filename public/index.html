@@ -550,7 +550,7 @@
     <div class="modalCard">
       <div class="modalTop">
         <strong id="modalTitle">Profile</strong>
-        <button class="btn secondary" id="closeModalBtn" type="button">Close</button>
+        <button class="btn btnSecondary" id="closeModalBtn" type="button">Close</button>
       </div>
 
       <div class="modalBody">
@@ -625,12 +625,14 @@
 
           <div class="profileQuickActions" id="profileQuickActions">
             <div class="quickActionGroup">
-              <button class="btn secondary" id="dmUserBtn" type="button">Message</button>
-              <button class="btn secondary" id="likeProfileBtn" type="button">❤️ Like</button>
-              <button class="btn secondary" id="actionsBtn" type="button" style="display:none;">Actions</button>
+              <button class="btn btnSecondary" id="dmUserBtn" type="button">Message</button>
+              <button class="btn btnSecondary" id="likeProfileBtn" type="button">❤️ Like</button>
+              <button class="btn btnSecondary" id="actionsBtn" type="button" style="display:none;">🛠 Actions</button>
+              <button class="btn btnSecondary" id="profileEditBtn" type="button" style="display:none;">✏️ Edit</button>
+              <button class="btn btnSecondary" id="profileSettingsBtn" type="button" style="display:none;">⚙️ Settings</button>
               <div class="badge" id="likeCount">0</div>
             </div>
-            <button class="btn secondary" id="copyUsernameBtn" type="button">Copy username</button>
+            <button class="btn btnSecondary" id="copyUsernameBtn" type="button">Copy username</button>
           </div>
           <div class="msgline" id="profileActionMsg"></div>
           <div class="msgline" id="profileLikeMsg"></div>
@@ -676,8 +678,8 @@
       <span class="menuIcon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.9 7.9 0 0 0 .1-2l2-1.2-2-3.5-2.3.7a7.7 7.7 0 0 0-1.7-1l-.3-2.4h-4l-.3 2.4a7.7 7.7 0 0 0-1.7 1L6.9 8.3 4.9 11.8l2 1.2a7.9 7.9 0 0 0 .1 2l-2 1.2 2 3.5 2.3-.7a7.7 7.7 0 0 0 1.7 1l.3 2.4h4l.3-2.4a7.7 7.7 0 0 0 1.7-1l2.3.7 2-3.5-2-1.2z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
       </span>
-      <span class="menuLabel">Preferences</span>
-      <span class="menuHint">Sounds + notifications</span>
+      <span class="menuLabel">Settings</span>
+      <span class="menuHint">Sounds + comfort mode</span>
     </button>
   </div>
 
@@ -731,6 +733,12 @@
       </div>
 
       <div class="small" id="prefSoundStatus" style="margin-top:8px;"></div>
+
+      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:12px;">
+        <label style="margin:0;">Comfort mode</label>
+        <input id="prefComfortMode" type="checkbox">
+      </div>
+      <div class="small muted" id="prefComfortHelp">Softens glows, confetti, and motion-heavy animations.</div>
     </div>
   </div>
 
@@ -827,9 +835,9 @@
                         </div>
 
                         <div class="row">
-                          <button class="btn" id="saveProfileBtn" type="button">Save</button>
-                          <button class="btn secondary" id="refreshProfileBtn" type="button">Refresh</button>
-                          <button class="btn danger" id="logoutBtn" type="button">Logout</button>
+                          <button class="btn btnPrimary" id="saveProfileBtn" type="button">Save</button>
+                          <button class="btn btnSecondary" id="refreshProfileBtn" type="button">Refresh</button>
+                          <button class="btn btnDanger" id="logoutBtn" type="button">Logout</button>
                         </div>
 
                         <div class="msgline" id="profileMsg"></div>
@@ -875,7 +883,7 @@
               </div>
 
               <div class="row" style="margin-top:6px;">
-                <button class="btn" id="saveBadgePrefsBtn" type="button">Save badge colors</button>
+                <button class="btn btnPrimary" id="saveBadgePrefsBtn" type="button">Save badge colors</button>
               </div>
 
               <div class="msgline" id="customizeMsg"></div>
@@ -962,12 +970,12 @@
               </div>
 
               <div class="actionGrid" style="margin-top:8px;">
-                <button class="btn secondary" id="modKickBtn" type="button">Kick</button>
-                <button class="btn secondary" id="modWarnBtn" type="button">Warn</button>
-                <button class="btn secondary" id="modMuteBtn" type="button">Mute</button>
-                <button class="btn danger" id="modBanBtn" type="button">Ban</button>
-                <button class="btn secondary" id="modUnmuteBtn" type="button">Unmute</button>
-                <button class="btn secondary" id="modUnbanBtn" type="button">Unban</button>
+                <button class="btn btnSecondary" id="modKickBtn" type="button">Kick</button>
+                <button class="btn btnSecondary" id="modWarnBtn" type="button">Warn</button>
+                <button class="btn btnSecondary" id="modMuteBtn" type="button">Mute</button>
+                <button class="btn btnDanger" id="modBanBtn" type="button">Ban</button>
+                <button class="btn btnSecondary" id="modUnmuteBtn" type="button">Unmute</button>
+                <button class="btn btnSecondary" id="modUnbanBtn" type="button">Unban</button>
               </div>
 
               <div class="field" style="margin-top:8px;">
@@ -983,7 +991,7 @@
                     <option>User</option>
                     <option>Guest</option>
                   </select>
-                  <button class="btn secondary" id="modSetRoleBtn" type="button">Apply role</button>
+                  <button class="btn btnPrimary" id="modSetRoleBtn" type="button">Apply role</button>
                 </div>
               </div>
 
@@ -1080,10 +1088,11 @@
                       </div>
                     </div>
                     <div class="actionGrid" style="margin-top:8px;">
-                      <button class="btn secondary" id="quickKickBtn" type="button">Kick</button>
-                      <button class="btn secondary" id="quickUnkickBtn" type="button">Unkick</button>
-                      <button class="btn secondary" id="quickMuteBtn" type="button">Mute</button>
-                      <button class="btn danger" id="quickBanBtn" type="button">Ban</button>
+                      <button class="btn btnSecondary" id="quickKickBtn" type="button">Kick</button>
+                      <button class="btn btnSecondary" id="quickUnkickBtn" type="button">Unkick</button>
+                      <button class="btn btnSecondary" id="quickMuteBtn" type="button">Mute</button>
+                      <button class="btn btnSecondary" id="quickUnmuteBtn" type="button">Unmute</button>
+                      <button class="btn btnDanger" id="quickBanBtn" type="button">Ban</button>
                     </div>
                     <div class="msgline" id="quickModMsg"></div>
                   </div>
@@ -1231,8 +1240,8 @@
         <option>Guest</option>
       </select>
       <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
-        <button class="btn" id="roleDebugApplyBtn" type="button">Apply</button>
-        <button class="btn secondary" id="roleDebugUseSelectedBtn" type="button">Use selected member</button>
+        <button class="btn btnPrimary" id="roleDebugApplyBtn" type="button">Apply</button>
+        <button class="btn btnSecondary" id="roleDebugUseSelectedBtn" type="button">Use selected member</button>
       </div>
       <div class="msgline" id="roleDebugMsg" style="margin-top:8px;"></div>
     </div>
