@@ -52,6 +52,10 @@
   --shadow: var(--shadowLg);
 }
 
+.hidden {
+  display: none !important;
+}
+
 :root[data-theme="Minimal Dark"],
 [data-theme="Minimal Dark"] {
   --bg: #1f1f24;

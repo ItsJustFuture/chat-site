@@ -3801,6 +3801,55 @@ function safeJsonParse(raw, fallback) {
     return fallback;
   }
 }
+function safeString(value, fallback = "") {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return fallback;
+  return String(value);
+}
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+const PREFS_DEFAULTS = Object.freeze({
+  dmBadgePrefs: { direct: "#ed4245", group: "#5865f2" },
+  dmThemePrefs: { background: "#1e1f22" },
+  sound: {
+    enabled: false,
+    room: true,
+    dm: true,
+    mention: true,
+    sent: false,
+    receive: false,
+    reaction: false,
+  },
+});
+function normalizeSoundPrefs(raw) {
+  const base = { ...PREFS_DEFAULTS.sound };
+  if (!raw || typeof raw !== "object") return base;
+  for (const key of Object.keys(base)) {
+    if (typeof raw[key] === "boolean") base[key] = raw[key];
+  }
+  return base;
+}
+function normalizePrefs(raw) {
+  const prefs = raw && typeof raw === "object" ? raw : {};
+  const dmBadgePrefs = { ...PREFS_DEFAULTS.dmBadgePrefs };
+  if (prefs.dmBadgePrefs && typeof prefs.dmBadgePrefs === "object") {
+    if (typeof prefs.dmBadgePrefs.direct === "string") dmBadgePrefs.direct = prefs.dmBadgePrefs.direct;
+    if (typeof prefs.dmBadgePrefs.group === "string") dmBadgePrefs.group = prefs.dmBadgePrefs.group;
+  }
+  const dmThemePrefs = { ...PREFS_DEFAULTS.dmThemePrefs };
+  if (prefs.dmThemePrefs && typeof prefs.dmThemePrefs === "object") {
+    if (typeof prefs.dmThemePrefs.background === "string") dmThemePrefs.background = prefs.dmThemePrefs.background;
+  }
+  return {
+    ...prefs,
+    dmBadgePrefs,
+    dmThemePrefs,
+    sound: normalizeSoundPrefs(prefs.sound),
+    chatFx: sanitizeChatFx(prefs.chatFx),
+  };
+}
 function sanitizePrefsInput(p) {
   const out = {};
   if (p && typeof p === "object") {
@@ -3873,7 +3922,7 @@ app.get("/api/me/prefs", requireLogin, async (req, res) => {
     // Prefer Postgres if the user exists there
     if (await pgUserExists(userId)) {
       const { rows } = await pgPool.query("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
-      const prefs = safeJsonParse(rows?.[0]?.prefs_json, {});
+      const prefs = normalizePrefs(safeJsonParse(rows?.[0]?.prefs_json, {}));
       return res.json({ prefs });
     }
   } catch (e) {
@@ -3882,7 +3931,7 @@ app.get("/api/me/prefs", requireLogin, async (req, res) => {
 
   db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (err, row) => {
     if (err) return res.status(500).send("Failed");
-    const prefs = safeJsonParse(row?.prefs_json, {});
+    const prefs = normalizePrefs(safeJsonParse(row?.prefs_json, {}));
     return res.json({ prefs });
   });
 });
@@ -3896,7 +3945,7 @@ app.post("/api/me/prefs", requireLogin, async (req, res) => {
     if (await pgUserExists(userId)) {
       const { rows } = await pgPool.query("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
       const current = safeJsonParse(rows?.[0]?.prefs_json, {});
-      const merged = { ...(current || {}), ...(incoming || {}) };
+      const merged = normalizePrefs({ ...(current || {}), ...(incoming || {}) });
       // IMPORTANT: node-postgres does not reliably serialize plain JS objects to JSON/JSONB.
       // Always stringify and cast to jsonb to ensure prefs are actually persisted.
       await pgPool.query("UPDATE users SET prefs_json = $1::jsonb WHERE id = $2", [JSON.stringify(merged), userId]);
@@ -3916,7 +3965,7 @@ app.post("/api/me/prefs", requireLogin, async (req, res) => {
   // SQLite fallback
   db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
     const current = safeJsonParse(row?.prefs_json, {});
-    const merged = { ...(current || {}), ...(incoming || {}) };
+    const merged = normalizePrefs({ ...(current || {}), ...(incoming || {}) });
     db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId], (err2) => {
       if (err2) return res.status(500).send("Failed");
       if (shouldUpdateChatFx) {
@@ -5758,8 +5807,8 @@ if (!room) {
     }
   });
 
-  socket.on("dm join", ({ threadId }) => {
-    const tid = Number(threadId);
+  socket.on("dm join", (payload = {}) => {
+    const tid = Number(payload.threadId);
     if (!Number.isInteger(tid)) return;
 
     loadThreadForUser(tid, socket.user.id, (err, thread) => {
@@ -5834,10 +5883,10 @@ if (!room) {
   });
 
   
-  socket.on("dm mark read", ({ threadId, messageId, ts }) => {
-    const tid = Number(threadId);
-    const mid = Number(messageId);
-    const tms = Number(ts) || Date.now();
+  socket.on("dm mark read", (payload = {}) => {
+    const tid = Number(payload.threadId);
+    const mid = Number(payload.messageId);
+    const tms = safeNumber(payload.ts, Date.now());
     if (!socket.user) return;
     if (!Number.isInteger(tid) || !Number.isInteger(mid)) return;
 
@@ -5869,16 +5918,17 @@ if (!room) {
   });
 
 
-  socket.on("dm leave", ({ threadId }) => {
-    const tid = Number(threadId);
+  socket.on("dm leave", (payload = {}) => {
+    const tid = Number(payload.threadId);
     if (!Number.isInteger(tid)) return;
     try { socket.leave(`dm:${tid}`); } catch {}
     try { socket.dmThreads?.delete(tid); } catch {}
   });
 
-socket.on("dm message", ({ threadId, text, replyToId, attachment, tone }) => {
+  socket.on("dm message", (payload = {}) => {
+    const { threadId, text, replyToId, attachment, tone } = payload || {};
     const tid = Number(threadId);
-    const body = String(text || "").trim().slice(0, 800);
+    const body = safeString(text, "").trim().slice(0, 800);
     const att = attachment && typeof attachment === "object" ? attachment : null;
     const toneKey = sanitizeTone(tone);
 
@@ -5903,7 +5953,7 @@ socket.on("dm message", ({ threadId, text, replyToId, attachment, tone }) => {
       if (err) return;
       const ts = Date.now();
 
-      const replyId = Number(replyToId);
+      const replyId = safeNumber(replyToId, NaN);
       const doInsert = (replyMeta = {}) => {
         const replyUser = replyMeta.user || null;
         const replyText = replyMeta.text || null;
@@ -5954,7 +6004,7 @@ socket.on("dm message", ({ threadId, text, replyToId, attachment, tone }) => {
               io.to(`dm:${tid}`).emit("dm message", payload);
             }
           );
-        };
+      };
 
       if (Number.isInteger(replyId)) {
         db.get(
@@ -5971,10 +6021,10 @@ socket.on("dm message", ({ threadId, text, replyToId, attachment, tone }) => {
   });
 
     // ---- DM edit message (self-only, short window)
-  socket.on("dm edit message", ({ threadId, messageId, text }) => {
-    const tid = Number(threadId);
-    const mid = Number(messageId);
-    const body = String(text || "").trim().slice(0, 2000);
+  socket.on("dm edit message", (payload = {}) => {
+    const tid = Number(payload.threadId);
+    const mid = Number(payload.messageId);
+    const body = safeString(payload.text, "").trim().slice(0, 2000);
     if (!socket.user) return;
     if (!Number.isInteger(tid) || !Number.isInteger(mid) || !body) return;
 
@@ -6012,10 +6062,10 @@ socket.on("dm message", ({ threadId, text, replyToId, attachment, tone }) => {
   });
 
   // ---- DM reactions (1 reaction per user per DM message)
-  socket.on("dm reaction", ({ threadId, messageId, emoji }) => {
-    const tid = Number(threadId);
-    const mid = Number(messageId);
-    const em = String(emoji || "").slice(0, 8);
+  socket.on("dm reaction", (payload = {}) => {
+    const tid = Number(payload.threadId);
+    const mid = Number(payload.messageId);
+    const em = safeString(payload.emoji, "").slice(0, 8);
     if (!socket.user) return;
     if (!Number.isInteger(tid) || !Number.isInteger(mid) || !em) return;
 
@@ -6055,7 +6105,7 @@ socket.on("status change", ({ status }) => {
     if (socket.currentRoom) emitUserList(socket.currentRoom);
   });
 
-  socket.on("chat message", (payload) => {
+  socket.on("chat message", (payload = {}) => {
     // If a client sends before it has joined a room (mobile reconnect/race),
     // auto-join main so the message doesn't silently disappear.
     let room = socket.currentRoom;
@@ -6083,16 +6133,16 @@ socket.on("status change", ({ status }) => {
       isPunished(socket.user.id, "mute", (muted) => {
         if (muted) return;
 
-        const text = String(payload?.text || "").slice(0, 800);
+        const text = safeString(payload.text, "").slice(0, 800);
         if (text.trim().startsWith("/")) {
           executeCommand(socket, text, room);
           return;
         }
-        const attachmentUrl = String(payload?.attachmentUrl || "").slice(0, 400);
-        const attachmentType = String(payload?.attachmentType || "").slice(0, 20);
-        const attachmentMime = String(payload?.attachmentMime || "").slice(0, 60);
-        const attachmentSize = Number(payload?.attachmentSize || 0) || 0;
-        const tone = sanitizeTone(payload?.tone);
+        const attachmentUrl = safeString(payload.attachmentUrl, "").slice(0, 400);
+        const attachmentType = safeString(payload.attachmentType, "").slice(0, 20);
+        const attachmentMime = safeString(payload.attachmentMime, "").slice(0, 60);
+        const attachmentSize = safeNumber(payload.attachmentSize, 0);
+        const tone = sanitizeTone(payload.tone);
 
         awardPassiveGold(socket.user.id);
 
@@ -6122,7 +6172,7 @@ socket.on("status change", ({ status }) => {
               slowmodeTracker.set(key, Date.now());
             }
 
-            const replyId = Number(payload?.replyToId);
+            const replyId = safeNumber(payload.replyToId, NaN);
             const insertWithReply = (replyMeta = {}) => {
               const replyPk = Number.isInteger(replyMeta.id) ? replyMeta.id : null;
               const replyUser = replyMeta.username || replyMeta.user || null;
@@ -6191,9 +6241,9 @@ socket.on("status change", ({ status }) => {
   });
 
   // ---- Edit message (self-only, short window)
-  socket.on("edit message", ({ messageId, text }) => {
-    const mid = Number(messageId);
-    const body = String(text || "").trim().slice(0, 2000);
+  socket.on("edit message", (payload = {}) => {
+    const mid = Number(payload.messageId);
+    const body = safeString(payload.text, "").trim().slice(0, 2000);
     if (!socket.user) return;
     if (!Number.isInteger(mid) || !body) return;
 

@@ -7,6 +7,27 @@ const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platfo
 const PREFERS_REDUCED_MOTION = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const DELETE_ANIM_MS = PREFERS_REDUCED_MOTION ? 1 : 200;
 
+function safeJsonParse(raw, fallback) {
+  try {
+    if (raw === null || raw === undefined || raw === "") return fallback;
+    if (typeof raw === "object") return raw;
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function safeNumber(value, fallback = 0) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function safeString(value, fallback = "") {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return fallback;
+  return String(value);
+}
+
 // ---- Scroll pinning scheduler (hoisted)
 // This function is referenced early (e.g. visualViewport listeners inside initLayoutMetrics).
 // It must be hoisted to avoid TDZ/ReferenceError when app.js is evaluated.
@@ -1060,12 +1081,9 @@ const DM_LAST_READ_KEY = "dm:lastRead:v1";
 const AVATAR_CACHE_KEY = "dm:avatarCache:v1";
 
 function loadJson(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    const val = JSON.parse(raw);
-    return val ?? fallback;
-  } catch { return fallback; }
+  const raw = localStorage.getItem(key);
+  const val = safeJsonParse(raw, fallback);
+  return val ?? fallback;
 }
 function saveJson(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
@@ -1232,6 +1250,32 @@ function updateUserFxMap(username, fx){
   if (!username) return;
   const key = String(username);
   userFxMap[key] = normalizeChatFx(fx);
+}
+
+function escapeSelectorValue(value) {
+  if (window.CSS?.escape) return CSS.escape(String(value));
+  return String(value).replace(/["\\]/g, "\\$&");
+}
+
+function updateUserFxInDom(username, fx){
+  const name = String(username || "");
+  if (!name) return;
+  const normalized = normalizeChatFx(fx);
+  const selector = `.msgGroup[data-user="${escapeSelectorValue(name)}"]`;
+  document.querySelectorAll(selector).forEach((group) => {
+    const body = group.querySelector(".msgGroupBody");
+    group.querySelectorAll(".bubble").forEach((bubble) => {
+      applyChatFxToBubble(bubble, normalized, { groupBody: body });
+    });
+    group.querySelectorAll(".unameText").forEach((el) => applyNameFxToEl(el, normalized));
+  });
+
+  if (activeDmId && dmMessagesEl) {
+    const threadMessages = dmMessages.get(activeDmId) || dmMessages.get(String(activeDmId)) || [];
+    if (threadMessages.some((m) => String(m.user || "") === name)) {
+      renderDmMessages(activeDmId);
+    }
+  }
 }
 
 function hydrateUserFxMap(authorsFx){
@@ -2008,6 +2052,20 @@ const groupQuickStrip = document.getElementById("groupQuickStrip");
 const dmQuickEmpty = document.getElementById("dmQuickEmpty");
 const groupQuickEmpty = document.getElementById("groupQuickEmpty");
 const groupQuickStartBtn = document.getElementById("groupQuickStartBtn");
+
+const DM_THREAD_ENTRY_SELECTOR = ".dmAvatarBtn";
+function updateDmThreadPlaceholderVisibility(){
+  const applyVisibility = (stripEl, emptyEl) => {
+    if (!stripEl || !emptyEl) return;
+    const hasThreads = !!stripEl.querySelector(DM_THREAD_ENTRY_SELECTOR);
+    stripEl.hidden = false;
+    emptyEl.hidden = false;
+    stripEl.classList.toggle("hidden", !hasThreads);
+    emptyEl.classList.toggle("hidden", hasThreads);
+  };
+  applyVisibility(dmQuickStrip || dmStrip, dmQuickEmpty);
+  applyVisibility(groupQuickStrip, groupQuickEmpty);
+}
 
 const dmCloseBtn = document.getElementById("dmCloseBtn");
 const dmTabs = document.getElementById("dmTabs");
@@ -5221,12 +5279,9 @@ function renderDirectThreads(){
 
   stripEl.innerHTML = "";
   if (list.length === 0) {
-    stripEl.style.display = "none";
-    if (dmQuickEmpty) dmQuickEmpty.hidden = false;
+    updateDmThreadPlaceholderVisibility();
     return;
   }
-  if (dmQuickEmpty) dmQuickEmpty.hidden = true;
-  stripEl.style.display = "flex";
 
   list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
   for (const t of list) {
@@ -5261,6 +5316,7 @@ function renderDirectThreads(){
     });
     stripEl.appendChild(btn);
   }
+  updateDmThreadPlaceholderVisibility();
 }
 
 function vennPreview(thread){
@@ -5287,12 +5343,9 @@ function renderGroupThreads(){
 
   stripEl.innerHTML = "";
   if (list.length === 0) {
-    stripEl.style.display = "none";
-    if (groupQuickEmpty) groupQuickEmpty.hidden = false;
+    updateDmThreadPlaceholderVisibility();
     return;
   }
-  if (groupQuickEmpty) groupQuickEmpty.hidden = true;
-  stripEl.style.display = "flex";
   list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
 
   for (const t of list) {
@@ -5319,6 +5372,7 @@ function renderGroupThreads(){
     });
     stripEl.appendChild(btn);
   }
+  updateDmThreadPlaceholderVisibility();
 }
 
 function renderDmThreads(){
@@ -9384,6 +9438,10 @@ async function startApp(){
   updateChangelogControlsVisibility();
   updateRoomControlsVisibility();
 
+  if (socket) {
+    try { socket.removeAllListeners(); } catch {}
+    try { socket.disconnect(); } catch {}
+  }
   socket = io();
   socket.on("connect", () => {
     // Join initial room so history + realtime messages work reliably
@@ -9503,6 +9561,13 @@ socket.on("disconnect", (reason) => {
 
   socket.on("command response", handleCommandResponse);
   socket.on("user list", (users)=>renderMembers(users));
+  socket.on("user fx updated", (payload = {}) => {
+    const name = safeString(payload.username, "").trim();
+    if (!name) return;
+    updateUserFxMap(name, payload.chatFx || payload.fx || {});
+    updateUserFxInDom(name, payload.chatFx || payload.fx || {});
+    renderDmThreads();
+  });
   socket.on("typing update", (names)=>{
     typingUsers = new Set((names || []).map(normKey));
     const others=(names||[]).filter(n=>normKey(n)!==normKey(me.username));
@@ -9576,32 +9641,32 @@ socket.on("disconnect", (reason) => {
   socket.on("message deleted", onMainMessageDeleted);
   socket.on("messageDeleted", onMainMessageDeleted);
 
-    socket.on("dm message edited", ({ threadId, messageId, text, editedAt }) => {
-    const tid = String(threadId);
-    const mid = String(messageId);
+    socket.on("dm message edited", (payload = {}) => {
+    const tid = String(payload.threadId || "");
+    const mid = String(payload.messageId || "");
     const arr = dmMessages.get(tid) || [];
     const i = arr.findIndex(mm => String(mm.messageId || mm.id) === mid);
     if (i !== -1) {
-      arr[i].text = text;
-      arr[i].editedAt = editedAt || Date.now();
+      arr[i].text = safeString(payload.text, "");
+      arr[i].editedAt = payload.editedAt || Date.now();
     }
     if (String(activeDmId) === tid) renderDmMessages(tid);
   });
 
-  socket.on("message edited", ({ messageId, text, editedAt }) => {
-    const mid = String(messageId);
+  socket.on("message edited", (payload = {}) => {
+    const mid = String(payload.messageId || "");
     // update index cache if present
     const idx = msgIndex.findIndex((x) => String(x.id) === mid);
     if (idx !== -1) {
-      msgIndex[idx].text = text;
-      msgIndex[idx].editedAt = editedAt || Date.now();
+      msgIndex[idx].text = safeString(payload.text, "");
+      msgIndex[idx].editedAt = payload.editedAt || Date.now();
     }
 
     const item = document.querySelector(`.msgItem[data-mid="${mid}"]`);
     if (item) {
       const bubble = item.querySelector(".bubble");
       const textEl = bubble?.querySelector(".text");
-      if (textEl) textEl.innerHTML = linkify(escapeHtml(String(text||""))).replace(/\n/g, "<br/>");
+      if (textEl) textEl.innerHTML = linkify(escapeHtml(safeString(payload.text, ""))).replace(/\n/g, "<br/>");
       const timeEl = bubble?.querySelector(".time");
       if (timeEl && !timeEl.querySelector(".editedTag")) {
         const ed = document.createElement("span");
@@ -9612,7 +9677,7 @@ socket.on("disconnect", (reason) => {
     }
   });
 
-socket.on("dm history", (payload) => {
+socket.on("dm history", (payload = {}) => {
     const { threadId, messages = [], participants = [], title = "" } = payload || {};
     hydrateUserFxMap(payload?.authorsFx || payload?.authors_fx);
     if (Array.isArray(messages)) {
@@ -9663,7 +9728,8 @@ socket.on("dm history", (payload) => {
     }
   });
 
-  socket.on("dm history cleared", ({ threadId }) => {
+  socket.on("dm history cleared", (payload = {}) => {
+    const threadId = payload.threadId;
     if (!threadId) return;
     dmMessages.set(threadId, []);
     const meta = dmThreads.find((t) => String(t.id) === String(threadId));
@@ -9728,9 +9794,9 @@ socket.on("dm history", (payload) => {
   }
 });
 
-  socket.on("dm read", (payload) => {
+  socket.on("dm read", (payload = {}) => {
     try {
-      const tid = String(payload.threadId);
+      const tid = String(payload.threadId || "");
       if (!tid) return;
       dmReadCache[tid] = payload;
 
@@ -9742,18 +9808,19 @@ socket.on("dm history", (payload) => {
   });
 
 
-  socket.on("dm reaction update", ({ threadId, messageId, reactions }) => {
+  socket.on("dm reaction update", (payload = {}) => {
     // Keep cache even if the thread isn't open yet.
-    const midKey = String(messageId);
-    dmReactionsCache[midKey] = reactions || {};
+    const midKey = String(payload.messageId || "");
+    if (!midKey) return;
+    dmReactionsCache[midKey] = payload.reactions || {};
     // Only render if the message is currently in the DOM.
     renderDmReactions(midKey, dmReactionsCache[midKey]);
     if (Sound.shouldReaction()) Sound.cues.reaction();
   });
 
-  socket.on("dm message deleted", ({ threadId, messageId }) => {
-    handleDmMessageDeleted(threadId, messageId);
-    if (String(activeDmId) === String(threadId)) {
+  socket.on("dm message deleted", (payload = {}) => {
+    handleDmMessageDeleted(payload.threadId, payload.messageId);
+    if (String(activeDmId) === String(payload.threadId)) {
       closeReactionMenu();
     }
   });
