@@ -7160,6 +7160,40 @@ function isAppealsStaff(role){
   return requireMinRole(role, "Admin") || requireMinRole(role, "Co owner") || requireMinRole(role, "Owner");
 }
 
+// Referrals: Moderators can submit ban referrals; Admin+ can review and resolve.
+function isReferralReviewer(role){
+  return requireMinRole(role, "Admin") || requireMinRole(role, "Co-owner") || requireMinRole(role, "Owner");
+}
+function canCreateReferral(role){
+  // Only Moderators submit referrals (Admins+ already have ban tools)
+  return String(role || "") === "Moderator";
+}
+
+async function createReferral({ username, referredBy, referredByRole, reason }){
+  const now = Date.now();
+  await dbRunAsync(
+    `INSERT INTO referrals (username, referred_by, reason, notes, status, action_by, action_type, action_minutes, action_reason, created_at, updated_at)
+     VALUES (?, ?, ?, NULL, 'open', NULL, NULL, NULL, NULL, ?, ?)`,
+    [username, referredBy, reason, now, now]
+  );
+}
+async function listOpenReferrals(){
+  return dbAllAsync(
+    `SELECT id, username AS target_username, referred_by AS from_username, reason, status, created_at, updated_at
+     FROM referrals
+     WHERE status='open'
+     ORDER BY created_at DESC
+     LIMIT 200`
+  );
+}
+async function resolveReferral({ id, actionBy }){
+  const now = Date.now();
+  await dbRunAsync(
+    `UPDATE referrals SET status='acted', action_by=?, action_type='dismiss', updated_at=? WHERE id=?`,
+    [actionBy, now, id]
+  );
+}
+
 socket.on("appeals:list", async (_payload, ack) => {
   const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
   if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
@@ -7261,6 +7295,47 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
   io.emit("appeals:updated");
   if (typeof ack === "function") ack({ ok: true });
 });
+
+  // ---- Referrals ----
+  socket.on("referrals:create", async ({ username, reason } = {}, ack) => {
+    try{
+      const actor = socket.request?.session?.user || socket.user || {};
+      const actorRole = actor.role || "User";
+      if(!canCreateReferral(actorRole)){
+        return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+      }
+      const target = sanitizeUsername(username);
+      const why = String(reason || "").trim().slice(0, 500);
+      if(!target || !why){
+        return typeof ack === "function" ? ack({ ok:false, error:"Missing username or reason" }) : null;
+      }
+      await createReferral({ username: target, referredBy: actor.username || "unknown", referredByRole: actorRole, reason: why });
+      if(typeof ack === "function") ack({ ok:true });
+    }catch(e){
+      if(typeof ack === "function") ack({ ok:false, error:"Failed to create referral" });
+    }
+  });
+
+  socket.on("referrals:list", async (_payload, ack) => {
+    const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
+    if(!isReferralReviewer(actorRole)) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+    const items = await listOpenReferrals();
+    if(typeof ack === "function") ack({ ok:true, items });
+  });
+
+  socket.on("referrals:resolve", async ({ id } = {}, ack) => {
+    try{
+      const actor = socket.request?.session?.user || socket.user || {};
+      const actorRole = actor.role || "User";
+      if(!isReferralReviewer(actorRole)) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+      const rid = Number(id);
+      if(!Number.isFinite(rid)) return typeof ack === "function" ? ack({ ok:false, error:"Invalid id" }) : null;
+      await resolveReferral({ id: rid, actionBy: actor.username || "unknown" });
+      if(typeof ack === "function") ack({ ok:true });
+    }catch(e){
+      if(typeof ack === "function") ack({ ok:false, error:"Failed to resolve" });
+    }
+  });
 
   socket.on("mod warn", ({ username, reason = "" }) => {
     const room = socket.currentRoom;
