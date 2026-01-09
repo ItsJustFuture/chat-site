@@ -554,8 +554,16 @@ const CHAT_FX_DEFAULTS = Object.freeze({
   textColor: null,
   nameColor: null,
   autoContrast: false,
+  textBold: false,
+  textItalic: false,
+  textGlow: "off",
+  textGradientEnabled: false,
+  textGradientA: null,
+  textGradientB: null,
+  textGradientAngle: 135
 });
 const CHAT_FX_GLOWS = new Set(["off", "soft", "neon", "strong"]);
+const CHAT_FX_TEXT_GLOWS = new Set(["off", "soft", "neon", "strong"]);
 const CHAT_FX_FONTS = new Set([
   "system",
   "inter","roboto","opensans","lato","poppins","nunito","rubik","montserrat","spacegrotesk","worksans","sourcesans3","raleway","oswald","ubuntu","firasans","gothicA1",
@@ -563,7 +571,14 @@ const CHAT_FX_FONTS = new Set([
   "jetbrains","inconsolata","spacemono","ibmplexmono","dmmono","pressstart",
   "anton","bebas","abril",
   "pacifico","dancing","caveat","indieflower","permanentmarker",
-  "metalmania"
+  "metalmania",
+  "orbitron","oxanium","audiowide","rajdhani","chakrapetch","sharetechmono","electrolize","quantico","turretroad","syncopate",
+  "bungee","bungeeinline","bungeeshade","monoton","righteous","luckiestguy","lilitaone","blackopsone","rubikglitch","fascinateinline",
+  "vt323","silkscreen","pixelifysans","tiny5",
+  "fredoka","baloo2","bubblegumsans","chewy","sniglet",
+  "cormorantgaramond","ebgaramond","bodonimoda","prata","marcellus",
+  "kaushanscript","greatvibes","allura","sacramento","satisfy","yellowtail","marckscript",
+  "unifrakturcook","unifrakturmaguntia","pirataone","newrocker","eater","nosifer"
 ]);
 const CHAT_FX_DENSITIES = new Set(["compact", "cozy", "spacious"]);
 const CHAT_FX_HEX = /^#[0-9a-f]{6}$/i;
@@ -632,6 +647,25 @@ function sanitizeChatFx(raw) {
   }
 
   if (typeof raw.autoContrast === "boolean") out.autoContrast = raw.autoContrast;
+  if (typeof raw.textBold === "boolean") out.textBold = raw.textBold;
+  if (typeof raw.textItalic === "boolean") out.textItalic = raw.textItalic;
+  if (CHAT_FX_TEXT_GLOWS.has(raw.textGlow)) out.textGlow = raw.textGlow;
+  if (typeof raw.textGradientEnabled === "boolean") out.textGradientEnabled = raw.textGradientEnabled;
+  if (raw.textGradientA == null || raw.textGradientA === "") {
+    out.textGradientA = null;
+  } else {
+    const tga = String(raw.textGradientA || "").trim();
+    out.textGradientA = CHAT_FX_HEX.test(tga) ? tga : null;
+  }
+  if (raw.textGradientB == null || raw.textGradientB === "") {
+    out.textGradientB = null;
+  } else {
+    const tgb = String(raw.textGradientB || "").trim();
+    out.textGradientB = CHAT_FX_HEX.test(tgb) ? tgb : null;
+  }
+  if (Number.isFinite(Number(raw.textGradientAngle))) {
+    out.textGradientAngle = clamp(raw.textGradientAngle, 0, 360);
+  }
 
   return out;
 }

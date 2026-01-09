@@ -2474,6 +2474,22 @@ body.dice-room .sys .diceFace{
   overflow-wrap:anywhere;   /* ✅ breaks long strings */
   word-break:break-word;    /* ✅ backup */
 }
+.bubble .text,
+.dmBubble .text{
+  font-weight: var(--fx-text-weight, 400);
+  font-style: var(--fx-text-style, normal);
+  text-shadow:
+    0 0 calc(var(--fx-text-glow, 0) * 6px) color-mix(in srgb, var(--fx-accent, var(--accent)) 60%, transparent),
+    0 0 calc(var(--fx-text-glow, 0) * 14px) color-mix(in srgb, var(--fx-accent, var(--accent)) 35%, transparent);
+}
+.bubble.fx-textGradient .text,
+.dmBubble.fx-textGradient .text{
+  background-image: linear-gradient(var(--fx-text-grad-angle, 135deg), var(--fx-text-grad-a, #7c4dff), var(--fx-text-grad-b, #00e5ff));
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
 .mention{ background:var(--mentionBg); color:var(--mentionText); border:1px solid var(--border); padding:0 4px; border-radius:6px; }
 /* ===== Message actions (horizontal bar below message) =====
    Actions live inside .msgMain and are collapsed by default so they reserve
