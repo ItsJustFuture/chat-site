@@ -11830,6 +11830,26 @@ async function refreshCouplesUI(){
     const res = await fetch("/api/couples/me");
     if (!res.ok) throw new Error(await res.text().catch(()=> "Could not load couples"));
     couplesState = await res.json();
+
+   // Optional: show a small count badge on the Couples label when you have incoming requests.
+   try {
+     const field = document.getElementById("couplesField");
+     const label = field ? field.querySelector("label") : null;
+     if (label) {
+       let badge = label.querySelector("#couplesPendingBadge");
+       if (!badge) {
+         badge = document.createElement("span");
+         badge.id = "couplesPendingBadge";
+         badge.className = "couplesPendingBadge";
+         badge.style.display = "none";
+         label.appendChild(badge);
+       }
+       const n = Array.isArray(couplesState?.incoming) ? couplesState.incoming.length : 0;
+       badge.textContent = String(n);
+       badge.style.display = n > 0 ? "inline-flex" : "none";
+     }
+   } catch {}
+
   } catch (e) {
     setMsgline(couplesMsg, e?.message || "Could not load couples");
     return;
@@ -11870,6 +11890,11 @@ async function refreshCouplesUI(){
           if (!r.ok) throw new Error(await r.text().catch(()=> "Could not accept"));
           couplesState = await r.json();
           await refreshCouplesUI();
+         try {
+           showToast(`Linked with ${item.fromUsername || item.partner || "partner"} 💜`);
+           pushNotification({ type: "system", text: `You are now linked with ${item.fromUsername || item.partner || "your partner"} 💜` });
+         } catch {}
+         emitLocalMembersRefresh();
           emitLocalMembersRefresh();
         } catch (e) { setMsgline(couplesMsg, e?.message || "Could not accept"); }
       };
@@ -11891,6 +11916,7 @@ async function refreshCouplesUI(){
         if (!r.ok) throw new Error(await r.text().catch(()=> "Could not update"));
         couplesState = await r.json();
         await refreshCouplesUI();
+        emitLocalMembersRefresh();
       } catch (e) { setMsgline(couplesMsg, e?.message || "Could not update"); }
     };
     right.appendChild(no);
@@ -12010,9 +12036,15 @@ if (couplesUnlinkBtn) {
   };
 }
 
-// When opening edit profile panel, refresh couples state
+// When opening edit profile panel, refresh couples state (so incoming requests are visible).
 try {
-  const oldOpenMyProfile = openMyProfile;
-  // openMyProfile exists; it opens modal and fills UI. We'll just hook after it runs.
+  const __oldOpenMyProfile = openMyProfile;
+  if (typeof __oldOpenMyProfile === "function") {
+    openMyProfile = async function(...args){
+      const res = await __oldOpenMyProfile.apply(this, args);
+      try { await refreshCouplesUI(); } catch {}
+      return res;
+    };
+  }
 } catch {}
 

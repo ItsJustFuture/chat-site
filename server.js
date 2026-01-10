@@ -5065,10 +5065,23 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
 
 
 // ---- Couples API (opt-in). Postgres only.
+
+function emitSystemMessageToUserId(userId, text){
+  try {
+    const uid = Number(userId) || 0;
+    if (!uid || !io?.sockets?.sockets) return;
+    for (const [sid, s] of io.sockets.sockets) {
+      if (s?.user?.id === uid) {
+        io.to(sid).emit("system message", { text });
+      }
+    }
+  } catch {}
+}
+
 app.get("/api/couples/me", requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
-    const summary = await pgGetCoupleSummaryFor(req.session.userId);
+    const summary = await pgGetCoupleSummaryFor(req.session.user.id);
     return res.json(summary);
   } catch (e) {
     console.warn("[couples] /me failed:", e?.message || e);
@@ -5083,7 +5096,7 @@ app.post("/api/couples/request", requireLogin, async (req, res) => {
     const targetRaw = String(req.body?.targetUsername || "").trim().slice(0, 64);
     const targetName = sanitizeUsername(targetRaw);
     if (!targetName) return res.status(400).send("Bad username");
-    if (targetName.toLowerCase() === String(req.session.user?.username || "").toLowerCase()) {
+    if (targetName.toLowerCase() === String(req.session.username || "").toLowerCase()) {
       return res.status(400).send("You cannot link with yourself");
     }
 
@@ -5091,8 +5104,7 @@ app.post("/api/couples/request", requireLogin, async (req, res) => {
     const target = trg[0];
     if (!target) return res.status(404).send("User not found");
 
-    const meId = Number(req.session.user?.id) || 0;
-    if (!meId) return res.status(401).send("Not logged in");
+    const meId = Number(req.session.user.id) || 0;
     const otherId = Number(target.id) || 0;
     const [u1, u2] = orderPair(meId, otherId);
     const now = Date.now();
@@ -5142,8 +5154,7 @@ app.post("/api/couples/respond", requireLogin, async (req, res) => {
     const accept = !!req.body?.accept;
     if (!linkId) return res.status(400).send("Bad request");
 
-    const meId = Number(req.session.user?.id) || 0;
-    if (!meId) return res.status(401).send("Not logged in");
+    const meId = Number(req.session.user.id) || 0;
     const { rows } = await pgPool.query(`SELECT * FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
     const link = rows[0];
     if (!link) return res.status(404).send("Not found");
@@ -5162,6 +5173,19 @@ app.post("/api/couples/respond", requireLogin, async (req, res) => {
       [linkId, now]
     );
 
+     // Best-effort: notify both users (private) that the link was accepted.
+     try {
+       const u1 = Number(link.user1_id) || 0;
+       const u2 = Number(link.user2_id) || 0;
+       const names = await pgPool.query(`SELECT id, username FROM users WHERE id = ANY($1::int[])`, [[u1, u2]]);
+       const byId = new Map((names.rows || []).map(r => [Number(r.id), r.username]));
+       const name1 = byId.get(u1) || "Someone";
+       const name2 = byId.get(u2) || "Someone";
+       emitSystemMessageToUserId(u1, `You are now linked with ${name2} 💜`);
+       emitSystemMessageToUserId(u2, `You are now linked with ${name1} 💜`);
+     } catch {}
+
+
     const summary = await pgGetCoupleSummaryFor(meId);
     return res.json(summary);
   } catch (e) {
@@ -5176,8 +5200,7 @@ app.post("/api/couples/unlink", requireLogin, async (req, res) => {
     const linkId = Number(req.body?.linkId) || 0;
     if (!linkId) return res.status(400).send("Bad request");
 
-    const meId = Number(req.session.user?.id) || 0;
-    if (!meId) return res.status(401).send("Not logged in");
+    const meId = Number(req.session.user.id) || 0;
     const { rows } = await pgPool.query(`SELECT user1_id,user2_id FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
     const link = rows[0];
     if (!link) return res.status(404).send("Not found");
@@ -5197,8 +5220,7 @@ app.post("/api/couples/prefs", requireLogin, async (req, res) => {
     if (!PG_READY) return res.status(503).send("DB not ready");
     const linkId = Number(req.body?.linkId) || 0;
     if (!linkId) return res.status(400).send("Bad request");
-    const meId = Number(req.session.user?.id) || 0;
-    if (!meId) return res.status(401).send("Not logged in");
+    const meId = Number(req.session.user.id) || 0;
 
     const { rows } = await pgPool.query(`SELECT user1_id,user2_id FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
     const link = rows[0];
@@ -5220,8 +5242,7 @@ app.post("/api/couples/status", requireLogin, async (req, res) => {
     const linkId = Number(req.body?.linkId) || 0;
     if (!linkId) return res.status(400).send("Bad request");
 
-    const meId = Number(req.session.user?.id) || 0;
-    if (!meId) return res.status(401).send("Not logged in");
+    const meId = Number(req.session.user.id) || 0;
     const { rows } = await pgPool.query(`SELECT user1_id,user2_id,status FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
     const link = rows[0];
     if (!link) return res.status(404).send("Not found");

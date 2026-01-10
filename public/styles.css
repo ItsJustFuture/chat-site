@@ -6547,6 +6547,25 @@ body.comfortMode[data-theme="Iris & Lola Neon"] .chat::after{
   opacity: 0.95;
 }
 
+.couplesPendingBadge{
+  margin-left:8px;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  min-width:18px;
+  height:18px;
+  padding:0 6px;
+  border-radius:999px;
+  background:var(--danger);
+  color:white;
+  font-size:12px;
+  font-weight:900;
+  line-height:1;
+  border:2px solid var(--panel2);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+
 .coupleAura{
   position: relative;
 }
