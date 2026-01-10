@@ -2662,6 +2662,12 @@ const couplesActiveTitle = document.getElementById("couplesActiveTitle");
 const couplesStatusEmoji = document.getElementById("couplesStatusEmoji");
 const couplesStatusLabel = document.getElementById("couplesStatusLabel");
 const couplesStatusSaveBtn = document.getElementById("couplesStatusSaveBtn");
+const couplesMoodEmoji = document.getElementById("couplesMoodEmoji");
+const couplesMoodSaveBtn = document.getElementById("couplesMoodSaveBtn");
+const couplesPingBtn = document.getElementById("couplesPingBtn");
+const couplesAllowPingToggle = document.getElementById("couplesAllowPingToggle");
+const couplesLabel = document.getElementById("couplesLabel");
+const couplesLabelBadge = document.getElementById("couplesLabelBadge");
 const couplesEnabledToggle = document.getElementById("couplesEnabledToggle");
 const couplesShowProfileToggle = document.getElementById("couplesShowProfileToggle");
 const couplesBadgeToggle = document.getElementById("couplesBadgeToggle");
@@ -5482,19 +5488,97 @@ function setModTarget(username){
 function reorderCouplesInMembers(list){
   const users = Array.isArray(list) ? list.slice() : [];
   const byName = new Map(users.map(u => [u?.name, u]));
-  const seen = new Set();
+  const processed = new Set();
   const out = [];
-  for (const u of users) {
+
+  function pairKey(a,b){
+    return [String(a||""), String(b||"")].sort((x,y)=>x.localeCompare(y)).join("::");
+  }
+
+  const pairByUser = new Map();
+  for (const u of users){
     const name = u?.name;
-    if (!name || seen.has(name)) continue;
-    out.push(u);
-    seen.add(name);
     const c = u?.couple;
-    if (c && c.group && c.partner && byName.has(c.partner) && !seen.has(c.partner)) {
-      out.push(byName.get(c.partner));
-      seen.add(c.partner);
+    if(!name || !c?.group || !c?.partner) continue;
+    const partner = c.partner;
+    if(!byName.has(partner)) continue;
+    const k = pairKey(name, partner);
+    if (pairByUser.has(name)) continue;
+    // record for both sides
+    pairByUser.set(name, { key:k, a:name, b:partner });
+    pairByUser.set(partner, { key:k, a:name, b:partner });
+  }
+
+  function isProcessed(name){ return processed.has(name); }
+
+  // clear any old markers
+  for (const u of users){
+    if(!u) continue;
+    delete u._coupleGroupTop;
+    delete u._coupleGroupBottom;
+    delete u._coupleGroupKey;
+    delete u._coupleBothOnline;
+  }
+
+  for (const u of users){
+    const name = u?.name;
+    if(!name || isProcessed(name)) continue;
+
+    const pair = pairByUser.get(name);
+    if (!pair){
+      out.push(u); processed.add(name);
+      continue;
+    }
+
+    const uA = byName.get(pair.a);
+    const uB = byName.get(pair.b);
+    if (!uA || !uB){
+      out.push(u); processed.add(name);
+      continue;
+    }
+
+    const rankA = roleRank(uA.role);
+    const rankB = roleRank(uB.role);
+    let topName = rankA === rankB ? (users.indexOf(uA) <= users.indexOf(uB) ? pair.a : pair.b) : (rankA > rankB ? pair.a : pair.b);
+    let bottomName = (topName === pair.a) ? pair.b : pair.a;
+
+    // If we hit the lower-role user first, defer until we hit the higher-role user,
+    // so the couple is anchored where the highest role would appear.
+    if (name !== topName && byName.has(topName) && !isProcessed(topName)){
+      continue;
+    }
+
+    const topU = byName.get(topName);
+    const bottomU = byName.get(bottomName);
+
+    if (topU && !isProcessed(topName)){
+      out.push(topU); processed.add(topName);
+    }
+    if (bottomU && !isProcessed(bottomName)){
+      out.push(bottomU); processed.add(bottomName);
+    }
+
+    // tag group positions for styling
+    try{
+      if (topU){ topU._coupleGroupTop = true; topU._coupleGroupKey = pair.key; }
+      if (bottomU){ bottomU._coupleGroupBottom = true; bottomU._coupleGroupKey = pair.key; }
+      const both = !!(topU && bottomU);
+      if (both){
+        topU._coupleBothOnline = true;
+        bottomU._coupleBothOnline = true;
+      }
+    }catch{}
+  }
+
+  // add any skipped users
+  for (const u of users){
+    const name = u?.name;
+    if(name && !processed.has(name)){
+      out.push(u);
+      processed.add(name);
     }
   }
+
   return (out.length === users.length) ? out : users;
 }
 
@@ -5505,8 +5589,40 @@ function fmtDaysSince(ts){
   return days === 1 ? "1 day" : `${days} days`;
 }
 
+// Couples: together-online micro-moment (client-side)
+const coupleOnlineFirstSeen = new Map(); // username -> ts
+const coupleTogetherShown = new Set(); // pairKey strings shown this session
+function couplePairKey(a,b){ return [String(a||""), String(b||"")].sort((x,y)=>x.localeCompare(y)).join("::"); }
+
+function maybeCouplesTogetherToast(userList){
+  try{
+    const list = Array.isArray(userList) ? userList : [];
+    const now = Date.now();
+    for (const u of list){
+      if (!u?.name) continue;
+      if (!coupleOnlineFirstSeen.has(u.name)) coupleOnlineFirstSeen.set(u.name, now);
+    }
+    const meName = String(me?.username || me?.name || "").trim();
+    if (!meName) return;
+    const meRow = list.find(x => x?.name === meName);
+    const c = meRow?.couple;
+    if (!c?.partner) return;
+    const partnerName = String(c.partner);
+    if (!list.some(x => x?.name === partnerName)) return; // partner not online
+    const k = couplePairKey(meName, partnerName);
+    if (coupleTogetherShown.has(k)) return;
+    const t1 = coupleOnlineFirstSeen.get(meName) || now;
+    const t2 = coupleOnlineFirstSeen.get(partnerName) || now;
+    if (Math.abs(t1 - t2) <= 30000) {
+      coupleTogetherShown.add(k);
+      showToast(`💜 ${meName} & ${partnerName} are online together`, { durationMs: 5200 });
+    }
+  }catch{}
+}
+
 function renderMembers(users){
   lastUsers = reorderCouplesInMembers(users || []);
+  try{ maybeCouplesTogetherToast(lastUsers); }catch{}
   cleanupRecentDiceRolls();
   refreshModTargetOptions(lastUsers);
   memberList.innerHTML="";
@@ -5517,6 +5633,10 @@ function renderMembers(users){
     const row=document.createElement("div");
     row.className="mItem";
     row.dataset.username = u.name;
+    if (u?._coupleGroupTop) row.classList.add("coupleGroupTop");
+    if (u?._coupleGroupBottom) row.classList.add("coupleGroupBottom");
+    if (u?._coupleBothOnline && u?.couple?.aura) row.classList.add("coupleAura");
+    if (u?._coupleBothOnline && u?.couple?.group) row.classList.add("coupleHop");
 
     const av=document.createElement("div");
     av.className="mAvatar";
@@ -5540,6 +5660,13 @@ function renderMembers(users){
       cb.title = `${u.couple.statusEmoji||"💜"} ${u.couple.statusLabel||"Linked"}: ${u.couple.partner}`;
       cb.textContent = String(u.couple.statusEmoji || "💜");
       name.appendChild(cb);
+    }
+    if (u?.couple?.moodEmoji) {
+      const cm = document.createElement("span");
+      cm.className = "coupleMood";
+      cm.title = `Mood: ${u.couple.moodEmoji}`;
+      cm.textContent = String(u.couple.moodEmoji);
+      name.appendChild(cm);
     }
     const ico = document.createElement("span");
     ico.className = "roleIco";
@@ -11221,6 +11348,15 @@ async function initChatApp(){
     joinRoom(currentRoom);
   });
 
+  socket.on("couple ping", (payload) => {
+    const from = payload?.from ? String(payload.from) : "Partner";
+    showToast(`💜 Ping from ${from}`, {
+      actionLabel: "Open DM",
+      actionFn: () => { try{ openDmFromProfile(from); }catch{} }
+    });
+    try{ markDmThreadPing(from); }catch{}
+  });
+
   socket.on("restriction:status", async (payload) => {
     if(payload?.type && payload.type !== "none"){
       try{ socket.disconnect(); }catch{}
@@ -11826,9 +11962,7 @@ try{ syncDesktopMembersWidth(); }catch{}
 
 // ---- Couples UI (opt-in)
 async function refreshCouplesUI(){
-  if (!myProfileEdit) return;
-  if (!couplesPendingBox || !couplesActiveBox) return;
-
+  if (!couplesPartnerInput || !couplesRequestBtn) return;
   try {
     const res = await fetch("/api/couples/me");
     if (!res.ok) throw new Error(await res.text().catch(()=> "Could not load couples"));
@@ -11838,89 +11972,120 @@ async function refreshCouplesUI(){
     return;
   }
 
-  // Pending list
-  const incoming = couplesState?.incoming || [];
-  const outgoing = couplesState?.outgoing || [];
+  const incoming = Array.isArray(couplesState?.incoming) ? couplesState.incoming : [];
+  const outgoing = Array.isArray(couplesState?.outgoing) ? couplesState.outgoing : [];
+  const active = couplesState?.active || null;
+
+  // label badge (incoming only)
+  try{
+    if (couplesLabelBadge) {
+      couplesLabelBadge.textContent = incoming.length ? String(incoming.length) : "";
+      couplesLabelBadge.style.display = incoming.length ? "inline-flex" : "none";
+    }
+  }catch{}
+
+  if (couplesPendingBox) couplesPendingBox.style.display = (incoming.length || outgoing.length) ? "block" : "none";
   if (couplesPendingList) couplesPendingList.innerHTML = "";
 
-  const anyPending = incoming.length || outgoing.length;
-  if (couplesPendingBox) couplesPendingBox.style.display = anyPending ? "" : "none";
-
-  const makePendingRow = (label, item, isIncoming) => {
+  const mkRow = (item, kind) => {
     const row = document.createElement("div");
     row.className = "couplesPendingRow";
     const left = document.createElement("div");
     left.className = "couplesPendingLeft";
-    left.textContent = `${label}: ${item.other}`;
-    row.appendChild(left);
+    const who = document.createElement("div");
+    who.className = "couplesPendingWho";
+    who.textContent = item.other || "Unknown";
+    const meta = document.createElement("div");
+    meta.className = "small";
+    meta.textContent = kind === "incoming" ? "Incoming request" : "Outgoing request";
+    left.appendChild(who);
+    left.appendChild(meta);
 
     const right = document.createElement("div");
     right.className = "couplesPendingRight";
 
-    if (isIncoming) {
-      const ok = document.createElement("button");
-      ok.className = "btn btnPrimary";
-      ok.type = "button";
-      ok.textContent = "Accept";
-      ok.onclick = async () => {
+    const btn = (label, fn, cls="btn secondary") => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = cls;
+      b.textContent = label;
+      b.onclick = fn;
+      return b;
+    };
+
+    if (kind === "incoming") {
+      right.appendChild(btn("Accept", async () => {
         setMsgline(couplesMsg, "");
-        try {
+        try{
           const r = await fetch("/api/couples/respond", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
             body: JSON.stringify({ linkId: item.linkId, accept: true })
           });
           if (!r.ok) throw new Error(await r.text().catch(()=> "Could not accept"));
           couplesState = await r.json();
-          await refreshCouplesUI();
+          showToast(`Linked with ${item.other} 💜`, { durationMs: 5200 });
           emitLocalMembersRefresh();
-        } catch (e) { setMsgline(couplesMsg, e?.message || "Could not accept"); }
-      };
-      right.appendChild(ok);
+          await refreshCouplesUI();
+        }catch(e){ setMsgline(couplesMsg, e?.message || "Could not accept"); }
+      }, "btn"));
+      right.appendChild(btn("Decline", async () => {
+        setMsgline(couplesMsg, "");
+        try{
+          const r = await fetch("/api/couples/respond", {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({ linkId: item.linkId, accept: false })
+          });
+          if (!r.ok) throw new Error(await r.text().catch(()=> "Could not decline"));
+          couplesState = await r.json();
+          emitLocalMembersRefresh();
+          await refreshCouplesUI();
+        }catch(e){ setMsgline(couplesMsg, e?.message || "Could not decline"); }
+      }, "btn secondary"));
+    } else {
+      right.appendChild(btn("Cancel", async () => {
+        setMsgline(couplesMsg, "");
+        try{
+          const r = await fetch("/api/couples/cancel", {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({ linkId: item.linkId })
+          });
+          if (!r.ok) throw new Error(await r.text().catch(()=> "Could not cancel"));
+          couplesState = await r.json();
+          await refreshCouplesUI();
+        }catch(e){ setMsgline(couplesMsg, e?.message || "Could not cancel"); }
+      }, "btn secondary"));
     }
 
-    const no = document.createElement("button");
-    no.className = "btn secondary";
-    no.type = "button";
-    no.textContent = isIncoming ? "Decline" : "Cancel";
-    no.onclick = async () => {
-      setMsgline(couplesMsg, "");
-      try {
-        const r = await fetch("/api/couples/respond", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ linkId: item.linkId, accept: false })
-        });
-        if (!r.ok) throw new Error(await r.text().catch(()=> "Could not update"));
-        couplesState = await r.json();
-        await refreshCouplesUI();
-      } catch (e) { setMsgline(couplesMsg, e?.message || "Could not update"); }
-    };
-    right.appendChild(no);
-
+    row.appendChild(left);
     row.appendChild(right);
     return row;
   };
 
   if (couplesPendingList) {
-    for (const it of incoming) couplesPendingList.appendChild(makePendingRow("Incoming", it, true));
-    for (const it of outgoing) couplesPendingList.appendChild(makePendingRow("Outgoing", it, false));
+    incoming.forEach(it => couplesPendingList.appendChild(mkRow(it, "incoming")));
+    outgoing.forEach(it => couplesPendingList.appendChild(mkRow(it, "outgoing")));
   }
 
-  const active = couplesState?.active || null;
-  if (couplesActiveBox) couplesActiveBox.style.display = active ? "" : "none";
+  if (couplesActiveBox) couplesActiveBox.style.display = active ? "block" : "none";
+
   if (!active) {
+    if (couplesActiveTitle) couplesActiveTitle.textContent = "Not linked";
     if (couplesStatusEmoji) couplesStatusEmoji.value = "💜";
     if (couplesStatusLabel) couplesStatusLabel.value = "Linked";
+    if (couplesMoodEmoji) couplesMoodEmoji.value = "";
   }
 
   if (active) {
     if (couplesActiveTitle) {
       const sinceTxt = active.since ? ` · ${fmtDaysSince(active.since)}` : "";
       couplesActiveTitle.textContent = `${active.statusEmoji||"💜"} ${active.statusLabel||"Linked"}: ${active.partner}${sinceTxt}`;
-      if (couplesStatusEmoji) couplesStatusEmoji.value = String(active.statusEmoji || "💜");
-      if (couplesStatusLabel) couplesStatusLabel.value = String(active.statusLabel || "Linked");
     }
+    if (couplesStatusEmoji) couplesStatusEmoji.value = String(active.statusEmoji || "💜");
+    if (couplesStatusLabel) couplesStatusLabel.value = String(active.statusLabel || "Linked");
+    if (couplesMoodEmoji) couplesMoodEmoji.value = String(active.moodEmoji || "");
     const p = active.prefs || {};
     if (couplesEnabledToggle) couplesEnabledToggle.checked = !!p.enabled;
     if (couplesShowProfileToggle) couplesShowProfileToggle.checked = !!p.showProfile;
@@ -11928,65 +12093,128 @@ async function refreshCouplesUI(){
     if (couplesAuraToggle) couplesAuraToggle.checked = !!p.aura;
     if (couplesShowMembersToggle) couplesShowMembersToggle.checked = !!p.showMembers;
     if (couplesGroupToggle) couplesGroupToggle.checked = !!p.groupMembers;
+    if (couplesAllowPingToggle) couplesAllowPingToggle.checked = (p.allowPing === undefined ? true : !!p.allowPing);
   }
 
-  // disable toggles if no active link
-  const toggles = [couplesEnabledToggle,couplesShowProfileToggle,couplesBadgeToggle,couplesAuraToggle,couplesShowMembersToggle,couplesGroupToggle];
+  const toggles = [couplesEnabledToggle,couplesShowProfileToggle,couplesBadgeToggle,couplesAuraToggle,couplesShowMembersToggle,couplesGroupToggle,couplesAllowPingToggle];
   toggles.forEach(t => { if (t) t.disabled = !active; });
 
   if (couplesUnlinkBtn) couplesUnlinkBtn.disabled = !active;
+  if (couplesStatusSaveBtn) couplesStatusSaveBtn.disabled = !active;
+  if (couplesMoodSaveBtn) couplesMoodSaveBtn.disabled = !active;
+  if (couplesPingBtn) couplesPingBtn.disabled = !active;
 }
 
 function emitLocalMembersRefresh(){
   try {
-    if (typeof emitUserListNow === "function") emitUserListNow();
+    // Best effort: re-emit current room join to trigger user list refresh
+    if (socket?.connected) {
+      socket.emit("join room", currentRoom);
+    }
   } catch {}
-}
-
-// best-effort helper: re-emit member list if we can
-function emitUserListNow(){
-  // The server pushes user list on join/updates; we can also request by toggling a no-op room refresh if such exists.
-  // If socket exists, ask it to refresh:
-  try { if (socket) socket.emit("refresh user list"); } catch {}
 }
 
 async function setCouplePrefs(patch){
   const active = couplesState?.active;
   if (!active?.linkId) return;
   setMsgline(couplesMsg, "");
-  try {
+  try{
     const r = await fetch("/api/couples/prefs", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ linkId: active.linkId, prefs: patch })
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify({ linkId: active.linkId, prefs: patch || {} })
     });
-    if (!r.ok) throw new Error(await r.text().catch(()=> "Could not save"));
+    if (!r.ok) throw new Error(await r.text().catch(()=> "Could not update"));
     couplesState = await r.json();
-    await refreshCouplesUI();
     emitLocalMembersRefresh();
-  } catch (e) {
-    setMsgline(couplesMsg, e?.message || "Could not save");
-  }
+    await refreshCouplesUI();
+  }catch(e){ setMsgline(couplesMsg, e?.message || "Could not update"); }
 }
 
+// Send link request
 if (couplesRequestBtn) {
   couplesRequestBtn.onclick = async () => {
+    const partner = String(couplesPartnerInput?.value || "").trim();
+    if (!partner) return;
     setMsgline(couplesMsg, "");
-    const name = String(couplesPartnerInput?.value || "").trim();
-    if (!name) return setMsgline(couplesMsg, "Enter a username.");
-    try {
+    try{
       const r = await fetch("/api/couples/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetUsername: name })
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ partner })
       });
-      if (!r.ok) throw new Error(await r.text().catch(()=> "Could not request"));
+      if (!r.ok) throw new Error(await r.text().catch(()=> "Could not create request"));
       couplesState = await r.json();
-      if (couplesPartnerInput) couplesPartnerInput.value = "";
+      showToast(`Request sent to ${partner} 💜`);
       await refreshCouplesUI();
-    } catch (e) {
-      setMsgline(couplesMsg, e?.message || "Could not request");
-    }
+    }catch(e){ setMsgline(couplesMsg, e?.message || "Could not create request"); }
+  };
+}
+
+if (couplesStatusSaveBtn) {
+  couplesStatusSaveBtn.onclick = async () => {
+    const active = couplesState?.active;
+    if (!active?.linkId) return;
+    const emoji = String(couplesStatusEmoji?.value || "💜");
+    const label = String(couplesStatusLabel?.value || "Linked").trim().slice(0,24);
+    setMsgline(couplesMsg, "");
+    try{
+      const r = await fetch("/api/couples/status", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ linkId: active.linkId, emoji, label })
+      });
+      if (!r.ok) throw new Error(await r.text().catch(()=> "Could not save status"));
+      couplesState = await r.json();
+      showToast(`Saved status ${emoji}`);
+      emitLocalMembersRefresh();
+      await refreshCouplesUI();
+    }catch(e){ setMsgline(couplesMsg, e?.message || "Could not save status"); }
+  };
+}
+
+if (couplesMoodSaveBtn) {
+  couplesMoodSaveBtn.onclick = async () => {
+    const active = couplesState?.active;
+    if (!active?.linkId) return;
+    const emoji = String(couplesMoodEmoji?.value || "").trim();
+    setMsgline(couplesMsg, "");
+    try{
+      const r = await fetch("/api/couples/mood", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ linkId: active.linkId, emoji })
+      });
+      if (!r.ok) throw new Error(await r.text().catch(()=> "Could not save mood"));
+      couplesState = await r.json();
+      showToast(`Mood updated ${emoji || ""}`);
+      emitLocalMembersRefresh();
+      await refreshCouplesUI();
+    }catch(e){ setMsgline(couplesMsg, e?.message || "Could not save mood"); }
+  };
+}
+
+if (couplesPingBtn) {
+  couplesPingBtn.onclick = async () => {
+    const active = couplesState?.active;
+    if (!active?.linkId) return;
+    setMsgline(couplesMsg, "");
+    try{
+      const r = await fetch("/api/couples/ping", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ linkId: active.linkId })
+      });
+      if (r.status === 429) {
+        const j = await r.json().catch(()=>null);
+        const waitMs = Number(j?.waitMs)||0;
+        const sec = waitMs ? Math.ceil(waitMs/1000) : 0;
+        showToast(`Ping cooldown${sec?`: ${sec}s`: ""}`, { durationMs: 2600 });
+        return;
+      }
+      if (!r.ok) throw new Error(await r.text().catch(()=> "Could not ping"));
+      showToast("Ping sent 💜", { durationMs: 2200 });
+    }catch(e){ setMsgline(couplesMsg, e?.message || "Could not ping"); }
   };
 }
 
@@ -11996,6 +12224,7 @@ if (couplesBadgeToggle) couplesBadgeToggle.onchange = () => setCouplePrefs({ bad
 if (couplesAuraToggle) couplesAuraToggle.onchange = () => setCouplePrefs({ aura: !!couplesAuraToggle.checked });
 if (couplesShowMembersToggle) couplesShowMembersToggle.onchange = () => setCouplePrefs({ showMembers: !!couplesShowMembersToggle.checked });
 if (couplesGroupToggle) couplesGroupToggle.onchange = () => setCouplePrefs({ groupMembers: !!couplesGroupToggle.checked });
+if (couplesAllowPingToggle) couplesAllowPingToggle.onchange = () => setCouplePrefs({ allowPing: !!couplesAllowPingToggle.checked });
 
 if (couplesUnlinkBtn) {
   couplesUnlinkBtn.onclick = async () => {
@@ -12003,49 +12232,29 @@ if (couplesUnlinkBtn) {
     if (!active?.linkId) return;
     if (!confirm(`Unlink from ${active.partner}?`)) return;
     setMsgline(couplesMsg, "");
-    try {
+    try{
       const r = await fetch("/api/couples/unlink", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ linkId: active.linkId })
       });
       if (!r.ok) throw new Error(await r.text().catch(()=> "Could not unlink"));
       couplesState = await r.json();
-      await refreshCouplesUI();
+      showToast("Unlinked");
       emitLocalMembersRefresh();
-    } catch (e) {
-      setMsgline(couplesMsg, e?.message || "Could not unlink");
-    }
+      await refreshCouplesUI();
+    }catch(e){ setMsgline(couplesMsg, e?.message || "Could not unlink"); }
   };
 }
 
-
-if (couplesStatusSaveBtn) {
-  couplesStatusSaveBtn.onclick = async () => {
-    const active = couplesState?.active;
-    if (!active?.linkId) return;
-    const emoji = String(couplesStatusEmoji?.value || "💜").trim().slice(0, 4) || "💜";
-    const label = String(couplesStatusLabel?.value || "Linked").trim().slice(0, 24) || "Linked";
-    setMsgline(couplesMsg, "");
-    try {
-      const r = await fetch("/api/couples/status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ linkId: active.linkId, emoji, label })
-      });
-      if (!r.ok) throw new Error(await r.text().catch(()=> "Could not save status"));
-      couplesState = await r.json();
-      await refreshCouplesUI();
-      try { toast(`Saved couples status ${emoji}`); } catch {}
-      emitLocalMembersRefresh();
-    } catch (e) {
-      setMsgline(couplesMsg, e?.message || "Could not save status");
-    }
-  };
-}
-
-// When opening edit profile panel, refresh couples state
+// Hook couples refresh when opening Edit Profile
 try {
-  const oldOpenMyProfile = openMyProfile;
-  // openMyProfile exists; it opens modal and fills UI. We'll just hook after it runs.
+  const _openMyProfile = openMyProfile;
+  if (typeof _openMyProfile === "function") {
+    openMyProfile = async (...args) => {
+      const r = await _openMyProfile(...args);
+      try { await refreshCouplesUI(); } catch {}
+      return r;
+    };
+  }
 } catch {}

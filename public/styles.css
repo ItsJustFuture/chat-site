@@ -6652,3 +6652,83 @@ body.comfortMode[data-theme="Iris & Lola Neon"] .chat::after{
 /* Couples status row */
 .couplesStatusRow select{padding:10px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.25);color:inherit}
 .couplesStatusRow input{min-width:0}
+
+
+/* Couples: members list pairing polish */
+.pillCount{
+  display:inline-flex;
+  min-width:18px;
+  height:18px;
+  padding:0 6px;
+  border-radius:999px;
+  align-items:center;
+  justify-content:center;
+  font-size:12px;
+  line-height:18px;
+  margin-left:6px;
+  background:rgba(255,255,255,0.18);
+  border:1px solid rgba(255,255,255,0.18);
+}
+
+.mItem.coupleGroupTop,
+.mItem.coupleGroupBottom{
+  position:relative;
+}
+
+.mItem.coupleGroupTop{
+  border-top-left-radius:14px;
+  border-top-right-radius:14px;
+}
+.mItem.coupleGroupBottom{
+  border-bottom-left-radius:14px;
+  border-bottom-right-radius:14px;
+}
+
+.mItem.coupleGroupTop::before,
+.mItem.coupleGroupBottom::before{
+  content:"";
+  position:absolute;
+  inset:-2px -6px;
+  border-radius:16px;
+  pointer-events:none;
+  background:linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  opacity:0.85;
+}
+
+.mItem.coupleGroupBottom::before{
+  opacity:0.55;
+}
+
+.mItem.coupleGroupTop::after{
+  content:"";
+  position:absolute;
+  left:14px;
+  right:14px;
+  bottom:-1px;
+  height:1px;
+  background:rgba(255,255,255,0.10);
+  pointer-events:none;
+}
+
+/* Shared aura */
+.mItem.coupleAura .mAvatar{
+  box-shadow:0 0 0 2px rgba(255,255,255,0.18), 0 0 12px rgba(255,255,255,0.16);
+  border-radius:999px;
+}
+
+/* Heart hop (subtle) */
+@keyframes coupleHopAnim{
+  0%{ transform:translateY(0); }
+  50%{ transform:translateY(-2px); }
+  100%{ transform:translateY(0); }
+}
+.mItem.coupleHop .mAvatar{
+  animation:coupleHopAnim 2.2s ease-in-out infinite;
+}
+
+/* Couples badge/mood */
+.coupleBadge, .coupleMood{
+  margin-right:6px;
+  font-size:14px;
+  opacity:0.95;
+}

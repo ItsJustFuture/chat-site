@@ -790,7 +790,7 @@
 
 
                         <div class="field" id="couplesField">
-                          <label>Couples</label>
+                          <label id="couplesLabel">Couples <span id="couplesLabelBadge" class="pillCount" style="display:none;"></span></label>
                           <div class="small">All couples features are opt-in and can be disabled at any time.</div>
 
                           <div class="row" style="margin-top:8px; gap:8px; align-items:center;">
@@ -819,6 +819,23 @@
                               <input id="couplesStatusLabel" placeholder="Status label (e.g. Linked)" maxlength="24" style="flex:1;">
                               <button class="btn secondary" id="couplesStatusSaveBtn" type="button">Save</button>
                             </div>
+                            <div class="row couplesMoodRow" style="margin-top:8px; gap:8px; align-items:center;">
+                              <select id="couplesMoodEmoji" aria-label="Couple mood emoji" style="width:72px;">
+                                <option value="">—</option>
+                                <option value="🌙">🌙</option>
+                                <option value="💫">💫</option>
+                                <option value="🧸">🧸</option>
+                                <option value="☕">☕</option>
+                                <option value="🔥">🔥</option>
+                                <option value="🥺">🥺</option>
+                                <option value="🫶">🫶</option>
+                                <option value="💜">💜</option>
+                              </select>
+                              <div class="small" style="flex:1;">Shared mood (optional)</div>
+                              <button class="btn secondary" id="couplesMoodSaveBtn" type="button">Save</button>
+                              <button class="btn secondary" id="couplesPingBtn" type="button">Ping</button>
+                            </div>
+
                             <div class="small">Shown as the couples badge (if enabled) and in your profile when both of you allow it.</div>
 
 
@@ -867,6 +884,12 @@
                                 <input type="checkbox" id="couplesGroupToggle">
                                 <span class="slider"></span>
                               </label>
+                            <label class="switch">
+                              <input type="checkbox" id="couplesAllowPingToggle">
+                              <span class="slider"></span>
+                              <span class="switchLabel">Allow partner pings</span>
+                            </label>
+
                               <div class="toggleLabel">Pull us together in members list</div>
                             </div>
 

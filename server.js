@@ -453,6 +453,7 @@ try {
         status TEXT NOT NULL DEFAULT 'pending', -- pending | active
         status_emoji TEXT NOT NULL DEFAULT '💜',
         status_label TEXT NOT NULL DEFAULT 'Linked',
+        mood_emoji TEXT,
         created_at BIGINT NOT NULL,
         activated_at BIGINT,
         updated_at BIGINT NOT NULL
@@ -469,10 +470,15 @@ try {
         group_members BOOLEAN NOT NULL DEFAULT false,
         aura BOOLEAN NOT NULL DEFAULT true,
         badge BOOLEAN NOT NULL DEFAULT true,
+        allow_ping BOOLEAN NOT NULL DEFAULT true,
+        last_ping_at BIGINT,
         updated_at BIGINT NOT NULL,
         PRIMARY KEY (link_id, user_id)
       )
     `);
+    await pgPool.query(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS mood_emoji TEXT`);
+    await pgPool.query(`ALTER TABLE couple_prefs ADD COLUMN IF NOT EXISTS allow_ping BOOLEAN NOT NULL DEFAULT true`);
+    await pgPool.query(`ALTER TABLE couple_prefs ADD COLUMN IF NOT EXISTS last_ping_at BIGINT`);
   } catch (e) {
     console.warn("[pg-init] couples tables failed:", e?.message || e);
   }
@@ -580,13 +586,15 @@ async function pgGetCoupleSummaryFor(userId) {
       since: Number(link.activated_at || link.created_at) || null,
       statusEmoji: link.status_emoji || "💜",
       statusLabel: link.status_label || "Linked",
+      moodEmoji: link.mood_emoji || "",
       prefs: prefsMe ? {
         enabled: !!prefsMe.enabled,
         showProfile: !!prefsMe.show_profile,
         showMembers: !!prefsMe.show_members,
         groupMembers: !!prefsMe.group_members,
         aura: !!prefsMe.aura,
-        badge: !!prefsMe.badge
+        badge: !!prefsMe.badge,
+        allowPing: (prefsMe.allow_ping === undefined ? true : !!prefsMe.allow_ping)
       } : null,
       partnerPrefs: prefsPartner ? {
         enabled: !!prefsPartner.enabled,
@@ -594,7 +602,8 @@ async function pgGetCoupleSummaryFor(userId) {
         showMembers: !!prefsPartner.show_members,
         groupMembers: !!prefsPartner.group_members,
         aura: !!prefsPartner.aura,
-        badge: !!prefsPartner.badge
+        badge: !!prefsPartner.badge,
+        allowPing: (prefsPartner.allow_ping === undefined ? true : !!prefsPartner.allow_ping)
       } : null
     };
   }
@@ -630,8 +639,8 @@ async function pgUpsertCouplePrefs(linkId, userId, patch) {
   if (!existing) {
     await pgPool.query(
       `
-      INSERT INTO couple_prefs(link_id, user_id, enabled, show_profile, show_members, group_members, aura, badge, updated_at)
-      VALUES($1,$2,true,true,true,false,true,true,$3)
+      INSERT INTO couple_prefs(link_id, user_id, enabled, show_profile, show_members, group_members, aura, badge, allow_ping, last_ping_at, updated_at)
+      VALUES($1,$2,true,true,true,false,true,true,true,NULL,$3)
       ON CONFLICT (link_id, user_id) DO NOTHING
       `,
       [Number(linkId) || 0, Number(userId) || 0, now]
@@ -1317,7 +1326,7 @@ function parseQuotedArgs(raw) {
       }
       continue;
     }
-    if (ch === "\"" || ch === "'") {
+    if (ch === "" || ch === "'") {
       quote = ch;
       continue;
     }
@@ -5033,6 +5042,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
               since: Number(cl.activated_at || cl.created_at) || null,
               statusEmoji: cl.status_emoji || "💜",
               statusLabel: cl.status_label || "Linked",
+              moodEmoji: cl.mood_emoji || "",
               badge: canShowCoupleFeature(mePrefs, partnerPrefs, "badge"),
               aura: canShowCoupleFeature(mePrefs, partnerPrefs, "aura"),
               showMembers: canShowCoupleFeature(mePrefs, partnerPrefs, "members"),
@@ -5154,6 +5164,28 @@ app.post("/api/couples/respond", requireLogin, async (req, res) => {
   }
 });
 
+app.post("/api/couples/cancel", requireLogin, async (req, res) => {
+  try {
+    if (!PG_READY) return res.status(503).send("DB not ready");
+    const linkId = Number(req.body?.linkId) || 0;
+    if (!linkId) return res.status(400).send("Bad request");
+    const meId = Number(req.session.user?.id) || 0;
+
+    const { rows } = await pgPool.query(`SELECT id, requested_by_id, status FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+    const link = rows[0];
+    if (!link) return res.status(404).send("Not found");
+    if (link.status !== "pending") return res.status(409).send("Not pending");
+    if (Number(link.requested_by_id) !== meId) return res.status(403).send("Forbidden");
+
+    await pgPool.query(`DELETE FROM couple_links WHERE id=$1`, [linkId]);
+    const summary = await pgGetCoupleSummaryFor(meId);
+    return res.json(summary);
+  } catch (e) {
+    console.warn("[couples] cancel failed:", e?.message || e);
+    return res.status(500).send("Could not cancel");
+  }
+});
+
 app.post("/api/couples/unlink", requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
@@ -5226,6 +5258,75 @@ app.post("/api/couples/status", requireLogin, async (req, res) => {
   }
 });
 
+
+app.post("/api/couples/mood", requireLogin, async (req, res) => {
+  try {
+    if (!PG_READY) return res.status(503).send("DB not ready");
+    const linkId = Number(req.body?.linkId) || 0;
+    const emoji = String(req.body?.emoji || "").trim();
+    if (!linkId) return res.status(400).send("Bad request");
+    if (emoji.length > 8) return res.status(400).send("Bad emoji");
+
+    const meId = Number(req.session.user?.id) || 0;
+    const { rows } = await pgPool.query(`SELECT id,user1_id,user2_id,status FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+    const link = rows[0];
+    if (!link) return res.status(404).send("Not found");
+    if (link.status !== "active") return res.status(409).send("Not active");
+    if (Number(link.user1_id) !== meId && Number(link.user2_id) !== meId) return res.status(403).send("Forbidden");
+
+    await pgPool.query(`UPDATE couple_links SET mood_emoji=$1, updated_at=$2 WHERE id=$3`, [emoji || null, Date.now(), linkId]);
+    const summary = await pgGetCoupleSummaryFor(meId);
+    return res.json(summary);
+  } catch (e) {
+    console.warn("[couples] mood failed:", e?.message || e);
+    return res.status(500).send("Could not save mood");
+  }
+});
+
+const COUPLES_PING_COOLDOWN_MS = 10 * 60 * 1000;
+
+app.post("/api/couples/ping", requireLogin, async (req, res) => {
+  try {
+    if (!PG_READY) return res.status(503).send("DB not ready");
+    const linkId = Number(req.body?.linkId) || 0;
+    if (!linkId) return res.status(400).send("Bad request");
+
+    const meId = Number(req.session.user?.id) || 0;
+    const meName = String(req.session.user?.username || "").trim();
+    const { rows } = await pgPool.query(`SELECT * FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+    const link = rows[0];
+    if (!link) return res.status(404).send("Not found");
+    if (link.status !== "active") return res.status(409).send("Not active");
+    if (Number(link.user1_id) !== meId && Number(link.user2_id) !== meId) return res.status(403).send("Forbidden");
+
+    const partnerId = (Number(link.user1_id) === meId) ? Number(link.user2_id) : Number(link.user1_id);
+
+    // Require both users to have couples enabled and allow ping
+    const prefsMe = await pgGetCouplePrefs(linkId, meId);
+    const prefsPartner = await pgGetCouplePrefs(linkId, partnerId);
+    if (!prefsMe?.enabled || !prefsPartner?.enabled) return res.status(409).send("Couples disabled");
+    if (prefsMe.allow_ping === false) return res.status(409).send("Pings disabled");
+    if (prefsPartner.allow_ping === false) return res.status(409).send("Partner disabled pings");
+
+    const now = Date.now();
+    const last = Number(prefsMe.last_ping_at) || 0;
+    if (last && (now - last) < COUPLES_PING_COOLDOWN_MS) {
+      const waitMs = COUPLES_PING_COOLDOWN_MS - (now - last);
+      return res.status(429).json({ error: "cooldown", waitMs });
+    }
+
+    await pgPool.query(`UPDATE couple_prefs SET last_ping_at=$1, updated_at=$2 WHERE link_id=$3 AND user_id=$4`, [now, now, linkId, meId]);
+
+    const sid = socketIdByUserId.get(partnerId);
+    if (sid) {
+      io.to(sid).emit("couple ping", { from: meName || "Partner" });
+    }
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn("[couples] ping failed:", e?.message || e);
+    return res.status(500).send("Could not ping");
+  }
+});
 
 app.post("/profile/:username/like", requireLogin, async (req, res) => {
   const u = sanitizeUsername(req.params.username);
