@@ -165,6 +165,7 @@ async function pgEnsureEpochMsBigint(tableName, columnName) {
 // ---- Postgres schema flags
 let PG_USERS_CREATED_AT_IS_TIMESTAMP = false;
 let PG_READY = false;
+let COUPLES_READY = false;
 let PG_INIT_ERROR = null;
 // ---- Postgres table setup
 // Run once on boot, and start the server only after this finishes (so schema/type fixes apply before /register).
@@ -440,16 +441,21 @@ try {
 } catch (e) {
   console.warn("[pg-init] restrictions/appeals tables failed:", e?.message || e);
 }
-
-    
   // --- Couples (opt-in linked profiles)
   try {
+    // Adapt to existing DBs where users.id may be INTEGER or BIGINT
+    const { rows: idInfo } = await pgPool.query(
+      `SELECT udt_name FROM information_schema.columns WHERE table_name='users' AND column_name='id' LIMIT 1`
+    );
+    const udt = (idInfo?.[0]?.udt_name || '').toLowerCase();
+    const ID_TYPE = (udt == 'int8' || udt == 'bigint') ? 'BIGINT' : 'INTEGER';
+
     await pgPool.query(`
       CREATE TABLE IF NOT EXISTS couple_links (
         id SERIAL PRIMARY KEY,
-        user1_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        user2_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        requested_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        user1_id ${ID_TYPE} NOT NULL,
+        user2_id ${ID_TYPE} NOT NULL,
+        requested_by_id ${ID_TYPE},
         status TEXT NOT NULL DEFAULT 'pending', -- pending | active
         status_emoji TEXT NOT NULL DEFAULT '💜',
         status_label TEXT NOT NULL DEFAULT 'Linked',
@@ -458,11 +464,24 @@ try {
         updated_at BIGINT NOT NULL
       )
     `);
+
+    // Best-effort FK constraints (may fail if legacy schemas differ); couples will still work without them.
+    try {
+      await pgPool.query(`ALTER TABLE couple_links ADD CONSTRAINT couple_links_user1_fk FOREIGN KEY (user1_id) REFERENCES users(id) ON DELETE CASCADE`);
+    } catch {}
+    try {
+      await pgPool.query(`ALTER TABLE couple_links ADD CONSTRAINT couple_links_user2_fk FOREIGN KEY (user2_id) REFERENCES users(id) ON DELETE CASCADE`);
+    } catch {}
+    try {
+      await pgPool.query(`ALTER TABLE couple_links ADD CONSTRAINT couple_links_requested_by_fk FOREIGN KEY (requested_by_id) REFERENCES users(id) ON DELETE SET NULL`);
+    } catch {}
+
     await pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_couple_pair ON couple_links(user1_id, user2_id)`);
+
     await pgPool.query(`
       CREATE TABLE IF NOT EXISTS couple_prefs (
         link_id INTEGER NOT NULL REFERENCES couple_links(id) ON DELETE CASCADE,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_id ${ID_TYPE} NOT NULL,
         enabled BOOLEAN NOT NULL DEFAULT true,
         show_profile BOOLEAN NOT NULL DEFAULT true,
         show_members BOOLEAN NOT NULL DEFAULT true,
@@ -473,8 +492,14 @@ try {
         PRIMARY KEY (link_id, user_id)
       )
     `);
+    try {
+      await pgPool.query(`ALTER TABLE couple_prefs ADD CONSTRAINT couple_prefs_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`);
+    } catch {}
+
+    COUPLES_READY = true;
   } catch (e) {
-    console.warn("[pg-init] couples tables failed:", e?.message || e);
+    COUPLES_READY = false;
+    console.warn('[pg-init] couples tables failed:', e?.message || e);
   }
 
 PG_READY = true;
@@ -5054,6 +5079,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
 app.get("/api/couples/me", requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
+    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
     const summary = await pgGetCoupleSummaryFor(req.session.user.id);
     return res.json(summary);
   } catch (e) {
@@ -5065,6 +5091,7 @@ app.get("/api/couples/me", requireLogin, async (req, res) => {
 app.post("/api/couples/request", requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
+    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
 
     const targetRaw = String(req.body?.targetUsername || "").trim().slice(0, 64);
     const targetName = sanitizeUsername(targetRaw);
@@ -5078,6 +5105,7 @@ app.post("/api/couples/request", requireLogin, async (req, res) => {
     if (!target) return res.status(404).send("User not found");
 
     const meId = Number(req.session.user?.id) || 0;
+    if (!meId) return res.status(401).send("Not logged in");
     const otherId = Number(target.id) || 0;
     const [u1, u2] = orderPair(meId, otherId);
     const now = Date.now();
@@ -5123,6 +5151,7 @@ app.post("/api/couples/request", requireLogin, async (req, res) => {
 app.post("/api/couples/respond", requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
+    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
     const linkId = Number(req.body?.linkId) || 0;
     const accept = !!req.body?.accept;
     if (!linkId) return res.status(400).send("Bad request");
@@ -5157,6 +5186,7 @@ app.post("/api/couples/respond", requireLogin, async (req, res) => {
 app.post("/api/couples/unlink", requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
+    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
     const linkId = Number(req.body?.linkId) || 0;
     if (!linkId) return res.status(400).send("Bad request");
 
@@ -5178,6 +5208,7 @@ app.post("/api/couples/unlink", requireLogin, async (req, res) => {
 app.post("/api/couples/prefs", requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
+    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
     const linkId = Number(req.body?.linkId) || 0;
     if (!linkId) return res.status(400).send("Bad request");
     const meId = Number(req.session.user?.id) || 0;
@@ -5199,6 +5230,7 @@ app.post("/api/couples/prefs", requireLogin, async (req, res) => {
 app.post("/api/couples/status", requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
+    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
     const linkId = Number(req.body?.linkId) || 0;
     if (!linkId) return res.status(400).send("Bad request");
 
