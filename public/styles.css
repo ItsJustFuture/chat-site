@@ -5752,11 +5752,170 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
 .profileQuickActions{ display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
 .quickActionGroup{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .quickActionGroup .badge{ height:100%; display:flex; align-items:center; justify-content:center; }
-#dmUserBtn,
-#copyUsernameBtn,
-#likeProfileBtn,
-#addFriendBtn{
-  display: none !important;
+#profileQuickActions{
+  padding: 8px 0 4px;
+}
+.profileInfoGrid{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 6px;
+}
+.profileInfoCard{
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.04);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.profileInfoCard.profileInfoWide{
+  grid-column: span 2;
+}
+.profileInfoCard .infoLabel{
+  font-size: 11px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.profileInfoCard .infoValue{
+  font-weight: 800;
+  font-size: 14px;
+}
+.profileInfoCard .vibeRow{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.profileBioCard{
+  margin-top: 12px;
+}
+.profileEditToggleRow{
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+.profileEditSection{
+  margin-top: 10px;
+}
+
+.customizeShell{
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+.customizeTopBar input{
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: var(--panel2);
+  color: var(--text);
+}
+.customizeCardGrid{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.customizeCard{
+  text-align: left;
+  border-radius: 14px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.04);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: transform .12s ease, border-color .12s ease, background .12s ease;
+}
+.customizeCard:hover{
+  transform: translateY(-1px);
+  background: rgba(255,255,255,.06);
+  border-color: rgba(255,255,255,.14);
+}
+.customizeCard .cardTitle{
+  font-weight: 800;
+  font-size: 14px;
+}
+.customizeCard .cardHint{
+  font-size: 12px;
+  color: var(--muted);
+}
+.customizeCard .cardPreview{
+  height: 28px;
+  border-radius: 10px;
+  background: rgba(0,0,0,.25);
+  border: 1px solid rgba(255,255,255,.08);
+}
+.customizeSubpages{
+  position: relative;
+  min-height: 200px;
+}
+.customizeSubpage{
+  display: none;
+  opacity: 0;
+  transform: translateX(12px);
+  transition: opacity .18s ease, transform .18s ease;
+}
+.customizeSubpage.active{
+  display: block;
+  opacity: 1;
+  transform: translateX(0);
+}
+.customizeHeader{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.customizeHeader .title{
+  font-size: 16px;
+  font-weight: 800;
+}
+.customizeSection{
+  margin-bottom: 12px;
+}
+.customizeSection > summary{
+  cursor: pointer;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.customizeResetRow{
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.chatFxPreviewWrap{
+  margin-top: 14px;
+}
+.actionList{
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 760px){
+  .customizeCardGrid{
+    grid-template-columns: 1fr;
+  }
+  .profileInfoGrid{
+    grid-template-columns: 1fr;
+  }
+  .profileInfoCard.profileInfoWide{
+    grid-column: span 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce){
+  .customizeSubpage{
+    transition: none;
+  }
+  .customizeCard{
+    transition: none;
+  }
 }
 #profileSheetStars{
   display: none !important;
