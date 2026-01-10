@@ -583,12 +583,6 @@
                 <span class="profileSheetName" id="profileSheetName">—</span>
                 <span class="profileRoleChip" id="profileSheetRoleChip">Role</span>
               </div>
-              <div class="profileSheetDetails" id="profileSheetDetails">
-                <span class="profileDetail" id="profileSheetAge" style="display:none;"></span>
-                <span class="profileDetail" id="profileSheetGender" style="display:none;"></span>
-              </div>
-              <div class="profileSheetSub" id="profileSheetSub"><span id="profileCoupleChip" class="coupleChip" style="display:none;"></span></div>
-              <div class="vibeRow" id="profileSheetVibes"></div>
               <div class="profileSheetStats" id="profileSheetStats" style="display:none;">
                 <span class="statPill" id="profileSheetStars">⭐ 0</span>
                 <span class="statPill" id="profileSheetLikes">♡ 0</span>
@@ -610,12 +604,20 @@
 
         <div class="profileSticky">
           <div class="profileActions">
-            <div class="tabs profileActionTabs profileCompactTabs" id="tabs">
-              <button class="tab active" data-tab="account" id="tabAccount" type="button">Account</button>
-              <button class="tab" data-tab="custom" id="tabCustom" type="button">Custom</button>
-              <button class="tab" data-tab="more" id="tabMore" type="button">More</button>
+            <div class="tabs profileActionTabs profileCompactTabs" id="profileTabs">
+              <button class="tab active" data-tab="profile" id="tabProfile" type="button">Profile</button>
+              <button class="tab" data-tab="customize" id="tabCustomize" type="button">Customize</button>
+              <button class="tab" data-tab="actions" id="tabActions" type="button" style="display:none;">Actions</button>
             </div>
 
+            <div class="msgline" id="profileActionMsg"></div>
+            <div class="msgline" id="profileLikeMsg"></div>
+            <div class="msgline" id="mediaMsg"></div>
+          </div>
+        </div>
+
+        <div class="modalContent" id="modalContent">
+          <div id="viewProfile">
             <div class="profileQuickActions" id="profileQuickActions">
               <div class="quickActionGroup">
                 <button class="btn btnSecondary" id="dmUserBtn" type="button">Message</button>
@@ -625,428 +627,43 @@
                 <div class="badge" id="likeCount">0</div>
               </div>
             </div>
-            <div class="msgline" id="profileActionMsg"></div>
-            <div class="msgline" id="profileLikeMsg"></div>
-            <div class="msgline" id="mediaMsg"></div>
-          </div>
-        </div>
 
-        <div id="viewCustom" style="display:none;">
-          <div class="profileCustomEmpty" id="profileCustomEmpty" style="display:none;">
-            <div class="panelBox">
-              <div class="small">Customisation settings are only available on your own profile.</div>
-            </div>
-          </div>
-  <div class="profileMenu" id="profileMenu">
-    <button class="profileMenuRow" type="button" data-action="edit-about">
-      <span class="menuIcon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M7 7h10M7 11h10M7 15h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 3h12a2 2 0 0 1 2 2v16l-3-2-3 2-3-2-3 2-3-2V5a2 2 0 0 1 2-2z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-      </span>
-      <span class="menuLabel">Edit profile</span>
-      <span class="menuHint">Avatar, mood, age, bio</span>
-    </button>
-
-    <button class="profileMenuRow" type="button" data-action="edit-themes">
-      <span class="menuIcon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M12 3a9 9 0 1 0 0 18c3 0 3-2 3-3s-1-2-2-2h-2a3 3 0 0 1-3-3c0-1 .4-1.9 1.1-2.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="10" r="1" fill="currentColor"/><circle cx="12" cy="8" r="1" fill="currentColor"/><circle cx="16" cy="10" r="1" fill="currentColor"/></svg>
-      </span>
-      <span class="menuLabel">Theme settings</span>
-      <span class="menuHint">Pick a theme + preview</span>
-    </button>
-
-    <button class="profileMenuRow" type="button" data-action="edit-dm">
-      <span class="menuIcon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-      </span>
-      <span class="menuLabel">DM customisation</span>
-      <span class="menuHint">Background + badge colors</span>
-    </button>
-
-    <button class="profileMenuRow vipOnly" type="button" data-action="edit-gifts">
-      <span class="menuIcon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M20 12v9H4v-9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M2 7h20v5H2V7z" stroke="currentColor" stroke-width="2"/><path d="M12 7v14" stroke="currentColor" stroke-width="2"/><path d="M12 7c-2.5 0-4-1-4-2.5S9.5 2 12 7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 7c2.5 0 4-1 4-2.5S14.5 2 12 7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-      </span>
-      <span class="menuLabel">VIP gifts</span>
-      <span class="menuHint">Inventory + history</span>
-      <span class="vipPill" aria-hidden="true">VIP</span>
-    </button>
-
-    <button class="profileMenuRow" type="button" data-action="open-preferences">
-      <span class="menuIcon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a7.9 7.9 0 0 0 .1-2l2-1.2-2-3.5-2.3.7a7.7 7.7 0 0 0-1.7-1l-.3-2.4h-4l-.3 2.4a7.7 7.7 0 0 0-1.7 1L6.9 8.3 4.9 11.8l2 1.2a7.9 7.9 0 0 0 .1 2l-2 1.2 2 3.5 2.3-.7a7.7 7.7 0 0 0 1.7 1l.3 2.4h4l.3-2.4a7.7 7.7 0 0 0 1.7-1l2.3.7 2-3.5-2-1.2z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-      </span>
-      <span class="menuLabel">Settings</span>
-      <span class="menuHint">Sounds + comfort mode</span>
-    </button>
-  </div>
-
-  <div class="panelBox" id="editGiftsPanel" style="display:none;">
-    <div class="sectionTitle">VIP gifts</div>
-    <div class="panelBox">
-      <div class="small">This section is wired and ready — add your gifts system whenever you want.</div>
-      <div class="small" style="margin-top:6px;">Tip: later load inventory/history via an endpoint like <code>/gifts</code> and render it here.</div>
-    </div>
-  </div>
-
-
-  <div class="panelBox" id="editPreferencesPanel" style="display:none;">
-    <div class="sectionTitle">Preferences</div>
-    <div class="panelBox">
-      <div class="small" style="margin-bottom:10px;">Sound cues are quiet and optional. On iOS you may need to toggle once to enable audio.</div>
-
-      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <label style="margin:0;">Enable sound cues</label>
-        <input id="prefSoundEnabled" type="checkbox">
-      </div>
-
-      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <label style="margin:0;">Room messages</label>
-        <input id="prefSoundRoom" type="checkbox">
-      </div>
-
-      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <label style="margin:0;">Direct messages</label>
-        <input id="prefSoundDm" type="checkbox">
-      </div>
-
-      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <label style="margin:0;">Mentions (@you)</label>
-        <input id="prefSoundMention" type="checkbox">
-      </div>
-
-      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <label style="margin:0;">Message sent</label>
-        <input id="prefSoundSent" type="checkbox">
-      </div>
-
-      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <label style="margin:0;">Message received</label>
-        <input id="prefSoundReceive" type="checkbox">
-      </div>
-
-      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <label style="margin:0;">Reaction added</label>
-        <input id="prefSoundReaction" type="checkbox">
-      </div>
-
-      <div class="small" id="prefSoundStatus" style="margin-top:8px;"></div>
-
-      <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:12px;">
-        <label style="margin:0;">Comfort mode</label>
-        <input id="prefComfortMode" type="checkbox">
-      </div>
-      <div class="small muted" id="prefComfortHelp">Softens glows, confetti, and motion-heavy animations.</div>
-
-      <div class="prefsSections" style="margin-top:12px;">
-        <details class="prefsSection" id="prefAppearanceSection">
-          <summary>Appearance</summary>
-          <div class="prefsContent">
-            <div class="field">
-              <label>UI scale</label>
-              <div class="uiScaleRow">
-                <input id="uiScaleRange" type="range" min="0.80" max="1.05" step="0.05" value="1" aria-label="UI size">
-                <div class="small muted" id="uiScaleValue">100%</div>
+            <div class="profileInfoGrid">
+              <div class="profileInfoCard">
+                <div class="infoLabel">Age</div>
+                <div class="infoValue" id="infoAge">—</div>
               </div>
-              <div class="uiScaleActions">
-                <button class="btn secondary" id="uiScaleResetBtn" type="button">Auto</button>
+              <div class="profileInfoCard">
+                <div class="infoLabel">Gender</div>
+                <div class="infoValue" id="infoGender">—</div>
+              </div>
+              <div class="profileInfoCard">
+                <div class="infoLabel">Current room</div>
+                <div class="infoValue" id="infoRoom">—</div>
+              </div>
+              <div class="profileInfoCard">
+                <div class="infoLabel">Mood</div>
+                <div class="infoValue" id="profileMood">—</div>
+              </div>
+              <div class="profileInfoCard">
+                <div class="infoLabel">Last seen</div>
+                <div class="infoValue" id="infoLastSeen">—</div>
+              </div>
+              <div class="profileInfoCard">
+                <div class="infoLabel">Status</div>
+                <div class="infoValue" id="profileStatus">—</div>
+              </div>
+              <div class="profileInfoCard profileInfoWide">
+                <div class="infoLabel">Vibes</div>
+                <div class="vibeRow" id="profileSheetVibes"></div>
+              </div>
+              <div class="profileInfoCard profileInfoWide" id="profileCoupleCard" style="display:none;">
+                <div class="infoLabel">Couple</div>
+                <span id="profileCoupleChip" class="coupleChip" style="display:none;"></span>
               </div>
             </div>
-          </div>
-        </details>
-      </div>
-    </div>
-  </div>
 
-  <div class="panelBox">
-    <div class="listBtns" style="display:none;">
-      <button class="btn secondary" id="editAboutBtn" type="button">About</button>
-      <button class="btn secondary" id="editThemesBtn" type="button">Themes</button>
-      <button class="btn secondary" id="editDmBtn" type="button">DM Customisation</button>
-    </div>
-  </div>
-
-  <div class="panelBox" id="editAboutPanel" style="display:none;">
-    <div id="myProfileEdit" style="display:none;">
-                      <div class="sectionTitle">Edit my profile</div>
-                      <div class="panelBox">
-                        <div class="field">
-                          <label>Avatar</label>
-                          <input id="avatarFile" type="file" accept="image/*">
-                          <div class="small">Max 5MB. PNG/JPG/WEBP/GIF.</div>
-                        </div>
-
-                        <div class="field">
-                          <label>Header gradient</label>
-                          <div class="colorInputRow tight">
-                            <input id="headerColorA" type="color" aria-label="Header color A">
-                            <input id="headerColorAText" type="text" placeholder="#ff6a2b" aria-label="Header color A text">
-                          </div>
-                          <div class="colorInputRow tight" style="margin-top:6px;">
-                            <input id="headerColorB" type="color" aria-label="Header color B">
-                            <input id="headerColorBText" type="text" placeholder="#2b0f08" aria-label="Header color B text">
-                          </div>
-                          <div class="small">Pick two colors for your profile header gradient.</div>
-                        </div>
-
-
-                        <div class="field" id="couplesField">
-                          <label id="couplesLabel">Couples <span id="couplesLabelBadge" class="pillCount" style="display:none;"></span></label>
-                          <div class="small">All couples features are opt-in and can be disabled at any time.</div>
-
-                          <div class="row" style="margin-top:8px; gap:8px; align-items:center;">
-                            <input id="couplesPartnerInput" placeholder="Partner username" style="flex:1;">
-                            <button class="btn secondary" id="couplesRequestBtn" type="button">Send link request</button>
-                          </div>
-
-                          <div class="panelBox" id="couplesPendingBox" style="margin-top:10px; display:none;">
-                            <div class="small" style="margin-bottom:6px;">Pending</div>
-                            <div id="couplesPendingList"></div>
-                          </div>
-
-                          <div class="panelBox" id="couplesActiveBox" style="margin-top:10px; display:none;">
-                            <div class="small" id="couplesActiveTitle">Linked</div>
-
-                            <div class="row couplesStatusRow" style="margin-top:8px; gap:8px; align-items:center;">
-                              <select id="couplesStatusEmoji" aria-label="Couple status emoji" style="width:72px;">
-                                <option value="💜">💜</option>
-                                <option value="💕">💕</option>
-                                <option value="✨">✨</option>
-                                <option value="🫶">🫶</option>
-                                <option value="🌙">🌙</option>
-                                <option value="🔥">🔥</option>
-                                <option value="🧸">🧸</option>
-                              </select>
-                              <input id="couplesStatusLabel" placeholder="Status label (e.g. Linked)" maxlength="24" style="flex:1;">
-                              <button class="btn secondary" id="couplesStatusSaveBtn" type="button">Save</button>
-                            </div>
-                            <div class="row couplesMoodRow" style="margin-top:8px; gap:8px; align-items:center;">
-                              <select id="couplesMoodEmoji" aria-label="Couple mood emoji" style="width:72px;">
-                                <option value="">—</option>
-                                <option value="🌙">🌙</option>
-                                <option value="💫">💫</option>
-                                <option value="🧸">🧸</option>
-                                <option value="☕">☕</option>
-                                <option value="🔥">🔥</option>
-                                <option value="🥺">🥺</option>
-                                <option value="🫶">🫶</option>
-                                <option value="💜">💜</option>
-                              </select>
-                              <div class="small" style="flex:1;">Shared mood (optional)</div>
-                              <button class="btn secondary" id="couplesMoodSaveBtn" type="button">Save</button>
-                              <button class="btn secondary" id="couplesPingBtn" type="button">Ping</button>
-                            </div>
-
-                            <div class="small">Shown as the couples badge (if enabled) and in your profile when both of you allow it.</div>
-
-
-                            <div class="toggleRow">
-                              <label class="switch">
-                                <input type="checkbox" id="couplesEnabledToggle">
-                                <span class="slider"></span>
-                              </label>
-                              <div class="toggleLabel">Enable couples features</div>
-                            </div>
-
-                            <div class="toggleRow">
-                              <label class="switch">
-                                <input type="checkbox" id="couplesShowProfileToggle">
-                                <span class="slider"></span>
-                              </label>
-                              <div class="toggleLabel">Show link on profiles</div>
-                            </div>
-
-                            <div class="toggleRow">
-                              <label class="switch">
-                                <input type="checkbox" id="couplesBadgeToggle">
-                                <span class="slider"></span>
-                              </label>
-                              <div class="toggleLabel">Show badge (💜) in members list</div>
-                            </div>
-
-                            <div class="toggleRow">
-                              <label class="switch">
-                                <input type="checkbox" id="couplesAuraToggle">
-                                <span class="slider"></span>
-                              </label>
-                              <div class="toggleLabel">Enable shared aura when together</div>
-                            </div>
-
-                            <div class="toggleRow">
-                              <label class="switch">
-                                <input type="checkbox" id="couplesShowMembersToggle">
-                                <span class="slider"></span>
-                              </label>
-                              <div class="toggleLabel">Show link in members list</div>
-                            </div>
-
-                            <div class="toggleRow">
-                              <label class="switch">
-                                <input type="checkbox" id="couplesGroupToggle">
-                                <span class="slider"></span>
-                              </label>
-                              <div class="toggleLabel">Pull us together in members list</div>
-                            </div>
-
-                            <div class="toggleRow">
-                              <label class="switch">
-                                <input type="checkbox" id="couplesAllowPingToggle">
-                                <span class="slider"></span>
-                              </label>
-                              <div class="toggleLabel">Allow partner pings</div>
-                            </div>
-
-                            <div class="row"<div class="row" style="margin-top:10px; gap:8px;">
-                              <button class="btn danger" id="couplesUnlinkBtn" type="button">Unlink</button>
-                            </div>
-                          </div>
-
-                          <div class="msgline" id="couplesMsg"></div>
-                        </div>
-
-                        <div class="field">
-                          <label>Mood</label>
-                          <input id="editMood" placeholder="e.g. chilling">
-                        </div>
-
-                        <div class="field">
-                          <label>Username</label>
-                          <input id="editUsername" placeholder="New username">
-                          <div class="small">Changing your username costs 5,000 gold.</div>
-                          <button class="btn secondary" id="changeUsernameBtn" type="button">Change username</button>
-                        </div>
-
-                        <div class="row">
-                          <div class="field" style="flex:1;">
-                            <label>Age (18+)</label>
-                            <input id="editAge" type="number" min="18" max="120" placeholder="18+">
-                          </div>
-                          <div class="field" style="flex:1;">
-                            <label>Gender</label>
-                            <select id="editGender">
-                              <option value="">Prefer not to say</option>
-                              <option value="Male">Male</option>
-                              <option value="Female">Female</option>
-                              <option value="Non-binary">Non-binary</option>
-                              <option value="Transgender">Transgender</option>
-                              <option value="Genderfluid">Genderfluid</option>
-                              <option value="Agender">Agender</option>
-                              <option value="Other">Other</option>
-                            </select>
-                          </div>
-                        </div>
-
-                        <div class="field">
-                          <label>Vibe tags (pick up to <span id="vibeTagLimit">3</span>)</label>
-                          <div class="pillRow" id="vibeTagOptions"></div>
-                          <div class="small">Adds a few personality badges to your profile.</div>
-                        </div>
-
-                        <div class="field">
-                          <div class="fieldLabelRow">
-                            <label>Bio (BBCode supported)</label>
-                            <button class="pillBtn small" id="bioHelperToggle" type="button">BBCode help &amp; preview</button>
-                          </div>
-                          <textarea id="editBio" placeholder="[b]bold[/b] [i]italics[/i] [url=https://...]link[/url] [quote]...[/quote]"></textarea>
-                          <div class="bioHelper" id="bioHelper" hidden>
-                            <div class="bioHelperRow" id="bioHelperButtons">
-                              <button type="button" class="pillBtn tiny" data-bio-tag="b">[b][/b]</button>
-                              <button type="button" class="pillBtn tiny" data-bio-tag="i">[i][/i]</button>
-                              <button type="button" class="pillBtn tiny" data-bio-tag="u">[u][/u]</button>
-                              <button type="button" class="pillBtn tiny" data-bio-tag="s">[s][/s]</button>
-                              <button type="button" class="pillBtn tiny" data-bio-tag="quote">[quote][/quote]</button>
-                              <button type="button" class="pillBtn tiny" data-bio-tag="code">[code][/code]</button>
-                              <button type="button" class="pillBtn tiny" data-bio-tag="url">[url]</button>
-                              <button type="button" class="pillBtn tiny" data-bio-tag="color">[color]</button>
-                              <button type="button" class="pillBtn tiny" data-bio-tag="img">[img]</button>
-                            </div>
-                            <div class="bioHelperPreview" id="bioHelperPreview"></div>
-                            <div class="small muted">Use BBCode for simple formatting. Links/images require full URLs.</div>
-                          </div>
-                        </div>
-
-                        <div class="row">
-                          <button class="btn btnPrimary" id="saveProfileBtn" type="button">Save</button>
-                          <button class="btn btnSecondary" id="refreshProfileBtn" type="button">Refresh</button>
-                          <button class="btn btnDanger" id="logoutBtn" type="button">Logout</button>
-                        </div>
-
-                        <div class="msgline" id="profileMsg"></div>
-                      </div>
-                    </div>
-  </div>
-
-
-  <div class="panelBox" id="editThemesPanel" style="display:none;">
-    <div class="themeFilters">
-      <button class="pillBtn active" data-theme-filter="all" type="button">All</button>
-      <button class="pillBtn" data-theme-filter="dark" type="button">Dark</button>
-      <button class="pillBtn" data-theme-filter="light" type="button">Light</button>
-    </div>
-    <div class="themeGrid" id="themeGrid"></div>
-    <div class="msgline" id="themeMsg"></div>
-  </div>
-
-  <div class="panelBox" id="editDmPanel" style="display:none;">
-   <div class="dmSettingsRow">
-                <div class="small">DM background</div>
-                <div class="colorInputRow tight">
-                  <input id="dmBgColor" type="color" aria-label="DM background color">
-                  <input id="dmBgColorText" type="text" placeholder="#1e1f22 or blue" aria-label="DM background color text">
-                </div>
-                <div class="small">Change the backdrop behind your DM threads and conversation.</div>
-              </div>
-
-              <div class="field">
-                <label>Direct message badge color</label>
-                <div class="colorInputRow">
-                  <input id="directBadgeColor" type="color" aria-label="Direct message badge color">
-                  <input id="directBadgeColorText" type="text" placeholder="#ed4245 or red" aria-label="Direct message badge color text">
-                </div>
-              </div>
-
-              <div class="field">
-                <label>Group DM badge color</label>
-                <div class="colorInputRow">
-                  <input id="groupBadgeColor" type="color" aria-label="Group DM badge color">
-                  <input id="groupBadgeColorText" type="text" placeholder="#5865f2 or blue" aria-label="Group DM badge color text">
-                </div>
-              </div>
-
-              <div class="row" style="margin-top:6px;">
-                <button class="btn btnPrimary" id="saveBadgePrefsBtn" type="button">Save badge colors</button>
-              </div>
-
-              <div class="msgline" id="customizeMsg"></div>
-  </div>
-</div>
-        <div class="modalContent" id="modalContent">
-          <div id="viewAccount">
-            <div class="sectionTitle">Account</div>
-            <div class="profileInfoList">
-              <div class="profileInfoRow"><span class="infoIcon" aria-hidden="true">🎂</span><span class="infoLabel">Age</span><span class="infoValue" id="infoAge">—</span></div>
-              <div class="profileInfoRow"><span class="infoIcon" aria-hidden="true">🧭</span><span class="infoLabel">Gender</span><span class="infoValue" id="infoGender">—</span></div>
-              <div class="profileInfoRow"><span class="infoIcon" aria-hidden="true">🌐</span><span class="infoLabel">Language</span><span class="infoValue" id="infoLanguage">—</span></div>
-              <div class="profileInfoRow"><span class="infoIcon" aria-hidden="true">📅</span><span class="infoLabel">Member since</span><span class="infoValue" id="infoCreated">—</span></div>
-              <div class="profileInfoRow"><span class="infoIcon" aria-hidden="true">💬</span><span class="infoLabel">Current room</span><span class="infoValue" id="infoRoom">—</span></div>
-              <div class="profileInfoRow"><span class="infoIcon" aria-hidden="true">🕒</span><span class="infoLabel">Last seen</span><span class="infoValue" id="infoLastSeen">—</span></div>
-              <div class="profileInfoRow"><span class="infoIcon" aria-hidden="true">💫</span><span class="infoLabel">Status</span><span class="infoValue" id="infoStatus">—</span></div>
-            </div>
-
-            <div class="sectionTitle">Account Level</div>
-            <div class="panelBox" id="levelPanel">
-              <div class="row" style="align-items:center; justify-content:space-between;">
-                <div class="badge" id="levelBadge">Level 1</div>
-                <div class="small" id="xpText">XP: 0 / 100</div>
-              </div>
-              <div class="progressShell">
-                <div class="progressFill" id="xpProgress"></div>
-              </div>
-              <div class="small" id="xpNote">XP is only visible to you.</div>
-            </div>
-          </div>
-
-          <div id="viewMore" style="display:none;">
-            <div id="viewAbout">
+            <div class="profileBioCard" id="viewAbout">
               <div class="sectionTitle">Bio</div>
               <div class="bioRender" id="bioRender">(no bio)</div>
               <div class="small" style="margin-top:8px;">
@@ -1054,120 +671,885 @@
               </div>
             </div>
 
-            <div id="viewModeration" style="display:none;">
-            <div class="sectionTitle">Moderation panel</div>
-
-            <div class="panelBox modCard">
-              <div class="field">
-                <label>Target</label>
-                <select id="modUserSelect"></select>
-                <input id="modUser" placeholder="Search or type username" autocomplete="off">
-                <div class="row modTargetActions" style="gap:8px; flex-wrap:wrap;">
-                  <button class="btn secondary" id="modOpenProfileBtn" type="button">View profile</button>
-                  <button class="btn secondary" id="modRefreshTargetsBtn" type="button">Refresh list</button>
-                </div>
-              </div>
-
-              <div class="field">
-                <label>Reason</label>
-                <div class="pillRow" id="modReasonPresets"></div>
-                <textarea id="modReason" rows="2" placeholder="Choose a preset and add details (required)"></textarea>
-              </div>
-
-              <div class="modGrid">
-                <div class="field">
-                  <label>Mute length</label>
-                  <select id="modMuteMins">
-                    <option value="10">10 minutes</option>
-                    <option value="30">30 minutes</option>
-                    <option value="60">1 hour</option>
-                    <option value="240">4 hours</option>
-                    <option value="1440">24 hours</option>
-                  </select>
-                </div>
-                <div class="field">
-                  <label>Ban length</label>
-                  <select id="modBanMins">
-                    <option value="0">Permanent</option>
-                    <option value="60">1 hour</option>
-                    <option value="720">12 hours</option>
-                    <option value="1440">24 hours</option>
-                    <option value="10080">7 days</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="actionGrid" style="margin-top:8px;">
-                <button class="btn btnSecondary" id="modKickBtn" type="button">Kick</button>
-                <button class="btn btnSecondary" id="modWarnBtn" type="button">Warn</button>
-                <button class="btn btnSecondary" id="modMuteBtn" type="button">Mute</button>
-                <button class="btn btnDanger" id="modBanBtn" type="button">Ban</button>
-                <button class="btn btnSecondary" id="modUnmuteBtn" type="button">Unmute</button>
-                <button class="btn btnSecondary" id="modUnbanBtn" type="button">Unban</button>
-              </div>
-
-              <div class="field" style="margin-top:8px;">
-                <label>Role assignment</label>
-                <div class="row" style="gap:8px; flex-wrap:wrap;">
-                  <select id="modSetRole">
-                    <option value="">Set role (Owner only)</option>
-                    <option>Owner</option>
-                    <option>Co-owner</option>
-                    <option>Admin</option>
-                    <option>Moderator</option>
-                    <option>VIP</option>
-                    <option>User</option>
-                    <option>Guest</option>
-                  </select>
-                  <button class="btn btnPrimary" id="modSetRoleBtn" type="button">Apply role</button>
-                </div>
-              </div>
-
-              <div class="msgline" id="modMsg"></div>
+            <div class="profileEditToggleRow" id="profileEditToggleRow" style="display:none;">
+              <button class="btn secondary" id="profileEditToggleBtn" type="button">Edit profile</button>
             </div>
 
-            <div class="sectionTitle">Moderation logs</div>
-            <div class="panelBox">
-              <div class="row" style="align-items:center;">
-                <input id="logUser" placeholder="Filter by user (actor or target)" style="flex:1; min-width:220px;">
-                <select id="logAction" style="width:220px;">
-                  <option value="">All actions</option>
-                  <option value="KICK">KICK</option>
-                  <option value="MUTE">MUTE</option>
-                  <option value="BAN">BAN</option>
-                  <option value="DELETE_MESSAGE">DELETE_MESSAGE</option>
-                  <option value="UNMUTE">UNMUTE</option>
-                  <option value="UNBAN">UNBAN</option>
-                  <option value="WARN">WARN</option>
-                  <option value="SET_ROLE">SET_ROLE</option>
-                </select>
-                <select id="logLimit" style="width:160px;">
-                  <option value="25">Last 25</option>
-                  <option value="50" selected>Last 50</option>
-                  <option value="100">Last 100</option>
-                  <option value="200">Last 200</option>
-                </select>
-                <button class="btn secondary" id="refreshLogsBtn" type="button">Refresh</button>
-              </div>
+            <div class="panelBox profileEditSection" id="profileEditSection" style="display:none;">
+              <div id="myProfileEdit" style="display:none;">
+                <div class="sectionTitle">Edit my profile</div>
+                <div class="panelBox">
+                  <div class="field">
+                    <label>Avatar</label>
+                    <input id="avatarFile" type="file" accept="image/*">
+                    <div class="small">Max 5MB. PNG/JPG/WEBP/GIF.</div>
+                  </div>
 
-              <div class="msgline" id="logsMsg"></div>
+                  <div class="field" id="couplesField">
+                    <label id="couplesLabel">Couples <span id="couplesLabelBadge" class="pillCount" style="display:none;"></span></label>
+                    <div class="small">All couples features are opt-in and can be disabled at any time.</div>
 
-              <div class="logTableWrap">
-                <table class="logTable">
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Actor</th>
-                      <th>Action</th>
-                      <th>Target</th>
-                      <th>Room</th>
-                      <th>Details</th>
-                    </tr>
-                  </thead>
-                  <tbody id="logsBody"></tbody>
-                </table>
+                    <div class="row" style="margin-top:8px; gap:8px; align-items:center;">
+                      <input id="couplesPartnerInput" placeholder="Partner username" style="flex:1;">
+                      <button class="btn secondary" id="couplesRequestBtn" type="button">Send link request</button>
+                    </div>
+
+                    <div class="panelBox" id="couplesPendingBox" style="margin-top:10px; display:none;">
+                      <div class="small" style="margin-bottom:6px;">Pending</div>
+                      <div id="couplesPendingList"></div>
+                    </div>
+
+                    <div class="panelBox" id="couplesActiveBox" style="margin-top:10px; display:none;">
+                      <div class="small" id="couplesActiveTitle">Linked</div>
+
+                      <div class="row couplesStatusRow" style="margin-top:8px; gap:8px; align-items:center;">
+                        <select id="couplesStatusEmoji" aria-label="Couple status emoji" style="width:72px;">
+                          <option value="💜">💜</option>
+                          <option value="💕">💕</option>
+                          <option value="✨">✨</option>
+                          <option value="🫶">🫶</option>
+                          <option value="🌙">🌙</option>
+                          <option value="🔥">🔥</option>
+                          <option value="🧸">🧸</option>
+                        </select>
+                        <input id="couplesStatusLabel" placeholder="Status label (e.g. Linked)" maxlength="24" style="flex:1;">
+                        <button class="btn secondary" id="couplesStatusSaveBtn" type="button">Save</button>
+                      </div>
+                      <div class="row couplesMoodRow" style="margin-top:8px; gap:8px; align-items:center;">
+                        <select id="couplesMoodEmoji" aria-label="Couple mood emoji" style="width:72px;">
+                          <option value="">—</option>
+                          <option value="🌙">🌙</option>
+                          <option value="💫">💫</option>
+                          <option value="🧸">🧸</option>
+                          <option value="☕">☕</option>
+                          <option value="🔥">🔥</option>
+                          <option value="🥺">🥺</option>
+                          <option value="🫶">🫶</option>
+                          <option value="💜">💜</option>
+                        </select>
+                        <div class="small" style="flex:1;">Shared mood (optional)</div>
+                        <button class="btn secondary" id="couplesMoodSaveBtn" type="button">Save</button>
+                        <button class="btn secondary" id="couplesPingBtn" type="button">Ping</button>
+                      </div>
+
+                      <div class="small">Shown as the couples badge (if enabled) and in your profile when both of you allow it.</div>
+
+                      <div class="toggleRow">
+                        <label class="switch">
+                          <input type="checkbox" id="couplesEnabledToggle">
+                          <span class="slider"></span>
+                        </label>
+                        <div class="toggleLabel">Enable couples features</div>
+                      </div>
+
+                      <div class="toggleRow">
+                        <label class="switch">
+                          <input type="checkbox" id="couplesShowProfileToggle">
+                          <span class="slider"></span>
+                        </label>
+                        <div class="toggleLabel">Show link on profiles</div>
+                      </div>
+
+                      <div class="toggleRow">
+                        <label class="switch">
+                          <input type="checkbox" id="couplesBadgeToggle">
+                          <span class="slider"></span>
+                        </label>
+                        <div class="toggleLabel">Show badge (💜) in members list</div>
+                      </div>
+
+                      <div class="toggleRow">
+                        <label class="switch">
+                          <input type="checkbox" id="couplesAuraToggle">
+                          <span class="slider"></span>
+                        </label>
+                        <div class="toggleLabel">Enable shared aura when together</div>
+                      </div>
+
+                      <div class="toggleRow">
+                        <label class="switch">
+                          <input type="checkbox" id="couplesShowMembersToggle">
+                          <span class="slider"></span>
+                        </label>
+                        <div class="toggleLabel">Show link in members list</div>
+                      </div>
+
+                      <div class="toggleRow">
+                        <label class="switch">
+                          <input type="checkbox" id="couplesGroupToggle">
+                          <span class="slider"></span>
+                        </label>
+                        <div class="toggleLabel">Pull us together in members list</div>
+                      </div>
+
+                      <div class="toggleRow">
+                        <label class="switch">
+                          <input type="checkbox" id="couplesAllowPingToggle">
+                          <span class="slider"></span>
+                        </label>
+                        <div class="toggleLabel">Allow partner pings</div>
+                      </div>
+
+                      <div class="row" style="margin-top:10px; gap:8px;">
+                        <button class="btn danger" id="couplesUnlinkBtn" type="button">Unlink</button>
+                      </div>
+                    </div>
+
+                    <div class="msgline" id="couplesMsg"></div>
+                  </div>
+
+                  <div class="field">
+                    <label>Mood</label>
+                    <input id="editMood" placeholder="e.g. chilling">
+                  </div>
+
+                  <div class="field">
+                    <label>Username</label>
+                    <input id="editUsername" placeholder="New username">
+                    <div class="small">Changing your username costs 5,000 gold.</div>
+                    <button class="btn secondary" id="changeUsernameBtn" type="button">Change username</button>
+                  </div>
+
+                  <div class="row">
+                    <div class="field" style="flex:1;">
+                      <label>Age (18+)</label>
+                      <input id="editAge" type="number" min="18" max="120" placeholder="18+">
+                    </div>
+                    <div class="field" style="flex:1;">
+                      <label>Gender</label>
+                      <select id="editGender">
+                        <option value="">Prefer not to say</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Non-binary">Non-binary</option>
+                        <option value="Transgender">Transgender</option>
+                        <option value="Genderfluid">Genderfluid</option>
+                        <option value="Agender">Agender</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="field">
+                    <label>Vibe tags (pick up to <span id="vibeTagLimit">3</span>)</label>
+                    <div class="pillRow" id="vibeTagOptions"></div>
+                    <div class="small">Adds a few personality badges to your profile.</div>
+                  </div>
+
+                  <div class="field">
+                    <div class="fieldLabelRow">
+                      <label>Bio (BBCode supported)</label>
+                      <button class="pillBtn small" id="bioHelperToggle" type="button">BBCode help &amp; preview</button>
+                    </div>
+                    <textarea id="editBio" placeholder="[b]bold[/b] [i]italics[/i] [url=https://...]link[/url] [quote]...[/quote]"></textarea>
+                    <div class="bioHelper" id="bioHelper" hidden>
+                      <div class="bioHelperRow" id="bioHelperButtons">
+                        <button type="button" class="pillBtn tiny" data-bio-tag="b">[b][/b]</button>
+                        <button type="button" class="pillBtn tiny" data-bio-tag="i">[i][/i]</button>
+                        <button type="button" class="pillBtn tiny" data-bio-tag="u">[u][/u]</button>
+                        <button type="button" class="pillBtn tiny" data-bio-tag="s">[s][/s]</button>
+                        <button type="button" class="pillBtn tiny" data-bio-tag="quote">[quote][/quote]</button>
+                        <button type="button" class="pillBtn tiny" data-bio-tag="code">[code][/code]</button>
+                        <button type="button" class="pillBtn tiny" data-bio-tag="url">[url]</button>
+                        <button type="button" class="pillBtn tiny" data-bio-tag="color">[color]</button>
+                        <button type="button" class="pillBtn tiny" data-bio-tag="img">[img]</button>
+                      </div>
+                      <div class="bioHelperPreview" id="bioHelperPreview"></div>
+                      <div class="small muted">Use BBCode for simple formatting. Links/images require full URLs.</div>
+                    </div>
+                  </div>
+
+                  <div class="row">
+                    <button class="btn btnPrimary" id="saveProfileBtn" type="button">Save</button>
+                    <button class="btn btnSecondary" id="refreshProfileBtn" type="button">Cancel</button>
+                    <button class="btn btnDanger" id="logoutBtn" type="button">Logout</button>
+                  </div>
+
+                  <div class="msgline" id="profileMsg"></div>
+                </div>
               </div>
             </div>
+          </div>
+
+          <div id="viewCustomize" style="display:none;">
+            <div class="profileCustomEmpty" id="profileCustomEmpty" style="display:none;">
+              <div class="panelBox">
+                <div class="small">Customisation settings are only available on your own profile.</div>
+              </div>
+            </div>
+
+            <div class="customizeShell" id="customizeShell">
+              <div class="customizeTopBar">
+                <input id="customizeSearch" type="search" placeholder="Search settings…">
+              </div>
+
+              <div class="customizeCardGrid" id="customizeCardGrid">
+                <button class="customizeCard" type="button" data-category="chat" data-search="chat appearance bubbles colors spacing themes">
+                  <div class="cardTitle">Chat Appearance</div>
+                  <div class="cardHint">Bubble styling, density, and themes.</div>
+                  <div class="cardPreview chatPreview"></div>
+                </button>
+                <button class="customizeCard" type="button" data-category="text" data-search="text identity font username color">
+                  <div class="cardTitle">Text &amp; Identity</div>
+                  <div class="cardHint">Fonts, name color, and message text.</div>
+                  <div class="cardPreview textPreview"></div>
+                </button>
+                <button class="customizeCard" type="button" data-category="profile" data-search="profile appearance header gradient avatar aura">
+                  <div class="cardTitle">Profile Appearance</div>
+                  <div class="cardHint">Header gradient and aura options.</div>
+                  <div class="cardPreview profilePreview"></div>
+                </button>
+                <button class="customizeCard" type="button" data-category="effects" data-search="effects animations polish comfort">
+                  <div class="cardTitle">Effects</div>
+                  <div class="cardHint">Animation toggles and effect presets.</div>
+                  <div class="cardPreview effectsPreview"></div>
+                </button>
+                <button class="customizeCard" type="button" data-category="layout" data-search="layout accessibility scale contrast">
+                  <div class="cardTitle">Layout &amp; Accessibility</div>
+                  <div class="cardHint">Scaling, clarity, and motion controls.</div>
+                  <div class="cardPreview layoutPreview"></div>
+                </button>
+                <button class="customizeCard" type="button" data-category="advanced" data-search="advanced debug experimental sound">
+                  <div class="cardTitle">Advanced</div>
+                  <div class="cardHint">Sound cues, diagnostics, and extras.</div>
+                  <div class="cardPreview advancedPreview"></div>
+                </button>
+              </div>
+
+              <div class="customizeSubpages" id="customizeSubpages">
+                <div class="customizeSubpage" data-category="chat" id="customizeChatPage">
+                  <div class="customizeHeader">
+                    <button class="iconBtn customizeBackBtn" type="button" data-back="chat" aria-label="Back">←</button>
+                    <div>
+                      <div class="title">Chat Appearance</div>
+                      <div class="small muted">Bubble style, density, and themes.</div>
+                    </div>
+                  </div>
+                  <div class="customizeSection">
+                    <div class="sectionTitle">Basic</div>
+                    <div class="panelBox" id="chatAppearanceBasic">
+                      <div class="field" data-customize-item data-search="bubble style glow">
+                        <label>Bubble style</label>
+                        <select id="chatFxGlow">
+                          <option value="off">Off</option>
+                          <option value="soft">Soft</option>
+                          <option value="neon">Neon</option>
+                          <option value="strong">Strong</option>
+                        </select>
+                      </div>
+                      <div class="field" data-customize-item data-search="bubble color">
+                        <label>Bubble color</label>
+                        <div class="chatFxColorRow">
+                          <input id="chatFxBubbleColorPick" type="color" value="#2b2d31" aria-label="Pick bubble color">
+                          <input id="chatFxBubbleColor" type="text" placeholder="#RRGGBB">
+                          <button class="pillBtn" id="chatFxBubbleColorClear" type="button">Clear</button>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="message spacing compact">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input type="checkbox" id="chatSpacingCompact">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Compact message spacing</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <details class="customizeSection" data-section="chat-advanced">
+                    <summary>Advanced</summary>
+                    <div class="panelBox" id="chatAppearanceAdvanced">
+                      <div class="field" data-customize-item data-search="bubble radius">
+                        <label>Bubble radius</label>
+                        <div class="chatFxSliderRow">
+                          <input id="chatFxRadius" type="range" min="6" max="28" step="1">
+                          <span class="chatFxSliderValue" id="chatFxRadiusValue">14</span>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="border thickness">
+                        <label>Border thickness</label>
+                        <div class="chatFxSliderRow">
+                          <input id="chatFxBorder" type="range" min="0" max="3" step="1">
+                          <span class="chatFxSliderValue" id="chatFxBorderValue">0</span>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="shadow glow">
+                        <label>Bubble glow intensity</label>
+                        <div class="chatFxSliderRow">
+                          <input id="chatFxGlass" type="range" min="0" max="1" step="0.05">
+                          <span class="chatFxSliderValue" id="chatFxGlassValue">0</span>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="blur">
+                        <label>Bubble blur</label>
+                        <div class="chatFxSliderRow">
+                          <input id="chatFxBlur" type="range" min="0" max="16" step="1">
+                          <span class="chatFxSliderValue" id="chatFxBlurValue">0</span>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="density spacing">
+                        <label>Message spacing</label>
+                        <div class="chatFxDensityRow" id="chatFxDensity">
+                          <button class="pillBtn" type="button" data-value="compact">Compact</button>
+                          <button class="pillBtn" type="button" data-value="cozy">Cozy</button>
+                          <button class="pillBtn" type="button" data-value="spacious">Spacious</button>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="enable bubbles">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="chatFxEnabled" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Enable custom bubbles</div>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="themes">
+                        <div class="sectionTitle">Themes</div>
+                        <div class="themeFilters">
+                          <button class="pillBtn active" data-theme-filter="all" type="button">All</button>
+                          <button class="pillBtn" data-theme-filter="dark" type="button">Dark</button>
+                          <button class="pillBtn" data-theme-filter="light" type="button">Light</button>
+                        </div>
+                        <div class="themeGrid" id="themeGrid"></div>
+                        <div class="msgline" id="themeMsg"></div>
+                      </div>
+                    </div>
+                  </details>
+                  <div class="chatFxPreviewWrap">
+                    <div class="small" style="margin-bottom:10px;">Preview your chat appearance before saving.</div>
+                    <div class="chatFxPreview" id="chatFxPreview">
+                      <div class="chatFxPreviewRow self">
+                        <div class="bubble chatFxPreviewBubble" id="chatFxPreviewBubble">
+                          <div class="meta">
+                            <div class="name"><span class="roleIco">👑 </span><span class="unameText">You</span></div>
+                            <div class="time">Just now</div>
+                          </div>
+                          <div class="text">Your message preview bubble.</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="chatFxActions">
+                      <div class="chatFxStatus" id="chatFxStatus"></div>
+                      <button class="btn" id="chatFxSaveBtn" type="button">Save appearance</button>
+                    </div>
+                  </div>
+                  <div class="customizeResetRow">
+                    <button class="btn secondary" id="resetChatAppearanceBtn" type="button">Reset this section</button>
+                  </div>
+                </div>
+
+                <div class="customizeSubpage" data-category="text" id="customizeTextPage">
+                  <div class="customizeHeader">
+                    <button class="iconBtn customizeBackBtn" type="button" data-back="text" aria-label="Back">←</button>
+                    <div>
+                      <div class="title">Text &amp; Identity</div>
+                      <div class="small muted">Fonts, colors, and readability controls.</div>
+                    </div>
+                  </div>
+                  <div class="customizeSection">
+                    <div class="sectionTitle">Basic</div>
+                    <div class="panelBox" id="textIdentityBasic">
+                      <div class="field" data-customize-item data-search="font">
+                        <label>Font</label>
+                        <select id="chatFxFont"></select>
+                      </div>
+                      <div class="field" data-customize-item data-search="username color">
+                        <label>Username color</label>
+                        <div class="chatFxColorRow">
+                          <input id="chatFxNameColorPick" type="color" value="#ffffff" aria-label="Pick username color">
+                          <input id="chatFxNameColor" type="hidden" value="">
+                          <button class="pillBtn" id="chatFxNameColorClear" type="button">Clear</button>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="message text color">
+                        <label>Message text color</label>
+                        <div class="chatFxColorRow">
+                          <input id="chatFxTextColorPick" type="color" value="#ffffff" aria-label="Pick text color">
+                          <input id="chatFxTextColor" type="text" placeholder="#RRGGBB">
+                          <button class="pillBtn" id="chatFxTextColorClear" type="button">Clear</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <details class="customizeSection" data-section="text-advanced">
+                    <summary>Advanced</summary>
+                    <div class="panelBox" id="textIdentityAdvanced">
+                      <div class="field" data-customize-item data-search="username font">
+                        <label>Username font</label>
+                        <select id="chatFxNameFont"></select>
+                      </div>
+                      <div class="field" data-customize-item data-search="text style bold italic">
+                        <label>Message text style</label>
+                        <div class="chatFxColorRow" style="justify-content:flex-start;">
+                          <label style="display:flex; align-items:center; gap:6px;">
+                            <input id="chatFxTextBold" type="checkbox"> Bold
+                          </label>
+                          <label style="display:flex; align-items:center; gap:6px;">
+                            <input id="chatFxTextItalic" type="checkbox"> Italic
+                          </label>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="text glow">
+                        <label>Text glow</label>
+                        <select id="chatFxTextGlow">
+                          <option value="off">Off</option>
+                          <option value="soft">Soft</option>
+                          <option value="neon">Neon</option>
+                          <option value="strong">Strong</option>
+                        </select>
+                      </div>
+                      <div class="field" data-customize-item data-search="text gradient">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="chatFxTextGradientEnabled" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Enable text gradient</div>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="gradient color">
+                        <label>Gradient color A</label>
+                        <div class="chatFxColorRow">
+                          <input id="chatFxTextGradientAPick" type="color" value="#7c4dff" aria-label="Pick gradient color A">
+                          <input id="chatFxTextGradientA" type="text" placeholder="#RRGGBB">
+                          <button class="pillBtn" id="chatFxTextGradientAClear" type="button">Clear</button>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="gradient color">
+                        <label>Gradient color B</label>
+                        <div class="chatFxColorRow">
+                          <input id="chatFxTextGradientBPick" type="color" value="#00e5ff" aria-label="Pick gradient color B">
+                          <input id="chatFxTextGradientB" type="text" placeholder="#RRGGBB">
+                          <button class="pillBtn" id="chatFxTextGradientBClear" type="button">Clear</button>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="gradient angle">
+                        <label>Gradient angle</label>
+                        <div class="chatFxSliderRow">
+                          <input id="chatFxTextGradientAngle" type="range" min="0" max="360" step="1">
+                          <span class="chatFxSliderValue" id="chatFxTextGradientAngleValue">135</span>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="auto contrast">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="chatFxAutoContrast" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Auto-contrast text</div>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+                  <div class="customizeResetRow">
+                    <button class="btn secondary" id="resetTextIdentityBtn" type="button">Reset this section</button>
+                  </div>
+                </div>
+
+                <div class="customizeSubpage" data-category="profile" id="customizeProfilePage">
+                  <div class="customizeHeader">
+                    <button class="iconBtn customizeBackBtn" type="button" data-back="profile" aria-label="Back">←</button>
+                    <div>
+                      <div class="title">Profile Appearance</div>
+                      <div class="small muted">Header gradient and avatar accents.</div>
+                    </div>
+                  </div>
+                  <div class="customizeSection">
+                    <div class="sectionTitle">Basic</div>
+                    <div class="panelBox" id="profileAppearanceBasic">
+                      <div class="field" data-customize-item data-search="header gradient">
+                        <label>Header gradient</label>
+                        <div class="colorInputRow tight">
+                          <input id="headerColorA" type="color" aria-label="Header color A">
+                          <input id="headerColorAText" type="text" placeholder="#ff6a2b" aria-label="Header color A text">
+                        </div>
+                        <div class="colorInputRow tight" style="margin-top:6px;">
+                          <input id="headerColorB" type="color" aria-label="Header color B">
+                          <input id="headerColorBText" type="text" placeholder="#2b0f08" aria-label="Header color B text">
+                        </div>
+                        <div class="small">Pick two colors for your profile header gradient.</div>
+                      </div>
+                      <div class="field" data-customize-item data-search="avatar aura">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="chatFxPolishAuras" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Avatar aura</div>
+                        </div>
+                        <div class="small muted">Requires Polish Pack.</div>
+                      </div>
+                    </div>
+                  </div>
+                  <details class="customizeSection" data-section="profile-advanced">
+                    <summary>Advanced</summary>
+                    <div class="panelBox" id="profileAppearanceAdvanced">
+                      <div class="field" data-customize-item data-search="accent color">
+                        <label>Profile accent color</label>
+                        <input id="chatFxAccent" type="text" placeholder="#RRGGBB">
+                        <div class="small">Leave blank to keep your theme accent.</div>
+                      </div>
+                    </div>
+                  </details>
+                  <div class="customizeResetRow">
+                    <button class="btn secondary" id="resetProfileAppearanceBtn" type="button">Reset this section</button>
+                  </div>
+                </div>
+
+                <div class="customizeSubpage" data-category="effects" id="customizeEffectsPage">
+                  <div class="customizeHeader">
+                    <button class="iconBtn customizeBackBtn" type="button" data-back="effects" aria-label="Back">←</button>
+                    <div>
+                      <div class="title">Effects</div>
+                      <div class="small muted">Animation and polish options.</div>
+                    </div>
+                  </div>
+                  <div class="customizeSection">
+                    <div class="sectionTitle">Basic</div>
+                    <div class="panelBox" id="effectsBasic">
+                      <div class="field" data-customize-item data-search="animations">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="chatFxPolishAnimations" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Animations</div>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="comfort mode">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="prefComfortMode" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Comfort mode</div>
+                        </div>
+                        <div class="small muted" id="prefComfortHelp">Softens glows, confetti, and motion-heavy animations.</div>
+                      </div>
+                      <div class="field" data-customize-item data-search="preset">
+                        <label>Effect preset</label>
+                        <select id="effectsPreset">
+                          <option value="">Custom</option>
+                          <option value="soft">Soft</option>
+                          <option value="neon">Neon</option>
+                          <option value="minimal">Minimal</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                  <details class="customizeSection" data-section="effects-advanced">
+                    <summary>Advanced</summary>
+                    <div class="panelBox" id="effectsAdvanced">
+                      <div class="field" data-customize-item data-search="polish pack">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="chatFxPolishPack" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Enable Polish Pack</div>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+                  <div class="customizeResetRow">
+                    <button class="btn secondary" id="resetEffectsBtn" type="button">Reset this section</button>
+                  </div>
+                </div>
+
+                <div class="customizeSubpage" data-category="layout" id="customizeLayoutPage">
+                  <div class="customizeHeader">
+                    <button class="iconBtn customizeBackBtn" type="button" data-back="layout" aria-label="Back">←</button>
+                    <div>
+                      <div class="title">Layout &amp; Accessibility</div>
+                      <div class="small muted">Scale, clarity, and motion overrides.</div>
+                    </div>
+                  </div>
+                  <div class="customizeSection">
+                    <div class="sectionTitle">Basic</div>
+                    <div class="panelBox" id="layoutBasic">
+                      <div class="field" data-customize-item data-search="ui scale">
+                        <label>UI scale</label>
+                        <div class="uiScaleRow">
+                          <input id="uiScaleRange" type="range" min="0.80" max="1.05" step="0.05" value="1" aria-label="UI size">
+                          <div class="small muted" id="uiScaleValue">100%</div>
+                        </div>
+                        <div class="uiScaleActions">
+                          <button class="btn secondary" id="uiScaleResetBtn" type="button">Auto</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <details class="customizeSection" data-section="layout-advanced">
+                    <summary>Advanced</summary>
+                    <div class="panelBox" id="layoutAdvanced">
+                      <div class="field" data-customize-item data-search="reduced motion">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="reduceMotionToggle" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Reduced motion override</div>
+                        </div>
+                        <div class="small muted">Mirrors your comfort mode preference.</div>
+                      </div>
+                    </div>
+                  </details>
+                  <div class="customizeResetRow">
+                    <button class="btn secondary" id="resetLayoutBtn" type="button">Reset this section</button>
+                  </div>
+                </div>
+
+                <div class="customizeSubpage" data-category="advanced" id="customizeAdvancedPage">
+                  <div class="customizeHeader">
+                    <button class="iconBtn customizeBackBtn" type="button" data-back="advanced" aria-label="Back">←</button>
+                    <div>
+                      <div class="title">Advanced</div>
+                      <div class="small muted">Sound cues, diagnostics, and extras.</div>
+                    </div>
+                  </div>
+                  <div class="customizeSection">
+                    <div class="sectionTitle">Basic</div>
+                    <div class="panelBox" id="advancedBasic">
+                      <div class="field" data-customize-item data-search="sound cues">
+                        <div class="small" style="margin-bottom:10px;">Sound cues are quiet and optional. On iOS you may need to toggle once to enable audio.</div>
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="prefSoundEnabled" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Enable sound cues</div>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="room messages sound">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="prefSoundRoom" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Room messages</div>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="direct messages sound">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="prefSoundDm" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Direct messages</div>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="mentions sound">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="prefSoundMention" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Mentions (@you)</div>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="message sent sound">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="prefSoundSent" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Message sent</div>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="message received sound">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="prefSoundReceive" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Message received</div>
+                        </div>
+                      </div>
+                      <div class="field" data-customize-item data-search="reaction sound">
+                        <div class="toggleRow">
+                          <label class="switch">
+                            <input id="prefSoundReaction" type="checkbox">
+                            <span class="slider"></span>
+                          </label>
+                          <div class="toggleLabel">Reaction added</div>
+                        </div>
+                      </div>
+                      <div class="small" id="prefSoundStatus" style="margin-top:8px;"></div>
+                    </div>
+                  </div>
+                  <details class="customizeSection" data-section="advanced-extra">
+                    <summary>Advanced</summary>
+                    <div class="panelBox" id="advancedAdvanced">
+                      <div class="field" data-customize-item data-search="dm background">
+                        <div class="small">DM background</div>
+                        <div class="colorInputRow tight">
+                          <input id="dmBgColor" type="color" aria-label="DM background color">
+                          <input id="dmBgColorText" type="text" placeholder="#1e1f22 or blue" aria-label="DM background color text">
+                        </div>
+                        <div class="small">Change the backdrop behind your DM threads and conversation.</div>
+                      </div>
+
+                      <div class="field" data-customize-item data-search="dm badge color">
+                        <label>Direct message badge color</label>
+                        <div class="colorInputRow">
+                          <input id="directBadgeColor" type="color" aria-label="Direct message badge color">
+                          <input id="directBadgeColorText" type="text" placeholder="#ed4245 or red" aria-label="Direct message badge color text">
+                        </div>
+                      </div>
+
+                      <div class="field" data-customize-item data-search="group dm badge color">
+                        <label>Group DM badge color</label>
+                        <div class="colorInputRow">
+                          <input id="groupBadgeColor" type="color" aria-label="Group DM badge color">
+                          <input id="groupBadgeColorText" type="text" placeholder="#5865f2 or blue" aria-label="Group DM badge color text">
+                        </div>
+                      </div>
+
+                      <div class="row" style="margin-top:6px;">
+                        <button class="btn btnPrimary" id="saveBadgePrefsBtn" type="button">Save badge colors</button>
+                      </div>
+
+                      <div class="msgline" id="customizeMsg"></div>
+
+                      <div class="sectionTitle" style="margin-top:16px;">VIP gifts</div>
+                      <div class="panelBox">
+                        <div class="small">This section is wired and ready — add your gifts system whenever you want.</div>
+                        <div class="small" style="margin-top:6px;">Tip: later load inventory/history via an endpoint like <code>/gifts</code> and render it here.</div>
+                      </div>
+                    </div>
+                  </details>
+                  <div class="customizeResetRow">
+                    <button class="btn secondary" id="resetAdvancedBtn" type="button">Reset this section</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="viewActions" style="display:none;">
+            <div class="sectionTitle">Quick actions</div>
+            <div class="panelBox actionList">
+              <button class="btn secondary" id="actionMuteBtn" type="button">Mute</button>
+              <button class="btn secondary" id="actionKickBtn" type="button">Kick</button>
+              <button class="btn danger" id="actionBanBtn" type="button">Ban</button>
+              <button class="btn secondary" id="actionAppealsBtn" type="button">View appeals</button>
+            </div>
+
+            <div id="viewModeration">
+              <div class="sectionTitle">Moderation panel</div>
+
+              <div class="panelBox modCard">
+                <div class="field">
+                  <label>Target</label>
+                  <select id="modUserSelect"></select>
+                  <input id="modUser" placeholder="Search or type username" autocomplete="off">
+                  <div class="row modTargetActions" style="gap:8px; flex-wrap:wrap;">
+                    <button class="btn secondary" id="modOpenProfileBtn" type="button">View profile</button>
+                    <button class="btn secondary" id="modRefreshTargetsBtn" type="button">Refresh list</button>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <label>Reason</label>
+                  <div class="pillRow" id="modReasonPresets"></div>
+                  <textarea id="modReason" rows="2" placeholder="Choose a preset and add details (required)"></textarea>
+                </div>
+
+                <div class="modGrid">
+                  <div class="field">
+                    <label>Mute length</label>
+                    <select id="modMuteMins">
+                      <option value="10">10 minutes</option>
+                      <option value="30">30 minutes</option>
+                      <option value="60">1 hour</option>
+                      <option value="240">4 hours</option>
+                      <option value="1440">24 hours</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label>Ban length</label>
+                    <select id="modBanMins">
+                      <option value="0">Permanent</option>
+                      <option value="60">1 hour</option>
+                      <option value="720">12 hours</option>
+                      <option value="1440">24 hours</option>
+                      <option value="10080">7 days</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="actionGrid" style="margin-top:8px;">
+                  <button class="btn btnSecondary" id="modKickBtn" type="button">Kick</button>
+                  <button class="btn btnSecondary" id="modWarnBtn" type="button">Warn</button>
+                  <button class="btn btnSecondary" id="modMuteBtn" type="button">Mute</button>
+                  <button class="btn btnDanger" id="modBanBtn" type="button">Ban</button>
+                  <button class="btn btnSecondary" id="modUnmuteBtn" type="button">Unmute</button>
+                  <button class="btn btnSecondary" id="modUnbanBtn" type="button">Unban</button>
+                </div>
+
+                <div class="field" style="margin-top:8px;">
+                  <label>Role assignment</label>
+                  <div class="row" style="gap:8px; flex-wrap:wrap;">
+                    <select id="modSetRole">
+                      <option value="">Set role (Owner only)</option>
+                      <option>Owner</option>
+                      <option>Co-owner</option>
+                      <option>Admin</option>
+                      <option>Moderator</option>
+                      <option>VIP</option>
+                      <option>User</option>
+                      <option>Guest</option>
+                    </select>
+                    <button class="btn btnPrimary" id="modSetRoleBtn" type="button">Apply role</button>
+                  </div>
+                </div>
+
+                <div class="msgline" id="modMsg"></div>
+              </div>
+
+              <div class="sectionTitle">Moderation logs</div>
+              <div class="panelBox">
+                <div class="row" style="align-items:center;">
+                  <input id="logUser" placeholder="Filter by user (actor or target)" style="flex:1; min-width:220px;">
+                  <select id="logAction" style="width:220px;">
+                    <option value="">All actions</option>
+                    <option value="KICK">KICK</option>
+                    <option value="MUTE">MUTE</option>
+                    <option value="BAN">BAN</option>
+                    <option value="DELETE_MESSAGE">DELETE_MESSAGE</option>
+                    <option value="UNMUTE">UNMUTE</option>
+                    <option value="UNBAN">UNBAN</option>
+                    <option value="WARN">WARN</option>
+                    <option value="SET_ROLE">SET_ROLE</option>
+                  </select>
+                  <select id="logLimit" style="width:160px;">
+                    <option value="25">Last 25</option>
+                    <option value="50" selected>Last 50</option>
+                    <option value="100">Last 100</option>
+                    <option value="200">Last 200</option>
+                  </select>
+                  <button class="btn secondary" id="refreshLogsBtn" type="button">Refresh</button>
+                </div>
+
+                <div class="msgline" id="logsMsg"></div>
+
+                <div class="logTableWrap">
+                  <table class="logTable">
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Actor</th>
+                        <th>Action</th>
+                        <th>Target</th>
+                        <th>Room</th>
+                        <th>Details</th>
+                      </tr>
+                    </thead>
+                    <tbody id="logsBody"></tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
 

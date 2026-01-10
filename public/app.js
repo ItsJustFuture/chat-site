@@ -743,7 +743,9 @@ const Sound = (() => {
 let socket = null;
 let me = null;
 let progression = { gold: 0, xp: 0, level: 1, xpIntoLevel: 0, xpForNextLevel: 100 };
-let activeProfileTab = "account";
+let activeProfileTab = "profile";
+let activeCustomizePage = null;
+let profileEditMode = false;
 let currentProfileIsSelf = false;
 let profileLikeState = { count: 0, liked: false, isSelf: false };
 let currentRoom = "main";
@@ -2123,16 +2125,35 @@ if(faqTitleInput){
 }
 const channelsCloseBtn = document.getElementById("channelsCloseBtn");
 const membersCloseBtn  = document.getElementById("membersCloseBtn");
-const viewCustom = document.getElementById("viewCustom");
+const viewCustom = document.getElementById("viewCustomize");
 
-const editAboutBtn = document.getElementById("editAboutBtn");
-const editThemesBtn = document.getElementById("editThemesBtn");
-const editDmBtn = document.getElementById("editDmBtn");
-const editAboutPanel = document.getElementById("editAboutPanel");
-const editThemesPanel = document.getElementById("editThemesPanel");
-const editDmPanel = document.getElementById("editDmPanel");
+const customizeShell = document.getElementById("customizeShell");
+const customizeSearch = document.getElementById("customizeSearch");
+const customizeCardGrid = document.getElementById("customizeCardGrid");
+const customizeSubpages = document.getElementById("customizeSubpages");
+const customizeCards = Array.from(document.querySelectorAll(".customizeCard"));
+const customizeBackBtns = Array.from(document.querySelectorAll(".customizeBackBtn"));
+const customizePages = Array.from(document.querySelectorAll(".customizeSubpage"));
 
-const editPreferencesPanel = document.getElementById("editPreferencesPanel");
+const chatSpacingCompact = document.getElementById("chatSpacingCompact");
+const effectsPreset = document.getElementById("effectsPreset");
+const reduceMotionToggle = document.getElementById("reduceMotionToggle");
+
+const resetChatAppearanceBtn = document.getElementById("resetChatAppearanceBtn");
+const resetTextIdentityBtn = document.getElementById("resetTextIdentityBtn");
+const resetProfileAppearanceBtn = document.getElementById("resetProfileAppearanceBtn");
+const resetEffectsBtn = document.getElementById("resetEffectsBtn");
+const resetLayoutBtn = document.getElementById("resetLayoutBtn");
+const resetAdvancedBtn = document.getElementById("resetAdvancedBtn");
+
+const actionMuteBtn = document.getElementById("actionMuteBtn");
+const actionKickBtn = document.getElementById("actionKickBtn");
+const actionBanBtn = document.getElementById("actionBanBtn");
+const actionAppealsBtn = document.getElementById("actionAppealsBtn");
+
+const profileEditToggleRow = document.getElementById("profileEditToggleRow");
+const profileEditToggleBtn = document.getElementById("profileEditToggleBtn");
+const profileEditSection = document.getElementById("profileEditSection");
 const prefSoundEnabled = document.getElementById("prefSoundEnabled");
 const prefSoundRoom = document.getElementById("prefSoundRoom");
 const prefSoundDm = document.getElementById("prefSoundDm");
@@ -2657,6 +2678,7 @@ const profileSheetStars = document.getElementById("profileSheetStars");
 const profileSheetLikes = document.getElementById("profileSheetLikes");
 const profileSheetSub = document.getElementById("profileSheetSub");
 const profileCoupleChip = document.getElementById("profileCoupleChip");
+const profileCoupleCard = document.getElementById("profileCoupleCard");
 const profileSheetAge = document.getElementById("profileSheetAge");
 const profileSheetGender = document.getElementById("profileSheetGender");
 const profileSheetDetails = document.getElementById("profileSheetDetails");
@@ -2675,15 +2697,17 @@ const infoCreated = document.getElementById("infoCreated");
 const infoLastSeen = document.getElementById("infoLastSeen");
 const infoRoom = document.getElementById("infoRoom");
 const infoStatus = document.getElementById("infoStatus");
+const profileMoodValue = document.getElementById("profileMood");
+const profileStatusValue = document.getElementById("profileStatus");
 
 // tabs/views
-const tabAccount = document.getElementById("tabAccount");
-const tabCustom = document.getElementById("tabCustom");
-const tabMore = document.getElementById("tabMore");
+const tabProfile = document.getElementById("tabProfile");
+const tabCustomize = document.getElementById("tabCustomize");
+const tabActions = document.getElementById("tabActions");
 const addFriendBtn = document.getElementById("addFriendBtn");
 
-const viewAccount = document.getElementById("viewAccount");
-const viewMore = document.getElementById("viewMore");
+const viewAccount = document.getElementById("viewProfile");
+const viewMore = document.getElementById("viewActions");
 const viewAbout = document.getElementById("viewAbout");
 const viewModeration = document.getElementById("viewModeration");
 const profileCustomEmpty = document.getElementById("profileCustomEmpty");
@@ -2904,6 +2928,11 @@ if (inlineMemberActionsShade && !inlineMemberActionsShade._wired){
     if (e.target === inlineMemberActionsShade) closeMemberActionsOverlay();
   });
 }
+
+actionMuteBtn?.addEventListener("click", openMemberActionsOverlay);
+actionKickBtn?.addEventListener("click", openMemberActionsOverlay);
+actionBanBtn?.addEventListener("click", openMemberActionsOverlay);
+actionAppealsBtn?.addEventListener("click", openAppealsPanel);
 
 
 // moderation panel
@@ -7257,8 +7286,12 @@ dmUserBtn?.addEventListener("click", () => {
 });
 profileEditBtn?.addEventListener("click", () => {
   if (!currentProfileIsSelf) return;
-  setTab("custom");
-  showEditPanel("about");
+  setProfileEditMode(true);
+  setTab("profile");
+});
+profileEditToggleBtn?.addEventListener("click", () => {
+  if (!currentProfileIsSelf) return;
+  setProfileEditMode(!profileEditMode);
 });
 profileSettingsBtn?.addEventListener("click", async () => {
   if (!currentProfileIsSelf) {
@@ -7268,8 +7301,7 @@ profileSettingsBtn?.addEventListener("click", async () => {
     }
     return;
   }
-  setTab("custom");
-  showEditPanel("preferences");
+  setTab("customize");
   try { syncSoundPrefsUI(true); } catch {}
   await loadChatFxPrefs({ force: true });
 });
@@ -7408,55 +7440,108 @@ function uploadChatFileWithProgress(file){
 // tabs
 function focusActiveTab(){
   if (window.matchMedia("(max-width: 760px)").matches) return;
-  const active=document.querySelector(".tab.active");
+  const active = document.querySelector(".tab.active");
   active?.scrollIntoView({ behavior:"smooth", inline:"center", block:"nearest" });
 }
+
+function setCustomizePage(category = null){
+  activeCustomizePage = category;
+  customizePages.forEach((page) => {
+    const isActive = page.dataset.category === category;
+    page.classList.toggle("active", isActive);
+    page.style.display = isActive ? "block" : "none";
+  });
+  if (customizeCardGrid) customizeCardGrid.style.display = category ? "none" : "grid";
+  if (customizeSubpages) customizeSubpages.classList.toggle("showing", !!category);
+  const scrollHost = modal?.querySelector(".modalBody");
+  if (scrollHost) scrollHost.scrollTop = 0;
+}
+
 function setTab(tab){
   activeProfileTab = tab;
   for(const el of document.querySelectorAll(".tab")){
     el.classList.toggle("active", el.dataset.tab===tab);
   }
-  if (viewAccount) viewAccount.style.display = tab==="account" ? "block" : "none";
-  if (viewCustom) viewCustom.style.display = tab==="custom" ? "block" : "none";
-  if (viewMore) viewMore.style.display = tab==="more" ? "block" : "none";
-  if(tab === "custom" && currentProfileIsSelf) showEditPanel("about");
+  if (viewAccount) viewAccount.style.display = tab==="profile" ? "block" : "none";
+  if (viewCustom) viewCustom.style.display = tab==="customize" ? "block" : "none";
+  if (viewMore) viewMore.style.display = tab==="actions" ? "block" : "none";
+  if (tab !== "profile") setProfileEditMode(false);
+  if (tab === "customize" && currentProfileIsSelf) setCustomizePage(activeCustomizePage || null);
+  if (tab === "customize") {
+    applyCustomizeVisibility();
+    if (currentProfileIsSelf) {
+      loadChatFxPrefs({ force: true }).catch(() => {});
+    }
+  }
   syncProfileEditUi();
   focusActiveTab();
+  const scrollHost = modal?.querySelector(".modalBody");
+  if (scrollHost) scrollHost.scrollTop = 0;
 }
-tabCustom?.addEventListener("click", ()=>setTab("custom"));
+tabCustomize?.addEventListener("click", ()=>setTab("customize"));
 
-function showEditPanel(which){
-  const isAbout = which === "about";
-  const isThemes = which === "themes";
-  const isDm = which === "dm";
-  const isGifts = which === "gifts";
-  const isPrefs = which === "preferences";
-
-  if (editAboutPanel) editAboutPanel.style.display = isAbout ? "block" : "none";
-  if (editThemesPanel) editThemesPanel.style.display = isThemes ? "block" : "none";
-  if (editDmPanel) editDmPanel.style.display = isDm ? "block" : "none";
-  if (editGiftsPanel) editGiftsPanel.style.display = isGifts ? "block" : "none";
-  if (editPreferencesPanel) editPreferencesPanel.style.display = isPrefs ? "block" : "none";
-
-  editAboutBtn?.classList.toggle("active", isAbout);
-  editThemesBtn?.classList.toggle("active", isThemes);
-  editDmBtn?.classList.toggle("active", isDm);
+function applyCustomizeVisibility(){
+  const showCustomize = currentProfileIsSelf;
+  if (profileCustomEmpty) profileCustomEmpty.style.display = showCustomize ? "none" : "";
+  if (customizeShell) customizeShell.style.display = showCustomize ? "" : "none";
+  if (!showCustomize){
+    setCustomizePage(null);
+  }
 }
 
-editAboutBtn?.addEventListener("click", ()=>showEditPanel("about"));
-editThemesBtn?.addEventListener("click", ()=>showEditPanel("themes"));
-editDmBtn?.addEventListener("click", ()=>showEditPanel("dm"));
+function filterCustomize(query){
+  const q = String(query || "").trim().toLowerCase();
+  const cards = customizeCards.length ? customizeCards : [];
+  cards.forEach((card) => {
+    const text = (card.dataset.search || card.textContent || "").toLowerCase();
+    card.hidden = !!q && !text.includes(q);
+  });
+
+  const items = Array.from(document.querySelectorAll("[data-customize-item]"));
+  let matches = 0;
+  items.forEach((item) => {
+    const text = (item.dataset.search || item.textContent || "").toLowerCase();
+    const hit = !q || text.includes(q);
+    item.hidden = !hit;
+    if (hit) matches += 1;
+  });
+
+  customizePages.forEach((page) => {
+    if (!q) return;
+    const pageItems = page.querySelectorAll("[data-customize-item]");
+    const anyVisible = Array.from(pageItems).some((item) => !item.hidden);
+    page.classList.toggle("hasMatches", anyVisible);
+  });
+
+  if (!q) {
+    customizePages.forEach((page) => page.classList.remove("hasMatches"));
+  }
+  return matches;
+}
+
+customizeCards.forEach((card) => {
+  card.addEventListener("click", () => {
+    if (!currentProfileIsSelf) return;
+    setCustomizePage(card.dataset.category || null);
+  });
+});
+customizeBackBtns.forEach((btn) => {
+  btn.addEventListener("click", () => setCustomizePage(null));
+});
+customizeSearch?.addEventListener("input", () => {
+  const value = customizeSearch.value;
+  filterCustomize(value);
+});
 
 // New profile edit menu + avatar action wiring
-wireProfileMenu();
 wireSoundPrefs();
 wireComfortMode();
 wireChatFxPrefs();
 wireProfileAvatarActions();
 wireHeaderGradientInputs();
-tabAccount?.addEventListener("click", ()=>setTab("account"));
-tabMore?.addEventListener("click", async ()=>{
-  setTab("more");
+tabProfile?.addEventListener("click", ()=>setTab("profile"));
+tabActions?.addEventListener("click", async ()=>{
+  setTab("actions");
   if (viewModeration?.style.display !== "none") await refreshLogs();
 });
 
@@ -7479,6 +7564,8 @@ function closeModal(){
   modal.classList.add("modal-closing");
   modalTargetUsername=null;
   modalTargetUserId=null;
+  setProfileEditMode(false);
+  setCustomizePage(null);
   quickModMsg.textContent="";
   modMsg.textContent="";
   logsMsg.textContent="";
@@ -9752,17 +9839,19 @@ function fillProfileUI(p, isSelf){
     }
   } catch {}
 
-  infoAge.textContent = (p.age ?? "—");
-  infoGender.textContent = (p.gender ?? "—");
+  if (infoAge) infoAge.textContent = (p.age ?? "—");
+  if (infoGender) infoGender.textContent = (p.gender ?? "—");
   if (infoLanguage){
     const langRow = infoLanguage.closest(".profileInfoRow");
     if (langRow) langRow.style.display = "none";
   }
-  infoCreated.textContent = formatMemberSince(p.created_at);
-  infoLastSeen.textContent = formatLastSeen(p.last_seen);
-  infoRoom.textContent = p.current_room ? `#${p.current_room}` : (p.last_room ? `#${p.last_room}` : "—");
+  if (infoCreated) infoCreated.textContent = formatMemberSince(p.created_at);
+  if (infoLastSeen) infoLastSeen.textContent = formatLastSeen(p.last_seen);
+  if (infoRoom) infoRoom.textContent = p.current_room ? `#${p.current_room}` : (p.last_room ? `#${p.last_room}` : "—");
   const statusLabel = normalizeStatusLabel(p.last_status, "");
-  infoStatus.textContent = statusLabel || "—";
+  if (infoStatus) infoStatus.textContent = statusLabel || "—";
+  if (profileMoodValue) profileMoodValue.textContent = p.mood ? p.mood : "—";
+  if (profileStatusValue) profileStatusValue.textContent = statusLabel || "—";
 
   bioRender.innerHTML = p.bio ? renderBBCode(p.bio) : "(no bio)";
   renderLevelProgress(p, isSelf);
@@ -9770,7 +9859,10 @@ function fillProfileUI(p, isSelf){
   setMsgline(profileLikeMsg, "");
   setMsgline(profileActionMsg, "");
   setMsgline(mediaMsg, "");
-  renderVibeChips(profileVibes, p.vibe_tags);
+  if (profileCoupleChip && profileCoupleCard){
+    const showCouple = profileCoupleChip.style.display !== "none";
+    profileCoupleCard.style.display = showCouple ? "" : "none";
+  }
   fillProfileSheetHeader(p, isSelf);
   syncProfileEditUi();
   if (levelPanel){
@@ -9878,32 +9970,45 @@ function updateProfilePresenceDot(statusLabel){
   profilePresenceDot.style.display = "inline-flex";
 }
 
+function setProfileEditMode(next){
+  profileEditMode = !!next;
+  if (profileEditSection) profileEditSection.style.display = profileEditMode ? "block" : "none";
+  if (profileEditToggleBtn) {
+    profileEditToggleBtn.textContent = profileEditMode ? "Exit edit mode" : "Edit profile";
+    profileEditToggleBtn.setAttribute("aria-pressed", profileEditMode ? "true" : "false");
+  }
+  syncProfileEditUi();
+}
+
 function syncProfileEditUi(){
-  const showAvatarActions = currentProfileIsSelf && activeProfileTab === "custom";
+  const showAvatarActions = currentProfileIsSelf && profileEditMode;
   if (profileSheetAvatarActions) profileSheetAvatarActions.style.display = showAvatarActions ? "flex" : "none";
+  if (profileEditSection) profileEditSection.style.display = (currentProfileIsSelf && profileEditMode) ? "block" : "none";
 }
 
 function updateProfileActions({ isSelf = false, canModerate = false } = {}){
-  if (profileMenu) profileMenu.style.display = isSelf ? "" : "none";
-  if (profileCustomEmpty) profileCustomEmpty.style.display = isSelf ? "none" : "";
+  if (profileEditToggleRow) profileEditToggleRow.style.display = isSelf ? "" : "none";
+  applyCustomizeVisibility();
   if (addFriendBtn) addFriendBtn.style.display = isSelf ? "none" : "";
+  const showActionsTab = canModerate && !isSelf;
   if (viewModeration) viewModeration.style.display = canModerate ? "" : "none";
+  if (tabActions) tabActions.style.display = showActionsTab ? "" : "none";
+  [actionMuteBtn, actionKickBtn, actionBanBtn, actionAppealsBtn].forEach((btn) => {
+    if (!btn) return;
+    btn.style.display = showActionsTab ? "" : "none";
+    btn.disabled = !modalCanModerate;
+  });
+  if (!showActionsTab && activeProfileTab === "actions") {
+    setTab("profile");
+  }
   if (actionsBtn) {
-    actionsBtn.textContent = "🛡️";
-    actionsBtn.style.display = (!isSelf && canModerate) ? "" : "none";
-    actionsBtn.disabled = !modalCanModerate;
+    actionsBtn.style.display = "none";
   }
   if (profileEditBtn) {
-    profileEditBtn.textContent = "✏️";
-    profileEditBtn.style.display = isSelf ? "" : "none";
+    profileEditBtn.style.display = "none";
   }
   if (profileSettingsBtn) {
-    const showDm = !isSelf;
-    profileSettingsBtn.textContent = showDm ? "💬" : "⚙️";
-    profileSettingsBtn.title = showDm ? "Message" : "Preferences";
-    profileSettingsBtn.setAttribute("aria-label", showDm ? "Message user" : "Preferences");
-    profileSettingsBtn.dataset.mode = showDm ? "dm" : "prefs";
-    profileSettingsBtn.style.display = showDm ? "" : "none";
+    profileSettingsBtn.style.display = "none";
   }
   syncProfileEditUi();
   setMsgline(profileActionMsg, "");
@@ -9914,6 +10019,7 @@ function updateBanControlsVisibility(){
   if (quickBanBtn) quickBanBtn.style.display = isAdminPlus ? "" : "none";
   if (modBanBtn) modBanBtn.style.display = isAdminPlus ? "" : "none";
   if (modUnbanBtn) modUnbanBtn.style.display = isAdminPlus ? "" : "none";
+  if (actionBanBtn) actionBanBtn.style.display = isAdminPlus ? "" : "none";
 }
 
 function applyProfileMenuVisibility(){
@@ -10048,8 +10154,10 @@ function wireSoundPrefs(){
 function wireComfortMode(){
   if (!prefComfortMode || prefComfortMode._wired) return;
   prefComfortMode._wired = true;
+  if (reduceMotionToggle) reduceMotionToggle.checked = prefComfortMode.checked;
   prefComfortMode.addEventListener("change", () => {
     applyComfortMode(prefComfortMode.checked, { persistLocal: true, persistServer: true });
+    if (reduceMotionToggle) reduceMotionToggle.checked = prefComfortMode.checked;
   });
 }
 
@@ -10098,6 +10206,7 @@ function setChatFxDensityButtons(value){
   chatFxPrefEls.densityButtons.forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.value === value);
   });
+  if (chatSpacingCompact) chatSpacingCompact.checked = value === "compact";
 }
 
 function getChatFxDensitySelection(){
@@ -10277,224 +10386,14 @@ function initPersonalisationSections(container){
 }
 
 function wireChatFxPrefs(){
-  if (!editPreferencesPanel || editPreferencesPanel._chatFxWired) return;
-  editPreferencesPanel._chatFxWired = true;
+  const chatFxFontEl = document.getElementById("chatFxFont");
+  const chatFxNameFontEl = document.getElementById("chatFxNameFont");
+  if (!chatFxFontEl || chatFxPrefEls) return;
+  const fontOptions = buildFontSelectOptionsHTML();
+  chatFxFontEl.innerHTML = fontOptions;
+  if (chatFxNameFontEl) chatFxNameFontEl.innerHTML = fontOptions;
 
-  const section = document.createElement("div");
-  section.className = "chatFxSection";
-  section.innerHTML = `
-    <div class="sectionTitle">Chat Appearance</div>
-    <div class="panelBox chatFxPanel">
-      <div class="small" style="margin-bottom:10px;">
-        Customize your chat bubbles. Changes preview here until you save them.
-      </div>
-      <div class="chatFxPreview" id="chatFxPreview">
-        <div class="chatFxPreviewRow self">
-          <div class="bubble chatFxPreviewBubble" id="chatFxPreviewBubble">
-            <div class="meta">
-              <div class="name"><span class="roleIco">👑 </span><span class="unameText">You</span></div>
-              <div class="time">Just now</div>
-            </div>
-            <div class="text">Your message preview bubble.</div>
-          </div>
-        </div>
-      </div>
-      <div class="prefsSections">
-        <details class="prefsSection" data-section="text-fonts">
-          <summary>Text &amp; Fonts</summary>
-          <div class="prefsContent">
-            <div class="field">
-              <label>Font</label>
-              <select id="chatFxFont">
-                ${buildFontSelectOptionsHTML()}
-              </select>
-            </div>
-            <div class="field">
-              <label>Username font</label>
-              <select id="chatFxNameFont">
-                ${buildFontSelectOptionsHTML()}
-              </select>
-            </div>
-            <div class="field">
-              <label>Text color (optional)</label>
-              <div class="chatFxColorRow">
-                <input id="chatFxTextColorPick" type="color" value="#ffffff" aria-label="Pick text color">
-                <input id="chatFxTextColor" type="text" placeholder="#RRGGBB">
-                <button class="pillBtn" id="chatFxTextColorClear" type="button">Clear</button>
-              </div>
-              <div class="small">Leave blank to use the theme's default message text.</div>
-            </div>
-            <div class="field">
-              <label>Message text style</label>
-              <div class="chatFxColorRow" style="justify-content:flex-start;">
-                <label style="display:flex; align-items:center; gap:6px;">
-                  <input id="chatFxTextBold" type="checkbox"> Bold
-                </label>
-                <label style="display:flex; align-items:center; gap:6px;">
-                  <input id="chatFxTextItalic" type="checkbox"> Italic
-                </label>
-              </div>
-            </div>
-            <div class="field">
-              <label>Text glow</label>
-              <select id="chatFxTextGlow">
-                <option value="off">Off</option>
-                <option value="soft">Soft</option>
-                <option value="neon">Neon</option>
-                <option value="strong">Strong</option>
-              </select>
-            </div>
-            <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-              <label style="margin:0;">Text gradient</label>
-              <input id="chatFxTextGradientEnabled" type="checkbox">
-            </div>
-            <div class="field">
-              <label>Gradient color A</label>
-              <div class="chatFxColorRow">
-                <input id="chatFxTextGradientAPick" type="color" value="#7c4dff" aria-label="Pick gradient color A">
-                <input id="chatFxTextGradientA" type="text" placeholder="#RRGGBB">
-                <button class="pillBtn" id="chatFxTextGradientAClear" type="button">Clear</button>
-              </div>
-            </div>
-            <div class="field">
-              <label>Gradient color B</label>
-              <div class="chatFxColorRow">
-                <input id="chatFxTextGradientBPick" type="color" value="#00e5ff" aria-label="Pick gradient color B">
-                <input id="chatFxTextGradientB" type="text" placeholder="#RRGGBB">
-                <button class="pillBtn" id="chatFxTextGradientBClear" type="button">Clear</button>
-              </div>
-            </div>
-            <div class="field">
-              <label>Gradient angle</label>
-              <div class="chatFxSliderRow">
-                <input id="chatFxTextGradientAngle" type="range" min="0" max="360" step="1">
-                <span class="chatFxSliderValue" id="chatFxTextGradientAngleValue">135</span>
-              </div>
-            </div>
-            <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-              <label style="margin:0;">Auto-contrast text</label>
-              <input id="chatFxAutoContrast" type="checkbox">
-            </div>
-          </div>
-        </details>
-        <details class="prefsSection" data-section="bubbles">
-          <summary>Bubbles &amp; Chat Style</summary>
-          <div class="prefsContent">
-            <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-              <label style="margin:0;">Enabled</label>
-              <input id="chatFxEnabled" type="checkbox">
-            </div>
-            <div class="field">
-              <label>Glow</label>
-              <select id="chatFxGlow">
-                <option value="off">Off</option>
-                <option value="soft">Soft</option>
-                <option value="neon">Neon</option>
-                <option value="strong">Strong</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Bubble radius</label>
-              <div class="chatFxSliderRow">
-                <input id="chatFxRadius" type="range" min="6" max="28" step="1">
-                <span class="chatFxSliderValue" id="chatFxRadiusValue">14</span>
-              </div>
-            </div>
-            <div class="field">
-              <label>Border thickness</label>
-              <div class="chatFxSliderRow">
-                <input id="chatFxBorder" type="range" min="0" max="3" step="1">
-                <span class="chatFxSliderValue" id="chatFxBorderValue">0</span>
-              </div>
-            </div>
-            <div class="field">
-              <label>Glass opacity</label>
-              <div class="chatFxSliderRow">
-                <input id="chatFxGlass" type="range" min="0" max="1" step="0.05">
-                <span class="chatFxSliderValue" id="chatFxGlassValue">0</span>
-              </div>
-            </div>
-            <div class="field">
-              <label>Glass blur</label>
-              <div class="chatFxSliderRow">
-                <input id="chatFxBlur" type="range" min="0" max="16" step="1">
-                <span class="chatFxSliderValue" id="chatFxBlurValue">0</span>
-              </div>
-            </div>
-            <div class="field">
-              <label>Density</label>
-              <div class="chatFxDensityRow" id="chatFxDensity">
-                <button class="pillBtn" type="button" data-value="compact">Compact</button>
-                <button class="pillBtn" type="button" data-value="cozy">Cozy</button>
-                <button class="pillBtn" type="button" data-value="spacious">Spacious</button>
-              </div>
-            </div>
-            <div class="field">
-              <label>Bubble color (optional)</label>
-              <div class="chatFxColorRow">
-                <input id="chatFxBubbleColorPick" type="color" value="#2b2d31" aria-label="Pick bubble color">
-                <input id="chatFxBubbleColor" type="text" placeholder="#RRGGBB">
-                <button class="pillBtn" id="chatFxBubbleColorClear" type="button">Clear</button>
-              </div>
-              <div class="small">Leave blank to use the theme bubble colour.</div>
-            </div>
-          </div>
-        </details>
-        <details class="prefsSection" data-section="theme-page">
-          <summary>Theme &amp; Page</summary>
-          <div class="prefsContent">
-            <div class="field">
-              <label>Accent color (optional)</label>
-              <input id="chatFxAccent" type="text" placeholder="#RRGGBB">
-              <div class="small">Leave blank to keep your theme accent.</div>
-            </div>
-          </div>
-        </details>
-        <details class="prefsSection" data-section="profile-identity">
-          <summary>Profile &amp; Identity</summary>
-          <div class="prefsContent">
-            <div class="field">
-              <label>Username color</label>
-              <div class="chatFxColorRow">
-                <input id="chatFxNameColorPick" type="color" value="#ffffff" aria-label="Pick username color">
-                <input id="chatFxNameColor" type="hidden" value="">
-                <button class="pillBtn" id="chatFxNameColorClear" type="button">Clear</button>
-              </div>
-              <div class="small">Leave blank to use the theme's default name colour.</div>
-            </div>
-            <div class="field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-              <label style="margin:0;">Avatar auras</label>
-              <input id="chatFxPolishAuras" type="checkbox">
-            </div>
-            <div class="small">Requires Polish Pack.</div>
-          </div>
-        </details>
-        <details class="prefsSection" data-section="advanced-accessibility">
-          <summary>Advanced / Accessibility</summary>
-          <div class="prefsContent">
-            <div class="field polishPackField">
-              <div class="polishPackHeader">
-                <label style="margin:0;">Enable Polish Pack</label>
-                <input id="chatFxPolishPack" type="checkbox">
-              </div>
-              <div class="polishPackOptions">
-                <label><input id="chatFxPolishAnimations" type="checkbox"> Animations</label>
-              </div>
-            </div>
-          </div>
-        </details>
-      </div>
-      <div class="chatFxActions">
-        <div class="chatFxStatus" id="chatFxStatus"></div>
-        <button class="btn" id="chatFxSaveBtn" type="button">Save appearance</button>
-      </div>
-    </div>
-  `;
-
-  editPreferencesPanel.appendChild(section);
-  initPersonalisationSections(section);
-
-  const q = (sel) => section.querySelector(sel);
+  const q = (sel) => document.querySelector(sel);
   chatFxPrefEls = {
     enabled: q("#chatFxEnabled"),
     glow: q("#chatFxGlow"),
@@ -10702,6 +10601,46 @@ function wireChatFxPrefs(){
       handleChatFxInput();
     });
   });
+  if (chatSpacingCompact && !chatSpacingCompact._wired){
+    chatSpacingCompact._wired = true;
+    chatSpacingCompact.addEventListener("change", () => {
+      const next = chatSpacingCompact.checked ? "compact" : "cozy";
+      setChatFxDensityButtons(next);
+      handleChatFxInput();
+    });
+  }
+
+  if (effectsPreset && !effectsPreset._wired){
+    effectsPreset._wired = true;
+    effectsPreset.addEventListener("change", () => {
+      if (!chatFxPrefEls) return;
+      const preset = effectsPreset.value;
+      if (!preset){
+        return;
+      }
+      const presets = {
+        soft: { glow: "soft", textGlow: "soft", glass: 0.3, blur: 4 },
+        neon: { glow: "neon", textGlow: "neon", glass: 0.5, blur: 8 },
+        minimal: { glow: "off", textGlow: "off", glass: 0, blur: 0 },
+      };
+      const next = presets[preset];
+      if (!next) return;
+      if (chatFxPrefEls.glow) chatFxPrefEls.glow.value = next.glow;
+      if (chatFxPrefEls.textGlow) chatFxPrefEls.textGlow.value = next.textGlow;
+      if (chatFxPrefEls.glass) chatFxPrefEls.glass.value = String(next.glass);
+      if (chatFxPrefEls.blur) chatFxPrefEls.blur.value = String(next.blur);
+      handleChatFxInput();
+    });
+  }
+
+  if (reduceMotionToggle && !reduceMotionToggle._wired){
+    reduceMotionToggle._wired = true;
+    reduceMotionToggle.addEventListener("change", () => {
+      if (!prefComfortMode) return;
+      prefComfortMode.checked = reduceMotionToggle.checked;
+      prefComfortMode.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
 
   chatFxPrefEls.saveBtn?.addEventListener("click", saveChatFxPrefs);
 
@@ -10710,42 +10649,94 @@ function wireChatFxPrefs(){
   chatFxDraft = { ...chatFxPrefs };
 }
 
-function wireProfileMenu(){
-  if (!profileMenu) return;
-  if (profileMenu._wired) return;
-  profileMenu._wired = true;
+function resetChatFxSection(section){
+  if (!chatFxPrefEls) return;
+  const defaults = mergeChatFxDefaults({});
+  const applyTextDefaults = () => {
+    if (chatFxPrefEls.font) chatFxPrefEls.font.value = defaults.font;
+    if (chatFxPrefEls.nameFont) chatFxPrefEls.nameFont.value = defaults.nameFont;
+    if (chatFxPrefEls.textColor) chatFxPrefEls.textColor.value = defaults.textColor || "";
+    if (chatFxPrefEls.textColorPick) chatFxPrefEls.textColorPick.value = normalizeColorForInput(defaults.textColor || "#ffffff", "#ffffff");
+    if (chatFxPrefEls.nameColor) chatFxPrefEls.nameColor.value = defaults.nameColor || "";
+    if (chatFxPrefEls.nameColorPick) chatFxPrefEls.nameColorPick.value = normalizeColorForInput(defaults.nameColor || "#ffffff", "#ffffff");
+    if (chatFxPrefEls.textBold) chatFxPrefEls.textBold.checked = !!defaults.textBold;
+    if (chatFxPrefEls.textItalic) chatFxPrefEls.textItalic.checked = !!defaults.textItalic;
+    if (chatFxPrefEls.textGlow) chatFxPrefEls.textGlow.value = defaults.textGlow;
+    if (chatFxPrefEls.textGradientEnabled) chatFxPrefEls.textGradientEnabled.checked = !!defaults.textGradientEnabled;
+    if (chatFxPrefEls.textGradientA) chatFxPrefEls.textGradientA.value = defaults.textGradientA || "";
+    if (chatFxPrefEls.textGradientB) chatFxPrefEls.textGradientB.value = defaults.textGradientB || "";
+    if (chatFxPrefEls.textGradientAngle) chatFxPrefEls.textGradientAngle.value = String(defaults.textGradientAngle);
+    if (chatFxPrefEls.autoContrast) chatFxPrefEls.autoContrast.checked = !!defaults.autoContrast;
+  };
+  const applyBubbleDefaults = () => {
+    if (chatFxPrefEls.enabled) chatFxPrefEls.enabled.checked = !!defaults.enabled;
+    if (chatFxPrefEls.glow) chatFxPrefEls.glow.value = defaults.glow;
+    if (chatFxPrefEls.radius) chatFxPrefEls.radius.value = String(defaults.radius);
+    if (chatFxPrefEls.border) chatFxPrefEls.border.value = String(defaults.border);
+    if (chatFxPrefEls.glass) chatFxPrefEls.glass.value = String(defaults.glass);
+    if (chatFxPrefEls.blur) chatFxPrefEls.blur.value = String(defaults.blur);
+    if (chatFxPrefEls.bubbleColor) chatFxPrefEls.bubbleColor.value = defaults.bubbleColor || "";
+    if (chatFxPrefEls.bubbleColorPick) chatFxPrefEls.bubbleColorPick.value = normalizeColorForInput(defaults.bubbleColor || "#2b2d31", "#2b2d31");
+    setChatFxDensityButtons(defaults.density);
+  };
 
-  profileMenu.addEventListener("click", async (e) => {
-    const btn = e.target.closest("[data-action]");
-    if (!btn) return;
-    const action = btn.dataset.action;
-
-    // Always ensure we're in the Custom tab when using this menu
-    setTab("custom");
-
-    if (action === "edit-about") return showEditPanel("about");
-    if (action === "edit-themes") return showEditPanel("themes");
-    if (action === "edit-dm") return showEditPanel("dm");
-    if (action === "edit-gifts") return showEditPanel("gifts");
-
-    if (action === "open-preferences"){
-      setTab("custom");
-      showEditPanel("preferences");
-      if (profileMsg) profileMsg.textContent = "";
-      // Sync UI toggles
-      try { syncSoundPrefsUI(true); } catch {}
-      await loadChatFxPrefs({ force: true });
-      return;
+  if (section === "chat") applyBubbleDefaults();
+  if (section === "text") applyTextDefaults();
+  if (section === "profile") {
+    if (chatFxPrefEls.polishAuras) chatFxPrefEls.polishAuras.checked = !!defaults.polishAuras;
+    if (chatFxPrefEls.accent) chatFxPrefEls.accent.value = defaults.accent || "";
+    syncHeaderGradientInputs(PROFILE_GRADIENT_DEFAULT_A, PROFILE_GRADIENT_DEFAULT_B);
+  }
+  if (section === "effects") {
+    if (chatFxPrefEls.polishPack) chatFxPrefEls.polishPack.checked = !!defaults.polishPack;
+    if (chatFxPrefEls.polishAnimations) chatFxPrefEls.polishAnimations.checked = !!defaults.polishAnimations;
+    if (prefComfortMode) {
+      prefComfortMode.checked = false;
+      prefComfortMode.dispatchEvent(new Event("change", { bubbles: true }));
     }
-  });
+    if (effectsPreset) effectsPreset.value = "";
+  }
+  handleChatFxInput();
 }
+
+resetChatAppearanceBtn?.addEventListener("click", () => resetChatFxSection("chat"));
+resetTextIdentityBtn?.addEventListener("click", () => resetChatFxSection("text"));
+resetProfileAppearanceBtn?.addEventListener("click", () => resetChatFxSection("profile"));
+resetEffectsBtn?.addEventListener("click", () => resetChatFxSection("effects"));
+resetLayoutBtn?.addEventListener("click", () => {
+  uiScaleResetBtn?.click();
+  if (reduceMotionToggle) reduceMotionToggle.checked = false;
+});
+resetAdvancedBtn?.addEventListener("click", () => {
+  const defaults = {
+    enabled: false,
+    room: true,
+    dm: true,
+    mention: true,
+    sent: false,
+    receive: false,
+    reaction: false,
+  };
+  Sound.importPrefs(defaults);
+  syncSoundPrefsUI(true);
+  queuePersistPrefs({ sound: Sound.exportPrefs() });
+
+  dmThemePrefs = { ...dmThemeDefaults };
+  applyDmThemePrefs();
+  saveDmThemePrefsToStorage();
+
+  badgePrefs = { ...badgeDefaults };
+  applyBadgePrefs();
+  saveBadgePrefsToStorage();
+});
 
 function wireProfileAvatarActions(){
   if (profileAvatarChangeBtn && !profileAvatarChangeBtn._wired){
     profileAvatarChangeBtn._wired = true;
     profileAvatarChangeBtn.addEventListener("click", () => {
-      setTab("custom");
-      showEditPanel("about");
+      if (!currentProfileIsSelf) return;
+      setProfileEditMode(true);
+      setTab("profile");
       // Open file picker for avatar
       try{ avatarFile?.click(); } catch {}
     });
@@ -10821,7 +10812,7 @@ async function openMyProfile(){
   fillProfileUI(p, true);
   syncCustomizationUI();
 
-  myProfileEdit.style.display="block";
+  if (myProfileEdit) myProfileEdit.style.display="block";
   try { refreshCouplesUI(); } catch {}
   modalCanModerate = false;
   if (actionsBtn) actionsBtn.style.display = "none";
@@ -10839,10 +10830,12 @@ async function openMyProfile(){
   syncHeaderGradientInputs(p.header_grad_a, p.header_grad_b);
   avatarFile.value="";
   profileMsg.textContent="";
+  setProfileEditMode(false);
+  setCustomizePage(null);
 
   const canMod = (roleRank(me.role) >= roleRank("Moderator"));
   updateProfileActions({ isSelf: true, canModerate: canMod });
-  setTab("account");
+  setTab("profile");
   openModal();
 }
 profileBtn.addEventListener("click", openMyProfile);
@@ -10918,7 +10911,7 @@ async function openMemberProfile(username){
   fillProfileUI(p, isSelf);
   syncCustomizationUI();
 
-  myProfileEdit.style.display = isSelf ? "block" : "none";
+  if (myProfileEdit) myProfileEdit.style.display = isSelf ? "block" : "none";
 
   const iCanMod = (roleRank(me.role) >= roleRank("Moderator")) && (roleRank(me.role) > roleRank(p.role));
   modalCanModerate = iCanMod;
@@ -10934,7 +10927,9 @@ async function openMemberProfile(username){
   if(modMsg) modMsg.textContent = "";
 
   updateProfileActions({ isSelf, canModerate: (roleRank(me.role) >= roleRank("Moderator")) });
-  setTab("account");
+  setProfileEditMode(false);
+  setCustomizePage(null);
+  setTab("profile");
   openModal();
 }
 
