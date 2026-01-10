@@ -587,7 +587,7 @@
                 <span class="profileDetail" id="profileSheetAge" style="display:none;"></span>
                 <span class="profileDetail" id="profileSheetGender" style="display:none;"></span>
               </div>
-              <div class="profileSheetSub" id="profileSheetSub"></div>
+              <div class="profileSheetSub" id="profileSheetSub"><span id="profileCoupleChip" class="coupleChip" style="display:none;"></span></div>
               <div class="vibeRow" id="profileSheetVibes"></div>
               <div class="profileSheetStats" id="profileSheetStats" style="display:none;">
                 <span class="statPill" id="profileSheetStars">⭐ 0</span>
@@ -786,6 +786,80 @@
                             <input id="headerColorBText" type="text" placeholder="#2b0f08" aria-label="Header color B text">
                           </div>
                           <div class="small">Pick two colors for your profile header gradient.</div>
+                        </div>
+
+
+                        <div class="field" id="couplesField">
+                          <label>Couples</label>
+                          <div class="small">All couples features are opt-in and can be disabled at any time.</div>
+
+                          <div class="row" style="margin-top:8px; gap:8px; align-items:center;">
+                            <input id="couplesPartnerInput" placeholder="Partner username" style="flex:1;">
+                            <button class="btn secondary" id="couplesRequestBtn" type="button">Send link request</button>
+                          </div>
+
+                          <div class="panelBox" id="couplesPendingBox" style="margin-top:10px; display:none;">
+                            <div class="small" style="margin-bottom:6px;">Pending</div>
+                            <div id="couplesPendingList"></div>
+                          </div>
+
+                          <div class="panelBox" id="couplesActiveBox" style="margin-top:10px; display:none;">
+                            <div class="small" id="couplesActiveTitle">Linked</div>
+
+                            <div class="toggleRow">
+                              <label class="switch">
+                                <input type="checkbox" id="couplesEnabledToggle">
+                                <span class="slider"></span>
+                              </label>
+                              <div class="toggleLabel">Enable couples features</div>
+                            </div>
+
+                            <div class="toggleRow">
+                              <label class="switch">
+                                <input type="checkbox" id="couplesShowProfileToggle">
+                                <span class="slider"></span>
+                              </label>
+                              <div class="toggleLabel">Show link on profiles</div>
+                            </div>
+
+                            <div class="toggleRow">
+                              <label class="switch">
+                                <input type="checkbox" id="couplesBadgeToggle">
+                                <span class="slider"></span>
+                              </label>
+                              <div class="toggleLabel">Show badge (💜) in members list</div>
+                            </div>
+
+                            <div class="toggleRow">
+                              <label class="switch">
+                                <input type="checkbox" id="couplesAuraToggle">
+                                <span class="slider"></span>
+                              </label>
+                              <div class="toggleLabel">Enable shared aura when together</div>
+                            </div>
+
+                            <div class="toggleRow">
+                              <label class="switch">
+                                <input type="checkbox" id="couplesShowMembersToggle">
+                                <span class="slider"></span>
+                              </label>
+                              <div class="toggleLabel">Show link in members list</div>
+                            </div>
+
+                            <div class="toggleRow">
+                              <label class="switch">
+                                <input type="checkbox" id="couplesGroupToggle">
+                                <span class="slider"></span>
+                              </label>
+                              <div class="toggleLabel">Pull us together in members list</div>
+                            </div>
+
+                            <div class="row" style="margin-top:10px; gap:8px;">
+                              <button class="btn danger" id="couplesUnlinkBtn" type="button">Unlink</button>
+                            </div>
+                          </div>
+
+                          <div class="msgline" id="couplesMsg"></div>
                         </div>
 
                         <div class="field">

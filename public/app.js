@@ -2590,6 +2590,7 @@ const profileSheetStats = document.getElementById("profileSheetStats");
 const profileSheetStars = document.getElementById("profileSheetStars");
 const profileSheetLikes = document.getElementById("profileSheetLikes");
 const profileSheetSub = document.getElementById("profileSheetSub");
+const profileCoupleChip = document.getElementById("profileCoupleChip");
 const profileSheetAge = document.getElementById("profileSheetAge");
 const profileSheetGender = document.getElementById("profileSheetGender");
 const profileSheetDetails = document.getElementById("profileSheetDetails");
@@ -2650,6 +2651,24 @@ const headerColorA = document.getElementById("headerColorA");
 const headerColorB = document.getElementById("headerColorB");
 const headerColorAText = document.getElementById("headerColorAText");
 const headerColorBText = document.getElementById("headerColorBText");
+
+// couples (opt-in)
+const couplesPartnerInput = document.getElementById("couplesPartnerInput");
+const couplesRequestBtn = document.getElementById("couplesRequestBtn");
+const couplesPendingBox = document.getElementById("couplesPendingBox");
+const couplesPendingList = document.getElementById("couplesPendingList");
+const couplesActiveBox = document.getElementById("couplesActiveBox");
+const couplesActiveTitle = document.getElementById("couplesActiveTitle");
+const couplesEnabledToggle = document.getElementById("couplesEnabledToggle");
+const couplesShowProfileToggle = document.getElementById("couplesShowProfileToggle");
+const couplesBadgeToggle = document.getElementById("couplesBadgeToggle");
+const couplesAuraToggle = document.getElementById("couplesAuraToggle");
+const couplesShowMembersToggle = document.getElementById("couplesShowMembersToggle");
+const couplesGroupToggle = document.getElementById("couplesGroupToggle");
+const couplesUnlinkBtn = document.getElementById("couplesUnlinkBtn");
+const couplesMsg = document.getElementById("couplesMsg");
+
+let couplesState = { active: null, incoming: [], outgoing: [] };
 const editMood = document.getElementById("editMood");
 const editUsername = document.getElementById("editUsername");
 const changeUsernameBtn = document.getElementById("changeUsernameBtn");
@@ -5456,11 +5475,39 @@ function setModTarget(username){
   }
 }
 
+
+function reorderCouplesInMembers(list){
+  const users = Array.isArray(list) ? list.slice() : [];
+  const byName = new Map(users.map(u => [u?.name, u]));
+  const seen = new Set();
+  const out = [];
+  for (const u of users) {
+    const name = u?.name;
+    if (!name || seen.has(name)) continue;
+    out.push(u);
+    seen.add(name);
+    const c = u?.couple;
+    if (c && c.group && c.partner && byName.has(c.partner) && !seen.has(c.partner)) {
+      out.push(byName.get(c.partner));
+      seen.add(c.partner);
+    }
+  }
+  return (out.length === users.length) ? out : users;
+}
+
+function fmtDaysSince(ts){
+  const t = Number(ts)||0;
+  if (!t) return "";
+  const days = Math.max(0, Math.floor((Date.now()-t)/86400000));
+  return days === 1 ? "1 day" : `${days} days`;
+}
+
 function renderMembers(users){
-  lastUsers = users || [];
+  lastUsers = reorderCouplesInMembers(users || []);
   cleanupRecentDiceRolls();
   refreshModTargetOptions(lastUsers);
   memberList.innerHTML="";
+  const presentNames = new Set((lastUsers||[]).map(u=>u?.name).filter(Boolean));
   lastUsers.forEach(u=>{
     updateRoleCache(u.username || u.name, u.role);
     if (u?.chatFx) updateUserFxMap(u.name, u.chatFx);
@@ -5470,6 +5517,8 @@ function renderMembers(users){
 
     const av=document.createElement("div");
     av.className="mAvatar";
+    const partnerPresent = !!(u?.couple?.partner && presentNames.has(u.couple.partner));
+    if (u?.couple?.aura && partnerPresent) av.classList.add("coupleAura");
     av.appendChild(avatarNode(u.avatar, u.name, u.role));
 
     const dot=document.createElement("div");
@@ -5482,6 +5531,13 @@ function renderMembers(users){
 
     const name=document.createElement("div");
     name.className="mName";
+    if (u?.couple?.badge && u?.couple?.partner) {
+      const cb = document.createElement("span");
+      cb.className = "coupleBadge";
+      cb.title = `${u.couple.statusEmoji||"💜"} ${u.couple.statusLabel||"Linked"}: ${u.couple.partner}`;
+      cb.textContent = String(u.couple.statusEmoji || "💜");
+      name.appendChild(cb);
+    }
     const ico = document.createElement("span");
     ico.className = "roleIco";
     ico.textContent = `${roleIcon(u.role)} `;
@@ -9550,6 +9606,20 @@ function fillProfileUI(p, isSelf){
   }
   if (modalMood) modalMood.textContent = p.mood ? `Mood: ${p.mood}` : "Mood: (none)";
 
+  // Couple chip (view-only, opt-in)
+  try {
+    if (profileCoupleChip) {
+      if (p?.couple?.partner) {
+        const sinceTxt = p.couple.since ? ` · ${fmtDaysSince(p.couple.since)}` : "";
+        profileCoupleChip.style.display = "";
+        profileCoupleChip.textContent = `${p.couple.statusEmoji || "💜"} ${p.couple.statusLabel || "Linked"}: ${p.couple.partner}${sinceTxt}`;
+      } else {
+        profileCoupleChip.style.display = "none";
+        profileCoupleChip.textContent = "";
+      }
+    }
+  } catch {}
+
   infoAge.textContent = (p.age ?? "—");
   infoGender.textContent = (p.gender ?? "—");
   if (infoLanguage){
@@ -10620,6 +10690,7 @@ async function openMyProfile(){
   syncCustomizationUI();
 
   myProfileEdit.style.display="block";
+  try { refreshCouplesUI(); } catch {}
   modalCanModerate = false;
   if (actionsBtn) actionsBtn.style.display = "none";
   closeMemberActionsOverlay();
@@ -11748,3 +11819,200 @@ function isThemeVisible(themeName) {
 }
 
 try{ syncDesktopMembersWidth(); }catch{}
+
+
+// ---- Couples UI (opt-in)
+async function refreshCouplesUI(){
+  if (!myProfileEdit) return;
+  if (!couplesPendingBox || !couplesActiveBox) return;
+
+  try {
+    const res = await fetch("/api/couples/me");
+    if (!res.ok) throw new Error(await res.text().catch(()=> "Could not load couples"));
+    couplesState = await res.json();
+  } catch (e) {
+    setMsgline(couplesMsg, e?.message || "Could not load couples");
+    return;
+  }
+
+  // Pending list
+  const incoming = couplesState?.incoming || [];
+  const outgoing = couplesState?.outgoing || [];
+  if (couplesPendingList) couplesPendingList.innerHTML = "";
+
+  const anyPending = incoming.length || outgoing.length;
+  if (couplesPendingBox) couplesPendingBox.style.display = anyPending ? "" : "none";
+
+  const makePendingRow = (label, item, isIncoming) => {
+    const row = document.createElement("div");
+    row.className = "couplesPendingRow";
+    const left = document.createElement("div");
+    left.className = "couplesPendingLeft";
+    left.textContent = `${label}: ${item.other}`;
+    row.appendChild(left);
+
+    const right = document.createElement("div");
+    right.className = "couplesPendingRight";
+
+    if (isIncoming) {
+      const ok = document.createElement("button");
+      ok.className = "btn btnPrimary";
+      ok.type = "button";
+      ok.textContent = "Accept";
+      ok.onclick = async () => {
+        setMsgline(couplesMsg, "");
+        try {
+          const r = await fetch("/api/couples/respond", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ linkId: item.linkId, accept: true })
+          });
+          if (!r.ok) throw new Error(await r.text().catch(()=> "Could not accept"));
+          couplesState = await r.json();
+          await refreshCouplesUI();
+          emitLocalMembersRefresh();
+        } catch (e) { setMsgline(couplesMsg, e?.message || "Could not accept"); }
+      };
+      right.appendChild(ok);
+    }
+
+    const no = document.createElement("button");
+    no.className = "btn secondary";
+    no.type = "button";
+    no.textContent = isIncoming ? "Decline" : "Cancel";
+    no.onclick = async () => {
+      setMsgline(couplesMsg, "");
+      try {
+        const r = await fetch("/api/couples/respond", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ linkId: item.linkId, accept: false })
+        });
+        if (!r.ok) throw new Error(await r.text().catch(()=> "Could not update"));
+        couplesState = await r.json();
+        await refreshCouplesUI();
+      } catch (e) { setMsgline(couplesMsg, e?.message || "Could not update"); }
+    };
+    right.appendChild(no);
+
+    row.appendChild(right);
+    return row;
+  };
+
+  if (couplesPendingList) {
+    for (const it of incoming) couplesPendingList.appendChild(makePendingRow("Incoming", it, true));
+    for (const it of outgoing) couplesPendingList.appendChild(makePendingRow("Outgoing", it, false));
+  }
+
+  const active = couplesState?.active || null;
+  if (couplesActiveBox) couplesActiveBox.style.display = active ? "" : "none";
+
+  if (active) {
+    if (couplesActiveTitle) {
+      const sinceTxt = active.since ? ` · ${fmtDaysSince(active.since)}` : "";
+      couplesActiveTitle.textContent = `${active.statusEmoji||"💜"} ${active.statusLabel||"Linked"}: ${active.partner}${sinceTxt}`;
+    }
+    const p = active.prefs || {};
+    if (couplesEnabledToggle) couplesEnabledToggle.checked = !!p.enabled;
+    if (couplesShowProfileToggle) couplesShowProfileToggle.checked = !!p.showProfile;
+    if (couplesBadgeToggle) couplesBadgeToggle.checked = !!p.badge;
+    if (couplesAuraToggle) couplesAuraToggle.checked = !!p.aura;
+    if (couplesShowMembersToggle) couplesShowMembersToggle.checked = !!p.showMembers;
+    if (couplesGroupToggle) couplesGroupToggle.checked = !!p.groupMembers;
+  }
+
+  // disable toggles if no active link
+  const toggles = [couplesEnabledToggle,couplesShowProfileToggle,couplesBadgeToggle,couplesAuraToggle,couplesShowMembersToggle,couplesGroupToggle];
+  toggles.forEach(t => { if (t) t.disabled = !active; });
+
+  if (couplesUnlinkBtn) couplesUnlinkBtn.disabled = !active;
+}
+
+function emitLocalMembersRefresh(){
+  try {
+    if (typeof emitUserListNow === "function") emitUserListNow();
+  } catch {}
+}
+
+// best-effort helper: re-emit member list if we can
+function emitUserListNow(){
+  // The server pushes user list on join/updates; we can also request by toggling a no-op room refresh if such exists.
+  // If socket exists, ask it to refresh:
+  try { if (socket) socket.emit("refresh user list"); } catch {}
+}
+
+async function setCouplePrefs(patch){
+  const active = couplesState?.active;
+  if (!active?.linkId) return;
+  setMsgline(couplesMsg, "");
+  try {
+    const r = await fetch("/api/couples/prefs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ linkId: active.linkId, prefs: patch })
+    });
+    if (!r.ok) throw new Error(await r.text().catch(()=> "Could not save"));
+    couplesState = await r.json();
+    await refreshCouplesUI();
+    emitLocalMembersRefresh();
+  } catch (e) {
+    setMsgline(couplesMsg, e?.message || "Could not save");
+  }
+}
+
+if (couplesRequestBtn) {
+  couplesRequestBtn.onclick = async () => {
+    setMsgline(couplesMsg, "");
+    const name = String(couplesPartnerInput?.value || "").trim();
+    if (!name) return setMsgline(couplesMsg, "Enter a username.");
+    try {
+      const r = await fetch("/api/couples/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUsername: name })
+      });
+      if (!r.ok) throw new Error(await r.text().catch(()=> "Could not request"));
+      couplesState = await r.json();
+      if (couplesPartnerInput) couplesPartnerInput.value = "";
+      await refreshCouplesUI();
+    } catch (e) {
+      setMsgline(couplesMsg, e?.message || "Could not request");
+    }
+  };
+}
+
+if (couplesEnabledToggle) couplesEnabledToggle.onchange = () => setCouplePrefs({ enabled: !!couplesEnabledToggle.checked });
+if (couplesShowProfileToggle) couplesShowProfileToggle.onchange = () => setCouplePrefs({ showProfile: !!couplesShowProfileToggle.checked });
+if (couplesBadgeToggle) couplesBadgeToggle.onchange = () => setCouplePrefs({ badge: !!couplesBadgeToggle.checked });
+if (couplesAuraToggle) couplesAuraToggle.onchange = () => setCouplePrefs({ aura: !!couplesAuraToggle.checked });
+if (couplesShowMembersToggle) couplesShowMembersToggle.onchange = () => setCouplePrefs({ showMembers: !!couplesShowMembersToggle.checked });
+if (couplesGroupToggle) couplesGroupToggle.onchange = () => setCouplePrefs({ groupMembers: !!couplesGroupToggle.checked });
+
+if (couplesUnlinkBtn) {
+  couplesUnlinkBtn.onclick = async () => {
+    const active = couplesState?.active;
+    if (!active?.linkId) return;
+    if (!confirm(`Unlink from ${active.partner}?`)) return;
+    setMsgline(couplesMsg, "");
+    try {
+      const r = await fetch("/api/couples/unlink", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ linkId: active.linkId })
+      });
+      if (!r.ok) throw new Error(await r.text().catch(()=> "Could not unlink"));
+      couplesState = await r.json();
+      await refreshCouplesUI();
+      emitLocalMembersRefresh();
+    } catch (e) {
+      setMsgline(couplesMsg, e?.message || "Could not unlink");
+    }
+  };
+}
+
+// When opening edit profile panel, refresh couples state
+try {
+  const oldOpenMyProfile = openMyProfile;
+  // openMyProfile exists; it opens modal and fills UI. We'll just hook after it runs.
+} catch {}
+
