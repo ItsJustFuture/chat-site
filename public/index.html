@@ -806,6 +806,22 @@
                           <div class="panelBox" id="couplesActiveBox" style="margin-top:10px; display:none;">
                             <div class="small" id="couplesActiveTitle">Linked</div>
 
+                            <div class="row couplesStatusRow" style="margin-top:8px; gap:8px; align-items:center;">
+                              <select id="couplesStatusEmoji" aria-label="Couple status emoji" style="width:72px;">
+                                <option value="💜">💜</option>
+                                <option value="💕">💕</option>
+                                <option value="✨">✨</option>
+                                <option value="🫶">🫶</option>
+                                <option value="🌙">🌙</option>
+                                <option value="🔥">🔥</option>
+                                <option value="🧸">🧸</option>
+                              </select>
+                              <input id="couplesStatusLabel" placeholder="Status label (e.g. Linked)" maxlength="24" style="flex:1;">
+                              <button class="btn secondary" id="couplesStatusSaveBtn" type="button">Save</button>
+                            </div>
+                            <div class="small">Shown as the couples badge (if enabled) and in your profile when both of you allow it.</div>
+
+
                             <div class="toggleRow">
                               <label class="switch">
                                 <input type="checkbox" id="couplesEnabledToggle">
