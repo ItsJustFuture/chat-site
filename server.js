@@ -453,7 +453,6 @@ try {
         status TEXT NOT NULL DEFAULT 'pending', -- pending | active
         status_emoji TEXT NOT NULL DEFAULT '💜',
         status_label TEXT NOT NULL DEFAULT 'Linked',
-        mood_emoji TEXT,
         created_at BIGINT NOT NULL,
         activated_at BIGINT,
         updated_at BIGINT NOT NULL
@@ -470,15 +469,10 @@ try {
         group_members BOOLEAN NOT NULL DEFAULT false,
         aura BOOLEAN NOT NULL DEFAULT true,
         badge BOOLEAN NOT NULL DEFAULT true,
-        allow_ping BOOLEAN NOT NULL DEFAULT true,
-        last_ping_at BIGINT,
         updated_at BIGINT NOT NULL,
         PRIMARY KEY (link_id, user_id)
       )
     `);
-    await pgPool.query(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS mood_emoji TEXT`);
-    await pgPool.query(`ALTER TABLE couple_prefs ADD COLUMN IF NOT EXISTS allow_ping BOOLEAN NOT NULL DEFAULT true`);
-    await pgPool.query(`ALTER TABLE couple_prefs ADD COLUMN IF NOT EXISTS last_ping_at BIGINT`);
   } catch (e) {
     console.warn("[pg-init] couples tables failed:", e?.message || e);
   }
@@ -586,15 +580,13 @@ async function pgGetCoupleSummaryFor(userId) {
       since: Number(link.activated_at || link.created_at) || null,
       statusEmoji: link.status_emoji || "💜",
       statusLabel: link.status_label || "Linked",
-      moodEmoji: link.mood_emoji || "",
       prefs: prefsMe ? {
         enabled: !!prefsMe.enabled,
         showProfile: !!prefsMe.show_profile,
         showMembers: !!prefsMe.show_members,
         groupMembers: !!prefsMe.group_members,
         aura: !!prefsMe.aura,
-        badge: !!prefsMe.badge,
-        allowPing: (prefsMe.allow_ping === undefined ? true : !!prefsMe.allow_ping)
+        badge: !!prefsMe.badge
       } : null,
       partnerPrefs: prefsPartner ? {
         enabled: !!prefsPartner.enabled,
@@ -602,8 +594,7 @@ async function pgGetCoupleSummaryFor(userId) {
         showMembers: !!prefsPartner.show_members,
         groupMembers: !!prefsPartner.group_members,
         aura: !!prefsPartner.aura,
-        badge: !!prefsPartner.badge,
-        allowPing: (prefsPartner.allow_ping === undefined ? true : !!prefsPartner.allow_ping)
+        badge: !!prefsPartner.badge
       } : null
     };
   }
@@ -639,8 +630,8 @@ async function pgUpsertCouplePrefs(linkId, userId, patch) {
   if (!existing) {
     await pgPool.query(
       `
-      INSERT INTO couple_prefs(link_id, user_id, enabled, show_profile, show_members, group_members, aura, badge, allow_ping, last_ping_at, updated_at)
-      VALUES($1,$2,true,true,true,false,true,true,true,NULL,$3)
+      INSERT INTO couple_prefs(link_id, user_id, enabled, show_profile, show_members, group_members, aura, badge, updated_at)
+      VALUES($1,$2,true,true,true,false,true,true,$3)
       ON CONFLICT (link_id, user_id) DO NOTHING
       `,
       [Number(linkId) || 0, Number(userId) || 0, now]
@@ -1031,7 +1022,10 @@ async function syncGoldXpThemeToPg(uid) {
 
 async function pgGetUserByUsername(username) {
   const { rows } = await pgPool.query(
-    `SELECT id, username FROM users WHERE lower(username) = lower($1) LIMIT 1`,
+    `SELECT id, username, password_hash, role, created_at, avatar, avatar_updated, bio, mood, age, gender, last_seen, last_room, last_status,
+            theme, gold, xp, "lastXpMessageAt", "lastDailyLoginAt", "lastGoldTickAt", "lastMessageGoldAt", "lastDailyLoginGoldAt",
+            "lastDiceRollAt", dice_sixes, vibe_tags, header_grad_a, header_grad_b
+       FROM users WHERE lower(username) = lower($1) LIMIT 1`,
     [username]
   );
   return pgRowToUser(rows[0]);
@@ -1039,7 +1033,10 @@ async function pgGetUserByUsername(username) {
 
 async function pgGetUserById(id) {
   const { rows } = await pgPool.query(
-    `SELECT id, username FROM users WHERE id = $1 LIMIT 1`,
+    `SELECT id, username, password_hash, role, created_at, avatar, avatar_updated, bio, mood, age, gender, last_seen, last_room, last_status,
+            theme, gold, xp, "lastXpMessageAt", "lastDailyLoginAt", "lastGoldTickAt", "lastMessageGoldAt", "lastDailyLoginGoldAt",
+            "lastDiceRollAt", dice_sixes, vibe_tags, header_grad_a, header_grad_b
+       FROM users WHERE id = $1 LIMIT 1`,
     [id]
   );
   return pgRowToUser(rows[0]);
@@ -1126,8 +1123,30 @@ async function pgUpsertFromSqliteRow(row) {
   return pgRowToUser(rows[0]);
 }
   const ROLES = ["Guest", "User", "VIP", "Moderator", "Admin", "Co-owner", "Owner"];
+function normalizeRole(role) {
+  const raw = String(role || "").trim();
+  if (!raw) return "User";
+  const key = raw.toLowerCase();
+  const map = {
+    "guest": "Guest",
+    "user": "User",
+    "vip": "VIP",
+    "moderator": "Moderator",
+    "mod": "Moderator",
+    "admin": "Admin",
+    "administrator": "Admin",
+    "coowner": "Co-owner",
+    "co-owner": "Co-owner",
+    "co owner": "Co-owner",
+    "co owners": "Co-owner",
+    "co-owner ": "Co-owner",
+    "owner": "Owner",
+  };
+  return map[key] || (raw[0].toUpperCase() + raw.slice(1));
+}
 function roleRank(role) {
-  const idx = ROLES.indexOf(role);
+  const norm = normalizeRole(role);
+  const idx = ROLES.findIndex(r => r.toLowerCase() === String(norm).toLowerCase());
   return idx === -1 ? 1 : idx;
 }
 const STATUS_ALIASES = {
@@ -1198,7 +1217,8 @@ function findUserByMention(raw, cb) {
   const sqliteGet = (name) =>
     new Promise((resolve) => {
       db.get(
-        `SELECT id, username FROM users WHERE username = ?
+        `SELECT id, username, role FROM users
+         WHERE username = ?
             OR lower(username) = lower(?)
          ORDER BY CASE WHEN username = ? THEN 0 ELSE 1 END
          LIMIT 1`,
@@ -1209,7 +1229,7 @@ function findUserByMention(raw, cb) {
   const sqliteGetById = (id) =>
     new Promise((resolve) => {
       db.get(
-        "SELECT id, username FROM users WHERE id = ? LIMIT 1",
+        "SELECT id, username, role FROM users WHERE id = ? LIMIT 1",
         [id],
         (err, row) => (err ? resolve(null) : resolve(row || null))
       );
@@ -1221,7 +1241,7 @@ function findUserByMention(raw, cb) {
       if (await pgUsersEnabled()) {
         try {
           const { rows } = await pgPool.query(
-            "SELECT id, username FROM users WHERE id = $1 LIMIT 1",
+            "SELECT id, username, role FROM users WHERE id = $1 LIMIT 1",
             [mentionId]
           );
           const row = rows?.[0] || null;
@@ -1239,7 +1259,8 @@ function findUserByMention(raw, cb) {
       if (await pgUsersEnabled()) {
         try {
           const { rows } = await pgPool.query(
-            `SELECT id, username FROM users WHERE username = $1
+            `SELECT id, username, role FROM users
+             WHERE username = $1
                 OR lower(username) = lower($2)
              ORDER BY CASE WHEN username = $3 THEN 0 ELSE 1 END
              LIMIT 1`,
@@ -1266,7 +1287,7 @@ async function findUserByUsername(rawName) {
   if (await pgUsersEnabled()) {
     try {
       const { rows } = await pgPool.query(
-        "SELECT id, username FROM users WHERE lower(username) = lower($1) LIMIT 1",
+        "SELECT id, username, role FROM users WHERE lower(username) = lower($1) LIMIT 1",
         [name]
       );
       if (rows?.[0]) return rows[0];
@@ -1275,7 +1296,7 @@ async function findUserByUsername(rawName) {
     }
   }
   return await dbGetAsync(
-    "SELECT id, username FROM users WHERE lower(username) = lower(?) LIMIT 1",
+    "SELECT id, username, role FROM users WHERE lower(username) = lower(?) LIMIT 1",
     [name]
   ).catch(() => null);
 }
@@ -1326,7 +1347,7 @@ function parseQuotedArgs(raw) {
       }
       continue;
     }
-    if (ch === "" || ch === "'") {
+    if (ch === "\"" || ch === "'") {
       quote = ch;
       continue;
     }
@@ -2718,7 +2739,8 @@ async function fetchUsersByNames(usernames) {
   if (await pgUsersEnabled()) {
     try {
       const { rows } = await pgPool.query(
-        `SELECT id, username FROM users WHERE username = ANY($1::text[])
+        `SELECT id, username FROM users
+         WHERE username = ANY($1::text[])
             OR lower(username) = ANY($2::text[])`,
         [exacts, lowers]
       );
@@ -3674,7 +3696,7 @@ app.post("/register", async (req, res) => {
     req.session.user = {
       id: user.id,
       username: user.username,
-      role: user.role,
+      role: normalizeRole(user.role),
       theme: sanitizeThemeNameServer(user.theme),
       avatar: user.avatar || "",
       avatar_updated: user.avatar_updated ?? null,
@@ -3819,7 +3841,7 @@ app.post("/login", async (req, res) => {
       ]
     ).catch((e) => console.error("PG mirror on login failed:", e));
 
-    req.session.user = { id: row.id, username: row.username, role: row.role, theme, avatar: avatarUrlFromRow(row) || "", avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? null };
+    req.session.user = { id: row.id, username: row.username, role: normalizeRole(row.role), theme, avatar: avatarUrlFromRow(row) || "", avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? null };
 
     await dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]).catch(() => {});
     await awardLoginXp(row.id, row.role);
@@ -3850,7 +3872,7 @@ app.get("/me", async (req, res) => {
 
     // Prefer Postgres
     const { rows } = await pgPool.query(
-      "SELECT id, username FROM users WHERE id = $1 LIMIT 1",
+      "SELECT id, username, role, theme, avatar, avatar_bytes, avatar_mime, avatar_updated FROM users WHERE id = $1 LIMIT 1",
       [req.session.user.id]
     );
 
@@ -3859,7 +3881,7 @@ app.get("/me", async (req, res) => {
     // If not in Postgres yet, fallback to SQLite and (optionally) sync
     if (!row) {
       const srow = await dbGet(
-        "SELECT id, username FROM users WHERE id = ?",
+        "SELECT id, username, role, theme, avatar, vibe_tags, bio, mood, age, gender FROM users WHERE id = ?",
         [req.session.user.id]
       );
       if (!srow) return res.json(null);
@@ -3896,7 +3918,7 @@ app.get("/me", async (req, res) => {
     req.session.user = {
       id: row.id,
       username: row.username,
-      role: row.role,
+      role: normalizeRole(row.role),
       theme,
       avatar: computedAvatar || prevAvatar,
       avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? prevAvatarUpdated,
@@ -4846,7 +4868,7 @@ app.get("/profile", requireLogin, async (req, res) => {
       const payload = {
         id: row.id,
         username: row.username,
-        role: row.role,
+        role: normalizeRole(row.role),
         avatar: avatarUrlFromRow(row),
         bio: row.bio,
         mood: row.mood,
@@ -4872,7 +4894,8 @@ app.get("/profile", requireLogin, async (req, res) => {
 
   // SQLite fallback (original behavior)
   const row = await dbGet(
-    `SELECT id, username FROM users WHERE id = ?`,
+    `SELECT id, username, role, avatar, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp, vibe_tags, header_grad_a, header_grad_b
+     FROM users WHERE id = ?`,
     [userId]
   );
   if (!row) return res.status(404).send("Not found");
@@ -4883,7 +4906,7 @@ app.get("/profile", requireLogin, async (req, res) => {
   const payload = {
     id: row.id,
     username: row.username,
-    role: row.role,
+    role: normalizeRole(row.role),
     avatar: avatarUrlFromRow(row),
     bio: row.bio,
     mood: row.mood,
@@ -4922,7 +4945,9 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
       for (const cand of candidates) {
         try {
           const r = await pgPool.query(
-            `SELECT id, username FROM users WHERE username = $1 OR lower(username) = lower($1)
+            `SELECT id, username, role, avatar, avatar_updated, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp, vibe_tags, header_grad_a, header_grad_b
+             FROM users
+             WHERE username = $1 OR lower(username) = lower($1)
              LIMIT 1`,
             [cand]
           );
@@ -4936,7 +4961,9 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
     if (!row) {
       for (const cand of candidates) {
         row = await dbGet(
-          `SELECT id, username FROM users WHERE username = ? OR lower(username) = lower(?)`,
+          `SELECT id, username, role, avatar, avatar_updated, bio, mood, age, gender, created_at, last_seen, last_room, last_status, gold, xp, vibe_tags, header_grad_a, header_grad_b
+           FROM users
+           WHERE username = ? OR lower(username) = lower(?)`,
           [cand, cand]
         );
         if (row) break;
@@ -4954,7 +4981,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
     const payload = {
       id: row.id,
       username: row.username,
-      role: row.role,
+      role: normalizeRole(row.role),
       avatar: avatarUrlFromRow(row),
       bio: row.bio,
       mood: live?.mood ?? row.mood,
@@ -5042,7 +5069,6 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
               since: Number(cl.activated_at || cl.created_at) || null,
               statusEmoji: cl.status_emoji || "💜",
               statusLabel: cl.status_label || "Linked",
-              moodEmoji: cl.mood_emoji || "",
               badge: canShowCoupleFeature(mePrefs, partnerPrefs, "badge"),
               aura: canShowCoupleFeature(mePrefs, partnerPrefs, "aura"),
               showMembers: canShowCoupleFeature(mePrefs, partnerPrefs, "members"),
@@ -5064,7 +5090,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
 app.get("/api/couples/me", requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
-    const summary = await pgGetCoupleSummaryFor(req.session.user.id);
+    const summary = await pgGetCoupleSummaryFor(req.session.userId);
     return res.json(summary);
   } catch (e) {
     console.warn("[couples] /me failed:", e?.message || e);
@@ -5079,7 +5105,7 @@ app.post("/api/couples/request", requireLogin, async (req, res) => {
     const targetRaw = String(req.body?.targetUsername || "").trim().slice(0, 64);
     const targetName = sanitizeUsername(targetRaw);
     if (!targetName) return res.status(400).send("Bad username");
-    if (targetName.toLowerCase() === String(req.session.user?.username || "").toLowerCase()) {
+    if (targetName.toLowerCase() === String(req.session.username || "").toLowerCase()) {
       return res.status(400).send("You cannot link with yourself");
     }
 
@@ -5087,7 +5113,7 @@ app.post("/api/couples/request", requireLogin, async (req, res) => {
     const target = trg[0];
     if (!target) return res.status(404).send("User not found");
 
-    const meId = Number(req.session.user?.id) || 0;
+    const meId = Number(req.session.userId) || 0;
     const otherId = Number(target.id) || 0;
     const [u1, u2] = orderPair(meId, otherId);
     const now = Date.now();
@@ -5137,7 +5163,7 @@ app.post("/api/couples/respond", requireLogin, async (req, res) => {
     const accept = !!req.body?.accept;
     if (!linkId) return res.status(400).send("Bad request");
 
-    const meId = Number(req.session.user?.id) || 0;
+    const meId = Number(req.session.userId) || 0;
     const { rows } = await pgPool.query(`SELECT * FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
     const link = rows[0];
     if (!link) return res.status(404).send("Not found");
@@ -5164,35 +5190,13 @@ app.post("/api/couples/respond", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/couples/cancel", requireLogin, async (req, res) => {
-  try {
-    if (!PG_READY) return res.status(503).send("DB not ready");
-    const linkId = Number(req.body?.linkId) || 0;
-    if (!linkId) return res.status(400).send("Bad request");
-    const meId = Number(req.session.user?.id) || 0;
-
-    const { rows } = await pgPool.query(`SELECT id, requested_by_id, status FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
-    const link = rows[0];
-    if (!link) return res.status(404).send("Not found");
-    if (link.status !== "pending") return res.status(409).send("Not pending");
-    if (Number(link.requested_by_id) !== meId) return res.status(403).send("Forbidden");
-
-    await pgPool.query(`DELETE FROM couple_links WHERE id=$1`, [linkId]);
-    const summary = await pgGetCoupleSummaryFor(meId);
-    return res.json(summary);
-  } catch (e) {
-    console.warn("[couples] cancel failed:", e?.message || e);
-    return res.status(500).send("Could not cancel");
-  }
-});
-
 app.post("/api/couples/unlink", requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
     const linkId = Number(req.body?.linkId) || 0;
     if (!linkId) return res.status(400).send("Bad request");
 
-    const meId = Number(req.session.user?.id) || 0;
+    const meId = Number(req.session.userId) || 0;
     const { rows } = await pgPool.query(`SELECT user1_id,user2_id FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
     const link = rows[0];
     if (!link) return res.status(404).send("Not found");
@@ -5212,7 +5216,7 @@ app.post("/api/couples/prefs", requireLogin, async (req, res) => {
     if (!PG_READY) return res.status(503).send("DB not ready");
     const linkId = Number(req.body?.linkId) || 0;
     if (!linkId) return res.status(400).send("Bad request");
-    const meId = Number(req.session.user?.id) || 0;
+    const meId = Number(req.session.userId) || 0;
 
     const { rows } = await pgPool.query(`SELECT user1_id,user2_id FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
     const link = rows[0];
@@ -5234,7 +5238,7 @@ app.post("/api/couples/status", requireLogin, async (req, res) => {
     const linkId = Number(req.body?.linkId) || 0;
     if (!linkId) return res.status(400).send("Bad request");
 
-    const meId = Number(req.session.user?.id) || 0;
+    const meId = Number(req.session.userId) || 0;
     const { rows } = await pgPool.query(`SELECT user1_id,user2_id,status FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
     const link = rows[0];
     if (!link) return res.status(404).send("Not found");
@@ -5258,75 +5262,6 @@ app.post("/api/couples/status", requireLogin, async (req, res) => {
   }
 });
 
-
-app.post("/api/couples/mood", requireLogin, async (req, res) => {
-  try {
-    if (!PG_READY) return res.status(503).send("DB not ready");
-    const linkId = Number(req.body?.linkId) || 0;
-    const emoji = String(req.body?.emoji || "").trim();
-    if (!linkId) return res.status(400).send("Bad request");
-    if (emoji.length > 8) return res.status(400).send("Bad emoji");
-
-    const meId = Number(req.session.user?.id) || 0;
-    const { rows } = await pgPool.query(`SELECT id,user1_id,user2_id,status FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
-    const link = rows[0];
-    if (!link) return res.status(404).send("Not found");
-    if (link.status !== "active") return res.status(409).send("Not active");
-    if (Number(link.user1_id) !== meId && Number(link.user2_id) !== meId) return res.status(403).send("Forbidden");
-
-    await pgPool.query(`UPDATE couple_links SET mood_emoji=$1, updated_at=$2 WHERE id=$3`, [emoji || null, Date.now(), linkId]);
-    const summary = await pgGetCoupleSummaryFor(meId);
-    return res.json(summary);
-  } catch (e) {
-    console.warn("[couples] mood failed:", e?.message || e);
-    return res.status(500).send("Could not save mood");
-  }
-});
-
-const COUPLES_PING_COOLDOWN_MS = 10 * 60 * 1000;
-
-app.post("/api/couples/ping", requireLogin, async (req, res) => {
-  try {
-    if (!PG_READY) return res.status(503).send("DB not ready");
-    const linkId = Number(req.body?.linkId) || 0;
-    if (!linkId) return res.status(400).send("Bad request");
-
-    const meId = Number(req.session.user?.id) || 0;
-    const meName = String(req.session.user?.username || "").trim();
-    const { rows } = await pgPool.query(`SELECT * FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
-    const link = rows[0];
-    if (!link) return res.status(404).send("Not found");
-    if (link.status !== "active") return res.status(409).send("Not active");
-    if (Number(link.user1_id) !== meId && Number(link.user2_id) !== meId) return res.status(403).send("Forbidden");
-
-    const partnerId = (Number(link.user1_id) === meId) ? Number(link.user2_id) : Number(link.user1_id);
-
-    // Require both users to have couples enabled and allow ping
-    const prefsMe = await pgGetCouplePrefs(linkId, meId);
-    const prefsPartner = await pgGetCouplePrefs(linkId, partnerId);
-    if (!prefsMe?.enabled || !prefsPartner?.enabled) return res.status(409).send("Couples disabled");
-    if (prefsMe.allow_ping === false) return res.status(409).send("Pings disabled");
-    if (prefsPartner.allow_ping === false) return res.status(409).send("Partner disabled pings");
-
-    const now = Date.now();
-    const last = Number(prefsMe.last_ping_at) || 0;
-    if (last && (now - last) < COUPLES_PING_COOLDOWN_MS) {
-      const waitMs = COUPLES_PING_COOLDOWN_MS - (now - last);
-      return res.status(429).json({ error: "cooldown", waitMs });
-    }
-
-    await pgPool.query(`UPDATE couple_prefs SET last_ping_at=$1, updated_at=$2 WHERE link_id=$3 AND user_id=$4`, [now, now, linkId, meId]);
-
-    const sid = socketIdByUserId.get(partnerId);
-    if (sid) {
-      io.to(sid).emit("couple ping", { from: meName || "Partner" });
-    }
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn("[couples] ping failed:", e?.message || e);
-    return res.status(500).send("Could not ping");
-  }
-});
 
 app.post("/profile/:username/like", requireLogin, async (req, res) => {
   const u = sanitizeUsername(req.params.username);
@@ -7598,7 +7533,7 @@ socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300 } = 
   username = sanitizeUsername(username);
   if (!username) return respond({ ok: false, error: "Invalid username." });
 
-  db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
+  db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
     if (!target) return respond({ ok: false, error: "User not found." });
     if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
@@ -7637,7 +7572,7 @@ socket.on("mod unkick", async ({ username } = {}, ack) => {
   username = sanitizeUsername(username);
   if (!username) return respond({ ok: false, error: "Invalid username." });
 
-  db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
+  db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
     if (!target) return respond({ ok: false, error: "User not found." });
     if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
@@ -7673,7 +7608,7 @@ socket.on("mod unkick", async ({ username } = {}, ack) => {
     const mins = clamp(minutes, 1, 1440);
     const expiresAt = Date.now() + mins * 60 * 1000;
 
-    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+    db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
       if (!target) return respond({ ok: false, error: "User not found." });
       if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
@@ -7709,7 +7644,7 @@ socket.on("mod unkick", async ({ username } = {}, ack) => {
     const mins = Number(minutes);
     const expiresAt = Number.isFinite(mins) && mins > 0 ? Date.now() + mins * 60 * 1000 : null;
 
-    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+    db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
       if (!target) return respond({ ok: false, error: "User not found." });
       if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
@@ -7754,7 +7689,7 @@ if (sid) {
     if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
 
     username = sanitizeUsername(username);
-    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+    db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
       if (!target) return respond({ ok: false, error: "User not found." });
       if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
@@ -7781,7 +7716,7 @@ if (sid) {
     if (!requireMinRole(actorRole, "Admin")) return respond({ ok: false, error: "Not permitted." });
 
     username = sanitizeUsername(username);
-    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+    db.get("SELECT id, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
       if (!target) return respond({ ok: false, error: "User not found." });
       if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
@@ -8049,7 +7984,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
     if (!requireMinRole(actorRole, "Moderator")) return;
 
     username = sanitizeUsername(username);
-	    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+	    db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
       if (!target) return;
       if (!canModerate(actorRole, target.role)) return;
 
