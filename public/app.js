@@ -1176,6 +1176,10 @@ let chatFxPrefs = { ...CHAT_FX_DEFAULTS };
 let chatFxDraft = null;
 let chatFxPrefEls = null;
 let chatFxPreviewBubble = null;
+let chatFxPreviewAvatar = null;
+let chatFxPreviewName = null;
+let chatFxPreviewRoleIcon = null;
+let chatFxPreviewTime = null;
 let chatFxStatus = null;
 let chatFxPrefsLoaded = false;
 let chatFxPrefsLoading = false;
@@ -2741,6 +2745,7 @@ const headerColorA = document.getElementById("headerColorA");
 const headerColorB = document.getElementById("headerColorB");
 const headerColorAText = document.getElementById("headerColorAText");
 const headerColorBText = document.getElementById("headerColorBText");
+let avatarPreviewUrl = null;
 
 // couples (opt-in)
 const couplesPartnerInput = document.getElementById("couplesPartnerInput");
@@ -2782,6 +2787,14 @@ setMsgline(profileLikeMsg, "");
 setMsgline(mediaMsg, "");
 ensureVisibleOnFocus(editBio);
 ensureVisibleOnFocus(changelogBodyInput);
+if (avatarFile && !avatarFile._wired){
+  avatarFile._wired = true;
+  avatarFile.addEventListener("change", () => {
+    const file = avatarFile.files?.[0];
+    if (!file) return;
+    applyAvatarPreview(file);
+  });
+}
 const uiScaleRange = document.getElementById("uiScaleRange");
 const uiScaleValue = document.getElementById("uiScaleValue");
 const uiScaleResetBtn = document.getElementById("uiScaleResetBtn");
@@ -9667,6 +9680,7 @@ async function loadMyProfile(){
   meAvatar.appendChild(avatarNode(p.avatar, p.username, p.role));
   renderLevelProgress(progression, true);
   renderVibeOptions(me.vibe_tags || []);
+  updateChatFxPreviewIdentity(me);
   if (editUsername) editUsername.value = "";
   if (priorRole && priorRole !== p.role) {
     pushNotification({ type: "system", text: `Role updated to ${p.role}.` });
@@ -9694,6 +9708,22 @@ function ensureVisibleOnFocus(el){
       try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch {}
     }, 60);
   });
+}
+
+function clearAvatarPreview(){
+  if (avatarPreviewUrl) {
+    try { URL.revokeObjectURL(avatarPreviewUrl); } catch {}
+    avatarPreviewUrl = null;
+  }
+}
+
+function applyAvatarPreview(file){
+  if (!file || !profileSheetAvatar) return;
+  clearAvatarPreview();
+  avatarPreviewUrl = URL.createObjectURL(file);
+  profileSheetAvatar.innerHTML = "";
+  profileSheetAvatar.appendChild(avatarNode(avatarPreviewUrl, me?.username || "", me?.role || ""));
+  if (profileMsg) profileMsg.textContent = "Avatar selected. Save to apply.";
 }
 
 function renderVibeChips(targetEl, tags){
@@ -10310,6 +10340,20 @@ function updateChatFxPreview(fx){
   chatFxPreviewBubble.closest(".chatFxPreview")?.classList.toggle("disabled", !normalizeChatFx(fx).enabled);
 }
 
+function updateChatFxPreviewIdentity(user = me){
+  if (!chatFxPreviewName || !chatFxPreviewRoleIcon || !chatFxPreviewAvatar) return;
+  const username = user?.username || "You";
+  const role = normalizeRole(user?.role || "User");
+  const roleToken = roleKey(role);
+  chatFxPreviewName.textContent = username;
+  chatFxPreviewName.dataset.role = roleToken;
+  chatFxPreviewName.closest(".name")?.setAttribute("data-role", roleToken);
+  chatFxPreviewRoleIcon.textContent = `${roleIcon(role)} `;
+  chatFxPreviewAvatar.innerHTML = "";
+  chatFxPreviewAvatar.appendChild(avatarNode(user?.avatar || user?.avatarUrl, username, role, username));
+  if (chatFxPreviewTime) chatFxPreviewTime.textContent = "Just now";
+}
+
 function handleChatFxInput(){
   if (!chatFxPrefEls) return;
   const normalized = normalizeChatFx(readChatFxFormRaw());
@@ -10439,7 +10483,12 @@ function wireChatFxPrefs(){
   };
   chatFxPrefEls.densityButtons = Array.from(chatFxPrefEls.densityRow?.querySelectorAll("button") || []);
   chatFxPreviewBubble = q("#chatFxPreviewBubble");
+  chatFxPreviewAvatar = q("#chatFxPreviewAvatar");
+  chatFxPreviewName = q("#chatFxPreviewName");
+  chatFxPreviewRoleIcon = q("#chatFxPreviewRoleIcon");
+  chatFxPreviewTime = q("#chatFxPreviewTime");
   chatFxStatus = chatFxPrefEls.status;
+  updateChatFxPreviewIdentity(me);
 
   chatFxPrefEls.enabled?.addEventListener("change", handleChatFxInput);
   chatFxPrefEls.glow?.addEventListener("change", handleChatFxInput);
@@ -10793,6 +10842,7 @@ function syncCustomizationUI(){
 
 async function openMyProfile(){
   closeDrawers();
+  clearAvatarPreview();
 
   // Try the self profile endpoint first (includes edit fields)
   let res = await fetch("/profile");

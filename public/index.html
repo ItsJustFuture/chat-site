@@ -566,11 +566,13 @@
                     <span class="ico" aria-hidden="true">
                       <svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                     </span>
+                    <span class="iconLabel">Remove</span>
                   </button>
                   <button class="iconPill" id="profileAvatarChangeBtn" type="button" aria-label="Change avatar">
                     <span class="ico" aria-hidden="true">
                       <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h4l2-2h4l2 2h4v14H4V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" stroke="currentColor" stroke-width="2"/></svg>
                     </span>
+                    <span class="iconLabel">Change</span>
                   </button>
                 </div>
               </div>
@@ -925,117 +927,131 @@
                       <div class="small muted">Bubble style, density, and themes.</div>
                     </div>
                   </div>
-                  <div class="customizeSection">
-                    <div class="sectionTitle">Basic</div>
-                    <div class="panelBox" id="chatAppearanceBasic">
-                      <div class="field" data-customize-item data-search="bubble style glow">
-                        <label>Bubble style</label>
-                        <select id="chatFxGlow">
-                          <option value="off">Off</option>
-                          <option value="soft">Soft</option>
-                          <option value="neon">Neon</option>
-                          <option value="strong">Strong</option>
-                        </select>
-                      </div>
-                      <div class="field" data-customize-item data-search="bubble color">
-                        <label>Bubble color</label>
-                        <div class="chatFxColorRow">
-                          <input id="chatFxBubbleColorPick" type="color" value="#2b2d31" aria-label="Pick bubble color">
-                          <input id="chatFxBubbleColor" type="text" placeholder="#RRGGBB">
-                          <button class="pillBtn" id="chatFxBubbleColorClear" type="button">Clear</button>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="message spacing compact">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input type="checkbox" id="chatSpacingCompact">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Compact message spacing</div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <details class="customizeSection" data-section="chat-advanced">
-                    <summary>Advanced</summary>
-                    <div class="panelBox" id="chatAppearanceAdvanced">
-                      <div class="field" data-customize-item data-search="bubble radius">
-                        <label>Bubble radius</label>
-                        <div class="chatFxSliderRow">
-                          <input id="chatFxRadius" type="range" min="6" max="28" step="1">
-                          <span class="chatFxSliderValue" id="chatFxRadiusValue">14</span>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="border thickness">
-                        <label>Border thickness</label>
-                        <div class="chatFxSliderRow">
-                          <input id="chatFxBorder" type="range" min="0" max="3" step="1">
-                          <span class="chatFxSliderValue" id="chatFxBorderValue">0</span>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="shadow glow">
-                        <label>Bubble glow intensity</label>
-                        <div class="chatFxSliderRow">
-                          <input id="chatFxGlass" type="range" min="0" max="1" step="0.05">
-                          <span class="chatFxSliderValue" id="chatFxGlassValue">0</span>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="blur">
-                        <label>Bubble blur</label>
-                        <div class="chatFxSliderRow">
-                          <input id="chatFxBlur" type="range" min="0" max="16" step="1">
-                          <span class="chatFxSliderValue" id="chatFxBlurValue">0</span>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="density spacing">
-                        <label>Message spacing</label>
-                        <div class="chatFxDensityRow" id="chatFxDensity">
-                          <button class="pillBtn" type="button" data-value="compact">Compact</button>
-                          <button class="pillBtn" type="button" data-value="cozy">Cozy</button>
-                          <button class="pillBtn" type="button" data-value="spacious">Spacious</button>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="enable bubbles">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="chatFxEnabled" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Enable custom bubbles</div>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="themes">
-                        <div class="sectionTitle">Themes</div>
-                        <div class="themeFilters">
-                          <button class="pillBtn active" data-theme-filter="all" type="button">All</button>
-                          <button class="pillBtn" data-theme-filter="dark" type="button">Dark</button>
-                          <button class="pillBtn" data-theme-filter="light" type="button">Light</button>
-                        </div>
-                        <div class="themeGrid" id="themeGrid"></div>
-                        <div class="msgline" id="themeMsg"></div>
-                      </div>
-                    </div>
-                  </details>
-                  <div class="chatFxPreviewWrap">
-                    <div class="small" style="margin-bottom:10px;">Preview your chat appearance before saving.</div>
-                    <div class="chatFxPreview" id="chatFxPreview">
-                      <div class="chatFxPreviewRow self">
-                        <div class="bubble chatFxPreviewBubble" id="chatFxPreviewBubble">
-                          <div class="meta">
-                            <div class="name"><span class="roleIco">👑 </span><span class="unameText">You</span></div>
-                            <div class="time">Just now</div>
+                  <div class="customizeChatLayout">
+                    <aside class="customizeChatPreview">
+                      <div class="chatFxPreviewWrap">
+                        <div class="small" style="margin-bottom:10px;">Preview your chat appearance before saving.</div>
+                        <div class="chatFxPreview" id="chatFxPreview">
+                          <div class="chatFxPreviewRow self">
+                            <div class="msgItem self chatFxPreviewItem">
+                              <div class="msgAvatar chatFxPreviewAvatar" id="chatFxPreviewAvatar"></div>
+                              <div class="msgMain">
+                                <div class="bubble chatFxPreviewBubble" id="chatFxPreviewBubble">
+                                  <div class="meta">
+                                    <div class="name">
+                                      <span class="roleIco" id="chatFxPreviewRoleIcon">👑 </span>
+                                      <span class="unameText" id="chatFxPreviewName">You</span>
+                                    </div>
+                                    <div class="time" id="chatFxPreviewTime">Just now</div>
+                                  </div>
+                                  <div class="text" id="chatFxPreviewText">Your message preview bubble.</div>
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                          <div class="text">Your message preview bubble.</div>
+                        </div>
+                        <div class="chatFxActions">
+                          <div class="chatFxStatus" id="chatFxStatus"></div>
+                          <button class="btn" id="chatFxSaveBtn" type="button">Save appearance</button>
                         </div>
                       </div>
+                    </aside>
+                    <div class="customizeChatControls">
+                      <div class="customizeSection">
+                        <div class="sectionTitle">Basic</div>
+                        <div class="panelBox" id="chatAppearanceBasic">
+                          <div class="field" data-customize-item data-search="bubble style glow">
+                            <label>Bubble style</label>
+                            <select id="chatFxGlow">
+                              <option value="off">Off</option>
+                              <option value="soft">Soft</option>
+                              <option value="neon">Neon</option>
+                              <option value="strong">Strong</option>
+                            </select>
+                          </div>
+                          <div class="field" data-customize-item data-search="bubble color">
+                            <label>Bubble color</label>
+                            <div class="chatFxColorRow">
+                              <input id="chatFxBubbleColorPick" type="color" value="#2b2d31" aria-label="Pick bubble color">
+                              <input id="chatFxBubbleColor" type="text" placeholder="#RRGGBB">
+                              <button class="pillBtn" id="chatFxBubbleColorClear" type="button">Clear</button>
+                            </div>
+                          </div>
+                          <div class="field" data-customize-item data-search="message spacing compact">
+                            <div class="toggleRow">
+                              <label class="switch">
+                                <input type="checkbox" id="chatSpacingCompact">
+                                <span class="slider"></span>
+                              </label>
+                              <div class="toggleLabel">Compact message spacing</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <details class="customizeSection" data-section="chat-advanced">
+                        <summary>Advanced</summary>
+                        <div class="panelBox" id="chatAppearanceAdvanced">
+                          <div class="field" data-customize-item data-search="bubble radius">
+                            <label>Bubble radius</label>
+                            <div class="chatFxSliderRow">
+                              <input id="chatFxRadius" type="range" min="6" max="28" step="1">
+                              <span class="chatFxSliderValue" id="chatFxRadiusValue">14</span>
+                            </div>
+                          </div>
+                          <div class="field" data-customize-item data-search="border thickness">
+                            <label>Border thickness</label>
+                            <div class="chatFxSliderRow">
+                              <input id="chatFxBorder" type="range" min="0" max="3" step="1">
+                              <span class="chatFxSliderValue" id="chatFxBorderValue">0</span>
+                            </div>
+                          </div>
+                          <div class="field" data-customize-item data-search="shadow glow">
+                            <label>Bubble glow intensity</label>
+                            <div class="chatFxSliderRow">
+                              <input id="chatFxGlass" type="range" min="0" max="1" step="0.05">
+                              <span class="chatFxSliderValue" id="chatFxGlassValue">0</span>
+                            </div>
+                          </div>
+                          <div class="field" data-customize-item data-search="blur">
+                            <label>Bubble blur</label>
+                            <div class="chatFxSliderRow">
+                              <input id="chatFxBlur" type="range" min="0" max="16" step="1">
+                              <span class="chatFxSliderValue" id="chatFxBlurValue">0</span>
+                            </div>
+                          </div>
+                          <div class="field" data-customize-item data-search="density spacing">
+                            <label>Message spacing</label>
+                            <div class="chatFxDensityRow" id="chatFxDensity">
+                              <button class="pillBtn" type="button" data-value="compact">Compact</button>
+                              <button class="pillBtn" type="button" data-value="cozy">Cozy</button>
+                              <button class="pillBtn" type="button" data-value="spacious">Spacious</button>
+                            </div>
+                          </div>
+                          <div class="field" data-customize-item data-search="enable bubbles">
+                            <div class="toggleRow">
+                              <label class="switch">
+                                <input id="chatFxEnabled" type="checkbox">
+                                <span class="slider"></span>
+                              </label>
+                              <div class="toggleLabel">Enable custom bubbles</div>
+                            </div>
+                          </div>
+                          <div class="field" data-customize-item data-search="themes">
+                            <div class="sectionTitle">Themes</div>
+                            <div class="themeFilters">
+                              <button class="pillBtn active" data-theme-filter="all" type="button">All</button>
+                              <button class="pillBtn" data-theme-filter="dark" type="button">Dark</button>
+                              <button class="pillBtn" data-theme-filter="light" type="button">Light</button>
+                            </div>
+                            <div class="themeGrid" id="themeGrid"></div>
+                            <div class="msgline" id="themeMsg"></div>
+                          </div>
+                        </div>
+                      </details>
+                      <div class="customizeResetRow">
+                        <button class="btn secondary" id="resetChatAppearanceBtn" type="button">Reset this section</button>
+                      </div>
                     </div>
-                    <div class="chatFxActions">
-                      <div class="chatFxStatus" id="chatFxStatus"></div>
-                      <button class="btn" id="chatFxSaveBtn" type="button">Save appearance</button>
-                    </div>
-                  </div>
-                  <div class="customizeResetRow">
-                    <button class="btn secondary" id="resetChatAppearanceBtn" type="button">Reset this section</button>
                   </div>
                 </div>
 

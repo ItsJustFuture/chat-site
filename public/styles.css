@@ -3364,6 +3364,17 @@ body:not(.polish-pack) .tonePicker{
 .chatFxPreview.disabled{ opacity:0.65; }
 .chatFxPreviewRow{ display:flex; justify-content:flex-end; }
 .chatFxPreviewRow .bubble{ max-width:100%; }
+.chatFxPreviewItem{
+  width: 100%;
+  align-items: flex-start;
+}
+.chatFxPreviewItem .msgMain{
+  min-width: 0;
+}
+.chatFxPreviewAvatar{
+  width: 32px;
+  height: 32px;
+}
 .chatFxSliderRow{ display:flex; align-items:center; gap:10px; }
 .chatFxSliderRow input[type="range"]{ flex:1; accent-color:var(--accent, #ff4f6d); }
 .chatFxSliderValue{
@@ -5650,6 +5661,11 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
 }
 .iconPill .ico{ width: 18px; height: 18px; display: inline-block; }
 .iconPill svg{ width: 18px; height: 18px; display:block; }
+.iconPill .iconLabel{
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
 .vibeRow{ display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
 .vibeChip{ background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.08); padding:2px 8px; border-radius:999px; font-size:11px; line-height:1.2; color:var(--text,#fff); }
 .vibeChip.mini{ font-size:10px; opacity:0.85; }
@@ -5889,12 +5905,32 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   margin-top: 8px;
 }
 .chatFxPreviewWrap{
-  margin-top: 14px;
+  margin-top: 0;
 }
 .actionList{
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+.customizeChatLayout{
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.customizeChatControls{
+  flex: 1;
+  min-width: 0;
+}
+.customizeChatPreview{
+  width: 320px;
+  flex: 0 0 320px;
+  position: sticky;
+  top: 12px;
+  align-self: flex-start;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  padding: 12px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
 }
 
 @media (max-width: 760px){
@@ -5906,6 +5942,18 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   }
   .profileInfoCard.profileInfoWide{
     grid-column: span 1;
+  }
+}
+
+@media (max-width: 980px){
+  .customizeChatLayout{
+    flex-direction: column;
+  }
+  .customizeChatPreview{
+    width: 100%;
+    top: 0;
+    z-index: 3;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.2);
   }
 }
 
