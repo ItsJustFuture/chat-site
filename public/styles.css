@@ -2697,14 +2697,23 @@ body.dice-room .sys .diceFace{
 
 
 .attachment{
-  margin-top:6px; border-radius:var(--radiusLg); overflow:hidden;
+  margin-top:6px;
+  border-radius:var(--radiusLg);
+  overflow:hidden;
   border:1px solid var(--border);
   max-width: min(520px, 80vw);
   background:var(--panel);
+  display: inline-block;
 }
-.attachment img, .attachment video{ display:block; width:100%; height:auto; }
+.attachment img, .attachment video{ display:block; max-width:100%; height:auto; }
 .attachment img, .attachment video{ user-select:none; }
 .attachment video{ background:var(--bg); }
+.msg-media-thumb{
+  max-width: clamp(180px, 60vw, 320px);
+  max-height: 240px;
+  border-radius: 12px;
+  object-fit: cover;
+}
 
 .actions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:2px; }
 .reactBtn{
@@ -5391,7 +5400,7 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   color: var(--profileHeaderText, #fff);
   min-height: 120px;
   width: 100%;
-  max-width: 100%;
+  max-width: none;
   --profileHeaderTextShadow: 0 1px 4px rgba(0,0,0,.6);
   --profileHeaderText: #fff;
   --profileHeaderPillBg: rgba(0,0,0,.32);
@@ -5440,14 +5449,14 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
 .profileSheetContent{
   position: relative;
   z-index: 1;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr;
   gap: 12px;
-  padding: 12px;
+  padding: 10px 12px;
   align-items: center;
-  flex-wrap: wrap;
 }
 .profileSheetContent.compact{
-  padding: 10px 12px;
+  padding: 8px 12px;
 }
 .profileAvatarWrap{ position: relative; display: grid; place-items: center; }
 .profileLevelRing{
@@ -5466,9 +5475,9 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   text-shadow: var(--profileHeaderTextShadow, 0 1px 4px rgba(0,0,0,.6));
 }
 .profileSheetAvatarCard{
-  width: 82px;
-  height: 82px;
-  border-radius: 16px;
+  width: 96px;
+  height: 96px;
+  border-radius: 18px;
   overflow: hidden;
   border: 2px solid rgba(255,255,255,.14);
   background: rgba(0,0,0,.40);
@@ -5531,8 +5540,25 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
 .vibeRow{ display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
 .vibeChip{ background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.08); padding:2px 8px; border-radius:999px; font-size:11px; line-height:1.2; color:var(--text,#fff); }
 .vibeChip.mini{ font-size:10px; opacity:0.85; }
-.profileSheetMeta{ color: var(--profileHeaderText, #fff); padding-bottom: 6px; text-shadow: var(--profileHeaderTextShadow, none); flex: 1; min-width: 0; }
-.profileSheetNameRow{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.profileSheetMeta{
+  color: var(--profileHeaderText, #fff);
+  padding-bottom: 4px;
+  text-shadow: var(--profileHeaderTextShadow, none);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  grid-column: 2;
+  grid-row: 1;
+  padding-right: 44px;
+  justify-content: center;
+  min-height: 96px;
+}
+.profileSheetNameRow{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  flex-wrap:wrap;
+}
 .profileSheetName{ font-size: 18px; font-weight: 800; letter-spacing: .2px; text-shadow: var(--profileHeaderTextShadow, none); }
 .profileRoleChip{
   font-size: 11px;
@@ -5547,8 +5573,13 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   display:flex;
   gap:8px;
   flex-wrap:wrap;
-  margin-top:4px;
+  margin-top:auto;
+  order: 5;
 }
+.profileSheetSub{ order: 2; }
+#profileSheetVibes{ order: 3; }
+.profileSheetStats{ order: 4; }
+.profileSheetNameRow{ order: 1; }
 .profileDetail{
   padding:4px 8px;
   border-radius:12px;
@@ -5581,10 +5612,13 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   text-shadow: var(--profileHeaderTextShadow, none);
 }
 .profileHeaderActions{
-  margin-left: auto;
   display: flex;
   gap: 6px;
   align-self: flex-start;
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  margin-left: 0;
 }
 .profileHeaderActions .iconBtn{
   height: 30px;
@@ -5593,8 +5627,8 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   font-size: 16px;
 }
 
-.profileActions{ display:flex; flex-direction:column; gap:8px; margin:6px 0 6px; }
-.profileActionTabs{ width:100%; flex-wrap:nowrap; display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:6px; margin:6px 0 4px; }
+.profileActions{ display:flex; flex-direction:column; gap:4px; margin:4px 0; }
+.profileActionTabs{ width:100%; flex-wrap:nowrap; display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:6px; margin:4px 0 2px; }
 .profileCompactTabs .tab{
   min-height: 34px;
   flex: 1 1 auto;
@@ -5605,13 +5639,41 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
 .profileQuickActions{ display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
 .quickActionGroup{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .quickActionGroup .badge{ height:100%; display:flex; align-items:center; justify-content:center; }
+#dmUserBtn,
+#copyUsernameBtn,
+#likeProfileBtn,
+#addFriendBtn{
+  display: none !important;
+}
+#profileSheetStars{
+  display: none !important;
+}
+#likeCount{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  font-weight: 800;
+  cursor: pointer;
+  user-select:none;
+}
+#likeCount.active{
+  background: color-mix(in srgb, var(--accent) 25%, var(--panel));
+}
+#likeCount[data-disabled="true"]{
+  opacity: 0.6;
+  cursor: default;
+}
 
 .profileSticky{
   position: sticky;
   top: 0;
   z-index: 2;
   background: var(--panel);
-  padding-top: 6px;
+  padding-top: 4px;
   margin: 0 -12px;
   padding-left: 12px;
   padding-right: 12px;
@@ -5808,7 +5870,8 @@ body.polish-pack.polish-animations .msg-new .dmBubble{
 
   /* Keep the main room composer pinned on desktop layouts */
   .chatMain,
-  main.chatMain{
+  main.chatMain,
+  .chat{
     display: grid;
     grid-template-rows: auto 1fr auto;
     height: 100%;

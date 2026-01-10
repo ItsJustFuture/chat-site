@@ -699,6 +699,7 @@ let me = null;
 let progression = { gold: 0, xp: 0, level: 1, xpIntoLevel: 0, xpForNextLevel: 100 };
 let activeProfileTab = "account";
 let currentProfileIsSelf = false;
+let profileLikeState = { count: 0, liked: false, isSelf: false };
 let currentRoom = "main";
 function displayRoomName(room){ return room==="diceroom" ? "Dice Room" : room; }
 
@@ -1883,15 +1884,29 @@ const THEME_LIST = [
 
 const IRIS_LOLA_THEME = "Iris & Lola Neon";
 const IRIS_LOLA_ALLOWED_USERNAMES = ["Iri", "Lola Henderson"];
+const IRIS_LOLA_ALLOWED_USER_IDS = [];
 let onlineUsers = [];
 
+function normalizeUserKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+function getUserId(user) {
+  return user?.id ?? user?.user_id ?? user?.userId ?? null;
+}
+function isIrisLolaAllowedUser(user) {
+  const userId = getUserId(user);
+  if (userId != null && IRIS_LOLA_ALLOWED_USER_IDS.length) {
+    return IRIS_LOLA_ALLOWED_USER_IDS.map(String).includes(String(userId));
+  }
+  const uname = normalizeUserKey(user?.username || "");
+  return IRIS_LOLA_ALLOWED_USERNAMES.some((allowed) => normalizeUserKey(allowed) === uname);
+}
 function isIrisLolaAllowed() {
-  const u = String(me?.username || "");
-  return IRIS_LOLA_ALLOWED_USERNAMES.includes(u);
+  return isIrisLolaAllowedUser(me);
 }
 function bothIrisAndLolaOnline() {
-  const set = new Set((onlineUsers || []).map((n) => String(n)));
-  return IRIS_LOLA_ALLOWED_USERNAMES.every((n) => set.has(n));
+  const set = new Set((onlineUsers || []).map((n) => normalizeUserKey(n)));
+  return IRIS_LOLA_ALLOWED_USERNAMES.every((n) => set.has(normalizeUserKey(n)));
 }
 function updateIrisLolaTogetherClass() {
   const active = document.body?.getAttribute("data-theme") || "";
@@ -4654,6 +4669,67 @@ function closeMediaLightbox(){
 }
 mediaLightboxClose?.addEventListener("click", closeMediaLightbox);
 mediaLightbox?.addEventListener("click", (e) => { if (e.target === mediaLightbox) closeMediaLightbox(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && mediaLightbox?.classList.contains("show")) closeMediaLightbox();
+});
+
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
+const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "m4v", "ogg"]);
+function inferAttachmentKind({ mime, type, url } = {}) {
+  const typeKey = normalizeUserKey(type);
+  if (typeKey === "image" || typeKey === "gif") return "image";
+  if (typeKey === "video") return "video";
+
+  const mimeKey = normalizeUserKey(mime);
+  if (mimeKey.startsWith("image/")) return "image";
+  if (mimeKey.startsWith("video/")) return "video";
+
+  const cleanUrl = String(url || "").split(/[?#]/)[0];
+  const ext = cleanUrl.includes(".") ? cleanUrl.split(".").pop().toLowerCase() : "";
+  if (IMAGE_EXTS.has(ext)) return "image";
+  if (VIDEO_EXTS.has(ext)) return "video";
+  return "file";
+}
+function renderAttachmentNode({ url, mime, type } = {}) {
+  const cleanUrl = String(url || "").trim();
+  if (!cleanUrl) return null;
+  const kind = inferAttachmentKind({ mime, type, url: cleanUrl });
+  const att = document.createElement("div");
+  att.className = "attachment";
+
+  if (kind === "image") {
+    const img = document.createElement("img");
+    img.className = "msg-media-thumb";
+    img.loading = "lazy";
+    img.src = cleanUrl;
+    img.alt = "attachment";
+    img.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openMediaLightbox(cleanUrl, "image");
+    });
+    att.appendChild(img);
+    return att;
+  }
+
+  if (kind === "video") {
+    const video = document.createElement("video");
+    video.className = "msg-media-thumb";
+    video.src = cleanUrl;
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    att.appendChild(video);
+    return att;
+  }
+
+  const a = document.createElement("a");
+  a.href = cleanUrl;
+  a.target = "_blank";
+  a.rel = "noopener";
+  a.textContent = "Download attachment";
+  att.appendChild(a);
+  return att;
+}
 
 function addMessage(m){
   // --- Main chat grouping: consecutive messages from same user are visually grouped ---
@@ -4862,39 +4938,12 @@ function buildMainMsgItem(m, opts){
     ytIds.forEach(id => bubble.appendChild(buildYouTubePreview(id)));
   }
 
-  // Legacy attachment fields (room chat)
-  if(m.attachmentUrl && m.attachmentType){
-    const att=document.createElement("div");
-    att.className="attachment";
-    if(m.attachmentType==="image"){
-      const img=document.createElement("img");
-      img.loading="lazy";
-      img.src=m.attachmentUrl;
-      img.alt="image";
-      img.addEventListener("click", ()=>openMediaLightbox(m.attachmentUrl, "image"));
-      att.appendChild(img);
-    }else{
-      const a=document.createElement("a");
-      a.href=m.attachmentUrl;
-      a.target="_blank";
-      a.rel="noopener";
-      a.textContent="Download attachment";
-      att.appendChild(a);
-    }
-    bubble.appendChild(att);
-  }
-
-  // New attachment object support (parity with DMs)
-  if(m.attachment && (m.attachment.url || m.attachmentUrl)){
-    try {
-      const url = m.attachment.url || m.attachmentUrl;
-      const type = m.attachment.type || m.attachmentType || "";
-      const mime = m.attachment.mime || m.attachmentMime || "";
-      const node = renderAnyAttachment({ url, type, mime }, { mode:"main" });
-      if(node) bubble.appendChild(node);
-    } catch (e) {
-      console.warn("Attachment render failed", e);
-    }
+  const attachmentPayload = m?.attachment?.url
+    ? { url: m.attachment.url, type: m.attachment.type, mime: m.attachment.mime }
+    : (m.attachmentUrl ? { url: m.attachmentUrl, type: m.attachmentType, mime: m.attachmentMime } : null);
+  if (attachmentPayload) {
+    const node = renderAttachmentNode(attachmentPayload);
+    if (node) bubble.appendChild(node);
   }
 
   // Reply preview (inline) if present
@@ -6174,31 +6223,12 @@ function renderDmMessages(threadId){
     text.innerHTML = applyMentions(m.text || "");
     bubble.appendChild(text);
 
-    if(m.attachmentUrl && m.attachmentType){
-      const att=document.createElement("div");
-      att.className="attachment";
-      if(m.attachmentType==="image"){
-        const img=document.createElement("img");
-        img.src=m.attachmentUrl;
-        img.alt="image";
-        img.addEventListener("click", ()=>openMediaLightbox(m.attachmentUrl, "image"));
-        att.appendChild(img);
-      }else if(m.attachmentType==="video"){
-        const v=document.createElement("video");
-        v.src=m.attachmentUrl;
-        v.controls=true;
-        v.playsInline=true;
-        v.addEventListener("click", ()=>openMediaLightbox(m.attachmentUrl, "video"));
-        att.appendChild(v);
-      }else{
-        const a=document.createElement("a");
-        a.href=m.attachmentUrl;
-        a.textContent="Download file";
-        a.target="_blank";
-        a.rel="noopener";
-        att.appendChild(a);
-      }
-      bubble.appendChild(att);
+    const attachmentPayload = m?.attachment?.url
+      ? { url: m.attachment.url, type: m.attachment.type, mime: m.attachment.mime }
+      : (m.attachmentUrl ? { url: m.attachmentUrl, type: m.attachmentType, mime: m.attachmentMime } : null);
+    if (attachmentPayload) {
+      const node = renderAttachmentNode(attachmentPayload);
+      if (node) bubble.appendChild(node);
     }
 
     const meta = document.createElement("div");
@@ -6869,7 +6899,13 @@ profileEditBtn?.addEventListener("click", () => {
   showEditPanel("about");
 });
 profileSettingsBtn?.addEventListener("click", async () => {
-  if (!currentProfileIsSelf) return;
+  if (!currentProfileIsSelf) {
+    if (modalTargetUsername) {
+      closeModal();
+      startDirectMessage(modalTargetUsername, modalTargetUserId);
+    }
+    return;
+  }
   setTab("custom");
   showEditPanel("preferences");
   try { syncSoundPrefsUI(true); } catch {}
@@ -9467,8 +9503,12 @@ function updateProfileActions({ isSelf = false, canModerate = false } = {}){
     profileEditBtn.style.display = isSelf ? "" : "none";
   }
   if (profileSettingsBtn) {
-    profileSettingsBtn.textContent = "⚙️";
-    profileSettingsBtn.style.display = isSelf ? "" : "none";
+    const showDm = !isSelf;
+    profileSettingsBtn.textContent = showDm ? "💬" : "⚙️";
+    profileSettingsBtn.title = showDm ? "Message" : "Preferences";
+    profileSettingsBtn.setAttribute("aria-label", showDm ? "Message user" : "Preferences");
+    profileSettingsBtn.dataset.mode = showDm ? "dm" : "prefs";
+    profileSettingsBtn.style.display = showDm ? "" : "none";
   }
   syncProfileEditUi();
   setMsgline(profileActionMsg, "");
@@ -10341,7 +10381,16 @@ function wireProfileAvatarActions(){
 
 function syncProfileLikes(p = {}, isSelf = false){
   const likesVal = Number(p.likes || 0);
-  if (likeCount) likeCount.textContent = likesVal.toLocaleString();
+  profileLikeState = { count: likesVal, liked: !!p.likedByMe, isSelf: !!isSelf };
+  if (likeCount) {
+    likeCount.textContent = `${p.likedByMe ? "❤️" : "♡"} ${likesVal.toLocaleString()}`;
+    likeCount.classList.toggle("active", !!p.likedByMe);
+    likeCount.setAttribute("aria-pressed", p.likedByMe ? "true" : "false");
+    likeCount.setAttribute("aria-label", isSelf ? "Likes" : (p.likedByMe ? "Unlike profile" : "Like profile"));
+    likeCount.setAttribute("role", "button");
+    likeCount.tabIndex = isSelf ? -1 : 0;
+    likeCount.dataset.disabled = isSelf ? "true" : "false";
+  }
   if (profileSheetLikes) profileSheetLikes.textContent = `${isSelf ? "❤️" : (p.likedByMe ? "❤️" : "♡")} ${likesVal.toLocaleString()}`;
   if (likeProfileBtn) {
     likeProfileBtn.disabled = !!isSelf;
@@ -10493,30 +10542,53 @@ async function openMemberProfile(username){
   openModal();
 }
 
-likeProfileBtn?.addEventListener("click", async () => {
-  if (!modalTargetUsername || likeProfileBtn.disabled) return;
+let likeToggleInFlight = false;
+async function toggleProfileLike() {
+  if (!modalTargetUsername || likeToggleInFlight || profileLikeState.isSelf) return;
   setMsgline(profileLikeMsg, "");
-  likeProfileBtn.disabled = true;
+  likeToggleInFlight = true;
+  const prev = { ...profileLikeState };
+  const nextLiked = !prev.liked;
+  const nextCount = Math.max(0, prev.count + (nextLiked ? 1 : -1));
+  syncProfileLikes({ likes: nextCount, likedByMe: nextLiked }, false);
+  if (likeProfileBtn) likeProfileBtn.disabled = true;
+
   try {
     const res = await fetch(`/profile/${encodeURIComponent(modalTargetUsername)}/like`, { method: "POST" });
     if (!res.ok) {
       const t = await res.text().catch(() => "");
-      setMsgline(profileLikeMsg, t || "Could not update like.");
-      return;
+      throw new Error(t || "Could not update like.");
     }
     const data = await res.json();
     syncProfileLikes({ likes: data.likes, likedByMe: data.liked }, false);
   } catch (err) {
-    setMsgline(profileLikeMsg, "Could not update like.");
+    syncProfileLikes({ likes: prev.count, likedByMe: prev.liked }, false);
+    setMsgline(profileLikeMsg, err?.message || "Could not update like.");
   } finally {
-    const isSelf = normKey(modalTargetUsername) === normKey(me?.username);
-    likeProfileBtn.disabled = isSelf;
+    likeToggleInFlight = false;
+    if (likeProfileBtn) likeProfileBtn.disabled = profileLikeState.isSelf;
   }
+}
+
+likeProfileBtn?.addEventListener("click", async () => {
+  await toggleProfileLike();
 });
 
 addFriendBtn?.addEventListener("click", () => {
   if (addFriendBtn.disabled) return;
   setMsgline(profileActionMsg, "Friend system coming soon.");
+});
+
+likeCount?.addEventListener("click", async () => {
+  if (profileLikeState.isSelf) return;
+  await toggleProfileLike();
+});
+likeCount?.addEventListener("keydown", async (e) => {
+  if (profileLikeState.isSelf) return;
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    await toggleProfileLike();
+  }
 });
 
 // media actions
@@ -11477,7 +11549,7 @@ function previewTheme(themeId, seconds = 10) {
 
 function isThemeVisible(themeName) {
   if (themeName === "Iris & Lola Neon") {
-    return ["Iri", "Lola Henderson"].includes(currentUser?.username);
+    return isIrisLolaAllowedUser(currentUser || me);
   }
   return true;
 }

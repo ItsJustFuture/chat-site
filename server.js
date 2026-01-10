@@ -26,6 +26,7 @@ async function setRoleEverywhere(targetId, username, role) {
 const PRIVATE_THEME_ALLOWLIST = {
   "Iris & Lola Neon": {
     users: ["Iri", "Lola Henderson"],
+    userIds: [],
     requireBothOnline: false
   }
 };
@@ -7560,14 +7561,25 @@ Promise.allSettled([migrationsReady, pgInitPromise]).then((results) => {
 });
 
 
+function normalizeUserKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
 function areIrisAndLolaOnline() {
-  return ONLINE_USERS.has("Iri") && ONLINE_USERS.has("Lola Henderson");
+  const online = new Set(Array.from(ONLINE_USERS).map((name) => normalizeUserKey(name)));
+  return online.has(normalizeUserKey("Iri")) && online.has(normalizeUserKey("Lola Henderson"));
 }
 
 function canUseTheme(user, themeName) {
   const rule = PRIVATE_THEME_ALLOWLIST[themeName];
   if (rule) {
-    if (!rule.users.includes(user.username)) return false;
+    const userId = user?.id ?? user?.user_id ?? user?.userId;
+    if (userId != null && Array.isArray(rule.userIds) && rule.userIds.length) {
+      if (!rule.userIds.map(String).includes(String(userId))) return false;
+    } else {
+      const uname = normalizeUserKey(user?.username || "");
+      const allowed = (rule.users || []).some((name) => normalizeUserKey(name) === uname);
+      if (!allowed) return false;
+    }
     if (rule.requireBothOnline && !areIrisAndLolaOnline()) return false;
     return true;
   }
