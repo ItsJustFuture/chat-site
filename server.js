@@ -3865,8 +3865,20 @@ app.get("/me", async (req, res) => {
     const prevAvatarUpdated = req.session?.user?.avatar_updated ?? null;
 
     // Prefer Postgres
+    // IMPORTANT: /me is used to hydrate the session and client state.
+    // We MUST select role/theme and avatar fields; otherwise we may overwrite
+    // req.session.user.role/theme with undefined, which breaks permission gating.
     const { rows } = await pgPool.query(
-      "SELECT id, username FROM users WHERE id = $1 LIMIT 1",
+      `SELECT id,
+              username,
+              role,
+              theme,
+              avatar,
+              avatar_updated,
+              avatar_bytes
+         FROM users
+        WHERE id = $1
+        LIMIT 1`,
       [req.session.user.id]
     );
 
