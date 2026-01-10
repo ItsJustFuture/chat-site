@@ -3773,6 +3773,33 @@ body.lockScroll{ overflow:hidden; }
 .dmRow{ width:100%; display:flex; align-items:flex-start; box-sizing:border-box; min-width:0; }
 .dmRow.self{ justify-content:flex-end; }
 
+/* DM message avatars (pfps) */
+.dmAvatarSlot{
+  width:40px;
+  flex: 0 0 40px;
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  padding-right:6px;
+  box-sizing:border-box;
+}
+.dmAvatarSlot.empty{ visibility:hidden; }
+.dmAvatarSpacer{ width:30px; height:30px; }
+.dmMsgAvatar{ width:30px; height:30px; }
+
+/* Self messages don't need a left avatar column */
+.dmRow.self .dmAvatarSlot{ display:none; }
+
+body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
+  animation: msgArrival 160ms ease;
+  transform-origin: center;
+}
+@media (prefers-reduced-motion: reduce){
+  body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
+    animation:none;
+  }
+}
+
 .dmBubbleWrap{
   display:flex;
   flex-direction:column;

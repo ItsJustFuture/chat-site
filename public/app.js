@@ -1724,10 +1724,18 @@ async function getAvatarUrl(username) {
 }
 
 function otherParty(thread) {
+  if (!thread) return "";
+  if (thread.otherUser?.username) return thread.otherUser.username;
+
+  const meKey = normKey(me?.username);
   const parts = Array.isArray(thread.participants) ? thread.participants : [];
-  const meName = (me && me.username) ? me.username : "";
-  const other = parts.find(p => p && p !== meName) || parts[0] || "";
-  return other;
+  const details = Array.isArray(thread.participantsDetail) ? thread.participantsDetail.map(p => p?.username).filter(Boolean) : [];
+
+  const all = [...parts, ...details].filter(Boolean);
+  for (const n of all) {
+    if (normKey(n) !== meKey) return n;
+  }
+  return all[0] || "";
 }
 
 function isDirectThread(thread) {
@@ -5732,11 +5740,33 @@ function toggleDmSettingsMenu(){
 }
 
 function threadLabel(t){
-  const parts = (t.participants || []);
-  const others = parts.filter(p => p !== me?.username);
+  if (!t) return "Direct Message";
+
+  // Prefer explicit "other user" if provided by the server.
+  const otherUser = t.otherUser?.username || t.other_user?.username || null;
+  if (!t.is_group && otherUser) return otherUser;
+
+  // Fall back to participants / participantsDetail (case-insensitive vs me).
+  const meKey = normKey(me?.username);
+  const namesFromParticipants = Array.isArray(t.participants) ? t.participants : [];
+  const namesFromDetail = Array.isArray(t.participantsDetail) ? t.participantsDetail.map(p => p?.username).filter(Boolean) : [];
+  const all = [...namesFromParticipants, ...namesFromDetail].filter(Boolean);
+
+  // Deduplicate, preserve order
+  const seen = new Set();
+  const parts = [];
+  for (const n of all) {
+    const k = normKey(n);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    parts.push(n);
+  }
+
+  const others = parts.filter(p => normKey(p) !== meKey);
+
   if (t.title) return t.title;
   if (t.is_group) return others.join(", ") || "Group chat";
-  return others[0] || "Direct Message";
+  return others[0] || otherUser || "Direct Message";
 }
 
 function lockBodyScroll(lock){
@@ -5867,27 +5897,65 @@ function renderDirectThreads(){
 
   list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
   for (const t of list) {
-    const other = otherParty(t) || "?";
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "dmAvatarBtn" + (String(activeDmId)===String(t.id) ? " active" : "");
-    btn.title = other ? `DM with ${other}` : "DM";
+    const other = otherParty(t) || threadLabel(t) || "?";
 
-    const wrap = document.createElement("div");
-    wrap.className = "dmAvatarWrap";
+    // Resolve avatar from the DM thread payload first, then fall back to cached / profile fetch.
+    const fromDetail = Array.isArray(t.participantsDetail)
+      ? (t.participantsDetail.find(p => normKey(p?.username) === normKey(other)) || null)
+      : null;
+    const avatarUrl = t.otherUser?.avatar || fromDetail?.avatar || avatarCache?.[other] || null;
 
     const meta = getUserMeta(other);
-    const av = makeAvatarEl({ username: meta.username || other, role: meta.role, avatarUrl: meta.avatarUrl, size: 34 });
-    av.classList.add("dmAvatar");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "dmThreadBtn";
+    btn.dataset.threadId = t.id;
 
-    const badge = document.createElement("span");
+    const wrap = document.createElement("div");
+    wrap.className = "dmThreadRow";
+
+    const av = makeAvatarEl({
+      username: meta.username || other,
+      role: meta.role || "member",
+      avatarUrl: meta.avatarUrl || avatarUrl || null,
+      size: 34
+    });
+    av.classList.add("dmThreadAvatar");
+
+    const body = document.createElement("div");
+    body.className = "dmThreadBody";
+
+    const top = document.createElement("div");
+    top.className = "dmThreadTop";
+
+    const name = document.createElement("div");
+    name.className = "dmThreadName";
+    name.textContent = other;
+
+    const ts = document.createElement("div");
+    ts.className = "dmThreadTs";
+    ts.textContent = formatRelativeTime(t.last_ts || t.created_at);
+
+    top.appendChild(name);
+    top.appendChild(ts);
+
+    const preview = document.createElement("div");
+    preview.className = "dmThreadPreview";
+    preview.textContent = (t.last_text || "").trim() || "—";
+
+    body.appendChild(top);
+    body.appendChild(preview);
+
+    const badge = document.createElement("div");
     badge.className = "dmUnreadBadge";
-    const lastRead = Number(dmLastRead[t.id] || 0);
-    const lastTs = Number(t.last_ts || 0);
-    const unread = dmUnreadThreads.has(t.id) || (lastTs > lastRead);
-    badge.style.display = unread ? "block" : "none";
+    const uc = Number(t.unreadCount || 0);
+    if (uc > 0) {
+      badge.textContent = String(Math.min(99, uc));
+      badge.classList.add("show");
+    }
 
     wrap.appendChild(av);
+    wrap.appendChild(body);
     wrap.appendChild(badge);
     btn.appendChild(wrap);
 
@@ -5896,8 +5964,27 @@ function renderDirectThreads(){
       openDmPanel();
       openDmThread(t.id);
     });
+
+    // If we still don't have a URL, fetch in the background and update this thread avatar.
+    if (other && !meta.avatarUrl && !avatarUrl) {
+      getAvatarUrl(other).then((u)=>{
+        if (!u) return;
+        try{
+          const img = av.querySelector("img.avatarImg");
+          if (img) img.src = u;
+          else {
+            // rebuild avatar element with the fetched URL
+            const repl = makeAvatarEl({ username: meta.username || other, role: meta.role || "member", avatarUrl: u, size: 34 });
+            repl.classList.add("dmThreadAvatar");
+            av.replaceWith(repl);
+          }
+        }catch{}
+      }).catch(()=>{});
+    }
+
     stripEl.appendChild(btn);
   }
+
   updateDmThreadPlaceholderVisibility();
 }
 
@@ -5972,7 +6059,27 @@ async function loadDmThreads(){
       return;
     }
     const raw = await res.json();
-    dmThreads = (raw || []).map((t) => ({ ...t, is_group: !!t.is_group }));
+
+dmThreads = (raw || []).map((t) => ({ ...t, is_group: !!t.is_group }));
+
+// Seed the avatar cache from DM thread payloads so DMs can render pfps immediately.
+try{
+  let touched = false;
+  for (const t of dmThreads) {
+    const detail = Array.isArray(t.participantsDetail) ? t.participantsDetail : [];
+    for (const p of detail) {
+      if (p?.username && p?.avatar && !avatarCache[p.username]) {
+        avatarCache[p.username] = p.avatar;
+        touched = true;
+      }
+    }
+    if (t?.otherUser?.username && t?.otherUser?.avatar && !avatarCache[t.otherUser.username]) {
+      avatarCache[t.otherUser.username] = t.otherUser.avatar;
+      touched = true;
+    }
+  }
+  if (touched) saveJson(AVATAR_CACHE_KEY, avatarCache);
+}catch{}
     refreshDmBadgesFromThreads();
     syncDmTabUi();
     renderDmThreads();
@@ -6082,6 +6189,7 @@ function renderDmMessages(threadId){
 
   dmMessagesEl.innerHTML = "";
   const msgsArr = dmMessages.get(threadId) || [];
+  const threadMeta = dmThreads.find(t => String(t.id) === String(threadId));
 
   // For read receipts, we only show "Seen" under the latest message YOU sent.
   let lastSelfMid = null;
@@ -6128,6 +6236,60 @@ function renderDmMessages(threadId){
     const row = document.createElement("div");
     row.className = "dmRow" + (isSelf ? " self" : "") + gClass;
     row.dataset.dmMid = m.messageId || m.id;
+
+// Avatar column (non-self). Keep spacing consistent for grouped messages.
+const threadMeta = dmThreads.find(t => String(t.id) === String(threadId));
+if (!isSelf) {
+  const slot = document.createElement("div");
+  slot.className = "dmAvatarSlot";
+
+  const prevUserKey = normKey(prev?.user || prev?.username || resolveMessageAuthor(prev) || "");
+  const curUserKey  = normKey(m?.user || m?.username || authorName || "");
+  const showAvatar = !prev || prevUserKey !== curUserKey;
+
+  if (showAvatar) {
+    const fromDetail = Array.isArray(threadMeta?.participantsDetail)
+      ? (threadMeta.participantsDetail.find(p => normKey(p?.username) === normKey(authorName)) || null)
+      : null;
+
+    const avatarUrl = threadMeta?.otherUser?.username && normKey(threadMeta.otherUser.username) === normKey(authorName)
+      ? threadMeta.otherUser.avatar
+      : (fromDetail?.avatar || avatarCache?.[authorName] || null);
+
+    const meta = getUserMeta(authorName);
+
+    const av = makeAvatarEl({
+      username: meta.username || authorName,
+      role: meta.role || "member",
+      avatarUrl: meta.avatarUrl || avatarUrl || null,
+      size: 30
+    });
+    av.classList.add("dmMsgAvatar");
+    slot.appendChild(av);
+
+    // Fetch avatar if we don't have it yet (background)
+    if (authorName && !meta.avatarUrl && !avatarUrl) {
+      getAvatarUrl(authorName).then((u)=>{
+        if (!u) return;
+        try{
+          const img = av.querySelector("img.avatarImg");
+          if (img) img.src = u;
+          else {
+            const repl = makeAvatarEl({ username: meta.username || authorName, role: meta.role || "member", avatarUrl: u, size: 30 });
+            repl.classList.add("dmMsgAvatar");
+            av.replaceWith(repl);
+          }
+        }catch{}
+      }).catch(()=>{});
+    }
+  } else {
+    slot.classList.add("empty");
+    // Keep layout width but hide the avatar for grouped messages.
+    slot.innerHTML = "<div class='dmAvatarSpacer'></div>";
+  }
+
+  row.appendChild(slot);
+}
 
     // Actions bar (reveals below the bubble; does NOT reserve horizontal space)
     const actions = document.createElement("div");
@@ -6393,32 +6555,64 @@ function setDmMeta(thread){
     updatePresenceAuras();
     return;
   }
+
   dmMetaTitle.textContent = threadLabel(thread);
-  const names = thread.participants || [];
+
+  const namesFromParticipants = Array.isArray(thread.participants) ? thread.participants : [];
+  const namesFromDetail = Array.isArray(thread.participantsDetail) ? thread.participantsDetail.map(p => p?.username).filter(Boolean) : [];
+  const names = [...namesFromParticipants, ...namesFromDetail].filter(Boolean);
+
+  // Track who is "in" this DM for presence auras (exclude self)
   activeDmUsers = new Set(names.map(normKey));
   activeDmUsers.delete(normKey(me?.username));
+
+  // "People" line
   dmMetaPeople.textContent = thread.is_group
     ? `${names.length} member${names.length === 1 ? "" : "s"}`
-    : names.join(", ");
+    : names.filter(n => normKey(n) !== normKey(me?.username)).join(", ");
 
-  // Show the active thread participant avatar in the DM header.
-  // For direct DMs: show the other person's avatar.
-  // For group DMs: show a fallback avatar derived from the thread label.
+  // Avatar in DM header:
+  // - direct: other user's avatar
+  // - group: stable fallback avatar
   if (dmMetaAvatar) {
     dmMetaAvatar.innerHTML = "";
     try{
       if (!thread.is_group) {
-        const parts = (thread.participants || []);
-        const other = parts.find(p => String(p||"").toLowerCase() !== String(me?.username||"").toLowerCase());
-        const meta = getUserMeta(other);
-        dmMetaAvatar.appendChild(makeAvatarEl({
-          username: meta.username || other,
+        const otherName = thread.otherUser?.username
+          || (names.find(n => normKey(n) !== normKey(me?.username)) || null);
+
+        const fromDetail = Array.isArray(thread.participantsDetail)
+          ? (thread.participantsDetail.find(p => normKey(p?.username) === normKey(otherName)) || null)
+          : null;
+
+        const avatarUrl = thread.otherUser?.avatar || fromDetail?.avatar || avatarCache?.[otherName] || null;
+        const meta = getUserMeta(otherName);
+
+        const av = makeAvatarEl({
+          username: meta.username || otherName || "?",
           role: meta.role || "member",
-          avatarUrl: meta.avatarUrl || null,
+          avatarUrl: meta.avatarUrl || avatarUrl || null,
           size: 32
-        }));
+        });
+
+        dmMetaAvatar.appendChild(av);
+
+        // If we still don't have a URL, try fetching it in the background.
+        if (otherName && !meta.avatarUrl && !avatarUrl) {
+          getAvatarUrl(otherName).then((u) => {
+            if (!u) return;
+            // refresh only if still on same thread
+            if (String(activeDmId) !== String(thread.id)) return;
+            dmMetaAvatar.innerHTML = "";
+            dmMetaAvatar.appendChild(makeAvatarEl({
+              username: meta.username || otherName,
+              role: meta.role || "member",
+              avatarUrl: u,
+              size: 32
+            }));
+          }).catch(()=>{});
+        }
       } else {
-        // group: use a stable fallback avatar based on thread label
         dmMetaAvatar.appendChild(makeAvatarEl({
           username: threadLabel(thread),
           role: "member",
@@ -6428,7 +6622,6 @@ function setDmMeta(thread){
       }
     }catch{}
   }
-  updatePresenceAuras();
 }
 
 function openDmThread(threadId){
