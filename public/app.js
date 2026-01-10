@@ -27,6 +27,52 @@ function safeString(value, fallback = "") {
   return String(value);
 }
 
+function triggerReactionBounce(btn, removing = false){
+  if (!btn || !btn.classList || PREFERS_REDUCED_MOTION) return;
+  const addClass = removing ? "react-bounce-remove" : "react-bounce-add";
+  btn.classList.remove("react-bounce-add", "react-bounce-remove");
+  void btn.offsetWidth;
+  btn.classList.add(addClass);
+  btn.addEventListener("animationend", () => btn.classList.remove(addClass), { once:true });
+}
+
+function withFlip(container, keyAttr, updateFn){
+  if (!container || typeof updateFn !== "function" || PREFERS_REDUCED_MOTION) {
+    updateFn?.();
+    return;
+  }
+  const firstRects = new Map();
+  container.querySelectorAll(`[${keyAttr}]`).forEach((el) => {
+    const key = el.getAttribute(keyAttr);
+    if (!key) return;
+    firstRects.set(key, el.getBoundingClientRect());
+  });
+
+  updateFn();
+
+  container.querySelectorAll(`[${keyAttr}]`).forEach((el) => {
+    const key = el.getAttribute(keyAttr);
+    if (!key || !firstRects.has(key)) return;
+    const first = firstRects.get(key);
+    const last = el.getBoundingClientRect();
+    const dx = first.left - last.left;
+    const dy = first.top - last.top;
+    if (!dx && !dy) return;
+    el.classList.remove("anim-flip");
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    el.classList.add("anim-flip");
+    requestAnimationFrame(() => {
+      el.style.transform = "";
+    });
+    const cleanup = () => {
+      el.classList.remove("anim-flip");
+      el.style.transform = "";
+    };
+    el.addEventListener("transitionend", cleanup, { once:true });
+    setTimeout(cleanup, 220);
+  });
+}
+
 // ---- Toasts (lightweight inline confirmations)
 let toastStackEl = null;
 function ensureToastStack(){
@@ -2138,6 +2184,26 @@ const commandPopupTitle = document.getElementById("commandPopupTitle");
 const commandPopupBody = document.getElementById("commandPopupBody");
 const commandPopupClose = document.getElementById("commandPopupClose");
 
+function setTypingIndicator(text = ""){
+  if (!typingEl) return;
+  typingEl.innerHTML = "";
+  const clean = String(text || "").replace(/(?:\.{3}|…)\s*$/, "").trim();
+  if (!clean) return;
+  const label = document.createElement("span");
+  label.className = "typingText";
+  label.textContent = clean;
+  const dots = document.createElement("span");
+  dots.className = "typingDots";
+  dots.setAttribute("aria-hidden", "true");
+  for (let i = 0; i < 3; i++) {
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dots.appendChild(dot);
+  }
+  typingEl.appendChild(label);
+  typingEl.appendChild(dots);
+}
+
 // --- Draft persistence (per room & per DM) ---
 function roomDraftKey(room){ return `draft:room:${sanitizeRoomClient(room||"main")}`; }
 function dmDraftKey(threadId){ return `draft:dm:${String(threadId||"")}`; }
@@ -3770,7 +3836,7 @@ function getUserMeta(username){
 
 function clearMsgs(){
   msgs.innerHTML="";
-  typingEl.textContent="";
+  setTypingIndicator("");
   msgIndex.length=0;
   typingUsers = new Set();
   updatePresenceAuras();
@@ -4597,6 +4663,7 @@ function openReactionMenu(messageId, anchorEl, rowEl){
     b.type = "button";
     b.textContent = em;
     b.onclick = ()=>{
+      triggerReactionBounce(b, false);
       if (reactionMenuMode === "dm") {
         socket?.emit("dm reaction", { threadId: reactionMenuThreadId, messageId, emoji: em });
       } else {
@@ -4639,6 +4706,7 @@ function openDmReactionMenu(threadId, messageId, anchorEl, rowEl){
     b.type = "button";
     b.textContent = em;
     b.onclick = ()=>{
+      triggerReactionBounce(b, false);
       socket?.emit("dm reaction", { threadId, messageId, emoji: em });
       closeReactionMenu();
     };
@@ -5204,6 +5272,17 @@ function renderReactions(messageId, reactionsMap){
     pill.style.cursor = "pointer";
     pill.addEventListener("click", (e)=>{
       e.stopPropagation();
+      let removing = false;
+      if (me?.username) {
+        const myKey = normKey(me.username);
+        for (const user in reactionsCache[messageId] || {}) {
+          if (normKey(user) === myKey) {
+            removing = reactionsCache[messageId][user] === emoji;
+            break;
+          }
+        }
+      }
+      triggerReactionBounce(pill, removing);
       socket?.emit("reaction", { messageId, emoji });
     });
     container.appendChild(pill);
@@ -5234,6 +5313,17 @@ function renderDmReactions(messageId, reactionsMap){
       // Use current active DM thread id
       const tid = (window.activeDmId != null) ? Number(window.activeDmId) : null;
       if (!Number.isInteger(tid)) return;
+      let removing = false;
+      if (me?.username) {
+        const myKey = normKey(me.username);
+        for (const user in dmReactionsCache[messageId] || {}) {
+          if (normKey(user) === myKey) {
+            removing = dmReactionsCache[messageId][user] === emoji;
+            break;
+          }
+        }
+      }
+      triggerReactionBounce(pill, removing);
       socket?.emit("dm reaction", { threadId: tid, messageId, emoji });
     });
     container.appendChild(pill);
@@ -5520,85 +5610,88 @@ function renderMembers(users){
   lastUsers = reorderCouplesInMembers(users || []);
   cleanupRecentDiceRolls();
   refreshModTargetOptions(lastUsers);
-  memberList.innerHTML="";
-  const presentNames = new Set((lastUsers||[]).map(u=>u?.name).filter(Boolean));
-  lastUsers.forEach(u=>{
-    updateRoleCache(u.username || u.name, u.role);
-    if (u?.chatFx) updateUserFxMap(u.name, u.chatFx);
-    const row=document.createElement("div");
-    row.className="mItem";
-    row.dataset.username = u.name;
+  withFlip(memberList, "data-flip-key", () => {
+    memberList.innerHTML="";
+    const presentNames = new Set((lastUsers||[]).map(u=>u?.name).filter(Boolean));
+    lastUsers.forEach(u=>{
+      updateRoleCache(u.username || u.name, u.role);
+      if (u?.chatFx) updateUserFxMap(u.name, u.chatFx);
+      const row=document.createElement("div");
+      row.className="mItem";
+      row.dataset.username = u.name;
+      row.dataset.flipKey = u.name;
 
-    const av=document.createElement("div");
-    av.className="mAvatar";
-    const partnerPresent = !!(u?.couple?.partner && presentNames.has(u.couple.partner));
-    if (u?.couple?.aura && partnerPresent) av.classList.add("coupleAura");
-    av.appendChild(avatarNode(u.avatar, u.name, u.role));
+      const av=document.createElement("div");
+      av.className="mAvatar";
+      const partnerPresent = !!(u?.couple?.partner && presentNames.has(u.couple.partner));
+      if (u?.couple?.aura && partnerPresent) av.classList.add("coupleAura");
+      av.appendChild(avatarNode(u.avatar, u.name, u.role));
 
-    const dot=document.createElement("div");
-    dot.className="dot";
-    const statusLabel = normalizeStatusLabel(u.status, "Online");
-    dot.style.background=statusDotColor(statusLabel);
+      const dot=document.createElement("div");
+      dot.className="dot";
+      const statusLabel = normalizeStatusLabel(u.status, "Online");
+      dot.style.background=statusDotColor(statusLabel);
 
-    const meta=document.createElement("div");
-    meta.className="mMeta";
+      const meta=document.createElement("div");
+      meta.className="mMeta";
 
-    const name=document.createElement("div");
-    name.className="mName";
-    if (u?.couple?.badge && u?.couple?.partner) {
-      const cb = document.createElement("span");
-      cb.className = "coupleBadge";
-      cb.title = `${u.couple.statusEmoji||"💜"} ${u.couple.statusLabel||"Linked"}: ${u.couple.partner}`;
-      cb.textContent = String(u.couple.statusEmoji || "💜");
-      name.appendChild(cb);
-    }
-    const ico = document.createElement("span");
-    ico.className = "roleIco";
-    ico.textContent = `${roleIcon(u.role)} `;
-    const uname = document.createElement("span");
-    uname.className = "unameText";
-    uname.textContent = String(u.name || "");
-    name.appendChild(ico);
-    name.appendChild(uname);
-    try{ applyNameFxToEl(uname, userFxMap[u.name] || u.chatFx || {}); }catch{}
+      const name=document.createElement("div");
+      name.className="mName";
+      if (u?.couple?.badge && u?.couple?.partner) {
+        const cb = document.createElement("span");
+        cb.className = "coupleBadge";
+        cb.title = `${u.couple.statusEmoji||"💜"} ${u.couple.statusLabel||"Linked"}: ${u.couple.partner}`;
+        cb.textContent = String(u.couple.statusEmoji || "💜");
+        name.appendChild(cb);
+      }
+      const ico = document.createElement("span");
+      ico.className = "roleIco";
+      ico.textContent = `${roleIcon(u.role)} `;
+      const uname = document.createElement("span");
+      uname.className = "unameText";
+      uname.textContent = String(u.name || "");
+      name.appendChild(ico);
+      name.appendChild(uname);
+      try{ applyNameFxToEl(uname, userFxMap[u.name] || u.chatFx || {}); }catch{}
 
-    const sub=document.createElement("div");
-    sub.className="mSub";
-    sub.textContent=`${u.role} • ${statusLabel}${u.mood?(" • "+u.mood):""}`;
+      const sub=document.createElement("div");
+      sub.className="mSub";
+      sub.textContent=`${u.role} • ${statusLabel}${u.mood?(" • "+u.mood):""}`;
 
-    meta.appendChild(name);
-    meta.appendChild(sub);
+      meta.appendChild(name);
+      meta.appendChild(sub);
 
-    const vibes = sanitizeVibeTagsClient(u.vibe_tags);
-    if (vibes.length) {
-      const vibeRow = document.createElement("div");
-      vibeRow.className = "vibeRow";
-      vibes.forEach((v)=>{
-        const chip = document.createElement("span");
-        chip.className = "vibeChip mini";
-        chip.textContent = formatVibeChipLabel(v);
-        vibeRow.appendChild(chip);
-      });
-      meta.appendChild(vibeRow);
-    }
+      const vibes = sanitizeVibeTagsClient(u.vibe_tags);
+      if (vibes.length) {
+        const vibeRow = document.createElement("div");
+        vibeRow.className = "vibeRow";
+        vibes.forEach((v)=>{
+          const chip = document.createElement("span");
+          chip.className = "vibeChip mini";
+          chip.textContent = formatVibeChipLabel(v);
+          vibeRow.appendChild(chip);
+        });
+        meta.appendChild(vibeRow);
+      }
 
-    const roll = recentDiceRolls.get(normKey(u.name));
-    if (roll && Date.now() - (roll.ts || 0) < 7000) {
-      const rollRow = document.createElement("div");
-      rollRow.className = "mRoll";
-      rollRow.textContent = `Rolled ${diceFace(roll.value)}`;
-      meta.appendChild(rollRow);
-    }
+      const roll = recentDiceRolls.get(normKey(u.name));
+      if (roll && Date.now() - (roll.ts || 0) < 7000) {
+        const rollRow = document.createElement("div");
+        rollRow.className = "mRoll";
+        rollRow.textContent = `Rolled ${diceFace(roll.value)}`;
+        meta.appendChild(rollRow);
+      }
 
-    row.appendChild(av);
-    row.appendChild(dot);
-    row.appendChild(meta);
+      row.appendChild(av);
+      row.appendChild(dot);
+      row.appendChild(meta);
 
-    row.onclick = (ev) => {
-      ev.stopPropagation();
-      openMemberMenu(u, row);
-    };
-    memberList.appendChild(row);
+      row.onclick = (ev) => {
+        ev.stopPropagation();
+        openMemberMenu(u, row);
+      };
+      memberList.appendChild(row);
+    });
   });
   updatePresenceAuras();
 }
@@ -5959,101 +6052,104 @@ function renderDirectThreads(){
   const stripEl = dmQuickStrip || dmStrip;
   if (!stripEl) return;
 
-  stripEl.innerHTML = "";
-  if (list.length === 0) {
-    updateDmThreadPlaceholderVisibility();
-    return;
-  }
-
-  list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
-  for (const t of list) {
-    const other = otherParty(t) || threadLabel(t) || "?";
-
-    // Resolve avatar from the DM thread payload first, then fall back to cached / profile fetch.
-    const fromDetail = Array.isArray(t.participantsDetail)
-      ? (t.participantsDetail.find(p => normKey(p?.username) === normKey(other)) || null)
-      : null;
-    const avatarUrl = t.otherUser?.avatar || fromDetail?.avatar || avatarCache?.[other] || null;
-
-    const meta = getUserMeta(other);
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "dmThreadBtn";
-    btn.dataset.threadId = t.id;
-
-    const wrap = document.createElement("div");
-    wrap.className = "dmThreadRow";
-
-    const av = makeAvatarEl({
-      username: meta.username || other,
-      role: meta.role || "member",
-      avatarUrl: meta.avatarUrl || avatarUrl || null,
-      size: 34
-    });
-    av.classList.add("dmThreadAvatar");
-
-    const body = document.createElement("div");
-    body.className = "dmThreadBody";
-
-    const top = document.createElement("div");
-    top.className = "dmThreadTop";
-
-    const name = document.createElement("div");
-    name.className = "dmThreadName";
-    name.textContent = other;
-
-    const ts = document.createElement("div");
-    ts.className = "dmThreadTs";
-    ts.textContent = formatRelativeTime(t.last_ts || t.created_at);
-
-    top.appendChild(name);
-    top.appendChild(ts);
-
-    const preview = document.createElement("div");
-    preview.className = "dmThreadPreview";
-    preview.textContent = (t.last_text || "").trim() || "—";
-
-    body.appendChild(top);
-    body.appendChild(preview);
-
-    const badge = document.createElement("div");
-    badge.className = "dmUnreadBadge";
-    const uc = Number(t.unreadCount || 0);
-    if (uc > 0) {
-      badge.textContent = String(Math.min(99, uc));
-      badge.classList.add("show");
+  withFlip(stripEl, "data-flip-key", () => {
+    stripEl.innerHTML = "";
+    if (list.length === 0) {
+      updateDmThreadPlaceholderVisibility();
+      return;
     }
 
-    wrap.appendChild(av);
-    wrap.appendChild(body);
-    wrap.appendChild(badge);
-    btn.appendChild(wrap);
+    list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
+    for (const t of list) {
+      const other = otherParty(t) || threadLabel(t) || "?";
 
-    btn.addEventListener("click", ()=>{
-      hideAllDmQuickBars();
-      openDmPanel();
-      openDmThread(t.id);
-    });
+      // Resolve avatar from the DM thread payload first, then fall back to cached / profile fetch.
+      const fromDetail = Array.isArray(t.participantsDetail)
+        ? (t.participantsDetail.find(p => normKey(p?.username) === normKey(other)) || null)
+        : null;
+      const avatarUrl = t.otherUser?.avatar || fromDetail?.avatar || avatarCache?.[other] || null;
 
-    // If we still don't have a URL, fetch in the background and update this thread avatar.
-    if (other && !meta.avatarUrl && !avatarUrl) {
-      getAvatarUrl(other).then((u)=>{
-        if (!u) return;
-        try{
-          const img = av.querySelector("img.avatarImg");
-          if (img) img.src = u;
-          else {
-            // rebuild avatar element with the fetched URL
-            const repl = makeAvatarEl({ username: meta.username || other, role: meta.role || "member", avatarUrl: u, size: 34 });
-            repl.classList.add("dmThreadAvatar");
-            av.replaceWith(repl);
-          }
-        }catch{}
-      }).catch(()=>{});
+      const meta = getUserMeta(other);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "dmThreadBtn";
+      btn.dataset.threadId = t.id;
+      btn.dataset.flipKey = `dm-thread-${t.id}`;
+
+      const wrap = document.createElement("div");
+      wrap.className = "dmThreadRow";
+
+      const av = makeAvatarEl({
+        username: meta.username || other,
+        role: meta.role || "member",
+        avatarUrl: meta.avatarUrl || avatarUrl || null,
+        size: 34
+      });
+      av.classList.add("dmThreadAvatar");
+
+      const body = document.createElement("div");
+      body.className = "dmThreadBody";
+
+      const top = document.createElement("div");
+      top.className = "dmThreadTop";
+
+      const name = document.createElement("div");
+      name.className = "dmThreadName";
+      name.textContent = other;
+
+      const ts = document.createElement("div");
+      ts.className = "dmThreadTs";
+      ts.textContent = formatRelativeTime(t.last_ts || t.created_at);
+
+      top.appendChild(name);
+      top.appendChild(ts);
+
+      const preview = document.createElement("div");
+      preview.className = "dmThreadPreview";
+      preview.textContent = (t.last_text || "").trim() || "—";
+
+      body.appendChild(top);
+      body.appendChild(preview);
+
+      const badge = document.createElement("div");
+      badge.className = "dmUnreadBadge";
+      const uc = Number(t.unreadCount || 0);
+      if (uc > 0) {
+        badge.textContent = String(Math.min(99, uc));
+        badge.classList.add("show");
+      }
+
+      wrap.appendChild(av);
+      wrap.appendChild(body);
+      wrap.appendChild(badge);
+      btn.appendChild(wrap);
+
+      btn.addEventListener("click", ()=>{
+        hideAllDmQuickBars();
+        openDmPanel();
+        openDmThread(t.id);
+      });
+
+      // If we still don't have a URL, fetch in the background and update this thread avatar.
+      if (other && !meta.avatarUrl && !avatarUrl) {
+        getAvatarUrl(other).then((u)=>{
+          if (!u) return;
+          try{
+            const img = av.querySelector("img.avatarImg");
+            if (img) img.src = u;
+            else {
+              // rebuild avatar element with the fetched URL
+              const repl = makeAvatarEl({ username: meta.username || other, role: meta.role || "member", avatarUrl: u, size: 34 });
+              repl.classList.add("dmThreadAvatar");
+              av.replaceWith(repl);
+            }
+          }catch{}
+        }).catch(()=>{});
+      }
+
+      stripEl.appendChild(btn);
     }
-
-    stripEl.appendChild(btn);
-  }
+  });
 
   updateDmThreadPlaceholderVisibility();
 }
@@ -6080,37 +6176,40 @@ function renderGroupThreads(){
   const stripEl = groupQuickStrip;
   if (!stripEl) return;
 
-  stripEl.innerHTML = "";
-  if (list.length === 0) {
-    updateDmThreadPlaceholderVisibility();
-    return;
-  }
-  list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
+  withFlip(stripEl, "data-flip-key", () => {
+    stripEl.innerHTML = "";
+    if (list.length === 0) {
+      updateDmThreadPlaceholderVisibility();
+      return;
+    }
+    list.sort((a,b)=>(Number(b.last_ts||0)-Number(a.last_ts||0)));
 
-  for (const t of list) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "dmAvatarBtn" + (String(activeDmId)===String(t.id) ? " active" : "");
-    btn.title = threadLabel(t);
+    for (const t of list) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "dmAvatarBtn" + (String(activeDmId)===String(t.id) ? " active" : "");
+      btn.title = threadLabel(t);
+      btn.dataset.flipKey = `dm-group-${t.id}`;
 
-    const badge = document.createElement("span");
-    badge.className = "dmUnreadBadge";
-    const lastRead = Number(dmLastRead[t.id] || 0);
-    const lastTs = Number(t.last_ts || 0);
-    const unread = dmUnreadThreads.has(t.id) || (lastTs > lastRead);
-    badge.style.display = unread ? "block" : "none";
+      const badge = document.createElement("span");
+      badge.className = "dmUnreadBadge";
+      const lastRead = Number(dmLastRead[t.id] || 0);
+      const lastTs = Number(t.last_ts || 0);
+      const unread = dmUnreadThreads.has(t.id) || (lastTs > lastRead);
+      badge.style.display = unread ? "block" : "none";
 
-    const preview = vennPreview(t);
-    preview.appendChild(badge);
-    btn.appendChild(preview);
+      const preview = vennPreview(t);
+      preview.appendChild(badge);
+      btn.appendChild(preview);
 
-    btn.addEventListener("click", ()=>{
-      hideAllDmQuickBars();
-      openDmPanel();
-      openDmThread(t.id);
-    });
-    stripEl.appendChild(btn);
-  }
+      btn.addEventListener("click", ()=>{
+        hideAllDmQuickBars();
+        openDmPanel();
+        openDmThread(t.id);
+      });
+      stripEl.appendChild(btn);
+    }
+  });
   updateDmThreadPlaceholderVisibility();
 }
 
@@ -7362,9 +7461,22 @@ tabMore?.addEventListener("click", async ()=>{
 });
 
 // modal open/close
-function openModal(){ modal.style.display="flex"; }
+function openModal(){
+  if (!modal) return;
+  modal.style.display="flex";
+  modal.classList.remove("modal-closing");
+  if (PREFERS_REDUCED_MOTION) {
+    modal.classList.add("modal-visible");
+    return;
+  }
+  requestAnimationFrame(() => {
+    modal.classList.add("modal-visible");
+  });
+}
 function closeModal(){
-  modal.style.display="none";
+  if (!modal) return;
+  modal.classList.remove("modal-visible");
+  modal.classList.add("modal-closing");
   modalTargetUsername=null;
   modalTargetUserId=null;
   quickModMsg.textContent="";
@@ -7372,6 +7484,15 @@ function closeModal(){
   logsMsg.textContent="";
   setMsgline(mediaMsg, "");
   if (customizeMsg) customizeMsg.textContent = "";
+  if (PREFERS_REDUCED_MOTION) {
+    modal.style.display="none";
+    modal.classList.remove("modal-closing");
+    return;
+  }
+  setTimeout(() => {
+    modal.style.display="none";
+    modal.classList.remove("modal-closing");
+  }, 220);
 }
 closeModalBtn.addEventListener("click", closeModal);
 modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
@@ -7422,14 +7543,17 @@ function sanitizeRoomClient(r){
 }
 
 function renderRoomsList(rooms){
-  chanList.innerHTML = "";
-  for(const r of rooms || []){
-    const div = document.createElement("div");
-    div.className = "chan" + (r === currentRoom ? " active" : "");
-    div.dataset.room = r;
-    div.textContent = displayRoomName(r); // no '#'
-    chanList.appendChild(div);
-  }
+  withFlip(chanList, "data-flip-key", () => {
+    chanList.innerHTML = "";
+    for(const r of rooms || []){
+      const div = document.createElement("div");
+      div.className = "chan" + (r === currentRoom ? " active" : "");
+      div.dataset.room = r;
+      div.dataset.flipKey = `room-${r}`;
+      div.textContent = displayRoomName(r); // no '#'
+      chanList.appendChild(div);
+    }
+  });
 }
 
 async function loadRooms(){
@@ -7923,12 +8047,8 @@ function handleChangelogListClick(event){
 
   const popBtn = (btn)=>{
     if(!btn || !btn.classList) return;
-    // Restart animation
-    btn.classList.remove("pop");
-    // Force reflow so the animation can replay on rapid taps
-    void btn.offsetWidth;
-    btn.classList.add("pop");
-    btn.addEventListener("animationend", ()=>btn.classList.remove("pop"), { once:true });
+    const removing = btn.classList.contains("active");
+    triggerReactionBounce(btn, removing);
   };
 
   // Reactions live inside <summary>. Prevent them from toggling the <details>.
@@ -8152,10 +8272,8 @@ function handleFaqListClick(event){
 
   const popBtn = (btn)=>{
     if(!btn || !btn.classList) return;
-    btn.classList.remove("pop");
-    void btn.offsetWidth;
-    btn.classList.add("pop");
-    btn.addEventListener("animationend", ()=>btn.classList.remove("pop"), { once:true });
+    const removing = btn.classList.contains("active");
+    triggerReactionBounce(btn, removing);
   };
   const delBtn = event.target.closest("[data-faq-delete]");
   if(delBtn && faqList.contains(delBtn)){
@@ -11371,7 +11489,7 @@ socket.on("disconnect", (reason) => {
       text = parts.join(" • ");
       if(others.length>2) text += ` (+${others.length-2})`;
     }
-    typingEl.textContent = text;
+    setTypingIndicator(text);
     stickToBottomIfWanted();
     updatePresenceAuras();
   });
@@ -12029,4 +12147,3 @@ try {
   const oldOpenMyProfile = openMyProfile;
   // openMyProfile exists; it opens modal and fills UI. We'll just hook after it runs.
 } catch {}
-
