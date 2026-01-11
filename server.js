@@ -4946,6 +4946,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
   try {
     // Prefer Postgres first (Render/prod path). Some users may not exist in SQLite yet.
     let row = null;
+    let fromPg = false;
     try {
       for (const cand of candidates) {
         try {
@@ -4958,6 +4959,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
           if (row) break;
         } catch {}
       }
+      if (row) fromPg = true;
     } catch {}
 
     // Fallback to SQLite
@@ -4972,6 +4974,49 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
     }
 
     if (!row) return res.status(404).send("Not found");
+
+    // IMPORTANT: The quick lookup above only selects id/username.
+    // We must fetch the full profile row, otherwise the UI will show blanks
+    // and appear to "not pull" changes after edits.
+    const PROFILE_COLS = [
+      "id",
+      "username",
+      "role",
+      "created_at",
+      "avatar",
+      "avatar_bytes",
+      "avatar_mime",
+      "avatar_updated",
+      "bio",
+      "mood",
+      "age",
+      "gender",
+      "last_seen",
+      "last_room",
+      "last_status",
+      "gold",
+      "xp",
+      "vibe_tags",
+      "header_grad_a",
+      "header_grad_b",
+    ];
+
+    if (fromPg) {
+      try {
+        const full = await pgGetUserRowById(Number(row.id) || 0, PROFILE_COLS);
+        if (full) row = full;
+      } catch {}
+    } else {
+      // SQLite full fetch
+      try {
+        const full = await dbGet(
+          `SELECT ${PROFILE_COLS.filter((c) => c !== "avatar_bytes" && c !== "avatar_mime" && c !== "avatar_updated").join(", ")}
+           FROM users WHERE id = ? LIMIT 1`,
+          [Number(row.id) || 0]
+        );
+        if (full) row = full;
+      } catch {}
+    }
 
     const live = onlineState.get(row.id);
     const lastStatus = normalizeStatus(live?.status || row.last_status, "");
