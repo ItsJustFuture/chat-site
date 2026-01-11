@@ -1047,7 +1047,7 @@ async function syncGoldXpThemeToPg(uid) {
 
 async function pgGetUserByUsername(username) {
   const { rows } = await pgPool.query(
-    `SELECT id, username FROM users WHERE lower(username) = lower($1) LIMIT 1`,
+    `SELECT * FROM users WHERE lower(username) = lower($1) LIMIT 1`,
     [username]
   );
   return pgRowToUser(rows[0]);
@@ -1055,7 +1055,7 @@ async function pgGetUserByUsername(username) {
 
 async function pgGetUserById(id) {
   const { rows } = await pgPool.query(
-    `SELECT id, username FROM users WHERE id = $1 LIMIT 1`,
+    `SELECT * FROM users WHERE id = $1 LIMIT 1`,
     [id]
   );
   return pgRowToUser(rows[0]);
@@ -3722,26 +3722,25 @@ app.post("/login", async (req, res) => {
       if (pgUser) break;
     }
     if (pgUser && pgUser.password_hash) {
-      const storedHash = String(pgUser.password_hash || "");
+      const stored = String(pgUser.password_hash || "").trim();
+
+      // Backwards compatibility: some legacy accounts may have a non-bcrypt value in password_hash.
+      // If it looks like a bcrypt hash, verify normally; otherwise treat it as plaintext and upgrade on success.
+      const looksBcrypt = stored.startsWith("$2");
       let ok = false;
 
-      // Support legacy plaintext passwords stored in password_hash (older SQLite/PG migrations)
-      if (storedHash.startsWith("$2")) {
-        ok = await bcrypt.compare(password, storedHash);
+      if (looksBcrypt) {
+        ok = await bcrypt.compare(password, stored);
       } else {
-        ok = storedHash === password;
+        ok = password === stored;
+        if (ok) {
+          const upgraded = await bcrypt.hash(password, 10);
+          await pgPool.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [upgraded, pgUser.id]).catch(() => {});
+          pgUser.password_hash = upgraded;
+        }
       }
 
       if (!ok) return res.status(401).send("Invalid username or password");
-
-      // Upgrade legacy plaintext to bcrypt for security/consistency
-      if (storedHash && !storedHash.startsWith("$2")) {
-        const upgraded = await bcrypt.hash(password, 10);
-        await pgPool
-          .query("UPDATE users SET password_hash = $1 WHERE id = $2", [upgraded, pgUser.id])
-          .catch(() => {});
-        pgUser.password_hash = upgraded;
-      }
 
       const theme = sanitizeThemeNameServer(pgUser.theme || DEFAULT_THEME);
 
@@ -3815,20 +3814,26 @@ app.post("/login", async (req, res) => {
       row.password_hash = passwordHash;
     }
 
-    // Some older builds stored plaintext passwords in password_hash. Allow login and upgrade to bcrypt.
-    if (passwordHash && !String(passwordHash).startsWith("$2")) {
-      if (String(passwordHash) !== password) return res.status(401).send("Invalid username or password");
+    {
+      const stored = String(row.password_hash || "").trim();
+      const looksBcrypt = stored.startsWith("$2");
+      let ok = false;
 
-      const upgraded = await bcrypt.hash(password, 10);
-      await dbRunAsync("UPDATE users SET password_hash = ? WHERE id = ?", [upgraded, row.id]).catch(() => {});
-      row.password_hash = upgraded;
-      passwordHash = upgraded;
+      if (looksBcrypt) {
+        ok = await bcrypt.compare(password, stored);
+      } else {
+        // Legacy plaintext stored in password_hash (or other non-bcrypt formats).
+        ok = password === stored;
+        if (ok) {
+          const upgraded = await bcrypt.hash(password, 10);
+          await dbRunAsync("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [upgraded, row.id]).catch(() => {});
+          row.password_hash = upgraded;
+        }
+      }
+
+      if (!ok) return res.status(401).send("Invalid username or password");
     }
-
-    const ok = await bcrypt.compare(password, String(row.password_hash || ""));
-    if (!ok) return res.status(401).send("Invalid username or password");
-
-    // Apply your auto-role rules (keep both stores aligned)
+// Apply your auto-role rules (keep both stores aligned)
     const norm = normKey(row.username);
     if (AUTO_OWNER.has(norm) && row.role !== "Owner") {
       await dbRunAsync("UPDATE users SET role = 'Owner' WHERE id = ?", [row.id]);
