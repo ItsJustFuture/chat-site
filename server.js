@@ -547,6 +547,28 @@ async function pgGetCoupleLinkForUser(userId) {
   return rows[0] || null;
 }
 
+
+async function pgGetActiveCoupleLinkForUser(userId) {
+  const uid = Number(userId) || 0;
+  if (!uid) return null;
+  const { rows } = await pgPool.query(
+    `
+    SELECT cl.*,
+           u1.username AS user1_name,
+           u2.username AS user2_name
+      FROM couple_links cl
+      JOIN users u1 ON u1.id = cl.user1_id
+      JOIN users u2 ON u2.id = cl.user2_id
+     WHERE (cl.user1_id=$1 OR cl.user2_id=$1)
+       AND cl.status='active'
+     ORDER BY cl.updated_at DESC
+     LIMIT 1
+    `,
+    [uid]
+  );
+  return rows[0] || null;
+}
+
 async function pgGetCouplePrefs(linkId, userId) {
   const { rows } = await pgPool.query(
     `SELECT * FROM couple_prefs WHERE link_id=$1 AND user_id=$2 LIMIT 1`,
@@ -556,7 +578,7 @@ async function pgGetCouplePrefs(linkId, userId) {
 }
 
 async function pgGetCoupleSummaryFor(userId) {
-  const link = await pgGetCoupleLinkForUser(userId);
+  const linkActive = await pgGetActiveCoupleLinkForUser(userId);
 
   // Pending links involving this user (incoming/outgoing)
   const { rows: pending } = await pgPool.query(
@@ -592,19 +614,19 @@ async function pgGetCoupleSummaryFor(userId) {
   }
 
   let active = null;
-  if (link && link.status === "active") {
-    const prefsMe = await pgGetCouplePrefs(link.id, userId);
-    const partnerId = (Number(link.user1_id) === Number(userId)) ? Number(link.user2_id) : Number(link.user1_id);
-    const prefsPartner = await pgGetCouplePrefs(link.id, partnerId);
-    const partnerName = (Number(link.user1_id) === Number(userId)) ? link.user2_name : link.user1_name;
+  if (linkActive) {
+    const prefsMe = await pgGetCouplePrefs(linkActive.id, userId);
+    const partnerId = (Number(linkActive.user1_id) === Number(userId)) ? Number(linkActive.user2_id) : Number(linkActive.user1_id);
+    const prefsPartner = await pgGetCouplePrefs(linkActive.id, partnerId);
+    const partnerName = (Number(linkActive.user1_id) === Number(userId)) ? linkActive.user2_name : linkActive.user1_name;
 
     active = {
-      linkId: link.id,
+      linkId: linkActive.id,
       partnerId,
       partner: partnerName,
-      since: Number(link.activated_at || link.created_at) || null,
-      statusEmoji: link.status_emoji || "💜",
-      statusLabel: link.status_label || "Linked",
+      since: Number(linkActive.activated_at || linkActive.created_at) || null,
+      statusEmoji: linkActive.status_emoji || "💜",
+      statusLabel: linkActive.status_label || "Linked",
       prefs: prefsMe ? {
         enabled: !!prefsMe.enabled,
         showProfile: !!prefsMe.show_profile,
@@ -5196,6 +5218,11 @@ app.post("/api/couples/request", requireLogin, async (req, res) => {
 
     const meId = Number(req.session.user?.id) || 0;
     if (!meId) return res.status(401).send("Not logged in");
+
+    // One active link at a time per user (prevents “missing options” when an active link exists but a newer pending request hides it).
+    const alreadyActive = await pgGetActiveCoupleLinkForUser(meId);
+    if (alreadyActive) return res.status(409).send("You are already linked");
+
     const otherId = Number(target.id) || 0;
     const [u1, u2] = orderPair(meId, otherId);
     const now = Date.now();
