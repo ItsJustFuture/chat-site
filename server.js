@@ -3722,8 +3722,26 @@ app.post("/login", async (req, res) => {
       if (pgUser) break;
     }
     if (pgUser && pgUser.password_hash) {
-      const ok = await bcrypt.compare(password, String(pgUser.password_hash || ""));
+      const storedHash = String(pgUser.password_hash || "");
+      let ok = false;
+
+      // Support legacy plaintext passwords stored in password_hash (older SQLite/PG migrations)
+      if (storedHash.startsWith("$2")) {
+        ok = await bcrypt.compare(password, storedHash);
+      } else {
+        ok = storedHash === password;
+      }
+
       if (!ok) return res.status(401).send("Invalid username or password");
+
+      // Upgrade legacy plaintext to bcrypt for security/consistency
+      if (storedHash && !storedHash.startsWith("$2")) {
+        const upgraded = await bcrypt.hash(password, 10);
+        await pgPool
+          .query("UPDATE users SET password_hash = $1 WHERE id = $2", [upgraded, pgUser.id])
+          .catch(() => {});
+        pgUser.password_hash = upgraded;
+      }
 
       const theme = sanitizeThemeNameServer(pgUser.theme || DEFAULT_THEME);
 
@@ -3795,6 +3813,16 @@ app.post("/login", async (req, res) => {
 
       await dbRunAsync("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [passwordHash, row.id]);
       row.password_hash = passwordHash;
+    }
+
+    // Some older builds stored plaintext passwords in password_hash. Allow login and upgrade to bcrypt.
+    if (passwordHash && !String(passwordHash).startsWith("$2")) {
+      if (String(passwordHash) !== password) return res.status(401).send("Invalid username or password");
+
+      const upgraded = await bcrypt.hash(password, 10);
+      await dbRunAsync("UPDATE users SET password_hash = ? WHERE id = ?", [upgraded, row.id]).catch(() => {});
+      row.password_hash = upgraded;
+      passwordHash = upgraded;
     }
 
     const ok = await bcrypt.compare(password, String(row.password_hash || ""));
