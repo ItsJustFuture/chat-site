@@ -508,7 +508,30 @@ await run(`CREATE INDEX IF NOT EXISTS idx_appeal_messages_appeal ON appeal_messa
 
 
 
-  // --- Fixed role assignments
+  // --- Friends system (requests + favorites)
+  await run(`
+    CREATE TABLE IF NOT EXISTS friend_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_user_id INTEGER NOT NULL,
+      to_user_id INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending', -- pending|accepted|declined|cancelled
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS friends (
+      user_id INTEGER NOT NULL,
+      friend_user_id INTEGER NOT NULL,
+      is_favorite INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, friend_user_id)
+    )
+  `);
+
+
+// --- Fixed role assignments
   await run("UPDATE users SET role='Owner' WHERE lower(username)='iri'");
   await run("UPDATE users SET role='Co-owner' WHERE lower(username) IN ('lola henderson','amelia')");
   await run("UPDATE users SET role='Admin' WHERE lower(username)='ally'");

@@ -434,6 +434,10 @@
     <button class="iconBtn smallIcon" id="membersCloseBtn" type="button" title="Close">✕</button>
   </div>
         <div class="memberGold" id="memberGold" aria-live="polite"></div>
+        <div class="memberPills" id="memberPills">
+          <button class="pill active" id="memberPillRoom" type="button">Room</button>
+          <button class="pill" id="memberPillFriends" type="button">Friends</button>
+        </div>
         <div id="memberList"></div>
         <div id="memberMenu" class="memberMenu">
           <div class="memberMenuHeader">
@@ -624,6 +628,7 @@
               <div class="quickActionGroup">
                 <button class="btn btnSecondary" id="dmUserBtn" type="button">Message</button>
                 <button class="btn btnSecondary" id="addFriendBtn" type="button" style="display:none;">🤝 Add Friend</button>
+                <button class="btn btnSecondary" id="declineFriendBtn" type="button" style="display:none;">✖ Decline</button>
                 <button class="btn btnSecondary" id="likeProfileBtn" type="button">❤️ Like</button>
                 <button class="btn btnSecondary" id="copyUsernameBtn" type="button">Copy username</button>
                 <div class="badge" id="likeCount">0</div>

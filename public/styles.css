@@ -3023,6 +3023,11 @@ body:not(.polish-pack) .tonePicker{
 .members h3{ margin:6px 6px 10px; font-size:12px; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; }
 .memberGold{ margin:0 6px 10px; padding:6px 10px; border-radius:var(--radiusMd); background:color-mix(in srgb, var(--panel) 80%, transparent); border:1px solid var(--border); font-weight:900; display:none; }
 .memberGold.show{ display:block; }
+
+.memberPills{ display:flex; gap:8px; margin:0 6px 10px; }
+.memberPills .pill{ flex:1; padding:8px 10px; border-radius:999px; border:1px solid var(--border); background:color-mix(in srgb, var(--panel) 85%, transparent); color:var(--text); font-weight:900; cursor:pointer; }
+.memberPills .pill.active{ background:var(--accent); color:#000; border-color:color-mix(in srgb, var(--accent) 65%, var(--border)); }
+
 .commandPopup{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px;margin:8px 6px 0;display:none;max-height:260px;overflow:auto;box-shadow:var(--shadow);}
 .commandPopup.show{display:block;}
 .commandPopupHeader{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;}
@@ -3202,6 +3207,14 @@ body:not(.polish-pack) .tonePicker{
   transition: transform .12s ease, background .12s ease;
 }
 .notificationsRow:active{ transform: scale(0.98); }
+
+.notificationsRow.friendReq{ grid-template-columns: 44px 1fr auto; cursor: default; }
+.notifAvatarBtn{ width:44px; height:44px; border-radius:50%; border:1px solid var(--border); background:color-mix(in srgb, var(--panel) 80%, transparent); display:flex; align-items:center; justify-content:center; padding:0; overflow:hidden; cursor:pointer; }
+.notifBody{ display:flex; flex-direction:column; gap:2px; }
+.notifActions{ display:flex; gap:8px; align-items:center; }
+.btn.small{ padding:6px 10px; font-size:12px; border-radius:10px; }
+.notificationsRow.friendReq.handled{ opacity:0.75; }
+
 .notificationsIcon{ font-size: 16px; }
 .notificationsText{ font-size: 13px; }
 .notificationsTime{ font-size: 11px; color: var(--muted); white-space: nowrap; }

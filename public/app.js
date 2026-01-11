@@ -748,10 +748,14 @@ let activeCustomizePage = null;
 let profileEditMode = false;
 let currentProfileIsSelf = false;
 let profileLikeState = { count: 0, liked: false, isSelf: false };
+let modalFriendInfo = null;
 let currentRoom = "main";
 function displayRoomName(room){ return room==="diceroom" ? "Dice Room" : room; }
 
 let lastUsers = [];
+let membersViewMode = "room"; // room|friends
+let friendsCache = [];
+let friendsDirty = true;
 const roleCache = new Map();
 const reactionsCache = Object.create(null);
 const dmReactionsCache = Object.create(null);
@@ -1238,6 +1242,7 @@ function notificationIcon(type){
   if (type === "mention") return "💬";
   if (type === "reaction") return "✨";
   if (type === "moderation") return "🛡️";
+  if (type === "friend_request") return "🤝";
   if (type === "system") return "📣";
   return "🔔";
 }
@@ -1246,21 +1251,44 @@ function saveNotifications(){
   saveJson(NOTIFICATIONS_KEY, notifications);
 }
 
-function pushNotification({ type = "system", text = "", ts = Date.now(), target = "" } = {}){
+
+function pushNotification({ id = null, type = "system", text = "", ts = Date.now(), target = "", meta = null } = {}){
   const message = String(text || "").trim();
   if (!message) return;
+  const entryId = id || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const entry = {
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    id: entryId,
     type,
     text: message,
     ts: Number(ts) || Date.now(),
     target,
+    meta: meta && typeof meta === 'object' ? meta : null,
     read: false,
   };
-  notifications = [entry, ...notifications].slice(0, NOTIFICATIONS_MAX);
+  // de-dupe by id
+  const existingIdx = notifications.findIndex((n) => n.id === entry.id);
+  if (existingIdx >= 0) {
+    notifications[existingIdx] = { ...notifications[existingIdx], ...entry };
+  } else {
+    notifications = [entry, ...notifications].slice(0, NOTIFICATIONS_MAX);
+  }
   saveNotifications();
   renderNotifications();
   updateNotificationsBadge();
+}
+
+function pushFriendRequestNotification({ requestId, fromUsername, fromAvatar, ts } = {}){
+  const rid = Number(requestId) || 0;
+  const uname = String(fromUsername || '').trim();
+  if (!rid || !uname) return;
+  pushNotification({
+    id: `friendreq:${rid}`,
+    type: 'friend_request',
+    text: `${uname} sent you a friend request`,
+    ts: Number(ts) || Date.now(),
+    target: `profile:${uname}`,
+    meta: { requestId: rid, fromUsername: uname, fromAvatar: fromAvatar || null, status: 'pending' }
+  });
 }
 
 function updateNotificationsBadge(){
@@ -1315,6 +1343,44 @@ function renderNotifications(){
     groupEl.appendChild(heading);
 
     items.forEach((item) => {
+      const isFriendReq = item.type === 'friend_request' && item.meta && Number(item.meta.requestId);
+      if (isFriendReq) {
+        const m = item.meta || {};
+        const row = document.createElement('div');
+        row.className = 'notificationsRow friendReq';
+        row.dataset.notificationId = item.id;
+        row.dataset.requestId = String(Number(m.requestId) || '');
+        row.innerHTML = `
+          <button class="notifAvatarBtn" type="button" data-action="open-profile" data-username="${escapeHtml(m.fromUsername||'')}">
+            <span class="notificationsIcon" aria-hidden="true">🤝</span>
+          </button>
+          <div class="notifBody">
+            <div class="notificationsText">${escapeHtml(item.text)}</div>
+            <div class="notificationsTime">${escapeHtml(fmtAbs(item.ts))}</div>
+          </div>
+          <div class="notifActions">
+            <button class="btn btnSecondary small" type="button" data-action="accept" data-request-id="${Number(m.requestId)}">Accept</button>
+            <button class="btn btnSecondary small" type="button" data-action="decline" data-request-id="${Number(m.requestId)}">Decline</button>
+          </div>
+        `;
+
+        // Replace icon button content with actual avatar node
+        const avatarBtn = row.querySelector('.notifAvatarBtn');
+        if (avatarBtn) {
+          avatarBtn.innerHTML = '';
+          avatarBtn.appendChild(avatarNode(m.fromAvatar, m.fromUsername, 'User'));
+        }
+        // Disable actions if already handled
+        const status = String(m.status || 'pending');
+        if (status !== 'pending') {
+          row.classList.add('handled');
+          row.querySelectorAll('[data-action="accept"],[data-action="decline"]').forEach((b) => b.disabled = true);
+        }
+
+        groupEl.appendChild(row);
+        return;
+      }
+
       const row = document.createElement("button");
       row.type = "button";
       row.className = "notificationsRow";
@@ -1333,6 +1399,8 @@ function renderNotifications(){
 function openNotificationsModal(){
   if (!notificationsModal) return;
   notificationsModal.hidden = false;
+  // Pull any pending friend requests so notifications stay useful after refresh
+  syncFriendRequestNotifications();
   renderNotifications();
   markNotificationsRead();
 }
@@ -1340,6 +1408,24 @@ function openNotificationsModal(){
 function closeNotificationsModal(){
   if (!notificationsModal) return;
   notificationsModal.hidden = true;
+}
+
+
+async function syncFriendRequestNotifications(){
+  try {
+    const res = await fetch('/api/friends/requests');
+    if (!res.ok) return;
+    const data = await res.json();
+    const incoming = Array.isArray(data?.incoming) ? data.incoming : [];
+    incoming.forEach((req) => {
+      pushFriendRequestNotification({
+        requestId: req.id,
+        fromUsername: req?.from?.username,
+        fromAvatar: req?.from?.avatar,
+        ts: req.createdAt
+      });
+    });
+  } catch {}
 }
 
 let dmLastRead = loadJson(DM_LAST_READ_KEY, {}); // { [threadId]: lastReadTs }
@@ -2199,6 +2285,9 @@ const msgs = document.getElementById("msgs");
 const typingEl = document.getElementById("typing");
 const memberList = document.getElementById("memberList");
 const memberGold = document.getElementById("memberGold");
+const memberPills = document.getElementById("memberPills");
+const memberPillRoom = document.getElementById("memberPillRoom");
+const memberPillFriends = document.getElementById("memberPillFriends");
 const memberMenu = document.getElementById("memberMenu");
 const memberMenuName = document.getElementById("memberMenuName");
 const memberViewProfileBtn = document.getElementById("memberViewProfileBtn");
@@ -2709,6 +2798,7 @@ const tabProfile = document.getElementById("tabProfile");
 const tabCustomize = document.getElementById("tabCustomize");
 const tabActions = document.getElementById("tabActions");
 const addFriendBtn = document.getElementById("addFriendBtn");
+const declineFriendBtn = document.getElementById("declineFriendBtn");
 
 const viewAccount = document.getElementById("viewProfile");
 const viewMore = document.getElementById("viewActions");
@@ -5737,6 +5827,105 @@ function renderMembers(users){
   });
   updatePresenceAuras();
 }
+
+async function loadFriendsList(force=false){
+  if (!force && !friendsDirty && Array.isArray(friendsCache)) return friendsCache;
+  try {
+    const res = await fetch('/api/friends/list');
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    friendsCache = Array.isArray(data?.friends) ? data.friends : [];
+    friendsDirty = false;
+    return friendsCache;
+  } catch (e) {
+    friendsCache = [];
+    friendsDirty = true;
+    return friendsCache;
+  }
+}
+
+function setMembersViewMode(mode){
+  membersViewMode = (mode === 'friends') ? 'friends' : 'room';
+  if (memberPillRoom) memberPillRoom.classList.toggle('active', membersViewMode==='room');
+  if (memberPillFriends) memberPillFriends.classList.toggle('active', membersViewMode==='friends');
+  if (membersViewMode === 'friends') {
+    loadFriendsList(true).then(renderFriendsList);
+  } else {
+    renderMembers(lastUsers);
+  }
+}
+
+function renderFriendsList(list){
+  const friends = Array.isArray(list) ? list : [];
+  cleanupRecentDiceRolls();
+  withFlip(memberList, 'data-flip-key', () => {
+    memberList.innerHTML = '';
+    if (!friends.length) {
+      const empty = document.createElement('div');
+      empty.className = 'emptyText';
+      empty.textContent = 'No friends yet.';
+      memberList.appendChild(empty);
+      return;
+    }
+
+    friends.forEach((f) => {
+      const row = document.createElement('div');
+      row.className = 'mItem friendItem';
+      row.dataset.username = f.username;
+      row.dataset.flipKey = f.username;
+
+      const av = document.createElement('div');
+      av.className = 'mAvatar';
+      av.appendChild(avatarNode(f.avatar, f.username, f.role || 'User'));
+
+      const dot = document.createElement('div');
+      dot.className = 'dot';
+      const statusLabel = f.online ? 'Online' : 'Offline';
+      dot.style.background = statusDotColor(statusLabel);
+
+      const meta = document.createElement('div');
+      meta.className = 'mMeta';
+
+      const name = document.createElement('div');
+      name.className = 'mName';
+      if (f.isFavorite) {
+        const star = document.createElement('span');
+        star.className = 'friendStar';
+        star.textContent = '★';
+        star.title = 'Favorite';
+        name.appendChild(star);
+      }
+      const ico = document.createElement('span');
+      ico.className = 'roleIco';
+      ico.textContent = `${roleIcon(f.role)} `;
+      const uname = document.createElement('span');
+      uname.className = 'unameText';
+      uname.textContent = f.username;
+      name.appendChild(ico);
+      name.appendChild(uname);
+
+      const sub = document.createElement('div');
+      sub.className = 'mSub';
+      const where = f.online ? (f.currentRoom ? `• in ${displayRoomName(f.currentRoom)}` : '') : (f.lastSeen ? `• last seen ${fmtAbs(f.lastSeen)}` : '');
+      sub.textContent = `${f.role || 'User'} • ${statusLabel} ${where}`.trim();
+
+      meta.appendChild(name);
+      meta.appendChild(sub);
+
+      row.appendChild(av);
+      row.appendChild(dot);
+      row.appendChild(meta);
+
+      row.onclick = (ev) => {
+        ev.stopPropagation();
+        openMemberMenu({ name: f.username, username: f.username, role: f.role || 'User', avatar: f.avatar, status: statusLabel }, row);
+      };
+      memberList.appendChild(row);
+    });
+  });
+}
+
+
 
 function cleanupRecentDiceRolls(maxAge = 7000){
   const now = Date.now();
@@ -9641,7 +9830,48 @@ notificationsClearBtn?.addEventListener("click", () => {
 notificationsModal?.addEventListener("click", (e) => {
   if (e.target === notificationsModal) closeNotificationsModal();
 });
-notificationsList?.addEventListener("click", (e) => {
+notificationsList?.addEventListener("click", async (e) => {
+  const actionEl = e.target.closest("[data-action]");
+  if (actionEl) {
+    const act = actionEl.getAttribute('data-action');
+    const username = actionEl.getAttribute('data-username') || '';
+    const rid = Number(actionEl.getAttribute('data-request-id') || 0);
+
+    if (act === 'open-profile' && username) {
+      openMemberProfile(username);
+      return;
+    }
+
+    if ((act === 'accept' || act === 'decline') && rid) {
+      actionEl.disabled = true;
+      try {
+        const res = await fetch('/api/friends/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestId: rid, action: act })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        // Update local notification entry (so it doesn't keep showing as pending)
+        const nid = `friendreq:${rid}`;
+        const idx = notifications.findIndex((n) => n.id === nid);
+        if (idx >= 0) {
+          const n = { ...notifications[idx] };
+          n.meta = { ...(n.meta || {}), status: act === 'accept' ? 'accepted' : 'declined' };
+          n.text = act === 'accept' ? `You and ${n.meta?.fromUsername || 'them'} are now friends` : `Declined friend request from ${n.meta?.fromUsername || 'them'}`;
+          notifications[idx] = n;
+          saveNotifications();
+          renderNotifications();
+          updateNotificationsBadge();
+        }
+        friendsDirty = true;
+      } catch (err) {
+        actionEl.disabled = false;
+        toast(err?.message || 'Could not respond');
+      }
+      return;
+    }
+  }
+
   const row = e.target.closest("[data-notification-id]");
   if (!row) return;
   const item = notifications.find((n) => n.id === row.dataset.notificationId);
@@ -9658,6 +9888,10 @@ notificationsList?.addEventListener("click", (e) => {
 
 renderNotifications();
 updateNotificationsBadge();
+
+// Members view pills (Room / Friends)
+memberPillRoom?.addEventListener('click', () => setMembersViewMode('room'));
+memberPillFriends?.addEventListener('click', () => setMembersViewMode('friends'));
 
 // ---- profiles
 async function loadMyProfile(){
@@ -10020,6 +10254,17 @@ function updateProfileActions({ isSelf = false, canModerate = false } = {}){
   if (profileEditToggleRow) profileEditToggleRow.style.display = isSelf ? "" : "none";
   applyCustomizeVisibility();
   if (addFriendBtn) addFriendBtn.style.display = isSelf ? "none" : "";
+  if (declineFriendBtn) declineFriendBtn.style.display = "none";
+  if (!isSelf && addFriendBtn) {
+    const st = String(modalFriendInfo?.status || 'none');
+    const rid = Number(modalFriendInfo?.requestId || 0);
+    addFriendBtn.disabled = false;
+    addFriendBtn.dataset.requestId = rid ? String(rid) : '';
+    if (st === 'friends') { addFriendBtn.textContent = '✅ Friends'; addFriendBtn.disabled = true; }
+    else if (st === 'outgoing') { addFriendBtn.textContent = '⏳ Request Sent'; addFriendBtn.disabled = true; }
+    else if (st === 'incoming') { addFriendBtn.textContent = '✅ Accept Friend'; if (declineFriendBtn) { declineFriendBtn.style.display = ''; declineFriendBtn.textContent = '✖ Decline'; declineFriendBtn.dataset.requestId = rid ? String(rid) : ''; } }
+    else { addFriendBtn.textContent = '🤝 Add Friend'; }
+  }
   const showActionsTab = canModerate && !isSelf;
   if (viewModeration) viewModeration.style.display = canModerate ? "" : "none";
   if (tabActions) tabActions.style.display = showActionsTab ? "" : "none";
@@ -10959,6 +11204,7 @@ async function openMemberProfile(username){
   modalTitle.textContent="Member Profile";
   modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
   fillProfileUI(p, isSelf);
+  modalFriendInfo = p.friend || null;
   syncCustomizationUI();
 
   if (myProfileEdit) myProfileEdit.style.display = isSelf ? "block" : "none";
@@ -11015,9 +11261,51 @@ likeProfileBtn?.addEventListener("click", async () => {
   await toggleProfileLike();
 });
 
-addFriendBtn?.addEventListener("click", () => {
+declineFriendBtn?.addEventListener("click", async () => {
+  if (!modalTargetUsername) return;
+  const st = String(modalFriendInfo?.status || 'none');
+  const rid = Number(declineFriendBtn.dataset.requestId || modalFriendInfo?.requestId || 0);
+  if (st !== 'incoming' || !rid) return;
+  setMsgline(profileActionMsg, "");
+  try {
+    const res = await fetch('/api/friends/respond', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId: rid, action: 'decline' }) });
+    if (!res.ok) throw new Error(await res.text());
+    modalFriendInfo = { status: 'none', requestId: null };
+    friendsDirty = true;
+    setMsgline(profileActionMsg, 'Friend request declined.');
+  } catch (e) {
+    setMsgline(profileActionMsg, e?.message || 'Could not decline.');
+  } finally {
+    updateProfileActions({ isSelf: false, canModerate: (roleRank(me.role) >= roleRank("Moderator")) });
+  }
+});
+
+addFriendBtn?.addEventListener("click", async () => {
   if (addFriendBtn.disabled) return;
-  setMsgline(profileActionMsg, "Friend system coming soon.");
+  const st = String(modalFriendInfo?.status || 'none');
+  const rid = Number(addFriendBtn.dataset.requestId || modalFriendInfo?.requestId || 0);
+  if (!modalTargetUsername) return;
+  setMsgline(profileActionMsg, "");
+  try {
+    if (st === 'incoming' && rid) {
+      const res = await fetch('/api/friends/respond', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId: rid, action: 'accept' }) });
+      if (!res.ok) throw new Error(await res.text());
+      modalFriendInfo = { status: 'friends', requestId: null };
+      friendsDirty = true;
+      setMsgline(profileActionMsg, 'Friend request accepted.');
+    } else if (st === 'none') {
+      const res = await fetch('/api/friends/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: modalTargetUsername }) });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json().catch(()=>({}));
+      modalFriendInfo = { status: data?.autoAccepted ? 'friends' : 'outgoing', requestId: null };
+      friendsDirty = true;
+      setMsgline(profileActionMsg, data?.autoAccepted ? 'Friend added.' : 'Friend request sent.');
+    }
+  } catch (e) {
+    setMsgline(profileActionMsg, e?.message || 'Could not update friend.');
+  } finally {
+    updateProfileActions({ isSelf: false, canModerate: (roleRank(me.role) >= roleRank("Moderator")) });
+  }
 });
 
 likeCount?.addEventListener("click", async () => {
@@ -11516,7 +11804,13 @@ socket.on("disconnect", (reason) => {
   });
 
   socket.on("command response", handleCommandResponse);
-  socket.on("user list", (users)=>renderMembers(users));
+  socket.on("user list", (users)=>{
+    if (membersViewMode === "friends") {
+      lastUsers = reorderCouplesInMembers(users || []);
+    } else {
+      renderMembers(users);
+    }
+  });
   socket.on("user fx updated", (payload = {}) => {
     const name = safeString(payload.username, "").trim();
     if (!name) return;
@@ -11556,6 +11850,34 @@ socket.on("disconnect", (reason) => {
     await loadMyProfile();
     renderLevelProgress(progression, true);
   });
+
+  // Friends notifications
+  socket.on("friend:request", (payload = {}) => {
+    const rid = Number(payload?.requestId || payload?.id || 0);
+    const from = payload?.from || {};
+    const uname = String(from.username || payload?.username || '').trim();
+    const av = from.avatar || payload?.avatar || null;
+    if (rid && uname) {
+      pushFriendRequestNotification({ requestId: rid, fromUsername: uname, fromAvatar: av, ts: Date.now() });
+      friendsDirty = true;
+    }
+  });
+  socket.on("friend:accepted", (payload = {}) => {
+    const uname = String(payload?.username || '').trim();
+    if (uname) pushNotification({ type: 'system', text: `🤝 You and ${uname} are now friends`, ts: Date.now(), target: `profile:${uname}` });
+    friendsDirty = true;
+  });
+  socket.on("friend:declined", (payload = {}) => {
+    const uname = String(payload?.username || '').trim();
+    if (uname) pushNotification({ type: 'system', text: `${uname} declined your friend request`, ts: Date.now(), target: `profile:${uname}` });
+    friendsDirty = true;
+  });
+  socket.on("friend:removed", (payload = {}) => {
+    const uname = String(payload?.username || '').trim();
+    if (uname) pushNotification({ type: 'system', text: `${uname} removed you as a friend`, ts: Date.now(), target: `profile:${uname}` });
+    friendsDirty = true;
+  });
+
   socket.on("history", (history)=>{
     let messages = history;
     if (history && !Array.isArray(history) && typeof history === "object") {

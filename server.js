@@ -166,6 +166,7 @@ async function pgEnsureEpochMsBigint(tableName, columnName) {
 let PG_USERS_CREATED_AT_IS_TIMESTAMP = false;
 let PG_READY = false;
 let COUPLES_READY = false;
+let FRIENDS_READY = false;
 let PG_INIT_ERROR = null;
 // ---- Postgres table setup
 // Run once on boot, and start the server only after this finishes (so schema/type fixes apply before /register).
@@ -502,6 +503,53 @@ try {
     console.warn('[pg-init] couples tables failed:', e?.message || e);
   }
 
+
+  // --- Friends (requests + favorites)
+  try {
+    const { rows: idInfoF } = await pgPool.query(
+      `SELECT udt_name FROM information_schema.columns WHERE table_name='users' AND column_name='id' LIMIT 1`
+    );
+    const udtF = (idInfoF?.[0]?.udt_name || '').toLowerCase();
+    const ID_TYPE_F = (udtF == 'int8' || udtF == 'bigint') ? 'BIGINT' : 'INTEGER';
+
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS friend_requests (
+        id SERIAL PRIMARY KEY,
+        from_user_id ${ID_TYPE_F} NOT NULL,
+        to_user_id ${ID_TYPE_F} NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending', -- pending|accepted|declined|cancelled
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
+      )
+    `);
+
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS friends (
+        user_id ${ID_TYPE_F} NOT NULL,
+        friend_user_id ${ID_TYPE_F} NOT NULL,
+        is_favorite BOOLEAN NOT NULL DEFAULT false,
+        created_at BIGINT NOT NULL,
+        PRIMARY KEY (user_id, friend_user_id)
+      )
+    `);
+
+    // Best-effort FK constraints
+    try { await pgPool.query(`ALTER TABLE friend_requests ADD CONSTRAINT friend_requests_from_fk FOREIGN KEY (from_user_id) REFERENCES users(id) ON DELETE CASCADE`); } catch {}
+    try { await pgPool.query(`ALTER TABLE friend_requests ADD CONSTRAINT friend_requests_to_fk FOREIGN KEY (to_user_id) REFERENCES users(id) ON DELETE CASCADE`); } catch {}
+    try { await pgPool.query(`ALTER TABLE friends ADD CONSTRAINT friends_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`); } catch {}
+    try { await pgPool.query(`ALTER TABLE friends ADD CONSTRAINT friends_friend_fk FOREIGN KEY (friend_user_id) REFERENCES users(id) ON DELETE CASCADE`); } catch {}
+
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_friend_requests_to_status ON friend_requests(to_user_id, status)`);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_friend_requests_from_status ON friend_requests(from_user_id, status)`);
+    // One pending request per direction
+    try { await pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_friend_request_pending ON friend_requests(from_user_id, to_user_id) WHERE status='pending'`); } catch {}
+
+    FRIENDS_READY = true;
+  } catch (e) {
+    FRIENDS_READY = false;
+    console.warn('[pg-init] friends tables failed:', e?.message || e);
+  }
+
 PG_READY = true;
     PG_INIT_ERROR = null;
     console.log("Postgres tables ready");
@@ -547,28 +595,6 @@ async function pgGetCoupleLinkForUser(userId) {
   return rows[0] || null;
 }
 
-
-async function pgGetActiveCoupleLinkForUser(userId) {
-  const uid = Number(userId) || 0;
-  if (!uid) return null;
-  const { rows } = await pgPool.query(
-    `
-    SELECT cl.*,
-           u1.username AS user1_name,
-           u2.username AS user2_name
-      FROM couple_links cl
-      JOIN users u1 ON u1.id = cl.user1_id
-      JOIN users u2 ON u2.id = cl.user2_id
-     WHERE (cl.user1_id=$1 OR cl.user2_id=$1)
-       AND cl.status='active'
-     ORDER BY cl.updated_at DESC
-     LIMIT 1
-    `,
-    [uid]
-  );
-  return rows[0] || null;
-}
-
 async function pgGetCouplePrefs(linkId, userId) {
   const { rows } = await pgPool.query(
     `SELECT * FROM couple_prefs WHERE link_id=$1 AND user_id=$2 LIMIT 1`,
@@ -578,7 +604,7 @@ async function pgGetCouplePrefs(linkId, userId) {
 }
 
 async function pgGetCoupleSummaryFor(userId) {
-  const linkActive = await pgGetActiveCoupleLinkForUser(userId);
+  const link = await pgGetCoupleLinkForUser(userId);
 
   // Pending links involving this user (incoming/outgoing)
   const { rows: pending } = await pgPool.query(
@@ -614,19 +640,19 @@ async function pgGetCoupleSummaryFor(userId) {
   }
 
   let active = null;
-  if (linkActive) {
-    const prefsMe = await pgGetCouplePrefs(linkActive.id, userId);
-    const partnerId = (Number(linkActive.user1_id) === Number(userId)) ? Number(linkActive.user2_id) : Number(linkActive.user1_id);
-    const prefsPartner = await pgGetCouplePrefs(linkActive.id, partnerId);
-    const partnerName = (Number(linkActive.user1_id) === Number(userId)) ? linkActive.user2_name : linkActive.user1_name;
+  if (link && link.status === "active") {
+    const prefsMe = await pgGetCouplePrefs(link.id, userId);
+    const partnerId = (Number(link.user1_id) === Number(userId)) ? Number(link.user2_id) : Number(link.user1_id);
+    const prefsPartner = await pgGetCouplePrefs(link.id, partnerId);
+    const partnerName = (Number(link.user1_id) === Number(userId)) ? link.user2_name : link.user1_name;
 
     active = {
-      linkId: linkActive.id,
+      linkId: link.id,
       partnerId,
       partner: partnerName,
-      since: Number(linkActive.activated_at || linkActive.created_at) || null,
-      statusEmoji: linkActive.status_emoji || "💜",
-      statusLabel: linkActive.status_label || "Linked",
+      since: Number(link.activated_at || link.created_at) || null,
+      statusEmoji: link.status_emoji || "💜",
+      statusLabel: link.status_label || "Linked",
       prefs: prefsMe ? {
         enabled: !!prefsMe.enabled,
         showProfile: !!prefsMe.show_profile,
@@ -701,6 +727,119 @@ async function pgUpsertCouplePrefs(linkId, userId, patch) {
     `UPDATE couple_prefs SET ${sets.join(", ")}, updated_at=$${i++} WHERE link_id=$${i++} AND user_id=$${i++}`,
     vals
   );
+}
+
+
+// ---- Friends helpers (Postgres-first, SQLite fallback)
+async function pgAreFriends(userId, otherId){
+  const uid=Number(userId)||0; const oid=Number(otherId)||0;
+  if(!uid||!oid) return false;
+  const { rows } = await pgPool.query(
+    `SELECT 1 FROM friends WHERE user_id=$1 AND friend_user_id=$2 LIMIT 1`,
+    [uid, oid]
+  );
+  return !!rows[0];
+}
+
+async function pgGetPendingFriendRequest(fromId, toId){
+  const a=Number(fromId)||0; const b=Number(toId)||0;
+  if(!a||!b) return null;
+  const { rows } = await pgPool.query(
+    `SELECT * FROM friend_requests WHERE from_user_id=$1 AND to_user_id=$2 AND status='pending' ORDER BY id DESC LIMIT 1`,
+    [a, b]
+  );
+  return rows[0] || null;
+}
+
+async function pgListIncomingFriendRequests(userId){
+  const uid=Number(userId)||0;
+  if(!uid) return [];
+  const { rows } = await pgPool.query(
+    `SELECT fr.id, fr.created_at, u.id AS from_id, u.username AS from_username, u.avatar, u.avatar_bytes, u.avatar_mime, u.avatar_updated
+       FROM friend_requests fr
+       JOIN users u ON u.id = fr.from_user_id
+      WHERE fr.to_user_id=$1 AND fr.status='pending'
+      ORDER BY fr.created_at DESC`,
+    [uid]
+  );
+  return rows || [];
+}
+
+async function pgCreateFriendsPair(a, b){
+  const uid=Number(a)||0; const oid=Number(b)||0;
+  const now=Date.now();
+  if(!uid||!oid||uid===oid) return;
+  await pgPool.query(
+    `INSERT INTO friends(user_id, friend_user_id, is_favorite, created_at)
+     VALUES ($1,$2,false,$3)
+     ON CONFLICT (user_id, friend_user_id) DO NOTHING`,
+    [uid, oid, now]
+  );
+  await pgPool.query(
+    `INSERT INTO friends(user_id, friend_user_id, is_favorite, created_at)
+     VALUES ($1,$2,false,$3)
+     ON CONFLICT (user_id, friend_user_id) DO NOTHING`,
+    [oid, uid, now]
+  );
+}
+
+async function pgListFriendsForUser(userId){
+  const uid=Number(userId)||0;
+  if(!uid) return [];
+  const { rows } = await pgPool.query(
+    `SELECT f.friend_user_id AS id,
+            f.is_favorite,
+            u.username,
+            u.role,
+            u.last_seen,
+            u.last_room,
+            u.last_status,
+            u.avatar, u.avatar_bytes, u.avatar_mime, u.avatar_updated
+       FROM friends f
+       JOIN users u ON u.id = f.friend_user_id
+      WHERE f.user_id=$1
+      ORDER BY f.is_favorite DESC, lower(u.username) ASC`,
+    [uid]
+  );
+  return rows || [];
+}
+
+async function dbAreFriends(userId, otherId){
+  const row = await dbGetAsync(`SELECT 1 FROM friends WHERE user_id=? AND friend_user_id=? LIMIT 1`, [userId, otherId]).catch(()=>null);
+  return !!row;
+}
+
+async function dbGetPendingFriendRequest(fromId, toId){
+  return await dbGetAsync(`SELECT * FROM friend_requests WHERE from_user_id=? AND to_user_id=? AND status='pending' ORDER BY id DESC LIMIT 1`, [fromId, toId]).catch(()=>null);
+}
+
+async function dbListIncomingFriendRequests(userId){
+  return await dbAllAsync(
+    `SELECT fr.id, fr.created_at, u.id AS from_id, u.username AS from_username, u.avatar
+       FROM friend_requests fr
+       JOIN users u ON u.id = fr.from_user_id
+      WHERE fr.to_user_id=? AND fr.status='pending'
+      ORDER BY fr.created_at DESC`,
+    [userId]
+  ).catch(()=>[]);
+}
+
+async function dbCreateFriendsPair(a,b){
+  const now=Date.now();
+  if(!a||!b||a===b) return;
+  await dbRunAsync(`INSERT OR IGNORE INTO friends(user_id, friend_user_id, is_favorite, created_at) VALUES (?,?,0,?)`, [a,b,now]).catch(()=>{});
+  await dbRunAsync(`INSERT OR IGNORE INTO friends(user_id, friend_user_id, is_favorite, created_at) VALUES (?,?,0,?)`, [b,a,now]).catch(()=>{});
+}
+
+async function dbListFriendsForUser(userId){
+  return await dbAllAsync(
+    `SELECT f.friend_user_id AS id, f.is_favorite, u.username, u.role, u.last_seen, u.last_room, u.last_status, u.avatar
+       FROM friends f
+       JOIN users u ON u.id = f.friend_user_id
+      WHERE f.user_id=?
+      ORDER BY f.is_favorite DESC, lower(u.username) ASC`,
+    [userId]
+  ).catch(()=>[]);
 }
 
 // ---- Security + parsing
@@ -1010,6 +1149,24 @@ function avatarUrlFromRow(row) {
   const legacy = row.avatar || row.avatar_url || row.avatarUrl || null;
   return legacy || null;
 }
+
+// Resolve a user's current avatar URL (works for both Postgres and SQLite backends).
+async function getAvatarUrlForUserId(userId){
+  const uid = Number(userId) || 0;
+  if (!uid) return null;
+  try {
+    if (PG_READY) {
+      const row = await pgGetUserRowById(uid, ["id","avatar","avatar_bytes","avatar_mime","avatar_updated"]).catch(()=>null);
+      return avatarUrlFromRow(row);
+    }
+  } catch {}
+  try {
+    const row = await dbGet("SELECT id, avatar FROM users WHERE id=? LIMIT 1", [uid]).catch(()=>null);
+    return avatarUrlFromRow(row);
+  } catch {}
+  return null;
+}
+
 function pgRowToUser(row) {
   if (!row) return null;
   return {
@@ -5180,6 +5337,41 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
       }
     } catch {}
 
+    // Friend relationship info (for showing accept/decline/add friend UI)
+    try {
+      const viewerId = Number(req.session.user?.id) || 0;
+      const targetId = Number(payload.id) || 0;
+      if (viewerId && targetId && viewerId !== targetId) {
+        let status = null;
+        let requestId = null;
+        if (PG_READY && FRIENDS_READY) {
+          const friends = await pgAreFriends(viewerId, targetId);
+          if (friends) {
+            status = 'friends';
+          } else {
+            const incoming = await pgGetPendingFriendRequest(targetId, viewerId);
+            const outgoing = await pgGetPendingFriendRequest(viewerId, targetId);
+            if (incoming?.id) { status = 'incoming'; requestId = Number(incoming.id) || null; }
+            else if (outgoing?.id) { status = 'outgoing'; requestId = Number(outgoing.id) || null; }
+            else status = 'none';
+          }
+        } else {
+          const friends = await dbAreFriends(viewerId, targetId);
+          if (friends) {
+            status = 'friends';
+          } else {
+            const incoming = await dbGetPendingFriendRequest(targetId, viewerId);
+            const outgoing = await dbGetPendingFriendRequest(viewerId, targetId);
+            if (incoming?.id) { status = 'incoming'; requestId = Number(incoming.id) || null; }
+            else if (outgoing?.id) { status = 'outgoing'; requestId = Number(outgoing.id) || null; }
+            else status = 'none';
+          }
+        }
+        payload.friend = { status, requestId };
+      }
+    } catch {}
+
+
     return res.json(payload);
   } catch (e) {
     return res.status(500).send("Server error");
@@ -5218,11 +5410,6 @@ app.post("/api/couples/request", requireLogin, async (req, res) => {
 
     const meId = Number(req.session.user?.id) || 0;
     if (!meId) return res.status(401).send("Not logged in");
-
-    // One active link at a time per user (prevents “missing options” when an active link exists but a newer pending request hides it).
-    const alreadyActive = await pgGetActiveCoupleLinkForUser(meId);
-    if (alreadyActive) return res.status(409).send("You are already linked");
-
     const otherId = Number(target.id) || 0;
     const [u1, u2] = orderPair(meId, otherId);
     const now = Date.now();
@@ -5374,6 +5561,260 @@ app.post("/api/couples/status", requireLogin, async (req, res) => {
     return res.status(500).send("Could not update status");
   }
 });
+
+
+// --- Friends API
+app.get("/api/friends/requests", requireLogin, async (req, res) => {
+  try {
+    const meId = Number(req.session.user?.id) || 0;
+    if (!meId) return res.status(401).send("Not logged in");
+    const rows = (PG_READY && FRIENDS_READY)
+      ? await pgListIncomingFriendRequests(meId)
+      : await dbListIncomingFriendRequests(meId);
+
+    const payload = rows.map((r) => ({
+      id: Number(r.id) || 0,
+      createdAt: Number(r.created_at) || Date.now(),
+      from: {
+        id: Number(r.from_id) || null,
+        username: r.from_username || r.username || null,
+        avatar: (PG_READY && FRIENDS_READY) ? avatarUrlFromRow(r) : (r.avatar || null)
+      }
+    })).filter((x) => x.id && x.from?.username);
+
+    return res.json({ incoming: payload });
+  } catch (e) {
+    console.warn('[friends] requests list failed:', e?.message || e);
+    return res.status(500).send('Could not load requests');
+  }
+});
+
+app.get("/api/friends/list", requireLogin, async (req, res) => {
+  try {
+    const meId = Number(req.session.user?.id) || 0;
+    if (!meId) return res.status(401).send("Not logged in");
+    const rows = (PG_READY && FRIENDS_READY)
+      ? await pgListFriendsForUser(meId)
+      : await dbListFriendsForUser(meId);
+
+    const friends = rows.map((r) => {
+      const uid = Number(r.id) || Number(r.friend_user_id) || 0;
+      const live = onlineState.get(uid);
+      const online = !!socketIdByUserId.get(uid);
+      return {
+        id: uid,
+        username: r.username,
+        role: r.role,
+        avatar: (PG_READY && FRIENDS_READY) ? avatarUrlFromRow(r) : (r.avatar || null),
+        isFavorite: !!r.is_favorite,
+        online,
+        currentRoom: live?.room || null,
+        lastSeen: r.last_seen || null,
+        lastRoom: r.last_room || null,
+        lastStatus: live?.status || r.last_status || null,
+      };
+    }).filter((f) => f.id && f.username);
+
+    return res.json({ friends });
+  } catch (e) {
+    console.warn('[friends] list failed:', e?.message || e);
+    return res.status(500).send('Could not load friends');
+  }
+});
+
+app.post("/api/friends/request", requireLogin, async (req, res) => {
+  try {
+    const meId = Number(req.session.user?.id) || 0;
+    const toName = String(req.body?.to || '').trim().slice(0, 64);
+    const toUser = await findUserByUsername(toName);
+    if (!toUser) return res.status(404).send('User not found');
+    if (Number(toUser.id) === meId) return res.status(400).send('You cannot friend yourself');
+
+    // Already friends?
+    const already = (PG_READY && FRIENDS_READY)
+      ? await pgAreFriends(meId, toUser.id)
+      : await dbAreFriends(meId, toUser.id);
+    if (already) return res.json({ ok: true, status: 'friends', autoAccepted: true });
+
+    // If they already requested you, auto-accept
+    const incoming = (PG_READY && FRIENDS_READY)
+      ? await pgGetPendingFriendRequest(toUser.id, meId)
+      : await dbGetPendingFriendRequest(toUser.id, meId);
+
+    const now = Date.now();
+
+    if (incoming?.id) {
+      if (PG_READY && FRIENDS_READY) {
+        await pgPool.query(`UPDATE friend_requests SET status='accepted', updated_at=$2 WHERE id=$1`, [incoming.id, now]);
+        await pgCreateFriendsPair(meId, toUser.id);
+      } else {
+        await dbRunAsync(`UPDATE friend_requests SET status='accepted', updated_at=? WHERE id=?`, [now, incoming.id]);
+        await dbCreateFriendsPair(meId, toUser.id);
+      }
+
+      // notify both
+      const sOther = socketIdByUserId.get(Number(toUser.id));
+      if (sOther) io.to(sOther).emit('friend:accepted', { username: req.session.user.username, by: req.session.user.username });
+      const sMe = socketIdByUserId.get(meId);
+      if (sMe) io.to(sMe).emit('friend:accepted', { username: toUser.username, by: req.session.user.username });
+
+      return res.json({ ok: true, status: 'friends', autoAccepted: true });
+    }
+
+    // Existing outgoing pending?
+    const outgoing = (PG_READY && FRIENDS_READY)
+      ? await pgGetPendingFriendRequest(meId, toUser.id)
+      : await dbGetPendingFriendRequest(meId, toUser.id);
+    if (outgoing?.id) return res.json({ ok: true, status: 'pending', requestId: Number(outgoing.id) });
+
+    let requestId = 0;
+    if (PG_READY && FRIENDS_READY) {
+      const { rows } = await pgPool.query(
+        `INSERT INTO friend_requests(from_user_id, to_user_id, status, created_at, updated_at)
+         VALUES ($1,$2,'pending',$3,$3)
+         RETURNING id`,
+        [meId, toUser.id, now]
+      );
+      requestId = Number(rows?.[0]?.id) || 0;
+    } else {
+      const r = await dbRunAsync(
+        `INSERT INTO friend_requests(from_user_id, to_user_id, status, created_at, updated_at)
+         VALUES (?,?, 'pending', ?, ?)`,
+        [meId, toUser.id, now, now]
+      );
+      requestId = Number(r?.lastID) || 0;
+    }
+
+    // notify receiver (personalized flair via client notification)
+    const sOther = socketIdByUserId.get(Number(toUser.id));
+    if (sOther) {
+      io.to(sOther).emit('friend:request', {
+        requestId,
+        from: {
+          id: meId,
+          username: req.session.user.username,
+          avatar: await getAvatarUrlForUserId(meId),
+        },
+        createdAt: now,
+      });
+    }
+
+    return res.json({ ok: true, status: 'pending', requestId });
+  } catch (e) {
+    console.warn('[friends] request failed:', e?.message || e);
+    return res.status(500).send('Could not send request');
+  }
+});
+
+app.post("/api/friends/respond", requireLogin, async (req, res) => {
+  try {
+    const meId = Number(req.session.user?.id) || 0;
+    const requestId = Number(req.body?.requestId) || 0;
+    const action = String(req.body?.action || '').toLowerCase();
+    if (!requestId || !['accept','decline'].includes(action)) return res.status(400).send('Bad request');
+
+    const now = Date.now();
+
+    if (PG_READY && FRIENDS_READY) {
+      const { rows } = await pgPool.query(`SELECT * FROM friend_requests WHERE id=$1 LIMIT 1`, [requestId]);
+      const fr = rows[0];
+      if (!fr) return res.status(404).send('Not found');
+      if (String(fr.status) !== 'pending') return res.json({ ok: true, status: fr.status });
+      if (Number(fr.to_user_id) !== meId) return res.status(403).send('Forbidden');
+
+      if (action === 'accept') {
+        await pgPool.query(`UPDATE friend_requests SET status='accepted', updated_at=$2 WHERE id=$1`, [requestId, now]);
+        await pgCreateFriendsPair(fr.from_user_id, fr.to_user_id);
+      } else {
+        await pgPool.query(`UPDATE friend_requests SET status='declined', updated_at=$2 WHERE id=$1`, [requestId, now]);
+      }
+
+      const fromId = Number(fr.from_user_id) || 0;
+      const fromUser = await pgGetUserById(fromId).catch(()=>null);
+      const sFrom = socketIdByUserId.get(fromId);
+      const sMe = socketIdByUserId.get(meId);
+      if (action === 'accept') {
+        if (sFrom) io.to(sFrom).emit('friend:accepted', { username: req.session.user.username, by: req.session.user.username });
+        if (sMe && fromUser?.username) io.to(sMe).emit('friend:accepted', { username: fromUser.username, by: req.session.user.username });
+      } else {
+        if (sFrom) io.to(sFrom).emit('friend:declined', { username: req.session.user.username });
+      }
+
+      return res.json({ ok: true, status: action === 'accept' ? 'accepted' : 'declined' });
+    }
+
+    // SQLite fallback
+    const fr = await dbGetAsync(`SELECT * FROM friend_requests WHERE id=? LIMIT 1`, [requestId]).catch(()=>null);
+    if (!fr) return res.status(404).send('Not found');
+    if (String(fr.status) !== 'pending') return res.json({ ok: true, status: fr.status });
+    if (Number(fr.to_user_id) !== meId) return res.status(403).send('Forbidden');
+
+    if (action === 'accept') {
+      await dbRunAsync(`UPDATE friend_requests SET status='accepted', updated_at=? WHERE id=?`, [now, requestId]);
+      await dbCreateFriendsPair(fr.from_user_id, fr.to_user_id);
+    } else {
+      await dbRunAsync(`UPDATE friend_requests SET status='declined', updated_at=? WHERE id=?`, [now, requestId]);
+    }
+
+    const sFrom = socketIdByUserId.get(Number(fr.from_user_id));
+    if (action === 'accept') {
+      if (sFrom) io.to(sFrom).emit('friend:accepted', { username: req.session.user.username, by: req.session.user.username });
+    } else {
+      if (sFrom) io.to(sFrom).emit('friend:declined', { username: req.session.user.username });
+    }
+
+    return res.json({ ok: true, status: action === 'accept' ? 'accepted' : 'declined' });
+  } catch (e) {
+    console.warn('[friends] respond failed:', e?.message || e);
+    return res.status(500).send('Could not respond');
+  }
+});
+
+app.post("/api/friends/favorite", requireLogin, async (req, res) => {
+  try {
+    const meId = Number(req.session.user?.id) || 0;
+    const uname = String(req.body?.username || '').trim().slice(0,64);
+    const other = await findUserByUsername(uname);
+    if (!other) return res.status(404).send('User not found');
+    const isFavorite = !!req.body?.isFavorite;
+
+    if (PG_READY && FRIENDS_READY) {
+      await pgPool.query(
+        `UPDATE friends SET is_favorite=$3 WHERE user_id=$1 AND friend_user_id=$2`,
+        [meId, other.id, isFavorite]
+      );
+    } else {
+      await dbRunAsync(`UPDATE friends SET is_favorite=? WHERE user_id=? AND friend_user_id=?`, [isFavorite ? 1 : 0, meId, other.id]);
+    }
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn('[friends] favorite failed:', e?.message || e);
+    return res.status(500).send('Could not update favorite');
+  }
+});
+
+app.post("/api/friends/remove", requireLogin, async (req, res) => {
+  try {
+    const meId = Number(req.session.user?.id) || 0;
+    const uname = String(req.body?.username || '').trim().slice(0,64);
+    const other = await findUserByUsername(uname);
+    if (!other) return res.status(404).send('User not found');
+
+    if (PG_READY && FRIENDS_READY) {
+      await pgPool.query(`DELETE FROM friends WHERE (user_id=$1 AND friend_user_id=$2) OR (user_id=$2 AND friend_user_id=$1)`, [meId, other.id]);
+    } else {
+      await dbRunAsync(`DELETE FROM friends WHERE (user_id=? AND friend_user_id=?) OR (user_id=? AND friend_user_id=?)`, [meId, other.id, other.id, meId]);
+    }
+    // notify other (optional)
+    const sOther = socketIdByUserId.get(Number(other.id));
+    if (sOther) io.to(sOther).emit('friend:removed', { username: req.session.user.username });
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn('[friends] remove failed:', e?.message || e);
+    return res.status(500).send('Could not remove friend');
+  }
+});
+
 
 
 app.post("/profile/:username/like", requireLogin, async (req, res) => {
