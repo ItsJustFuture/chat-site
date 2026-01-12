@@ -3825,10 +3825,12 @@ function presenceFlags(username, explicitStatus){
   const key = normKey(username);
   const u = (lastUsers || []).find((user) => normKey(user?.name) === key || normKey(user?.username) === key);
   const status = normalizeStatusLabel(explicitStatus || u?.status || "Online", "Online");
-  const isIdle = status === "Idle" || status === "Away";
+  const isIdle = status === "Idle" || status === "Away" || status === "Lurking";
+  const isDnd = status === "Busy" || status === "DnD";
   const isTyping = key && typingUsers.has(key);
   const isActiveDm = key && activeDmUsers.has(key);
-  return { status, isIdle, isTyping, isActiveDm };
+  const isOnline = !isIdle && !isDnd;
+  return { status, isIdle, isDnd, isTyping, isActiveDm, isOnline };
 }
 
 function resolvePresenceAuraTarget(el){
@@ -3845,17 +3847,38 @@ function applyPresenceAura(el, username, opts = {}){
   const key = normKey(username || opts.username || target.dataset.username || "");
   if (key) target.dataset.username = key;
   if (!isPolishAurasEnabled()) {
-    target.classList.remove("presenceAura", "isTyping", "isActiveDm", "isIdle", "isOnline");
+    target.classList.remove("presenceAura", "isTyping", "isActiveDm", "isIdle", "isOnline", "isDnd", "isVip");
     delete target.dataset.status;
     return;
   }
-  const { status, isIdle, isTyping, isActiveDm } = presenceFlags(key, opts.status);
+  const { status, isIdle, isTyping, isActiveDm, isDnd, isOnline } = presenceFlags(key, opts.status);
   target.classList.add("presenceAura");
   target.classList.toggle("isTyping", !!isTyping);
   target.classList.toggle("isActiveDm", !!isActiveDm);
   target.classList.toggle("isIdle", !!isIdle);
-  target.classList.toggle("isOnline", !isIdle);
+  target.classList.toggle("isDnd", !!isDnd);
+  target.classList.toggle("isOnline", !!isOnline);
   if (status) target.dataset.status = status;
+}
+
+function applyAvatarMeta(el, user = {}){
+  if (!el || !el.classList) return;
+  const username = typeof user === "string" ? user : (user?.username || user?.name || "");
+  const role = (typeof user === "object") ? (user?.role || user?.userRole || null) : null;
+  const target = resolvePresenceAuraTarget(el);
+  if (target && username) target.dataset.username = normKey(username);
+  if (target) {
+    const isVip = role && roleRank(role) >= roleRank("VIP");
+    target.classList.toggle("isVip", !!isVip);
+  }
+  applyPresenceAura(target || el, username, { status: user?.status });
+}
+
+function setPresenceClass(username, status){
+  const key = normKey(username || "");
+  if (!key) return;
+  const selector = `[data-username="${escapeSelectorValue(key)}"]`;
+  document.querySelectorAll(selector).forEach((node) => applyPresenceAura(node, key, { status }));
 }
 
 function updatePresenceAuras(){
@@ -3884,7 +3907,7 @@ function avatarNode(url, fallbackText, role, presenceName){
     const wrap=document.createElement("div");
     wrap.className = `avatarFallback role-${rKey}` + (rKey === "vip" ? " vipDiamond" : "");
     wrap.textContent=(fallbackText||"?").slice(0,1).toUpperCase();
-    applyPresenceAura(wrap, pName);
+    applyAvatarMeta(wrap, { username: pName, role });
     return wrap;
   };
 
@@ -3897,7 +3920,7 @@ function avatarNode(url, fallbackText, role, presenceName){
     img.onerror = () => {
       img.replaceWith(buildFallback());
     };
-    applyPresenceAura(img, pName);
+    applyAvatarMeta(img, { username: pName, role });
     return img;
   }
   return buildFallback();
@@ -3943,14 +3966,14 @@ function makeAvatarEl({ username, role, avatarUrl, size = 34 }) {
     };
 
     el.appendChild(img);
-    applyPresenceAura(el, username);
+    applyAvatarMeta(el, { username, role });
     return el;
   }
 
   // No avatar URL -> default gradient fallback
   el.classList.add("avatarFallback", `role-${roleKey(role)}`);
   el.textContent = (username || "?").slice(0, 1).toUpperCase();
-  applyPresenceAura(el, username);
+  applyAvatarMeta(el, { username, role });
   return el;
 }
 
@@ -3963,6 +3986,159 @@ function getUserMeta(username){
   }
   const u = (lastUsers || []).find(x => String((x.username||x.name||"")).toLowerCase() === name.toLowerCase());
   return { role: u?.role || "member", avatarUrl: u?.avatar || u?.avatarUrl || null, username: u?.username || u?.name || name, status: u?.status, vibe_tags: sanitizeVibeTagsClient(u?.vibe_tags) };
+}
+
+const IDENTITY_GLOW_PALETTE = [
+  "#6c7af7",
+  "#58a6ff",
+  "#a855f7",
+  "#ff7ad9",
+  "#ffb347",
+  "#5ee6c9"
+];
+const ROLE_GLOW_MAP = {
+  "Owner": "#f6c358",
+  "Co-owner": "#ff9f43",
+  "Admin": "#ff6b6b",
+  "Moderator": "#54a0ff",
+  "VIP": "#b96bff",
+  "Guest": "#8f9ca6",
+  "User": "#6c7af7",
+  "Member": "#6c7af7"
+};
+function clamp(num, min, max){ return Math.min(max, Math.max(min, num)); }
+function hashString(input){
+  const str = String(input || "");
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+function hexToRgb(hex){
+  const raw = String(hex || "").replace("#", "");
+  const normalized = raw.length === 3 ? raw.split("").map((c)=>c + c).join("") : raw;
+  const int = Number.parseInt(normalized || "0", 16);
+  return {
+    r: (int >> 16) & 255,
+    g: (int >> 8) & 255,
+    b: int & 255
+  };
+}
+function rgbToHex({ r, g, b }){
+  const toHex = (v) => String(v.toString(16)).padStart(2, "0");
+  return `#${toHex(clamp(Math.round(r), 0, 255))}${toHex(clamp(Math.round(g), 0, 255))}${toHex(clamp(Math.round(b), 0, 255))}`;
+}
+function rgbToHsl({ r, g, b }){
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d !== 0) {
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case rn: h = (gn - bn) / d + (gn < bn ? 6 : 0); break;
+      case gn: h = (bn - rn) / d + 2; break;
+      default: h = (rn - gn) / d + 4; break;
+    }
+    h /= 6;
+  }
+  return { h, s, l };
+}
+function hslToRgb({ h, s, l }){
+  if (s === 0) {
+    const v = Math.round(l * 255);
+    return { r: v, g: v, b: v };
+  }
+  const hue2rgb = (p, q, t) => {
+    let tt = t;
+    if (tt < 0) tt += 1;
+    if (tt > 1) tt -= 1;
+    if (tt < 1/6) return p + (q - p) * 6 * tt;
+    if (tt < 1/2) return q;
+    if (tt < 2/3) return p + (q - p) * (2/3 - tt) * 6;
+    return p;
+  };
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const r = hue2rgb(p, q, h + 1/3);
+  const g = hue2rgb(p, q, h);
+  const b = hue2rgb(p, q, h - 1/3);
+  return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+}
+function mixRgb(a, b, ratio = 0.5){
+  const r = a.r + (b.r - a.r) * ratio;
+  const g = a.g + (b.g - a.g) * ratio;
+  const bch = a.b + (b.b - a.b) * ratio;
+  return { r, g, b: bch };
+}
+function getUserIdentityGlow(user){
+  const username = safeString(user?.username || user?.name || "");
+  const role = normalizeRole(user?.role || user?.userRole || "User");
+  const baseHex = ROLE_GLOW_MAP[role] || null;
+  const fallbackHex = IDENTITY_GLOW_PALETTE[hashString(username) % IDENTITY_GLOW_PALETTE.length] || "#6c7af7";
+  const seedHex = baseHex || fallbackHex;
+  let baseRgb = hexToRgb(seedHex);
+
+  const vibes = sanitizeVibeTagsClient(user?.vibe_tags);
+  if (vibes.length) {
+    const vibeHash = hashString(vibes.join("|"));
+    const hsl = rgbToHsl(baseRgb);
+    const hueShift = ((vibeHash % 18) - 9) / 360;
+    hsl.h = (hsl.h + hueShift + 1) % 1;
+    hsl.s = clamp(hsl.s + Math.min(0.12, vibes.length * 0.03), 0.2, 0.9);
+    hsl.l = clamp(hsl.l + 0.04, 0.24, 0.75);
+    baseRgb = hslToRgb(hsl);
+  }
+
+  const partner = safeString(user?.couple?.partner || "");
+  if (partner && partner.toLowerCase() !== username.toLowerCase()) {
+    const partnerHex = IDENTITY_GLOW_PALETTE[hashString(partner) % IDENTITY_GLOW_PALETTE.length] || "#6c7af7";
+    const partnerRgb = hexToRgb(partnerHex);
+    baseRgb = mixRgb(baseRgb, partnerRgb, 0.35);
+  }
+
+  const colorHex = rgbToHex(baseRgb);
+  return {
+    color: colorHex,
+    rgb: `${Math.round(baseRgb.r)} ${Math.round(baseRgb.g)} ${Math.round(baseRgb.b)}`
+  };
+}
+function applyIdentityGlow(el, user){
+  if (!el || !el.style) return;
+  const glow = getUserIdentityGlow(user || {});
+  if (!glow?.color) return;
+  el.style.setProperty("--userGlow", glow.color);
+  el.style.setProperty("--userGlowRgb", glow.rgb);
+}
+
+const MSG_IMPACT_LONG_THRESHOLD = 160;
+function detectMessageImpactVariant(targetEl, rawText){
+  if (!targetEl) return "";
+  const hasMedia = !!targetEl.querySelector(".attachment, .msg-media-thumb, .ytMiniCard, iframe, video");
+  if (hasMedia) return "media";
+  const len = String(rawText || "").trim().length;
+  if (len > MSG_IMPACT_LONG_THRESHOLD) return "long";
+  return "";
+}
+function applyMessageImpactAnimation(el, { variant, isVip } = {}){
+  if (!el || !el.classList || !isPolishAnimationsEnabled()) return;
+  const classes = ["msgEnter"];
+  if (variant) classes.push(`msgEnter--${variant}`);
+  if (isVip) classes.push("msgEnter--vip");
+  el.classList.remove("msgEnter", "msgEnter--long", "msgEnter--media", "msgEnter--vip");
+  el.classList.add(...classes);
+  const cleanup = () => {
+    el.classList.remove(...classes);
+  };
+  el.addEventListener("animationend", cleanup, { once:true });
+  setTimeout(cleanup, 800);
 }
 
 
@@ -4454,7 +4630,7 @@ function updatePolishPackClasses(fx = chatFxPrefs){
 
   if (!auras) {
     document.querySelectorAll(".presenceAura").forEach((el) => {
-      el.classList.remove("presenceAura", "isTyping", "isActiveDm", "isIdle", "isOnline");
+      el.classList.remove("presenceAura", "isTyping", "isActiveDm", "isIdle", "isOnline", "isDnd", "isVip");
       delete el.dataset.status;
     });
   } else {
@@ -5020,6 +5196,7 @@ try{
     const av = document.createElement("div");
     av.className = "msgAvatar";
     av.appendChild(avatarNode(m.avatar, senderName, senderRole));
+    applyAvatarMeta(av, { username: senderName, role: senderRole, status: m.status });
     av.title = `View ${senderName} profile`;
     av.tabIndex = 0;
     const openProfile = (e) => { e.stopPropagation(); openMemberProfile(senderName); };
@@ -5043,9 +5220,11 @@ try{
     showHeader: !canGroup, // show username/role only on first in group
     isSelf
   });
+  item.dataset.username = normKey(senderName || "");
 
   const bubbleEl = item.querySelector(".bubble");
   applyChatFxToBubble(bubbleEl, resolvedFx, { groupBody: body });
+  applyIdentityGlow(item, { username: senderName, role: senderRole, vibe_tags: m?.vibe_tags, couple: m?.couple });
   body.appendChild(item);
   queueContrastReinforcement(bubbleEl);
 
@@ -5064,6 +5243,9 @@ try{
       item.classList.add("msg-new");
       setTimeout(() => item.classList.remove("msg-new"), 220);
     }
+    const variant = detectMessageImpactVariant(item, rawText);
+    const isVip = roleRank(senderRole) >= roleRank("VIP");
+    applyMessageImpactAnimation(item, { variant, isVip });
     delete m.__fresh;
   }
 
@@ -5755,6 +5937,7 @@ function renderMembers(users){
 
       const av=document.createElement("div");
       av.className="mAvatar";
+      applyAvatarMeta(av, { username: u.name, role: u.role, status: u.status });
       const partnerPresent = !!(u?.couple?.partner && presentNames.has(u.couple.partner));
       if (u?.couple?.aura && partnerPresent) av.classList.add("coupleAura");
       av.appendChild(avatarNode(u.avatar, u.name, u.role));
@@ -5882,6 +6065,7 @@ function renderFriendsList(list){
       dot.className = 'dot';
       const statusLabel = f.online ? 'Online' : 'Offline';
       dot.style.background = statusDotColor(statusLabel);
+      applyAvatarMeta(av, { username: f.username, role: f.role || 'User', status: statusLabel });
 
       const meta = document.createElement('div');
       meta.className = 'mMeta';
@@ -6232,6 +6416,12 @@ function renderThreadItem(t){
   div.className = "dmItem" + (t.id === activeDmId ? " active" : "");
   const label = threadLabel(t);
   const preview = t.last_text ? String(t.last_text).slice(0, 80) : "No messages yet";
+  if (!t.is_group) {
+    const other = (t.participants || []).find((p) => p !== me?.username) || label;
+    const meta = getUserMeta(other);
+    div.dataset.username = normKey(meta.username || other);
+    applyIdentityGlow(div, meta);
+  }
 
   div.appendChild(threadAvatarNode(t));
 
@@ -6306,9 +6496,12 @@ function renderDirectThreads(){
       btn.className = "dmThreadBtn";
       btn.dataset.threadId = t.id;
       btn.dataset.flipKey = `dm-thread-${t.id}`;
+      if (String(t.id) === String(activeDmId)) btn.classList.add("active");
 
       const wrap = document.createElement("div");
       wrap.className = "dmThreadRow";
+      wrap.dataset.username = normKey(meta.username || other);
+      applyIdentityGlow(wrap, { username: meta.username || other, role: meta.role, vibe_tags: meta.vibe_tags, couple: meta.couple });
 
       const av = makeAvatarEl({
         username: meta.username || other,
@@ -6636,6 +6829,8 @@ function renderDmMessages(threadId){
     const row = document.createElement("div");
     row.className = "dmRow" + (isSelf ? " self" : "") + gClass;
     row.dataset.dmMid = m.messageId || m.id;
+    row.dataset.username = normKey(authorName || "");
+    applyIdentityGlow(row, { username: authorName, role: m.role || roleForUser(authorName), vibe_tags: m?.vibe_tags, couple: m?.couple });
 
 // Avatar column (non-self). Keep spacing consistent for grouped messages.
 const threadMeta = dmThreads.find(t => String(t.id) === String(threadId));
@@ -6877,6 +7072,9 @@ if (!isSelf) {
         row.classList.add("msg-new");
         setTimeout(() => row.classList.remove("msg-new"), 220);
       }
+      const variant = detectMessageImpactVariant(row, m.text || "");
+      const isVip = roleRank(m.role || roleForUser(authorName)) >= roleRank("VIP");
+      applyMessageImpactAnimation(row, { variant, isVip });
       delete m.__fresh;
     }
     dmMessagesEl.appendChild(row);
@@ -10142,6 +10340,7 @@ function fillProfileSheetHeader(p, isSelf){
 
   currentProfileHeaderRole = p?.role || "";
   applyProfileHeaderGradient(p?.header_grad_a, p?.header_grad_b, currentProfileHeaderRole);
+  applyIdentityGlow(profileSheetHero, p);
 
   // Avatar
   if (profileSheetAvatar){
@@ -11830,6 +12029,7 @@ socket.on("disconnect", (reason) => {
     }
     setTypingIndicator(text);
     stickToBottomIfWanted();
+    (names || []).forEach((name) => setPresenceClass(name, "typing"));
     updatePresenceAuras();
   });
   socket.on("level up", ({ level }) => {
