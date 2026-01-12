@@ -1184,6 +1184,12 @@ let chatFxPreviewAvatar = null;
 let chatFxPreviewName = null;
 let chatFxPreviewRoleIcon = null;
 let chatFxPreviewTime = null;
+// Text & Identity sticky preview
+let textFxPreviewBubble = null;
+let textFxPreviewAvatar = null;
+let textFxPreviewName = null;
+let textFxPreviewRoleIcon = null;
+let textFxPreviewTime = null;
 let chatFxStatus = null;
 let chatFxPrefsLoaded = false;
 let chatFxPrefsLoading = false;
@@ -3596,7 +3602,16 @@ function fmtAbs(ts){
 }
 function fmtCreated(ts){
   if(!ts) return "—";
-  const d = new Date(ts);
+  // Accept numeric strings and seconds timestamps.
+  let raw = ts;
+  if (typeof raw === "string") raw = raw.trim();
+  const asNum = (typeof raw === "number") ? raw : Number(raw);
+  if (Number.isFinite(asNum)) {
+    const ms = asNum < 1e12 ? asNum * 1000 : asNum;
+    const d = new Date(ms);
+    if (!Number.isNaN(d.getTime())) return d.toLocaleString();
+  }
+  const d = new Date(raw);
   if(Number.isNaN(d.getTime())) return String(ts);
   return d.toLocaleString();
 }
@@ -7846,13 +7861,14 @@ function focusActiveTab(){
 
 function setCustomizePage(category = null){
   activeCustomizePage = category;
+  const isWide = window.matchMedia && window.matchMedia("(min-width: 900px)").matches;
   customizePages.forEach((page) => {
     const isActive = page.dataset.category === category;
     page.classList.toggle("active", isActive);
     page.style.display = isActive ? "block" : "none";
   });
-  if (customizeCardGrid) customizeCardGrid.style.display = category ? "none" : "grid";
-  if (customizeSubpages) customizeSubpages.classList.toggle("showing", !!category);
+  if (customizeCardGrid) customizeCardGrid.style.display = (isWide ? "grid" : (category ? "none" : "grid"));
+  if (customizeSubpages) customizeSubpages.classList.toggle("showing", isWide ? true : !!category);
   const scrollHost = modal?.querySelector(".modalBody");
   if (scrollHost) scrollHost.scrollTop = 0;
 }
@@ -10285,7 +10301,12 @@ function fillProfileUI(p, isSelf){
     modalRole.textContent=`${roleIcon(p.role)} ${p.role}`;
     modalRole.style.color=roleBadgeColor(p.role);
   }
-  if (modalMood) modalMood.textContent = p.mood ? `Mood: ${p.mood}` : "Mood: (none)";
+  // Mood lives under the username/role in the header.
+  if (modalMood) {
+    const mood = String(p.mood || "").trim();
+    modalMood.textContent = mood;
+    modalMood.style.display = mood ? "block" : "none";
+  }
 
   // Couple chip (view-only, opt-in)
   try {
@@ -10450,7 +10471,9 @@ function syncProfileEditUi(){
 }
 
 function updateProfileActions({ isSelf = false, canModerate = false } = {}){
-  if (profileEditToggleRow) profileEditToggleRow.style.display = isSelf ? "" : "none";
+  // Quick "Edit profile" button now lives in the top quick-actions row.
+  if (profileEditToggleBtn) profileEditToggleBtn.style.display = isSelf ? "" : "none";
+  if (profileEditToggleRow) profileEditToggleRow.style.display = "none";
   applyCustomizeVisibility();
   if (addFriendBtn) addFriendBtn.style.display = isSelf ? "none" : "";
   if (declineFriendBtn) declineFriendBtn.style.display = "none";
@@ -10779,23 +10802,48 @@ function readChatFxFormRaw(){
 }
 
 function updateChatFxPreview(fx){
-  if (!chatFxPreviewBubble) return;
-  applyChatFxToBubble(chatFxPreviewBubble, fx);
-  chatFxPreviewBubble.closest(".chatFxPreview")?.classList.toggle("disabled", !normalizeChatFx(fx).enabled);
+  const normalized = normalizeChatFx(fx);
+  if (chatFxPreviewBubble) {
+    applyChatFxToBubble(chatFxPreviewBubble, normalized);
+    chatFxPreviewBubble.closest(".chatFxPreview")?.classList.toggle("disabled", !normalized.enabled);
+  }
+  if (textFxPreviewBubble) {
+    applyChatFxToBubble(textFxPreviewBubble, normalized);
+    textFxPreviewBubble.closest(".chatFxPreview")?.classList.toggle("disabled", !normalized.enabled);
+  }
 }
 
 function updateChatFxPreviewIdentity(user = me){
-  if (!chatFxPreviewName || !chatFxPreviewRoleIcon || !chatFxPreviewAvatar) return;
+  if (!chatFxPreviewName || !chatFxPreviewRoleIcon || !chatFxPreviewAvatar) {
+    // Still allow Text & Identity preview to update even if the Chat Appearance preview isn't mounted.
+    if (!textFxPreviewName || !textFxPreviewRoleIcon || !textFxPreviewAvatar) return;
+  }
   const username = user?.username || "You";
   const role = normalizeRole(user?.role || "User");
   const roleToken = roleKey(role);
-  chatFxPreviewName.textContent = username;
-  chatFxPreviewName.dataset.role = roleToken;
-  chatFxPreviewName.closest(".name")?.setAttribute("data-role", roleToken);
-  chatFxPreviewRoleIcon.textContent = `${roleIcon(role)} `;
-  chatFxPreviewAvatar.innerHTML = "";
-  chatFxPreviewAvatar.appendChild(avatarNode(user?.avatar || user?.avatarUrl, username, role, username));
+  if (chatFxPreviewName) {
+    chatFxPreviewName.textContent = username;
+    chatFxPreviewName.dataset.role = roleToken;
+    chatFxPreviewName.closest(".name")?.setAttribute("data-role", roleToken);
+  }
+  if (chatFxPreviewRoleIcon) chatFxPreviewRoleIcon.textContent = `${roleIcon(role)} `;
+  if (chatFxPreviewAvatar) {
+    chatFxPreviewAvatar.innerHTML = "";
+    chatFxPreviewAvatar.appendChild(avatarNode(user?.avatar || user?.avatarUrl, username, role, username));
+  }
   if (chatFxPreviewTime) chatFxPreviewTime.textContent = "Just now";
+
+  if (textFxPreviewName) {
+    textFxPreviewName.textContent = username;
+    textFxPreviewName.dataset.role = roleToken;
+    textFxPreviewName.closest(".name")?.setAttribute("data-role", roleToken);
+  }
+  if (textFxPreviewRoleIcon) textFxPreviewRoleIcon.textContent = `${roleIcon(role)} `;
+  if (textFxPreviewAvatar) {
+    textFxPreviewAvatar.innerHTML = "";
+    textFxPreviewAvatar.appendChild(avatarNode(user?.avatar || user?.avatarUrl, username, role, username));
+  }
+  if (textFxPreviewTime) textFxPreviewTime.textContent = "Just now";
 }
 
 function handleChatFxInput(){
@@ -10931,6 +10979,13 @@ function wireChatFxPrefs(){
   chatFxPreviewName = q("#chatFxPreviewName");
   chatFxPreviewRoleIcon = q("#chatFxPreviewRoleIcon");
   chatFxPreviewTime = q("#chatFxPreviewTime");
+
+  // Text & Identity sticky preview (optional)
+  textFxPreviewBubble = q("#textFxPreviewBubble");
+  textFxPreviewAvatar = q("#textFxPreviewAvatar");
+  textFxPreviewName = q("#textFxPreviewName");
+  textFxPreviewRoleIcon = q("#textFxPreviewRoleIcon");
+  textFxPreviewTime = q("#textFxPreviewTime");
   chatFxStatus = chatFxPrefEls.status;
   updateChatFxPreviewIdentity(me);
 
@@ -11301,7 +11356,8 @@ async function openMyProfile(){
   applyProgressionPayload(p);
 
   modalTitle.textContent="My Profile";
-  modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
+  // Created date is shown in the info grid; keep header meta empty.
+  if (modalMeta) modalMeta.textContent = "";
 
   fillProfileUI(p, true);
   syncCustomizationUI();
@@ -11401,7 +11457,8 @@ async function openMemberProfile(username){
   if (isSelf) applyProgressionPayload(p);
 
   modalTitle.textContent="Member Profile";
-  modalMeta.textContent = p.created_at ? `Created: ${fmtCreated(p.created_at)}` : "";
+  // Created date is shown in the info grid; keep header meta empty.
+  if (modalMeta) modalMeta.textContent = "";
   fillProfileUI(p, isSelf);
   modalFriendInfo = p.friend || null;
   syncCustomizationUI();

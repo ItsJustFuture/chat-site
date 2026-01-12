@@ -5975,6 +5975,45 @@ body.polish-pack.polish-auras .presenceAura.isVip::after{
   gap: 12px;
   margin-top: 4px;
 }
+
+/* Desktop: use the full width (cards left, active settings right) */
+@media (min-width: 900px){
+  .customizeShell{
+    display: grid;
+    grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+  .customizeBackBtn{ display:none; }
+  .customizeCardGrid{ align-content:start; }
+  .customizeSubpages{ min-height: 520px; }
+}
+
+/* Sticky Text & Identity preview */
+.textFxStickyPreview{
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 6px 0 12px;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(0,0,0,.28);
+  backdrop-filter: blur(10px);
+}
+
+@media (min-width: 900px){
+  #customizeTextPage{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  #customizeTextPage .customizeHeader,
+  #customizeTextPage .textFxStickyPreview,
+  #customizeTextPage .customizeResetRow{
+    grid-column: 1 / -1;
+  }
+}
 .customizeTopBar input{
   width: 100%;
   padding: 10px 12px;

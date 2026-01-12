@@ -606,7 +606,7 @@
       </div>
 
       <div class="modalBody">
-        <div class="small" id="modalMeta"></div>
+        <div class="small" id="modalMeta" style="display:none;"></div>
 
         <div class="profileSticky">
           <div class="profileActions">
@@ -630,8 +630,7 @@
                 <button class="btn btnSecondary" id="addFriendBtn" type="button" style="display:none;">🤝 Add Friend</button>
                 <button class="btn btnSecondary" id="declineFriendBtn" type="button" style="display:none;">✖ Decline</button>
                 <button class="btn btnSecondary" id="likeProfileBtn" type="button">❤️ Like</button>
-                <button class="btn btnSecondary" id="copyUsernameBtn" type="button">Copy username</button>
-                <div class="badge" id="likeCount">0</div>
+                <button class="btn btnSecondary" id="profileEditToggleBtn" type="button" style="display:none;">Edit profile</button>
               </div>
             </div>
 
@@ -649,8 +648,8 @@
                 <div class="infoValue" id="infoRoom">—</div>
               </div>
               <div class="profileInfoCard">
-                <div class="infoLabel">Mood</div>
-                <div class="infoValue" id="profileMood">—</div>
+                <div class="infoLabel">Created</div>
+                <div class="infoValue" id="infoCreated">—</div>
               </div>
               <div class="profileInfoCard">
                 <div class="infoLabel">Last seen</div>
@@ -673,13 +672,6 @@
             <div class="profileBioCard" id="viewAbout">
               <div class="sectionTitle">Bio</div>
               <div class="bioRender" id="bioRender">(no bio)</div>
-              <div class="small" style="margin-top:8px;">
-                BBCode: [b] [i] [u] [s] [quote] [code] [url=] [img]
-              </div>
-            </div>
-
-            <div class="profileEditToggleRow" id="profileEditToggleRow" style="display:none;">
-              <button class="btn secondary" id="profileEditToggleBtn" type="button">Edit profile</button>
             </div>
 
             <div class="panelBox profileEditSection" id="profileEditSection" style="display:none;">
@@ -1066,6 +1058,31 @@
                     <div>
                       <div class="title">Text &amp; Identity</div>
                       <div class="small muted">Fonts, colors, and readability controls.</div>
+                    </div>
+                  </div>
+
+                  <!-- Sticky preview for Text & Identity (live updates while tweaking fonts/colors) -->
+                  <div class="textFxStickyPreview" id="textFxStickyPreview">
+                    <div class="chatFxPreviewWrap">
+                      <div class="chatFxPreview" id="textFxPreview">
+                        <div class="chatFxPreviewRow self">
+                          <div class="msgItem self chatFxPreviewItem">
+                            <div class="msgAvatar chatFxPreviewAvatar" id="textFxPreviewAvatar"></div>
+                            <div class="msgMain">
+                              <div class="bubble chatFxPreviewBubble" id="textFxPreviewBubble">
+                                <div class="meta">
+                                  <div class="name">
+                                    <span class="roleIco" id="textFxPreviewRoleIcon">👑 </span>
+                                    <span class="unameText" id="textFxPreviewName">You</span>
+                                  </div>
+                                  <div class="time" id="textFxPreviewTime">Just now</div>
+                                </div>
+                                <div class="text" id="textFxPreviewText">Preview your username + text styling here.</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div class="customizeSection">
