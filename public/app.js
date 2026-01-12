@@ -11388,7 +11388,7 @@ async function openMyProfile(){
   setTab("profile");
   openModal();
 }
-profileBtn.addEventListener("click", openMyProfile);
+profileBtn?.addEventListener("click", openMyProfile);
 
 saveProfileBtn.addEventListener("click", async ()=>{
   profileMsg.textContent="Saving...";
@@ -11577,7 +11577,7 @@ likeCount?.addEventListener("keydown", async (e) => {
 });
 
 // media actions
-copyUsernameBtn.addEventListener("click", async ()=>{
+copyUsernameBtn?.addEventListener("click", async ()=>{
   const u = modalTargetUsername || me?.username || "";
   try{ await navigator.clipboard.writeText(u); setMsgline(mediaMsg, "Copied username."); }
   catch{ setMsgline(mediaMsg, "Copy failed (browser blocked)."); }
@@ -12418,10 +12418,10 @@ async function bootApp(){
 document.addEventListener("DOMContentLoaded", bootApp);
 
 // profile button also closes drawers
-profileBtn.addEventListener("click", () => { closeDrawers(); });
+profileBtn?.addEventListener("click", () => { closeDrawers(); });
 
 // close drawers when opening modal
-modal.addEventListener("show", closeDrawers);
+modal?.addEventListener("show", closeDrawers);
 
 
 
