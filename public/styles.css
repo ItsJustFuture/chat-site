@@ -5841,6 +5841,16 @@ body.polish-pack.polish-auras .presenceAura.isVip::after{
   align-items:center;
   flex-wrap:wrap;
 }
+.profileSheetMood{
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: .92;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.profileSheetMood:empty{ display:none; }
+#profileMood{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width: 100%; }
 .profileSheetName{ font-size: 18px; font-weight: 800; letter-spacing: .2px; text-shadow: var(--profileHeaderTextShadow, none); }
 .profileRoleChip{
   font-size: 11px;
@@ -5978,17 +5988,19 @@ body.polish-pack.polish-auras .presenceAura.isVip::after{
 
 /* Desktop: use the full width (cards left, active settings right) */
 @media (min-width: 900px){
+  /* Keep shelves spanning full width (no split columns) */
   .customizeShell{
-    display: grid;
-    grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
-    gap: 16px;
-    align-items: start;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    align-items: stretch;
   }
   .customizeBackBtn{ display:none; }
-  .customizeCardGrid{ align-content:start; }
-  .customizeSubpages{ min-height: 520px; }
+  .customizeCardGrid{
+    grid-template-columns: repeat(3, minmax(220px, 1fr));
+  }
+  .customizeSubpages{ min-height: 560px; }
 }
-
 /* Sticky Text & Identity preview */
 .textFxStickyPreview{
   position: sticky;
@@ -6014,6 +6026,51 @@ body.polish-pack.polish-auras .presenceAura.isVip::after{
     grid-column: 1 / -1;
   }
 }
+
+.customizeTopBar{
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  padding: 6px 0 2px;
+  background: linear-gradient(to bottom, rgba(0,0,0,.55), rgba(0,0,0,0));
+  backdrop-filter: blur(8px);
+}
+.customizeSearchWrap{
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.customizeSearchWrap input{
+  max-width: 520px;
+}
+.customizeCardGrid{
+  width: 100%;
+}
+
+.customizeMergedSection{
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+.customizeSectionTitle{
+  font-weight: 900;
+  margin: 0 0 10px;
+  opacity: .92;
+}
+
+/* Make preview compact + sticky in combined page */
+.customizeChatPreview,
+.textFxStickyPreview{
+  position: sticky;
+  top: 64px; /* sits below search + shelves */
+  z-index: 3;
+}
+
+.customizeChatPreview .chatFxPreview{
+  transform: scale(.92);
+  transform-origin: top left;
+}
+
 .customizeTopBar input{
   width: 100%;
   padding: 10px 12px;
@@ -6105,24 +6162,27 @@ body.polish-pack.polish-auras .presenceAura.isVip::after{
   flex-wrap: wrap;
 }
 .customizeChatLayout{
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
+  display:flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: stretch;
 }
+
 .customizeChatControls{
   flex: 1;
   min-width: 0;
 }
 .customizeChatPreview{
-  width: 320px;
-  flex: 0 0 320px;
+  width: 100%;
+  flex: 0 0 auto;
   position: sticky;
-  top: 12px;
-  align-self: flex-start;
+  top: 64px;
+  align-self: stretch;
   border-radius: 14px;
   border: 1px solid var(--border);
-  padding: 12px;
-  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  padding: 10px;
+  background: rgba(0,0,0,.22);
+  backdrop-filter: blur(10px);
 }
 
 @media (max-width: 760px){

@@ -1,1806 +1,1659 @@
-<!doctype html>
+<!DOCTYPE html>
+
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" name="viewport"/>
 <title>Banter &amp; Brats</title>
-  <script src="/theme-init.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Nunito:wght@400;600;700&family=Poppins:wght@400;500;600;700&family=Rubik:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css">
+<script src="/theme-init.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;family=Nunito:wght@400;600;700&amp;family=Poppins:wght@400;500;600;700&amp;family=Rubik:wght@400;500;600;700&amp;family=Montserrat:wght@400;500;600;700&amp;family=Space+Grotesk:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="/styles.css" rel="stylesheet"/>
 </head>
-
 <body class="auth-pending">
-  <div id="authLoading" class="authLoading" aria-live="polite">
+<div aria-live="polite" class="authLoading" id="authLoading">
     Checking your session...
   </div>
-
-  <!-- AUTH -->
-  <div id="loginView">
-    <div class="loginBackdrop" aria-hidden="true"></div>
-
-    <div class="loginShell">
-      <div class="loginBrand">
-        <div class="loginBadge">Welcome to</div>
-        <h1 class="loginLogo">Banter <span class="amp">&amp;</span> Brats</h1>
-        <p class="loginTag">18+ community chat built for rooms, DMs, and a little chaos.</p>
-        <ul class="loginFeatures">
-          <li>Pick rooms, hop into DMs, and keep tabs on reactions.</li>
-          <li>Track XP, gold, and shout-outs in leaderboards.</li>
-          <li>Keep it cozy with themes, vibes, and profile flair.</li>
-        </ul>
-      </div>
-
-      <div class="loginCard" role="dialog" aria-label="Login or register">
-        <div class="loginHeader">
-          <h2>Sign in</h2>
-          <p>Use your username and password to continue.</p>
-        </div>
-
-        <form class="loginForm" id="authForm">
-          <div class="field">
-            <label for="authUser">Username</label>
-            <input id="authUser" autocomplete="username" placeholder="your username" required>
-          </div>
-
-          <div class="field">
-            <label for="authPass">Password</label>
-            <div class="passWrap">
-              <input id="authPass" type="password" autocomplete="current-password" placeholder="your password" required>
-              <button class="passToggle" id="togglePassBtn" type="button" aria-label="Show password" title="Show password">👁</button>
-            </div>
-          </div>
-
-          <div class="loginValidation" id="authValidation" aria-live="polite"></div>
-
-          <div class="row loginActions">
-            <button class="btn" id="loginBtn" type="submit">Join chat</button>
-            <button class="btn secondary" id="regBtn" type="button">Create account</button>
-          </div>
-
-          <div class="loginHint small muted">No email needed. Just claim a username.</div>
-          <div class="msgline" id="authMsg" aria-live="polite"></div>
-        </form>
-
-        <div class="loginFooter small muted">
+<!-- AUTH -->
+<div id="loginView">
+<div aria-hidden="true" class="loginBackdrop"></div>
+<div class="loginShell">
+<div class="loginBrand">
+<div class="loginBadge">Welcome to</div>
+<h1 class="loginLogo">Banter <span class="amp">&amp;</span> Brats</h1>
+<p class="loginTag">18+ community chat built for rooms, DMs, and a little chaos.</p>
+<ul class="loginFeatures">
+<li>Pick rooms, hop into DMs, and keep tabs on reactions.</li>
+<li>Track XP, gold, and shout-outs in leaderboards.</li>
+<li>Keep it cozy with themes, vibes, and profile flair.</li>
+</ul>
+</div>
+<div aria-label="Login or register" class="loginCard" role="dialog">
+<div class="loginHeader">
+<h2>Sign in</h2>
+<p>Use your username and password to continue.</p>
+</div>
+<form class="loginForm" id="authForm">
+<div class="field">
+<label for="authUser">Username</label>
+<input autocomplete="username" id="authUser" placeholder="your username" required=""/>
+</div>
+<div class="field">
+<label for="authPass">Password</label>
+<div class="passWrap">
+<input autocomplete="current-password" id="authPass" placeholder="your password" required="" type="password"/>
+<button aria-label="Show password" class="passToggle" id="togglePassBtn" title="Show password" type="button">👁</button>
+</div>
+</div>
+<div aria-live="polite" class="loginValidation" id="authValidation"></div>
+<div class="row loginActions">
+<button class="btn" id="loginBtn" type="submit">Join chat</button>
+<button class="btn secondary" id="regBtn" type="button">Create account</button>
+</div>
+<div class="loginHint small muted">No email needed. Just claim a username.</div>
+<div aria-live="polite" class="msgline" id="authMsg"></div>
+</form>
+<div class="loginFooter small muted">
           By continuing, you confirm you are 18+ and agree to follow the community rules.
         </div>
-      </div>
-    </div>
-  </div>
-
-
+</div>
+</div>
+</div>
 <!-- RESTRICTED (Kick/Ban) -->
-<div id="restrictedView" hidden>
-  <div class="restrictedShell">
-    <div class="restrictedCard">
-      <div class="restrictedIcon" aria-hidden="true">⚠️</div>
-      <h2 id="restrictedTitle">Restricted</h2>
-      <div class="restrictedSub" id="restrictedSub">You cannot access the chat right now.</div>
-
-      <div class="restrictedTimer" id="restrictedTimerWrap" hidden>
-        <div class="restrictedTimerLabel">You can re-enter in</div>
-        <div class="restrictedTimerValue" id="restrictedTimer">00:00:00</div>
-      </div>
-
-      <div class="restrictedReason">
-        <div class="small muted">Reason</div>
-        <div class="restrictedReasonText" id="restrictedReasonText">—</div>
-      </div>
-
-      <div class="restrictedAppeal">
-        <div class="restrictedAppealHeader">
-          <div class="title">Appeal</div>
-          <div class="small muted" id="appealStatusText">One ticket per user.</div>
-        </div>
-
-        <div class="appealThread" id="appealThread"></div>
-
-        <div class="appealComposer">
-          <textarea id="appealInput" rows="3" maxlength="2000" placeholder="Explain your appeal..."></textarea>
-          <div class="row" style="gap:10px; flex-wrap:wrap;">
-            <button class="btn" id="appealSendBtn" type="button">Send appeal</button>
-            <button class="btn secondary" id="appealRefreshBtn" type="button">Refresh</button>
-            <div class="msgline" id="appealMsg"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="row" style="gap:10px; justify-content:center; margin-top:14px;">
-        <button class="btn secondary" id="restrictedRecheckBtn" type="button">Re-check access</button>
-        <button class="btn danger" id="restrictedLogoutBtn" type="button">Logout</button>
-      </div>
-    </div>
-  </div>
+<div hidden="" id="restrictedView">
+<div class="restrictedShell">
+<div class="restrictedCard">
+<div aria-hidden="true" class="restrictedIcon">⚠️</div>
+<h2 id="restrictedTitle">Restricted</h2>
+<div class="restrictedSub" id="restrictedSub">You cannot access the chat right now.</div>
+<div class="restrictedTimer" hidden="" id="restrictedTimerWrap">
+<div class="restrictedTimerLabel">You can re-enter in</div>
+<div class="restrictedTimerValue" id="restrictedTimer">00:00:00</div>
 </div>
-
-  <!-- APP -->
-  <div id="chatView" hidden>
-  <div id="app">
-    <div class="layout">
-      <aside class="channels" id="channelsPane">
-       <div class="brand">
-  <strong class="neonBrand">Banter <span class="amp">&</span> Brats</strong>
-  <div class="small" id="nowRoom">main</div>
+<div class="restrictedReason">
+<div class="small muted">Reason</div>
+<div class="restrictedReasonText" id="restrictedReasonText">—</div>
 </div>
-
+<div class="restrictedAppeal">
+<div class="restrictedAppealHeader">
+<div class="title">Appeal</div>
+<div class="small muted" id="appealStatusText">One ticket per user.</div>
+</div>
+<div class="appealThread" id="appealThread"></div>
+<div class="appealComposer">
+<textarea id="appealInput" maxlength="2000" placeholder="Explain your appeal..." rows="3"></textarea>
+<div class="row" style="gap:10px; flex-wrap:wrap;">
+<button class="btn" id="appealSendBtn" type="button">Send appeal</button>
+<button class="btn secondary" id="appealRefreshBtn" type="button">Refresh</button>
+<div class="msgline" id="appealMsg"></div>
+</div>
+</div>
+</div>
+<div class="row" style="gap:10px; justify-content:center; margin-top:14px;">
+<button class="btn secondary" id="restrictedRecheckBtn" type="button">Re-check access</button>
+<button class="btn danger" id="restrictedLogoutBtn" type="button">Logout</button>
+</div>
+</div>
+</div>
+</div>
+<!-- APP -->
+<div hidden="" id="chatView">
+<div id="app">
+<div class="layout">
+<aside class="channels" id="channelsPane">
+<div class="brand">
+<strong class="neonBrand">Banter <span class="amp">&amp;</span> Brats</strong>
+<div class="small" id="nowRoom">main</div>
+</div>
 <div class="chanHeader">
-  <div class="small" id="chanHeaderTitle">Rooms</div>
-  <div class="row" style="gap:6px;">
-  <button class="iconBtn smallIcon" id="channelsCloseBtn" type="button" title="Close">✕</button>
-  <button class="iconBtn smallIcon" id="menuToggleBtn" type="button" title="Menu">☰</button>
-  <button class="iconBtn smallIcon" id="addRoomBtn" type="button" title="Create room">＋</button>
+<div class="small" id="chanHeaderTitle">Rooms</div>
+<div class="row" style="gap:6px;">
+<button class="iconBtn smallIcon" id="channelsCloseBtn" title="Close" type="button">✕</button>
+<button class="iconBtn smallIcon" id="menuToggleBtn" title="Menu" type="button">☰</button>
+<button class="iconBtn smallIcon" id="addRoomBtn" title="Create room" type="button">＋</button>
 </div>
 </div>
-
 <div class="roomsPanel" id="roomsPanel">
-  <div class="latestUpdate" id="latestUpdate">
-    <div class="latestUpdateTop">
-      <div class="latestUpdateHeading">
-        <div class="small muted">Latest update</div>
-        <div class="latestUpdateTitle" id="latestUpdateTitle">—</div>
-        <div class="small" id="latestUpdateDate"></div>
-        <div class="changelogReactions latestUpdateReactions" id="latestUpdateReactions"></div>
-      </div>
-      <button class="btn secondary" id="latestUpdateViewBtn" type="button">View</button>
-    </div>
-    <div class="latestUpdateBody" id="latestUpdateBody"></div>
-  </div>
-
-  <div class="chanList" id="chanList">
-    <!-- will be rendered by app.js from /rooms -->
-  </div>
+<div class="latestUpdate" id="latestUpdate">
+<div class="latestUpdateTop">
+<div class="latestUpdateHeading">
+<div class="small muted">Latest update</div>
+<div class="latestUpdateTitle" id="latestUpdateTitle">—</div>
+<div class="small" id="latestUpdateDate"></div>
+<div class="changelogReactions latestUpdateReactions" id="latestUpdateReactions"></div>
 </div>
-
+<button class="btn secondary" id="latestUpdateViewBtn" type="button">View</button>
+</div>
+<div class="latestUpdateBody" id="latestUpdateBody"></div>
+</div>
+<div class="chanList" id="chanList">
+<!-- will be rendered by app.js from /rooms -->
+</div>
+</div>
 <div class="menuPanel" id="menuPanel">
-  <div class="menuNav" id="menuNav">
-    <button class="menuTab active" data-menu-tab="changelog" type="button">Changelog</button>
-    <button class="menuTab" data-menu-tab="rules" type="button">Rules</button>
-    <button class="menuTab" data-menu-tab="faq" type="button">FAQ</button>
-    <button class="menuTab" data-menu-tab="leaderboards" type="button">Leaderboards</button>
-  </div>
-
-  <div class="menuContent">
-    <div class="menuSection" data-menu-section="changelog">
-      <div class="menuSectionHeader">
-        <div>
-          <div class="title">Changelog</div>
-          <div class="small muted">Newest updates appear first.</div>
-        </div>
-        <div class="menuActions" id="changelogActions">
-          <button class="btn" id="changelogNewBtn" type="button">New entry</button>
-        </div>
-      </div>
-
-      <div class="card" id="changelogEditor">
-        <div class="field">
-          <label for="changelogTitleInput">Title</label>
-          <input id="changelogTitleInput" maxlength="120" placeholder="What's new?">
-        </div>
-        <div class="field">
-          <label for="changelogBodyInput">Details</label>
-          <textarea id="changelogBodyInput" rows="4" maxlength="8000" placeholder="Describe the change..."></textarea>
-        </div>
-        <div class="row" style="align-items:center; gap:10px; flex-wrap:wrap;">
-          <button class="btn" id="changelogSaveBtn" type="button">Save</button>
-          <button class="btn secondary" id="changelogCancelBtn" type="button">Cancel</button>
-          <div class="msgline" id="changelogEditMsg"></div>
-        </div>
-      </div>
-
-      <div class="msgline" id="changelogMsg"></div>
-      <div class="changelogList" id="changelogList"></div>
-    </div>
-
-    <div class="menuSection" data-menu-section="rules">
-      <div class="menuSectionHeader">
-        <div class="title">Rules</div>
-      </div>
-      <div class="card muted">Coming soon.</div>
-    </div>
-
-    <div class="menuSection" data-menu-section="faq">
-      <div class="menuSectionHeader">
-        <div class="title">Questions</div>
-        <div class="menuActions">
-          <button class="btn" id="faqAskBtn" type="button">Ask a question</button>
-        </div>
-      </div>
-      <div class="faqForm" id="faqForm">
-        <div class="field">
-          <label for="faqTitleInput">Question</label>
-          <input id="faqTitleInput" maxlength="140" placeholder="What do you want to know?" />
-        </div>
-        <div class="field">
-          <label for="faqDetailsInput">Details (optional)</label>
-          <textarea id="faqDetailsInput" rows="3" maxlength="1000" placeholder="Add context or examples..."></textarea>
-        </div>
-        <div class="row" style="align-items:center; gap:10px; flex-wrap:wrap;">
-          <button class="btn" id="faqSubmitBtn" type="button">Submit</button>
-          <button class="btn secondary" id="faqCancelBtn" type="button">Cancel</button>
-          <div class="msgline" id="faqEditMsg"></div>
-        </div>
-      </div>
-      <div class="msgline" id="faqMsg"></div>
-      <div class="faqList" id="faqList"></div>
-    </div>
-
-      <div class="menuSection" data-menu-section="leaderboards">
-        <div class="menuSectionHeader">
-          <div>
-            <div class="title">Leaderboards</div>
-            <div class="small muted">XP, Gold, Dice sixes, and profile likes.</div>
-        </div>
-        <div class="menuActions">
-          <button class="btn secondary" id="refreshLeaderboardsBtn" type="button">Refresh</button>
-        </div>
-      </div>
-      <div class="msgline" id="leaderboardsMsg"></div>
-      <div class="small muted" id="leaderboardsUpdatedAt"></div>
-      <div class="leaderboardGrid">
-        <div class="card leaderboardCard">
-          <div class="sectionTitle">XP leaderboard</div>
-          <div class="leaderboardList" id="leaderboardXp"></div>
-        </div>
-        <div class="card leaderboardCard">
-          <div class="sectionTitle">Gold leaderboard</div>
-          <div class="leaderboardList" id="leaderboardGold"></div>
-        </div>
-        <div class="card leaderboardCard">
-          <div class="sectionTitle">Dice leaderboard</div>
-          <div class="leaderboardList" id="leaderboardDice"></div>
-        </div>
-        <div class="card leaderboardCard">
-          <div class="sectionTitle">Profile likes</div>
-          <div class="leaderboardList" id="leaderboardLikes"></div>
-        </div>
-      </div>
-    </div>
-  </div>
+<div class="menuNav" id="menuNav">
+<button class="menuTab active" data-menu-tab="changelog" type="button">Changelog</button>
+<button class="menuTab" data-menu-tab="rules" type="button">Rules</button>
+<button class="menuTab" data-menu-tab="faq" type="button">FAQ</button>
+<button class="menuTab" data-menu-tab="leaderboards" type="button">Leaderboards</button>
 </div>
-
-<div class="commandPopup" id="commandPopup" aria-live="polite">
-  <div class="commandPopupHeader">
-    <div class="commandPopupTitle" id="commandPopupTitle">Command</div>
-    <button class="iconBtn" id="commandPopupClose" type="button" title="Dismiss">✕</button>
-  </div>
-  <div class="commandPopupBody" id="commandPopupBody"></div>
+<div class="menuContent">
+<div class="menuSection" data-menu-section="changelog">
+<div class="menuSectionHeader">
+<div>
+<div class="title">Changelog</div>
+<div class="small muted">Newest updates appear first.</div>
 </div>
-
-        <div class="bottomBar">
-          <div class="meRow">
-            <div class="meLeft">
-              <div class="meAvatar" id="meAvatar"></div>
-              <div class="meMeta">
-                <div class="meName" id="meName">...</div>
-                <div class="meRole" id="meRole">...</div>
-              </div>
-            </div>
-
-            <div class="row" style="gap:8px; align-items:center;">
-              <div class="meStatusText" id="meStatusText">Online</div>
-              <button class="iconBtn" id="profileBtn" type="button" title="Profile">👤</button>
-            </div>
-          </div>
-
-          <select id="statusSelect">
-            <option>Online</option>
-            <option>Away</option>
-            <option>Busy</option>
-            <option>DnD</option>
-            <option>Idle</option>
-            <option>Gaming</option>
-            <option>Music</option>
-            <option>Working</option>
-            <option>Chatting</option>
-            <option>Lurking</option>
-          </select>
-        </div>
-      </aside>
-
-      <main class="chat">
-        <div class="topbar">
-          <div class="row topLeft" style="align-items:center; gap:10px;">
-            <button class="iconBtn mobOnly" id="openChannelsBtn" type="button" title="Channels">☰</button>
-           <div class="roomTitle"><span id="roomTitle" class="srOnly">main</span><button class="iconBtn logoutTop" id="logoutTopBtn" type="button" title="Logout" aria-label="Logout">⎋</button></div>
-          </div>
-
-          <div class="row topActions" style="align-items:center; gap:10px;">
-            <div class="searchWrap">
-              <input id="searchInput" placeholder="Search messages...">
-            </div>
-            <div id="levelToast" class="levelToastInline" aria-live="polite">🎉 <span id="levelToastText">Level up!</span></div>
-            <button class="iconBtn withBadge" id="dmToggleBtn" type="button" title="Direct messages">💬<span class="notifDot" id="dmBadgeDot" title="New DMs"></span></button>
-            <button class="iconBtn withBadge" id="groupDmToggleBtn" type="button" title="Group DMs">👥<span class="notifDot" id="groupDmBadgeDot" title="New group DMs"></span></button>
-            <button class="iconBtn withBadge" id="notificationsBtn" type="button" title="Notifications" aria-label="Notifications">🔔<span class="notifDot" id="notificationsDot" title="New notifications"></span></button>
-            <button class="iconBtn mobOnly" id="openMembersBtn" type="button" title="Members">👥</button>
-          </div>
-        </div>
-
-        <!-- Quick avatar strips (shown before opening the DM panel) -->
-        <div class="dmQuickBar" id="dmQuickBar" hidden>
-          <div class="dmQuickStrip" id="dmQuickStrip" aria-label="Your direct message threads"></div>
-          <div class="dmQuickEmpty" id="dmQuickEmpty" hidden>No active DMs</div>
-        </div>
-        <div class="dmQuickBar" id="groupQuickBar" hidden>
-          <div class="dmQuickStrip" id="groupQuickStrip" aria-label="Your group message threads"></div>
-          <div class="dmQuickEmpty" id="groupQuickEmpty" hidden>
-            <div class="dmQuickEmptyText">No active Group DMs</div>
-            <button class="btn dmQuickEmptyBtn" id="groupQuickStartBtn" type="button">Start a new Group DM</button>
-          </div>
-        </div>
-
-        <div class="ytSticky is-hidden" id="ytSticky" aria-live="polite">
-          <div class="ytStickyInner">
-            <div class="ytStickyHeader">
-              <div class="ytStickyInfo">
-                <div class="ytStickyThumb" id="ytStickyThumb" aria-hidden="true"></div>
-                <div class="ytStickyText">
-                  <div class="ytStickyTitle" id="ytStickyTitle">YouTube player</div>
-                  <div class="ytStickyChannel" id="ytStickyChannel"></div>
-                </div>
-              </div>
-              <div class="ytStickyHeaderActions">
-                <button class="iconBtn" id="ytPlayPause" type="button" aria-label="Play">▶</button>
-                <button class="iconBtn" id="ytMinimize" type="button" aria-label="Minimize player">—</button>
-                <button class="iconBtn" id="ytClose" type="button" aria-label="Close player">✕</button>
-              </div>
-            </div>
-            <div class="ytStickyBody" id="ytBody">
-              <div class="ytStickyControls">
-                <div class="ytSeekRow">
-                  <span id="ytCurrentTime" class="ytTime">0:00</span>
-                  <input type="range" id="ytSeek" min="0" step="1" value="0" aria-label="Seek">
-                  <span id="ytDuration" class="ytTime">--:--</span>
-                </div>
-                <div class="ytControlRow">
-                  <div class="ytVolumeControls">
-                    <button class="iconBtn" id="ytMute" type="button" aria-label="Mute">🔊</button>
-                    <input type="range" id="ytVolume" min="0" max="100" step="1" value="60" aria-label="Volume">
-                  </div>
-                  <label class="ytSelectLabel">Quality
-                    <select id="ytQuality" aria-label="Quality"></select>
-                  </label>
-                </div>
-              </div>
-              <div class="ytPlayerHolder">
-                <div id="ytStickyFrame"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-<div class="notificationsModal" id="notificationsModal" hidden>
-  <div class="modalCard notificationsCard">
-    <div class="modalTop">
-      <strong>Notifications</strong>
-      <button class="iconBtn" id="notificationsCloseBtn" type="button" aria-label="Close">✕</button>
-    </div>
-    <div class="modalBody">
-      <div class="notificationsActions">
-        <button class="btn secondary small" id="notificationsClearBtn" type="button">Clear all</button>
-      </div>
-      <div class="notificationsList" id="notificationsList"></div>
-      <div class="small muted" id="notificationsEmpty">No notifications yet. Mentions are coming soon.</div>
-    </div>
-  </div>
+<div class="menuActions" id="changelogActions">
+<button class="btn" id="changelogNewBtn" type="button">New entry</button>
 </div>
-
-        <div class="msgs" id="msgs"></div>
-        <div class="typing" id="typing"></div>
-
-        <div id="uploadPreview" class="uploadPreview">
-          <div class="uploadLeft">
-            <div id="previewThumb" class="previewThumb"></div>
-            <div class="uploadMeta">
-              <div id="uploadName" class="uploadName"></div>
-              <div id="uploadInfo" class="uploadInfo"></div>
-            </div>
-          </div>
-          <div class="uploadRight">
-            <div class="progressWrap">
-              <div id="uploadProgress" class="progressBar"></div>
-            </div>
-            <button class="btn secondary" id="cancelUploadBtn" type="button">Cancel</button>
-          </div>
-        </div>
-
-        <div class="replyPreview" id="replyPreview">
-          <div class="replyText" id="replyPreviewText"></div>
-          <button class="iconBtn smallIcon" id="replyPreviewClose" type="button" aria-label="Cancel reply">✕</button>
-        </div>
-
-        <div class="inputBar">
-         <input id="msgInput" type="text" placeholder="Message main" maxlength="800">
-
-          <!-- hidden native input -->
-          <input id="fileInput" type="file" accept="image/*,video/mp4,video/quicktime">
-
-          <!-- camera icon button -->
-          <button class="iconBtn" id="pickFileBtn" type="button" title="Upload">📷</button>
-
-          <div class="tonePicker" id="tonePicker" aria-label="Tone indicator"></div>
-
-          <button class="btn" id="sendBtn" type="button">Send</button>
-          <div class="mentionDropdown" id="mentionDropdown"></div>
-        </div>
-      </main>
-
-      <aside class="members drawer" id="membersPane">
-  <div class="drawerHeader">
-    <h3>Members</h3>
-    <button class="btn secondary small" id="appealsPanelBtn" type="button" hidden>Appeals</button>
-    <button class="btn secondary small" id="referralsPanelBtn" type="button" hidden>Referrals</button>
-    <button class="btn secondary small" id="roleDebugPanelBtn" type="button" hidden>Role debug</button>
-    <button class="iconBtn smallIcon" id="membersCloseBtn" type="button" title="Close">✕</button>
-  </div>
-        <div class="memberGold" id="memberGold" aria-live="polite"></div>
-        <div class="memberPills" id="memberPills">
-          <button class="pill active" id="memberPillRoom" type="button">Room</button>
-          <button class="pill" id="memberPillFriends" type="button">Friends</button>
-        </div>
-        <div id="memberList"></div>
-        <div id="memberMenu" class="memberMenu">
-          <div class="memberMenuHeader">
-            <div class="memberMenuName" id="memberMenuName"></div>
-            <div class="small" id="memberMenuHint">Quick actions</div>
-          </div>
-          <div class="memberMenuActions">
-            <button class="btn secondary" id="memberViewProfileBtn" type="button">View profile</button>
-            <button class="btn" id="memberDmBtn" type="button">DM</button>
-            <button class="btn secondary" id="memberReferBtn" type="button" style="display:none;">Refer ban</button>
-          </div>
-        </div>
-      </aside>
-    </div>
-
-    <!-- Mobile overlay (MUST live inside #app because #app is transformed, which creates a stacking context).
+</div>
+<div class="card" id="changelogEditor">
+<div class="field">
+<label for="changelogTitleInput">Title</label>
+<input id="changelogTitleInput" maxlength="120" placeholder="What's new?"/>
+</div>
+<div class="field">
+<label for="changelogBodyInput">Details</label>
+<textarea id="changelogBodyInput" maxlength="8000" placeholder="Describe the change..." rows="4"></textarea>
+</div>
+<div class="row" style="align-items:center; gap:10px; flex-wrap:wrap;">
+<button class="btn" id="changelogSaveBtn" type="button">Save</button>
+<button class="btn secondary" id="changelogCancelBtn" type="button">Cancel</button>
+<div class="msgline" id="changelogEditMsg"></div>
+</div>
+</div>
+<div class="msgline" id="changelogMsg"></div>
+<div class="changelogList" id="changelogList"></div>
+</div>
+<div class="menuSection" data-menu-section="rules">
+<div class="menuSectionHeader">
+<div class="title">Rules</div>
+</div>
+<div class="card muted">Coming soon.</div>
+</div>
+<div class="menuSection" data-menu-section="faq">
+<div class="menuSectionHeader">
+<div class="title">Questions</div>
+<div class="menuActions">
+<button class="btn" id="faqAskBtn" type="button">Ask a question</button>
+</div>
+</div>
+<div class="faqForm" id="faqForm">
+<div class="field">
+<label for="faqTitleInput">Question</label>
+<input id="faqTitleInput" maxlength="140" placeholder="What do you want to know?">
+</input></div>
+<div class="field">
+<label for="faqDetailsInput">Details (optional)</label>
+<textarea id="faqDetailsInput" maxlength="1000" placeholder="Add context or examples..." rows="3"></textarea>
+</div>
+<div class="row" style="align-items:center; gap:10px; flex-wrap:wrap;">
+<button class="btn" id="faqSubmitBtn" type="button">Submit</button>
+<button class="btn secondary" id="faqCancelBtn" type="button">Cancel</button>
+<div class="msgline" id="faqEditMsg"></div>
+</div>
+</div>
+<div class="msgline" id="faqMsg"></div>
+<div class="faqList" id="faqList"></div>
+</div>
+<div class="menuSection" data-menu-section="leaderboards">
+<div class="menuSectionHeader">
+<div>
+<div class="title">Leaderboards</div>
+<div class="small muted">XP, Gold, Dice sixes, and profile likes.</div>
+</div>
+<div class="menuActions">
+<button class="btn secondary" id="refreshLeaderboardsBtn" type="button">Refresh</button>
+</div>
+</div>
+<div class="msgline" id="leaderboardsMsg"></div>
+<div class="small muted" id="leaderboardsUpdatedAt"></div>
+<div class="leaderboardGrid">
+<div class="card leaderboardCard">
+<div class="sectionTitle">XP leaderboard</div>
+<div class="leaderboardList" id="leaderboardXp"></div>
+</div>
+<div class="card leaderboardCard">
+<div class="sectionTitle">Gold leaderboard</div>
+<div class="leaderboardList" id="leaderboardGold"></div>
+</div>
+<div class="card leaderboardCard">
+<div class="sectionTitle">Dice leaderboard</div>
+<div class="leaderboardList" id="leaderboardDice"></div>
+</div>
+<div class="card leaderboardCard">
+<div class="sectionTitle">Profile likes</div>
+<div class="leaderboardList" id="leaderboardLikes"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div aria-live="polite" class="commandPopup" id="commandPopup">
+<div class="commandPopupHeader">
+<div class="commandPopupTitle" id="commandPopupTitle">Command</div>
+<button class="iconBtn" id="commandPopupClose" title="Dismiss" type="button">✕</button>
+</div>
+<div class="commandPopupBody" id="commandPopupBody"></div>
+</div>
+<div class="bottomBar">
+<div class="meRow">
+<div class="meLeft">
+<div class="meAvatar" id="meAvatar"></div>
+<div class="meMeta">
+<div class="meName" id="meName">...</div>
+<div class="meRole" id="meRole">...</div>
+</div>
+</div>
+<div class="row" style="gap:8px; align-items:center;">
+<div class="meStatusText" id="meStatusText">Online</div>
+<button class="iconBtn" id="profileBtn" title="Profile" type="button">👤</button>
+</div>
+</div>
+<select id="statusSelect">
+<option>Online</option>
+<option>Away</option>
+<option>Busy</option>
+<option>DnD</option>
+<option>Idle</option>
+<option>Gaming</option>
+<option>Music</option>
+<option>Working</option>
+<option>Chatting</option>
+<option>Lurking</option>
+</select>
+</div>
+</aside>
+<main class="chat">
+<div class="topbar">
+<div class="row topLeft" style="align-items:center; gap:10px;">
+<button class="iconBtn mobOnly" id="openChannelsBtn" title="Channels" type="button">☰</button>
+<div class="roomTitle"><span class="srOnly" id="roomTitle">main</span><button aria-label="Logout" class="iconBtn logoutTop" id="logoutTopBtn" title="Logout" type="button">⎋</button></div>
+</div>
+<div class="row topActions" style="align-items:center; gap:10px;">
+<div class="searchWrap">
+<input id="searchInput" placeholder="Search messages..."/>
+</div>
+<div aria-live="polite" class="levelToastInline" id="levelToast">🎉 <span id="levelToastText">Level up!</span></div>
+<button class="iconBtn withBadge" id="dmToggleBtn" title="Direct messages" type="button">💬<span class="notifDot" id="dmBadgeDot" title="New DMs"></span></button>
+<button class="iconBtn withBadge" id="groupDmToggleBtn" title="Group DMs" type="button">👥<span class="notifDot" id="groupDmBadgeDot" title="New group DMs"></span></button>
+<button aria-label="Notifications" class="iconBtn withBadge" id="notificationsBtn" title="Notifications" type="button">🔔<span class="notifDot" id="notificationsDot" title="New notifications"></span></button>
+<button class="iconBtn mobOnly" id="openMembersBtn" title="Members" type="button">👥</button>
+</div>
+</div>
+<!-- Quick avatar strips (shown before opening the DM panel) -->
+<div class="dmQuickBar" hidden="" id="dmQuickBar">
+<div aria-label="Your direct message threads" class="dmQuickStrip" id="dmQuickStrip"></div>
+<div class="dmQuickEmpty" hidden="" id="dmQuickEmpty">No active DMs</div>
+</div>
+<div class="dmQuickBar" hidden="" id="groupQuickBar">
+<div aria-label="Your group message threads" class="dmQuickStrip" id="groupQuickStrip"></div>
+<div class="dmQuickEmpty" hidden="" id="groupQuickEmpty">
+<div class="dmQuickEmptyText">No active Group DMs</div>
+<button class="btn dmQuickEmptyBtn" id="groupQuickStartBtn" type="button">Start a new Group DM</button>
+</div>
+</div>
+<div aria-live="polite" class="ytSticky is-hidden" id="ytSticky">
+<div class="ytStickyInner">
+<div class="ytStickyHeader">
+<div class="ytStickyInfo">
+<div aria-hidden="true" class="ytStickyThumb" id="ytStickyThumb"></div>
+<div class="ytStickyText">
+<div class="ytStickyTitle" id="ytStickyTitle">YouTube player</div>
+<div class="ytStickyChannel" id="ytStickyChannel"></div>
+</div>
+</div>
+<div class="ytStickyHeaderActions">
+<button aria-label="Play" class="iconBtn" id="ytPlayPause" type="button">▶</button>
+<button aria-label="Minimize player" class="iconBtn" id="ytMinimize" type="button">—</button>
+<button aria-label="Close player" class="iconBtn" id="ytClose" type="button">✕</button>
+</div>
+</div>
+<div class="ytStickyBody" id="ytBody">
+<div class="ytStickyControls">
+<div class="ytSeekRow">
+<span class="ytTime" id="ytCurrentTime">0:00</span>
+<input aria-label="Seek" id="ytSeek" min="0" step="1" type="range" value="0"/>
+<span class="ytTime" id="ytDuration">--:--</span>
+</div>
+<div class="ytControlRow">
+<div class="ytVolumeControls">
+<button aria-label="Mute" class="iconBtn" id="ytMute" type="button">🔊</button>
+<input aria-label="Volume" id="ytVolume" max="100" min="0" step="1" type="range" value="60"/>
+</div>
+<label class="ytSelectLabel">Quality
+                    <select aria-label="Quality" id="ytQuality"></select>
+</label>
+</div>
+</div>
+<div class="ytPlayerHolder">
+<div id="ytStickyFrame"></div>
+</div>
+</div>
+</div>
+</div>
+<div class="notificationsModal" hidden="" id="notificationsModal">
+<div class="modalCard notificationsCard">
+<div class="modalTop">
+<strong>Notifications</strong>
+<button aria-label="Close" class="iconBtn" id="notificationsCloseBtn" type="button">✕</button>
+</div>
+<div class="modalBody">
+<div class="notificationsActions">
+<button class="btn secondary small" id="notificationsClearBtn" type="button">Clear all</button>
+</div>
+<div class="notificationsList" id="notificationsList"></div>
+<div class="small muted" id="notificationsEmpty">No notifications yet. Mentions are coming soon.</div>
+</div>
+</div>
+</div>
+<div class="msgs" id="msgs"></div>
+<div class="typing" id="typing"></div>
+<div class="uploadPreview" id="uploadPreview">
+<div class="uploadLeft">
+<div class="previewThumb" id="previewThumb"></div>
+<div class="uploadMeta">
+<div class="uploadName" id="uploadName"></div>
+<div class="uploadInfo" id="uploadInfo"></div>
+</div>
+</div>
+<div class="uploadRight">
+<div class="progressWrap">
+<div class="progressBar" id="uploadProgress"></div>
+</div>
+<button class="btn secondary" id="cancelUploadBtn" type="button">Cancel</button>
+</div>
+</div>
+<div class="replyPreview" id="replyPreview">
+<div class="replyText" id="replyPreviewText"></div>
+<button aria-label="Cancel reply" class="iconBtn smallIcon" id="replyPreviewClose" type="button">✕</button>
+</div>
+<div class="inputBar">
+<input id="msgInput" maxlength="800" placeholder="Message main" type="text"/>
+<!-- hidden native input -->
+<input accept="image/*,video/mp4,video/quicktime" id="fileInput" type="file"/>
+<!-- camera icon button -->
+<button class="iconBtn" id="pickFileBtn" title="Upload" type="button">📷</button>
+<div aria-label="Tone indicator" class="tonePicker" id="tonePicker"></div>
+<button class="btn" id="sendBtn" type="button">Send</button>
+<div class="mentionDropdown" id="mentionDropdown"></div>
+</div>
+</main>
+<aside class="members drawer" id="membersPane">
+<div class="drawerHeader">
+<h3>Members</h3>
+<button class="btn secondary small" hidden="" id="appealsPanelBtn" type="button">Appeals</button>
+<button class="btn secondary small" hidden="" id="referralsPanelBtn" type="button">Referrals</button>
+<button class="btn secondary small" hidden="" id="roleDebugPanelBtn" type="button">Role debug</button>
+<button class="iconBtn smallIcon" id="membersCloseBtn" title="Close" type="button">✕</button>
+</div>
+<div aria-live="polite" class="memberGold" id="memberGold"></div>
+<div class="memberPills" id="memberPills">
+<button class="pill active" id="memberPillRoom" type="button">Room</button>
+<button class="pill" id="memberPillFriends" type="button">Friends</button>
+</div>
+<div id="memberList"></div>
+<div class="memberMenu" id="memberMenu">
+<div class="memberMenuHeader">
+<div class="memberMenuName" id="memberMenuName"></div>
+<div class="small" id="memberMenuHint">Quick actions</div>
+</div>
+<div class="memberMenuActions">
+<button class="btn secondary" id="memberViewProfileBtn" type="button">View profile</button>
+<button class="btn" id="memberDmBtn" type="button">DM</button>
+<button class="btn secondary" id="memberReferBtn" style="display:none;" type="button">Refer ban</button>
+</div>
+</div>
+</aside>
+</div>
+<!-- Mobile overlay (MUST live inside #app because #app is transformed, which creates a stacking context).
          If this sits outside #app it can render above the drawers and steal taps on iOS. -->
-    <div id="drawerOverlay" class="overlay"></div>
-  </div>
+<div class="overlay" id="drawerOverlay"></div>
+</div>
+<!-- DM PANEL -->
+<div class="dmPanel" id="dmPanel">
+<div class="dmHeader">
+<div>
+<div class="title">Direct Messages</div>
+<div class="small">Start a DM from the members list.</div>
+</div>
+<button class="iconBtn" id="dmCloseBtn" title="Close" type="button">✕</button>
+</div>
+<div class="dmContent">
+<div class="dmConversation">
+<div class="dmMeta">
+<div class="dmMetaText">
+<div class="dmMetaTop">
+<div class="dmMetaAvatar" id="dmMetaAvatar"></div>
+<div class="title" id="dmMetaTitle">Pick a thread</div>
+</div>
+<div class="small" id="dmMetaPeople"></div>
+</div>
+<div class="dmMetaActions">
+<button class="iconBtn secondary" id="dmCreateGroupBtn" title="Create group" type="button">➕</button>
+<button class="iconBtn secondary" id="dmInfoBtn" title="Group info" type="button">ℹ️</button>
+<button class="iconBtn secondary" id="dmSettingsBtn" title="DM settings" type="button">⚙️</button>
+<div class="dmSettingsMenu" id="dmSettingsMenu">
+<div class="dmSettingsRow">
+<button class="btn danger" id="dmDeleteHistoryBtn" type="button">Delete history</button>
+<div class="small">Remove every message in this DM for all participants.</div>
+</div>
+<div class="dmSettingsRow">
+<button class="btn secondary" id="dmReportBtn" type="button">Report DM (coming soon)</button>
+</div>
+</div>
+</div>
+</div>
+<div class="dmMessages" id="dmMessages"></div>
+<div class="replyPreview" id="dmReplyPreview">
+<div class="replyText" id="dmReplyPreviewText"></div>
+<button aria-label="Cancel reply" class="iconBtn smallIcon" id="dmReplyClose" type="button">✕</button>
+</div>
+<div class="dmInput">
+<input id="dmText" maxlength="800" placeholder="Message"/>
+<input accept="image/*" id="dmFileInput" style="display:none" type="file"/>
+<button class="iconBtn" id="dmPickFileBtn" title="Upload image" type="button">📷</button>
+<div aria-label="Tone indicator" class="tonePicker" id="dmTonePicker"></div>
+<button class="btn" id="dmSendBtn" type="button">Send</button>
+<div class="mentionDropdown" id="dmMentionDropdown"></div>
+</div>
+</div>
+</div>
+</div>
+<div class="dmModal" id="dmPickerModal">
+<div class="dmModalCard">
+<div class="dmModalHeader">
+<div>
+<div class="title" id="dmModalTitle">Create group</div>
+<div class="small" id="dmModalSubtitle">Pick at least two people</div>
+</div>
+<button aria-label="Close" class="iconBtn" id="dmModalCloseBtn" type="button">✕</button>
+</div>
+<div class="field">
+<label for="dmModalSearch">Search</label>
+<input id="dmModalSearch" placeholder="Search by username" type="search"/>
+</div>
+<div class="dmPickerList" id="dmPickerList"></div>
+<div class="dmModalActions">
+<button class="btn secondary" id="dmModalCancelBtn" type="button">Cancel</button>
+<button class="btn" disabled="" id="dmModalPrimaryBtn" type="button">Create</button>
+</div>
+</div>
+</div>
+<div class="dmModal" id="dmInfoModal">
+<div class="dmModalCard">
+<div class="dmModalHeader">
+<div>
+<div class="title" id="dmInfoTitle">Group info</div>
+<div class="small" id="dmInfoSubtitle"></div>
+</div>
+<button aria-label="Close" class="iconBtn" id="dmInfoCloseBtn" type="button">✕</button>
+</div>
+<div class="dmInfoSection">
+<div class="small">Members</div>
+<div class="dmInfoMembers" id="dmInfoMembers"></div>
+</div>
+<div class="dmModalActions stacked">
+<button class="btn secondary" id="dmInfoAddBtn" type="button">Add members</button>
+<button class="btn danger" id="dmLeaveBtn" type="button">Leave group</button>
+</div>
+</div>
+</div>
+<!-- PROFILE / MODAL -->
+<div id="modal">
+<div class="modalCard profileModalCard">
+<div class="modalTop profileModalTop">
+<!-- Profile sheet header (compact layout) -->
+<div class="profileSheetHero compact" id="profileSheetHero">
+<div class="profileSheetBg" id="profileSheetBg"></div>
+<div aria-hidden="true" class="profileSheetOverlay" id="profileSheetOverlay"></div>
+<div class="profileSheetContent compact">
+<div class="profileAvatarWrap">
+<div class="profileSheetAvatarCard">
+<div class="profileSheetAvatar" id="profileSheetAvatar"></div>
+<div class="profileSheetAvatarActions" id="profileSheetAvatarActions" style="display:none;">
+<button aria-label="Remove avatar" class="iconPill" id="profileAvatarRemoveBtn" type="button">
+<span aria-hidden="true" class="ico">
+<svg fill="none" viewbox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path></svg>
+</span>
+<span class="iconLabel">Remove</span>
+</button>
+<button aria-label="Change avatar" class="iconPill" id="profileAvatarChangeBtn" type="button">
+<span aria-hidden="true" class="ico">
+<svg fill="none" viewbox="0 0 24 24"><path d="M4 7h4l2-2h4l2 2h4v14H4V7z" stroke="currentColor" stroke-linejoin="round" stroke-width="2"></path><path d="M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" stroke="currentColor" stroke-width="2"></path></svg>
+</span>
+<span class="iconLabel">Change</span>
+</button>
+</div>
+</div>
+<span aria-hidden="true" class="profilePresenceDot" id="profilePresenceDot"></span>
+</div>
+<div class="profileSheetMeta">
+<span class="srOnly" id="modalTitle">Profile</span>
+<div class="profileSheetNameRow">
+<span class="profileSheetName" id="profileSheetName">—</span>
+<span class="profileRoleChip" id="profileSheetRoleChip">Role</span>
+</div><div class="profileSheetMood"><span id="profileMood"></span></div>
+<div class="profileSheetStats" id="profileSheetStats" style="display:none;">
+<span class="statPill" id="profileSheetStars">⭐ 0</span>
+<span class="statPill" id="profileSheetLikes">♡ 0</span>
+</div>
+</div>
+<div class="profileHeaderActions">
+<button aria-label="Edit profile" class="iconBtn smallIcon" id="profileEditBtn" style="display:none;" title="Edit profile" type="button">✏️</button>
+<button aria-label="Preferences" class="iconBtn smallIcon" id="profileSettingsBtn" style="display:none;" title="Preferences" type="button">⚙️</button>
+<button aria-label="Moderation actions" class="iconBtn smallIcon" id="actionsBtn" style="display:none;" title="Moderation actions" type="button">🛡️</button>
+<button aria-label="Close profile" class="iconBtn smallIcon" id="closeModalBtn" type="button">✕</button>
+</div>
+</div>
+</div>
+</div>
+<div class="modalBody">
+<div class="small" id="modalMeta" style="display:none;"></div>
+<div class="profileSticky">
+<div class="profileActions">
+<div class="tabs profileActionTabs profileCompactTabs" id="profileTabs">
+<button class="tab active" data-tab="profile" id="tabProfile" type="button">Profile</button>
+<button class="tab" data-tab="customize" id="tabCustomize" type="button">Customize</button>
+<button class="tab" data-tab="actions" id="tabActions" style="display:none;" type="button">Actions</button>
+</div>
+<div class="msgline" id="profileActionMsg"></div>
+<div class="msgline" id="profileLikeMsg"></div>
+<div class="msgline" id="mediaMsg"></div>
+</div>
+</div>
+<div class="modalContent" id="modalContent">
+<div id="viewProfile">
+<div class="profileQuickActions" id="profileQuickActions">
+<div class="quickActionGroup">
+<button class="btn btnSecondary" id="dmUserBtn" type="button">Message</button>
+<button class="btn btnSecondary" id="addFriendBtn" style="display:none;" type="button">🤝 Add Friend</button>
+<button class="btn btnSecondary" id="declineFriendBtn" style="display:none;" type="button">✖ Decline</button>
+<button class="btn btnSecondary" id="likeProfileBtn" type="button">❤️ Like</button>
+<button class="btn btnSecondary" id="profileEditToggleBtn" style="display:none;" type="button">Edit profile</button>
+</div>
+</div>
+<div class="profileInfoGrid">
+<div class="profileInfoCard">
+<div class="infoLabel">Age</div>
+<div class="infoValue" id="infoAge">—</div>
+</div>
+<div class="profileInfoCard">
+<div class="infoLabel">Gender</div>
+<div class="infoValue" id="infoGender">—</div>
+</div>
+<div class="profileInfoCard">
+<div class="infoLabel">Current room</div>
+<div class="infoValue" id="infoRoom">—</div>
+</div>
+<div class="profileInfoCard">
+<div class="infoLabel">Created</div>
+<div class="infoValue" id="infoCreated">—</div>
+</div>
+<div class="profileInfoCard">
+<div class="infoLabel">Last seen</div>
+<div class="infoValue" id="infoLastSeen">—</div>
+</div>
+<div class="profileInfoCard">
+<div class="infoLabel">Status</div>
+<div class="infoValue" id="profileStatus">—</div>
+</div>
+<div class="profileInfoCard profileInfoWide">
+<div class="infoLabel">Vibes</div>
+<div class="vibeRow" id="profileSheetVibes"></div>
+</div>
+<div class="profileInfoCard profileInfoWide" id="profileCoupleCard" style="display:none;">
+<div class="infoLabel">Couple</div>
+<span class="coupleChip" id="profileCoupleChip" style="display:none;"></span>
+</div>
+</div>
+<div class="profileBioCard" id="viewAbout">
+<div class="sectionTitle">Bio</div>
+<div class="bioRender" id="bioRender">(no bio)</div>
+</div>
+<div class="panelBox profileEditSection" id="profileEditSection" style="display:none;">
+<div id="myProfileEdit" style="display:none;">
+<div class="sectionTitle">Edit my profile</div>
+<div class="panelBox">
+<div class="field">
+<label>Avatar</label>
+<input accept="image/*" id="avatarFile" type="file"/>
+<div class="small">Max 5MB. PNG/JPG/WEBP/GIF.</div>
+</div>
+<div class="field" id="couplesField">
+<label id="couplesLabel">Couples <span class="pillCount" id="couplesLabelBadge" style="display:none;"></span></label>
+<div class="small">All couples features are opt-in and can be disabled at any time.</div>
+<div class="row" style="margin-top:8px; gap:8px; align-items:center;">
+<input id="couplesPartnerInput" placeholder="Partner username" style="flex:1;"/>
+<button class="btn secondary" id="couplesRequestBtn" type="button">Send link request</button>
+</div>
+<div class="panelBox" id="couplesPendingBox" style="margin-top:10px; display:none;">
+<div class="small" style="margin-bottom:6px;">Pending</div>
+<div id="couplesPendingList"></div>
+</div>
+<div class="panelBox" id="couplesActiveBox" style="margin-top:10px; display:none;">
+<div class="small" id="couplesActiveTitle">Linked</div>
+<div class="row couplesStatusRow" style="margin-top:8px; gap:8px; align-items:center;">
+<select aria-label="Couple status emoji" id="couplesStatusEmoji" style="width:72px;">
+<option value="💜">💜</option>
+<option value="💕">💕</option>
+<option value="✨">✨</option>
+<option value="🫶">🫶</option>
+<option value="🌙">🌙</option>
+<option value="🔥">🔥</option>
+<option value="🧸">🧸</option>
+</select>
+<input id="couplesStatusLabel" maxlength="24" placeholder="Status label (e.g. Linked)" style="flex:1;"/>
+<button class="btn secondary" id="couplesStatusSaveBtn" type="button">Save</button>
+</div>
+<div class="row couplesMoodRow" style="margin-top:8px; gap:8px; align-items:center;">
+<select aria-label="Couple mood emoji" id="couplesMoodEmoji" style="width:72px;">
+<option value="">—</option>
+<option value="🌙">🌙</option>
+<option value="💫">💫</option>
+<option value="🧸">🧸</option>
+<option value="☕">☕</option>
+<option value="🔥">🔥</option>
+<option value="🥺">🥺</option>
+<option value="🫶">🫶</option>
+<option value="💜">💜</option>
+</select>
+<div class="small" style="flex:1;">Shared mood (optional)</div>
+<button class="btn secondary" id="couplesMoodSaveBtn" type="button">Save</button>
+<button class="btn secondary" id="couplesPingBtn" type="button">Ping</button>
+</div>
+<div class="small">Shown as the couples badge (if enabled) and in your profile when both of you allow it.</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesEnabledToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Enable couples features</div>
+</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesShowProfileToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Show link on profiles</div>
+</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesBadgeToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Show badge (💜) in members list</div>
+</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesAuraToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Enable shared aura when together</div>
+</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesShowMembersToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Show link in members list</div>
+</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesGroupToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Pull us together in members list</div>
+</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesAllowPingToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Allow partner pings</div>
+</div>
+<div class="row" style="margin-top:10px; gap:8px;">
+<button class="btn danger" id="couplesUnlinkBtn" type="button">Unlink</button>
+</div>
+</div>
+<div class="msgline" id="couplesMsg"></div>
+</div>
+<div class="field">
+<label>Mood</label>
+<input id="editMood" placeholder="e.g. chilling"/>
+</div>
+<div class="field">
+<label>Username</label>
+<input id="editUsername" placeholder="New username"/>
+<div class="small">Changing your username costs 5,000 gold.</div>
+<button class="btn secondary" id="changeUsernameBtn" type="button">Change username</button>
+</div>
+<div class="row">
+<div class="field" style="flex:1;">
+<label>Age (18+)</label>
+<input id="editAge" max="120" min="18" placeholder="18+" type="number"/>
+</div>
+<div class="field" style="flex:1;">
+<label>Gender</label>
+<select id="editGender">
+<option value="">Prefer not to say</option>
+<option value="Male">Male</option>
+<option value="Female">Female</option>
+<option value="Non-binary">Non-binary</option>
+<option value="Transgender">Transgender</option>
+<option value="Genderfluid">Genderfluid</option>
+<option value="Agender">Agender</option>
+<option value="Other">Other</option>
+</select>
+</div>
+</div>
+<div class="field">
+<label>Vibe tags (pick up to <span id="vibeTagLimit">3</span>)</label>
+<div class="pillRow" id="vibeTagOptions"></div>
+<div class="small">Adds a few personality badges to your profile.</div>
+</div>
+<div class="field">
+<div class="fieldLabelRow">
+<label>Bio (BBCode supported)</label>
+<button class="pillBtn small" id="bioHelperToggle" type="button">BBCode help &amp; preview</button>
+</div>
+<textarea id="editBio" placeholder="[b]bold[/b] [i]italics[/i] [url=https://...]link[/url] [quote]...[/quote]"></textarea>
+<div class="bioHelper" hidden="" id="bioHelper">
+<div class="bioHelperRow" id="bioHelperButtons">
+<button class="pillBtn tiny" data-bio-tag="b" type="button">[b][/b]</button>
+<button class="pillBtn tiny" data-bio-tag="i" type="button">[i][/i]</button>
+<button class="pillBtn tiny" data-bio-tag="u" type="button">[u][/u]</button>
+<button class="pillBtn tiny" data-bio-tag="s" type="button">[s][/s]</button>
+<button class="pillBtn tiny" data-bio-tag="quote" type="button">[quote][/quote]</button>
+<button class="pillBtn tiny" data-bio-tag="code" type="button">[code][/code]</button>
+<button class="pillBtn tiny" data-bio-tag="url" type="button">[url]</button>
+<button class="pillBtn tiny" data-bio-tag="color" type="button">[color]</button>
+<button class="pillBtn tiny" data-bio-tag="img" type="button">[img]</button>
+</div>
+<div class="bioHelperPreview" id="bioHelperPreview"></div>
+<div class="small muted">Use BBCode for simple formatting. Links/images require full URLs.</div>
+</div>
+</div>
+<div class="row">
+<button class="btn btnPrimary" id="saveProfileBtn" type="button">Save</button>
+<button class="btn btnSecondary" id="refreshProfileBtn" type="button">Cancel</button>
+<button class="btn btnDanger" id="logoutBtn" type="button">Logout</button>
+</div>
+<div class="msgline" id="profileMsg"></div>
+</div>
+</div>
+</div>
+</div>
+<div id="viewCustomize" style="display:none;">
+<div class="profileCustomEmpty" id="profileCustomEmpty" style="display:none;">
+<div class="panelBox">
+<div class="small">Customisation settings are only available on your own profile.</div>
+</div>
+</div>
+<div class="customizeShell" id="customizeShell">
+<div class="customizeTopBar">
+<div class="customizeSearchWrap"><input id="customizeSearch" placeholder="Search settings…" type="search"/></div>
+</div>
+<div class="customizeCardGrid" id="customizeCardGrid">
+<button class="customizeCard" data-category="chat" data-search="chat appearance bubbles colors spacing themes text identity font username color readability" type="button">
+<div class="cardTitle">Chat &amp; Identity</div>
+<div class="cardHint">Bubbles, fonts, name color, and message text.</div>
+<div class="cardPreview chatPreview"></div>
+</button>
 
-  <!-- DM PANEL -->
-  <div id="dmPanel" class="dmPanel">
-    <div class="dmHeader">
-      <div>
-        <div class="title">Direct Messages</div>
-        <div class="small">Start a DM from the members list.</div>
-      </div>
-      <button class="iconBtn" id="dmCloseBtn" type="button" title="Close">✕</button>
-    </div>
-
-    <div class="dmContent">
-      <div class="dmConversation">
-        <div class="dmMeta">
-          <div class="dmMetaText">
-            <div class="dmMetaTop">
-              <div class="dmMetaAvatar" id="dmMetaAvatar"></div>
-              <div class="title" id="dmMetaTitle">Pick a thread</div>
-            </div>
-            <div class="small" id="dmMetaPeople"></div>
-          </div>
-          <div class="dmMetaActions">
-            <button class="iconBtn secondary" id="dmCreateGroupBtn" type="button" title="Create group">➕</button>
-            <button class="iconBtn secondary" id="dmInfoBtn" type="button" title="Group info">ℹ️</button>
-            <button class="iconBtn secondary" id="dmSettingsBtn" type="button" title="DM settings">⚙️</button>
-            <div class="dmSettingsMenu" id="dmSettingsMenu">
-              <div class="dmSettingsRow">
-                <button class="btn danger" id="dmDeleteHistoryBtn" type="button">Delete history</button>
-                <div class="small">Remove every message in this DM for all participants.</div>
-              </div>
-              <div class="dmSettingsRow">
-                <button class="btn secondary" id="dmReportBtn" type="button">Report DM (coming soon)</button>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="dmMessages" id="dmMessages"></div>
-        <div class="replyPreview" id="dmReplyPreview">
-          <div class="replyText" id="dmReplyPreviewText"></div>
-          <button class="iconBtn smallIcon" id="dmReplyClose" type="button" aria-label="Cancel reply">✕</button>
-        </div>
-        <div class="dmInput">
-          <input id="dmText" placeholder="Message" maxlength="800">
-          <input id="dmFileInput" type="file" accept="image/*" style="display:none">
-          <button class="iconBtn" id="dmPickFileBtn" type="button" title="Upload image">📷</button>
-          <div class="tonePicker" id="dmTonePicker" aria-label="Tone indicator"></div>
-          <button class="btn" id="dmSendBtn" type="button">Send</button>
-          <div class="mentionDropdown" id="dmMentionDropdown"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="dmModal" id="dmPickerModal">
-    <div class="dmModalCard">
-      <div class="dmModalHeader">
-        <div>
-          <div class="title" id="dmModalTitle">Create group</div>
-          <div class="small" id="dmModalSubtitle">Pick at least two people</div>
-        </div>
-        <button class="iconBtn" id="dmModalCloseBtn" type="button" aria-label="Close">✕</button>
-      </div>
-      <div class="field">
-        <label for="dmModalSearch">Search</label>
-        <input id="dmModalSearch" type="search" placeholder="Search by username">
-      </div>
-      <div class="dmPickerList" id="dmPickerList"></div>
-      <div class="dmModalActions">
-        <button class="btn secondary" id="dmModalCancelBtn" type="button">Cancel</button>
-        <button class="btn" id="dmModalPrimaryBtn" type="button" disabled>Create</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="dmModal" id="dmInfoModal">
-    <div class="dmModalCard">
-      <div class="dmModalHeader">
-        <div>
-          <div class="title" id="dmInfoTitle">Group info</div>
-          <div class="small" id="dmInfoSubtitle"></div>
-        </div>
-        <button class="iconBtn" id="dmInfoCloseBtn" type="button" aria-label="Close">✕</button>
-      </div>
-      <div class="dmInfoSection">
-        <div class="small">Members</div>
-        <div class="dmInfoMembers" id="dmInfoMembers"></div>
-      </div>
-      <div class="dmModalActions stacked">
-        <button class="btn secondary" id="dmInfoAddBtn" type="button">Add members</button>
-        <button class="btn danger" id="dmLeaveBtn" type="button">Leave group</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- PROFILE / MODAL -->
-  <div id="modal">
-    <div class="modalCard profileModalCard">
-      <div class="modalTop profileModalTop">
-        <!-- Profile sheet header (compact layout) -->
-        <div class="profileSheetHero compact" id="profileSheetHero">
-          <div class="profileSheetBg" id="profileSheetBg"></div>
-          <div class="profileSheetOverlay" id="profileSheetOverlay" aria-hidden="true"></div>
-
-          <div class="profileSheetContent compact">
-            <div class="profileAvatarWrap">
-              <div class="profileSheetAvatarCard">
-                <div class="profileSheetAvatar" id="profileSheetAvatar"></div>
-
-                <div class="profileSheetAvatarActions" id="profileSheetAvatarActions" style="display:none;">
-                  <button class="iconPill" id="profileAvatarRemoveBtn" type="button" aria-label="Remove avatar">
-                    <span class="ico" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                    </span>
-                    <span class="iconLabel">Remove</span>
-                  </button>
-                  <button class="iconPill" id="profileAvatarChangeBtn" type="button" aria-label="Change avatar">
-                    <span class="ico" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h4l2-2h4l2 2h4v14H4V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" stroke="currentColor" stroke-width="2"/></svg>
-                    </span>
-                    <span class="iconLabel">Change</span>
-                  </button>
-                </div>
-              </div>
-              <span class="profilePresenceDot" id="profilePresenceDot" aria-hidden="true"></span>
-            </div>
-
-            <div class="profileSheetMeta">
-              <span class="srOnly" id="modalTitle">Profile</span>
-              <div class="profileSheetNameRow">
-                <span class="profileSheetName" id="profileSheetName">—</span>
-                <span class="profileRoleChip" id="profileSheetRoleChip">Role</span>
-              </div>
-              <div class="profileSheetStats" id="profileSheetStats" style="display:none;">
-                <span class="statPill" id="profileSheetStars">⭐ 0</span>
-                <span class="statPill" id="profileSheetLikes">♡ 0</span>
-              </div>
-            </div>
-
-            <div class="profileHeaderActions">
-              <button class="iconBtn smallIcon" id="profileEditBtn" type="button" title="Edit profile" aria-label="Edit profile" style="display:none;">✏️</button>
-              <button class="iconBtn smallIcon" id="profileSettingsBtn" type="button" title="Preferences" aria-label="Preferences" style="display:none;">⚙️</button>
-              <button class="iconBtn smallIcon" id="actionsBtn" type="button" title="Moderation actions" aria-label="Moderation actions" style="display:none;">🛡️</button>
-              <button class="iconBtn smallIcon" id="closeModalBtn" type="button" aria-label="Close profile">✕</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="modalBody">
-        <div class="small" id="modalMeta" style="display:none;"></div>
-
-        <div class="profileSticky">
-          <div class="profileActions">
-            <div class="tabs profileActionTabs profileCompactTabs" id="profileTabs">
-              <button class="tab active" data-tab="profile" id="tabProfile" type="button">Profile</button>
-              <button class="tab" data-tab="customize" id="tabCustomize" type="button">Customize</button>
-              <button class="tab" data-tab="actions" id="tabActions" type="button" style="display:none;">Actions</button>
-            </div>
-
-            <div class="msgline" id="profileActionMsg"></div>
-            <div class="msgline" id="profileLikeMsg"></div>
-            <div class="msgline" id="mediaMsg"></div>
-          </div>
-        </div>
-
-        <div class="modalContent" id="modalContent">
-          <div id="viewProfile">
-            <div class="profileQuickActions" id="profileQuickActions">
-              <div class="quickActionGroup">
-                <button class="btn btnSecondary" id="dmUserBtn" type="button">Message</button>
-                <button class="btn btnSecondary" id="addFriendBtn" type="button" style="display:none;">🤝 Add Friend</button>
-                <button class="btn btnSecondary" id="declineFriendBtn" type="button" style="display:none;">✖ Decline</button>
-                <button class="btn btnSecondary" id="likeProfileBtn" type="button">❤️ Like</button>
-                <button class="btn btnSecondary" id="profileEditToggleBtn" type="button" style="display:none;">Edit profile</button>
-              </div>
-            </div>
-
-            <div class="profileInfoGrid">
-              <div class="profileInfoCard">
-                <div class="infoLabel">Age</div>
-                <div class="infoValue" id="infoAge">—</div>
-              </div>
-              <div class="profileInfoCard">
-                <div class="infoLabel">Gender</div>
-                <div class="infoValue" id="infoGender">—</div>
-              </div>
-              <div class="profileInfoCard">
-                <div class="infoLabel">Current room</div>
-                <div class="infoValue" id="infoRoom">—</div>
-              </div>
-              <div class="profileInfoCard">
-                <div class="infoLabel">Created</div>
-                <div class="infoValue" id="infoCreated">—</div>
-              </div>
-              <div class="profileInfoCard">
-                <div class="infoLabel">Last seen</div>
-                <div class="infoValue" id="infoLastSeen">—</div>
-              </div>
-              <div class="profileInfoCard">
-                <div class="infoLabel">Status</div>
-                <div class="infoValue" id="profileStatus">—</div>
-              </div>
-              <div class="profileInfoCard profileInfoWide">
-                <div class="infoLabel">Vibes</div>
-                <div class="vibeRow" id="profileSheetVibes"></div>
-              </div>
-              <div class="profileInfoCard profileInfoWide" id="profileCoupleCard" style="display:none;">
-                <div class="infoLabel">Couple</div>
-                <span id="profileCoupleChip" class="coupleChip" style="display:none;"></span>
-              </div>
-            </div>
-
-            <div class="profileBioCard" id="viewAbout">
-              <div class="sectionTitle">Bio</div>
-              <div class="bioRender" id="bioRender">(no bio)</div>
-            </div>
-
-            <div class="panelBox profileEditSection" id="profileEditSection" style="display:none;">
-              <div id="myProfileEdit" style="display:none;">
-                <div class="sectionTitle">Edit my profile</div>
-                <div class="panelBox">
-                  <div class="field">
-                    <label>Avatar</label>
-                    <input id="avatarFile" type="file" accept="image/*">
-                    <div class="small">Max 5MB. PNG/JPG/WEBP/GIF.</div>
-                  </div>
-
-                  <div class="field" id="couplesField">
-                    <label id="couplesLabel">Couples <span id="couplesLabelBadge" class="pillCount" style="display:none;"></span></label>
-                    <div class="small">All couples features are opt-in and can be disabled at any time.</div>
-
-                    <div class="row" style="margin-top:8px; gap:8px; align-items:center;">
-                      <input id="couplesPartnerInput" placeholder="Partner username" style="flex:1;">
-                      <button class="btn secondary" id="couplesRequestBtn" type="button">Send link request</button>
-                    </div>
-
-                    <div class="panelBox" id="couplesPendingBox" style="margin-top:10px; display:none;">
-                      <div class="small" style="margin-bottom:6px;">Pending</div>
-                      <div id="couplesPendingList"></div>
-                    </div>
-
-                    <div class="panelBox" id="couplesActiveBox" style="margin-top:10px; display:none;">
-                      <div class="small" id="couplesActiveTitle">Linked</div>
-
-                      <div class="row couplesStatusRow" style="margin-top:8px; gap:8px; align-items:center;">
-                        <select id="couplesStatusEmoji" aria-label="Couple status emoji" style="width:72px;">
-                          <option value="💜">💜</option>
-                          <option value="💕">💕</option>
-                          <option value="✨">✨</option>
-                          <option value="🫶">🫶</option>
-                          <option value="🌙">🌙</option>
-                          <option value="🔥">🔥</option>
-                          <option value="🧸">🧸</option>
-                        </select>
-                        <input id="couplesStatusLabel" placeholder="Status label (e.g. Linked)" maxlength="24" style="flex:1;">
-                        <button class="btn secondary" id="couplesStatusSaveBtn" type="button">Save</button>
-                      </div>
-                      <div class="row couplesMoodRow" style="margin-top:8px; gap:8px; align-items:center;">
-                        <select id="couplesMoodEmoji" aria-label="Couple mood emoji" style="width:72px;">
-                          <option value="">—</option>
-                          <option value="🌙">🌙</option>
-                          <option value="💫">💫</option>
-                          <option value="🧸">🧸</option>
-                          <option value="☕">☕</option>
-                          <option value="🔥">🔥</option>
-                          <option value="🥺">🥺</option>
-                          <option value="🫶">🫶</option>
-                          <option value="💜">💜</option>
-                        </select>
-                        <div class="small" style="flex:1;">Shared mood (optional)</div>
-                        <button class="btn secondary" id="couplesMoodSaveBtn" type="button">Save</button>
-                        <button class="btn secondary" id="couplesPingBtn" type="button">Ping</button>
-                      </div>
-
-                      <div class="small">Shown as the couples badge (if enabled) and in your profile when both of you allow it.</div>
-
-                      <div class="toggleRow">
-                        <label class="switch">
-                          <input type="checkbox" id="couplesEnabledToggle">
-                          <span class="slider"></span>
-                        </label>
-                        <div class="toggleLabel">Enable couples features</div>
-                      </div>
-
-                      <div class="toggleRow">
-                        <label class="switch">
-                          <input type="checkbox" id="couplesShowProfileToggle">
-                          <span class="slider"></span>
-                        </label>
-                        <div class="toggleLabel">Show link on profiles</div>
-                      </div>
-
-                      <div class="toggleRow">
-                        <label class="switch">
-                          <input type="checkbox" id="couplesBadgeToggle">
-                          <span class="slider"></span>
-                        </label>
-                        <div class="toggleLabel">Show badge (💜) in members list</div>
-                      </div>
-
-                      <div class="toggleRow">
-                        <label class="switch">
-                          <input type="checkbox" id="couplesAuraToggle">
-                          <span class="slider"></span>
-                        </label>
-                        <div class="toggleLabel">Enable shared aura when together</div>
-                      </div>
-
-                      <div class="toggleRow">
-                        <label class="switch">
-                          <input type="checkbox" id="couplesShowMembersToggle">
-                          <span class="slider"></span>
-                        </label>
-                        <div class="toggleLabel">Show link in members list</div>
-                      </div>
-
-                      <div class="toggleRow">
-                        <label class="switch">
-                          <input type="checkbox" id="couplesGroupToggle">
-                          <span class="slider"></span>
-                        </label>
-                        <div class="toggleLabel">Pull us together in members list</div>
-                      </div>
-
-                      <div class="toggleRow">
-                        <label class="switch">
-                          <input type="checkbox" id="couplesAllowPingToggle">
-                          <span class="slider"></span>
-                        </label>
-                        <div class="toggleLabel">Allow partner pings</div>
-                      </div>
-
-                      <div class="row" style="margin-top:10px; gap:8px;">
-                        <button class="btn danger" id="couplesUnlinkBtn" type="button">Unlink</button>
-                      </div>
-                    </div>
-
-                    <div class="msgline" id="couplesMsg"></div>
-                  </div>
-
-                  <div class="field">
-                    <label>Mood</label>
-                    <input id="editMood" placeholder="e.g. chilling">
-                  </div>
-
-                  <div class="field">
-                    <label>Username</label>
-                    <input id="editUsername" placeholder="New username">
-                    <div class="small">Changing your username costs 5,000 gold.</div>
-                    <button class="btn secondary" id="changeUsernameBtn" type="button">Change username</button>
-                  </div>
-
-                  <div class="row">
-                    <div class="field" style="flex:1;">
-                      <label>Age (18+)</label>
-                      <input id="editAge" type="number" min="18" max="120" placeholder="18+">
-                    </div>
-                    <div class="field" style="flex:1;">
-                      <label>Gender</label>
-                      <select id="editGender">
-                        <option value="">Prefer not to say</option>
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                        <option value="Non-binary">Non-binary</option>
-                        <option value="Transgender">Transgender</option>
-                        <option value="Genderfluid">Genderfluid</option>
-                        <option value="Agender">Agender</option>
-                        <option value="Other">Other</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div class="field">
-                    <label>Vibe tags (pick up to <span id="vibeTagLimit">3</span>)</label>
-                    <div class="pillRow" id="vibeTagOptions"></div>
-                    <div class="small">Adds a few personality badges to your profile.</div>
-                  </div>
-
-                  <div class="field">
-                    <div class="fieldLabelRow">
-                      <label>Bio (BBCode supported)</label>
-                      <button class="pillBtn small" id="bioHelperToggle" type="button">BBCode help &amp; preview</button>
-                    </div>
-                    <textarea id="editBio" placeholder="[b]bold[/b] [i]italics[/i] [url=https://...]link[/url] [quote]...[/quote]"></textarea>
-                    <div class="bioHelper" id="bioHelper" hidden>
-                      <div class="bioHelperRow" id="bioHelperButtons">
-                        <button type="button" class="pillBtn tiny" data-bio-tag="b">[b][/b]</button>
-                        <button type="button" class="pillBtn tiny" data-bio-tag="i">[i][/i]</button>
-                        <button type="button" class="pillBtn tiny" data-bio-tag="u">[u][/u]</button>
-                        <button type="button" class="pillBtn tiny" data-bio-tag="s">[s][/s]</button>
-                        <button type="button" class="pillBtn tiny" data-bio-tag="quote">[quote][/quote]</button>
-                        <button type="button" class="pillBtn tiny" data-bio-tag="code">[code][/code]</button>
-                        <button type="button" class="pillBtn tiny" data-bio-tag="url">[url]</button>
-                        <button type="button" class="pillBtn tiny" data-bio-tag="color">[color]</button>
-                        <button type="button" class="pillBtn tiny" data-bio-tag="img">[img]</button>
-                      </div>
-                      <div class="bioHelperPreview" id="bioHelperPreview"></div>
-                      <div class="small muted">Use BBCode for simple formatting. Links/images require full URLs.</div>
-                    </div>
-                  </div>
-
-                  <div class="row">
-                    <button class="btn btnPrimary" id="saveProfileBtn" type="button">Save</button>
-                    <button class="btn btnSecondary" id="refreshProfileBtn" type="button">Cancel</button>
-                    <button class="btn btnDanger" id="logoutBtn" type="button">Logout</button>
-                  </div>
-
-                  <div class="msgline" id="profileMsg"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div id="viewCustomize" style="display:none;">
-            <div class="profileCustomEmpty" id="profileCustomEmpty" style="display:none;">
-              <div class="panelBox">
-                <div class="small">Customisation settings are only available on your own profile.</div>
-              </div>
-            </div>
-
-            <div class="customizeShell" id="customizeShell">
-              <div class="customizeTopBar">
-                <input id="customizeSearch" type="search" placeholder="Search settings…">
-              </div>
-
-              <div class="customizeCardGrid" id="customizeCardGrid">
-                <button class="customizeCard" type="button" data-category="chat" data-search="chat appearance bubbles colors spacing themes">
-                  <div class="cardTitle">Chat Appearance</div>
-                  <div class="cardHint">Bubble styling, density, and themes.</div>
-                  <div class="cardPreview chatPreview"></div>
-                </button>
-                <button class="customizeCard" type="button" data-category="text" data-search="text identity font username color">
-                  <div class="cardTitle">Text &amp; Identity</div>
-                  <div class="cardHint">Fonts, name color, and message text.</div>
-                  <div class="cardPreview textPreview"></div>
-                </button>
-                <button class="customizeCard" type="button" data-category="profile" data-search="profile appearance header gradient avatar aura">
-                  <div class="cardTitle">Profile Appearance</div>
-                  <div class="cardHint">Header gradient and aura options.</div>
-                  <div class="cardPreview profilePreview"></div>
-                </button>
-                <button class="customizeCard" type="button" data-category="effects" data-search="effects animations polish comfort">
-                  <div class="cardTitle">Effects</div>
-                  <div class="cardHint">Animation toggles and effect presets.</div>
-                  <div class="cardPreview effectsPreview"></div>
-                </button>
-                <button class="customizeCard" type="button" data-category="layout" data-search="layout accessibility scale contrast">
-                  <div class="cardTitle">Layout &amp; Accessibility</div>
-                  <div class="cardHint">Scaling, clarity, and motion controls.</div>
-                  <div class="cardPreview layoutPreview"></div>
-                </button>
-                <button class="customizeCard" type="button" data-category="advanced" data-search="advanced debug experimental sound">
-                  <div class="cardTitle">Advanced</div>
-                  <div class="cardHint">Sound cues, diagnostics, and extras.</div>
-                  <div class="cardPreview advancedPreview"></div>
-                </button>
-              </div>
-
-              <div class="customizeSubpages" id="customizeSubpages">
-                <div class="customizeSubpage" data-category="chat" id="customizeChatPage">
-                  <div class="customizeHeader">
-                    <button class="iconBtn customizeBackBtn" type="button" data-back="chat" aria-label="Back">←</button>
-                    <div>
-                      <div class="title">Chat Appearance</div>
-                      <div class="small muted">Bubble style, density, and themes.</div>
-                    </div>
-                  </div>
-                  <div class="customizeChatLayout">
-                    <aside class="customizeChatPreview">
-                      <div class="chatFxPreviewWrap">
-                        <div class="small" style="margin-bottom:10px;">Preview your chat appearance before saving.</div>
-                        <div class="chatFxPreview" id="chatFxPreview">
-                          <div class="chatFxPreviewRow self">
-                            <div class="msgItem self chatFxPreviewItem">
-                              <div class="msgAvatar chatFxPreviewAvatar" id="chatFxPreviewAvatar"></div>
-                              <div class="msgMain">
-                                <div class="bubble chatFxPreviewBubble" id="chatFxPreviewBubble">
-                                  <div class="meta">
-                                    <div class="name">
-                                      <span class="roleIco" id="chatFxPreviewRoleIcon">👑 </span>
-                                      <span class="unameText" id="chatFxPreviewName">You</span>
-                                    </div>
-                                    <div class="time" id="chatFxPreviewTime">Just now</div>
-                                  </div>
-                                  <div class="text" id="chatFxPreviewText">Your message preview bubble.</div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <div class="chatFxActions">
-                          <div class="chatFxStatus" id="chatFxStatus"></div>
-                          <button class="btn" id="chatFxSaveBtn" type="button">Save appearance</button>
-                        </div>
-                      </div>
-                    </aside>
-                    <div class="customizeChatControls">
-                      <div class="customizeSection">
-                        <div class="sectionTitle">Basic</div>
-                        <div class="panelBox" id="chatAppearanceBasic">
-                          <div class="field" data-customize-item data-search="bubble style glow">
-                            <label>Bubble style</label>
-                            <select id="chatFxGlow">
-                              <option value="off">Off</option>
-                              <option value="soft">Soft</option>
-                              <option value="neon">Neon</option>
-                              <option value="strong">Strong</option>
-                            </select>
-                          </div>
-                          <div class="field" data-customize-item data-search="bubble color">
-                            <label>Bubble color</label>
-                            <div class="chatFxColorRow">
-                              <input id="chatFxBubbleColorPick" type="color" value="#2b2d31" aria-label="Pick bubble color">
-                              <input id="chatFxBubbleColor" type="text" placeholder="#RRGGBB">
-                              <button class="pillBtn" id="chatFxBubbleColorClear" type="button">Clear</button>
-                            </div>
-                          </div>
-                          <div class="field" data-customize-item data-search="message spacing compact">
-                            <div class="toggleRow">
-                              <label class="switch">
-                                <input type="checkbox" id="chatSpacingCompact">
-                                <span class="slider"></span>
-                              </label>
-                              <div class="toggleLabel">Compact message spacing</div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <details class="customizeSection" data-section="chat-advanced">
-                        <summary>Advanced</summary>
-                        <div class="panelBox" id="chatAppearanceAdvanced">
-                          <div class="field" data-customize-item data-search="bubble radius">
-                            <label>Bubble radius</label>
-                            <div class="chatFxSliderRow">
-                              <input id="chatFxRadius" type="range" min="6" max="28" step="1">
-                              <span class="chatFxSliderValue" id="chatFxRadiusValue">14</span>
-                            </div>
-                          </div>
-                          <div class="field" data-customize-item data-search="border thickness">
-                            <label>Border thickness</label>
-                            <div class="chatFxSliderRow">
-                              <input id="chatFxBorder" type="range" min="0" max="3" step="1">
-                              <span class="chatFxSliderValue" id="chatFxBorderValue">0</span>
-                            </div>
-                          </div>
-                          <div class="field" data-customize-item data-search="shadow glow">
-                            <label>Bubble glow intensity</label>
-                            <div class="chatFxSliderRow">
-                              <input id="chatFxGlass" type="range" min="0" max="1" step="0.05">
-                              <span class="chatFxSliderValue" id="chatFxGlassValue">0</span>
-                            </div>
-                          </div>
-                          <div class="field" data-customize-item data-search="blur">
-                            <label>Bubble blur</label>
-                            <div class="chatFxSliderRow">
-                              <input id="chatFxBlur" type="range" min="0" max="16" step="1">
-                              <span class="chatFxSliderValue" id="chatFxBlurValue">0</span>
-                            </div>
-                          </div>
-                          <div class="field" data-customize-item data-search="density spacing">
-                            <label>Message spacing</label>
-                            <div class="chatFxDensityRow" id="chatFxDensity">
-                              <button class="pillBtn" type="button" data-value="compact">Compact</button>
-                              <button class="pillBtn" type="button" data-value="cozy">Cozy</button>
-                              <button class="pillBtn" type="button" data-value="spacious">Spacious</button>
-                            </div>
-                          </div>
-                          <div class="field" data-customize-item data-search="enable bubbles">
-                            <div class="toggleRow">
-                              <label class="switch">
-                                <input id="chatFxEnabled" type="checkbox">
-                                <span class="slider"></span>
-                              </label>
-                              <div class="toggleLabel">Enable custom bubbles</div>
-                            </div>
-                          </div>
-                          <div class="field" data-customize-item data-search="themes">
-                            <div class="sectionTitle">Themes</div>
-                            <div class="themeFilters">
-                              <button class="pillBtn active" data-theme-filter="all" type="button">All</button>
-                              <button class="pillBtn" data-theme-filter="dark" type="button">Dark</button>
-                              <button class="pillBtn" data-theme-filter="light" type="button">Light</button>
-                            </div>
-                            <div class="themeGrid" id="themeGrid"></div>
-                            <div class="msgline" id="themeMsg"></div>
-                          </div>
-                        </div>
-                      </details>
-                      <div class="customizeResetRow">
-                        <button class="btn secondary" id="resetChatAppearanceBtn" type="button">Reset this section</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="customizeSubpage" data-category="text" id="customizeTextPage">
-                  <div class="customizeHeader">
-                    <button class="iconBtn customizeBackBtn" type="button" data-back="text" aria-label="Back">←</button>
-                    <div>
-                      <div class="title">Text &amp; Identity</div>
-                      <div class="small muted">Fonts, colors, and readability controls.</div>
-                    </div>
-                  </div>
-
-                  <!-- Sticky preview for Text & Identity (live updates while tweaking fonts/colors) -->
-                  <div class="textFxStickyPreview" id="textFxStickyPreview">
-                    <div class="chatFxPreviewWrap">
-                      <div class="chatFxPreview" id="textFxPreview">
-                        <div class="chatFxPreviewRow self">
-                          <div class="msgItem self chatFxPreviewItem">
-                            <div class="msgAvatar chatFxPreviewAvatar" id="textFxPreviewAvatar"></div>
-                            <div class="msgMain">
-                              <div class="bubble chatFxPreviewBubble" id="textFxPreviewBubble">
-                                <div class="meta">
-                                  <div class="name">
-                                    <span class="roleIco" id="textFxPreviewRoleIcon">👑 </span>
-                                    <span class="unameText" id="textFxPreviewName">You</span>
-                                  </div>
-                                  <div class="time" id="textFxPreviewTime">Just now</div>
-                                </div>
-                                <div class="text" id="textFxPreviewText">Preview your username + text styling here.</div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="customizeSection">
-                    <div class="sectionTitle">Basic</div>
-                    <div class="panelBox" id="textIdentityBasic">
-                      <div class="field" data-customize-item data-search="font">
-                        <label>Font</label>
-                        <select id="chatFxFont"></select>
-                      </div>
-                      <div class="field" data-customize-item data-search="username color">
-                        <label>Username color</label>
-                        <div class="chatFxColorRow">
-                          <input id="chatFxNameColorPick" type="color" value="#ffffff" aria-label="Pick username color">
-                          <input id="chatFxNameColor" type="hidden" value="">
-                          <button class="pillBtn" id="chatFxNameColorClear" type="button">Clear</button>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="message text color">
-                        <label>Message text color</label>
-                        <div class="chatFxColorRow">
-                          <input id="chatFxTextColorPick" type="color" value="#ffffff" aria-label="Pick text color">
-                          <input id="chatFxTextColor" type="text" placeholder="#RRGGBB">
-                          <button class="pillBtn" id="chatFxTextColorClear" type="button">Clear</button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <details class="customizeSection" data-section="text-advanced">
-                    <summary>Advanced</summary>
-                    <div class="panelBox" id="textIdentityAdvanced">
-                      <div class="field" data-customize-item data-search="username font">
-                        <label>Username font</label>
-                        <select id="chatFxNameFont"></select>
-                      </div>
-                      <div class="field" data-customize-item data-search="text style bold italic">
-                        <label>Message text style</label>
-                        <div class="chatFxColorRow" style="justify-content:flex-start;">
-                          <label style="display:flex; align-items:center; gap:6px;">
-                            <input id="chatFxTextBold" type="checkbox"> Bold
+<button class="customizeCard" data-category="profile" data-search="profile appearance header gradient avatar aura" type="button">
+<div class="cardTitle">Profile Appearance</div>
+<div class="cardHint">Header gradient and aura options.</div>
+<div class="cardPreview profilePreview"></div>
+</button>
+<button class="customizeCard" data-category="effects" data-search="effects animations polish comfort" type="button">
+<div class="cardTitle">Effects</div>
+<div class="cardHint">Animation toggles and effect presets.</div>
+<div class="cardPreview effectsPreview"></div>
+</button>
+<button class="customizeCard" data-category="layout" data-search="layout accessibility scale contrast" type="button">
+<div class="cardTitle">Layout &amp; Accessibility</div>
+<div class="cardHint">Scaling, clarity, and motion controls.</div>
+<div class="cardPreview layoutPreview"></div>
+</button>
+<button class="customizeCard" data-category="advanced" data-search="advanced debug experimental sound" type="button">
+<div class="cardTitle">Advanced</div>
+<div class="cardHint">Sound cues, diagnostics, and extras.</div>
+<div class="cardPreview advancedPreview"></div>
+</button>
+</div>
+<div class="customizeSubpages" id="customizeSubpages">
+<div class="customizeSubpage" data-category="chat" id="customizeChatPage">
+<div class="customizeHeader">
+<button aria-label="Back" class="iconBtn customizeBackBtn" data-back="chat" type="button">←</button>
+<div>
+<div class="title">Chat &amp; Identity</div>
+<div class="small muted">Bubble style, density, plus fonts and readability.</div>
+</div>
+</div>
+<div class="customizeChatLayout">
+<aside class="customizeChatPreview">
+<div class="chatFxPreviewWrap">
+<div class="small" style="margin-bottom:10px;">Preview your chat appearance before saving.</div>
+<div class="chatFxPreview" id="chatFxPreview">
+<div class="chatFxPreviewRow self">
+<div class="msgItem self chatFxPreviewItem">
+<div class="msgAvatar chatFxPreviewAvatar" id="chatFxPreviewAvatar"></div>
+<div class="msgMain">
+<div class="bubble chatFxPreviewBubble" id="chatFxPreviewBubble">
+<div class="meta">
+<div class="name">
+<span class="roleIco" id="chatFxPreviewRoleIcon">👑 </span>
+<span class="unameText" id="chatFxPreviewName">You</span>
+</div>
+<div class="time" id="chatFxPreviewTime">Just now</div>
+</div>
+<div class="text" id="chatFxPreviewText">Your message preview bubble.</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="chatFxActions">
+<div class="chatFxStatus" id="chatFxStatus"></div>
+<button class="btn" id="chatFxSaveBtn" type="button">Save appearance</button>
+</div>
+</div>
+</aside>
+<div class="customizeChatControls">
+<div class="customizeSection">
+<div class="sectionTitle">Basic</div>
+<div class="panelBox" id="chatAppearanceBasic">
+<div class="field" data-customize-item="" data-search="bubble style glow">
+<label>Bubble style</label>
+<select id="chatFxGlow">
+<option value="off">Off</option>
+<option value="soft">Soft</option>
+<option value="neon">Neon</option>
+<option value="strong">Strong</option>
+</select>
+</div>
+<div class="field" data-customize-item="" data-search="bubble color">
+<label>Bubble color</label>
+<div class="chatFxColorRow">
+<input aria-label="Pick bubble color" id="chatFxBubbleColorPick" type="color" value="#2b2d31"/>
+<input id="chatFxBubbleColor" placeholder="#RRGGBB" type="text"/>
+<button class="pillBtn" id="chatFxBubbleColorClear" type="button">Clear</button>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="message spacing compact">
+<div class="toggleRow">
+<label class="switch">
+<input id="chatSpacingCompact" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Compact message spacing</div>
+</div>
+</div>
+</div>
+</div>
+<details class="customizeSection" data-section="chat-advanced">
+<summary>Advanced</summary>
+<div class="panelBox" id="chatAppearanceAdvanced">
+<div class="field" data-customize-item="" data-search="bubble radius">
+<label>Bubble radius</label>
+<div class="chatFxSliderRow">
+<input id="chatFxRadius" max="28" min="6" step="1" type="range"/>
+<span class="chatFxSliderValue" id="chatFxRadiusValue">14</span>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="border thickness">
+<label>Border thickness</label>
+<div class="chatFxSliderRow">
+<input id="chatFxBorder" max="3" min="0" step="1" type="range"/>
+<span class="chatFxSliderValue" id="chatFxBorderValue">0</span>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="shadow glow">
+<label>Bubble glow intensity</label>
+<div class="chatFxSliderRow">
+<input id="chatFxGlass" max="1" min="0" step="0.05" type="range"/>
+<span class="chatFxSliderValue" id="chatFxGlassValue">0</span>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="blur">
+<label>Bubble blur</label>
+<div class="chatFxSliderRow">
+<input id="chatFxBlur" max="16" min="0" step="1" type="range"/>
+<span class="chatFxSliderValue" id="chatFxBlurValue">0</span>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="density spacing">
+<label>Message spacing</label>
+<div class="chatFxDensityRow" id="chatFxDensity">
+<button class="pillBtn" data-value="compact" type="button">Compact</button>
+<button class="pillBtn" data-value="cozy" type="button">Cozy</button>
+<button class="pillBtn" data-value="spacious" type="button">Spacious</button>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="enable bubbles">
+<div class="toggleRow">
+<label class="switch">
+<input id="chatFxEnabled" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Enable custom bubbles</div>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="themes">
+<div class="sectionTitle">Themes</div>
+<div class="themeFilters">
+<button class="pillBtn active" data-theme-filter="all" type="button">All</button>
+<button class="pillBtn" data-theme-filter="dark" type="button">Dark</button>
+<button class="pillBtn" data-theme-filter="light" type="button">Light</button>
+</div>
+<div class="themeGrid" id="themeGrid"></div>
+<div class="msgline" id="themeMsg"></div>
+</div>
+</div>
+</details>
+<div class="customizeResetRow">
+<button class="btn secondary" id="resetChatAppearanceBtn" type="button">Reset this section</button>
+</div>
+</div>
+</div>
+<section class="customizeMergedSection" id="mergedTextIdentitySection"><div class="customizeSectionTitle">Text &amp; Identity</div><div class="textFxStickyPreview" id="textFxStickyPreview">
+<div class="chatFxPreviewWrap">
+<div class="chatFxPreview" id="textFxPreview">
+<div class="chatFxPreviewRow self">
+<div class="msgItem self chatFxPreviewItem">
+<div class="msgAvatar chatFxPreviewAvatar" id="textFxPreviewAvatar"></div>
+<div class="msgMain">
+<div class="bubble chatFxPreviewBubble" id="textFxPreviewBubble">
+<div class="meta">
+<div class="name">
+<span class="roleIco" id="textFxPreviewRoleIcon">👑 </span>
+<span class="unameText" id="textFxPreviewName">You</span>
+</div>
+<div class="time" id="textFxPreviewTime">Just now</div>
+</div>
+<div class="text" id="textFxPreviewText">Preview your username + text styling here.</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div><div class="customizeSection">
+<div class="sectionTitle">Basic</div>
+<div class="panelBox" id="textIdentityBasic">
+<div class="field" data-customize-item="" data-search="font">
+<label>Font</label>
+<select id="chatFxFont"></select>
+</div>
+<div class="field" data-customize-item="" data-search="username color">
+<label>Username color</label>
+<div class="chatFxColorRow">
+<input aria-label="Pick username color" id="chatFxNameColorPick" type="color" value="#ffffff"/>
+<input id="chatFxNameColor" type="hidden" value=""/>
+<button class="pillBtn" id="chatFxNameColorClear" type="button">Clear</button>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="message text color">
+<label>Message text color</label>
+<div class="chatFxColorRow">
+<input aria-label="Pick text color" id="chatFxTextColorPick" type="color" value="#ffffff"/>
+<input id="chatFxTextColor" placeholder="#RRGGBB" type="text"/>
+<button class="pillBtn" id="chatFxTextColorClear" type="button">Clear</button>
+</div>
+</div>
+</div>
+</div><details class="customizeSection" data-section="text-advanced">
+<summary>Advanced</summary>
+<div class="panelBox" id="textIdentityAdvanced">
+<div class="field" data-customize-item="" data-search="username font">
+<label>Username font</label>
+<select id="chatFxNameFont"></select>
+</div>
+<div class="field" data-customize-item="" data-search="text style bold italic">
+<label>Message text style</label>
+<div class="chatFxColorRow" style="justify-content:flex-start;">
+<label style="display:flex; align-items:center; gap:6px;">
+<input id="chatFxTextBold" type="checkbox"/> Bold
                           </label>
-                          <label style="display:flex; align-items:center; gap:6px;">
-                            <input id="chatFxTextItalic" type="checkbox"> Italic
+<label style="display:flex; align-items:center; gap:6px;">
+<input id="chatFxTextItalic" type="checkbox"/> Italic
                           </label>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="text glow">
-                        <label>Text glow</label>
-                        <select id="chatFxTextGlow">
-                          <option value="off">Off</option>
-                          <option value="soft">Soft</option>
-                          <option value="neon">Neon</option>
-                          <option value="strong">Strong</option>
-                        </select>
-                      </div>
-                      <div class="field" data-customize-item data-search="text gradient">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="chatFxTextGradientEnabled" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Enable text gradient</div>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="gradient color">
-                        <label>Gradient color A</label>
-                        <div class="chatFxColorRow">
-                          <input id="chatFxTextGradientAPick" type="color" value="#7c4dff" aria-label="Pick gradient color A">
-                          <input id="chatFxTextGradientA" type="text" placeholder="#RRGGBB">
-                          <button class="pillBtn" id="chatFxTextGradientAClear" type="button">Clear</button>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="gradient color">
-                        <label>Gradient color B</label>
-                        <div class="chatFxColorRow">
-                          <input id="chatFxTextGradientBPick" type="color" value="#00e5ff" aria-label="Pick gradient color B">
-                          <input id="chatFxTextGradientB" type="text" placeholder="#RRGGBB">
-                          <button class="pillBtn" id="chatFxTextGradientBClear" type="button">Clear</button>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="gradient angle">
-                        <label>Gradient angle</label>
-                        <div class="chatFxSliderRow">
-                          <input id="chatFxTextGradientAngle" type="range" min="0" max="360" step="1">
-                          <span class="chatFxSliderValue" id="chatFxTextGradientAngleValue">135</span>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="auto contrast">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="chatFxAutoContrast" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Auto-contrast text</div>
-                        </div>
-                      </div>
-                    </div>
-                  </details>
-                  <div class="customizeResetRow">
-                    <button class="btn secondary" id="resetTextIdentityBtn" type="button">Reset this section</button>
-                  </div>
-                </div>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="text glow">
+<label>Text glow</label>
+<select id="chatFxTextGlow">
+<option value="off">Off</option>
+<option value="soft">Soft</option>
+<option value="neon">Neon</option>
+<option value="strong">Strong</option>
+</select>
+</div>
+<div class="field" data-customize-item="" data-search="text gradient">
+<div class="toggleRow">
+<label class="switch">
+<input id="chatFxTextGradientEnabled" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Enable text gradient</div>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="gradient color">
+<label>Gradient color A</label>
+<div class="chatFxColorRow">
+<input aria-label="Pick gradient color A" id="chatFxTextGradientAPick" type="color" value="#7c4dff"/>
+<input id="chatFxTextGradientA" placeholder="#RRGGBB" type="text"/>
+<button class="pillBtn" id="chatFxTextGradientAClear" type="button">Clear</button>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="gradient color">
+<label>Gradient color B</label>
+<div class="chatFxColorRow">
+<input aria-label="Pick gradient color B" id="chatFxTextGradientBPick" type="color" value="#00e5ff"/>
+<input id="chatFxTextGradientB" placeholder="#RRGGBB" type="text"/>
+<button class="pillBtn" id="chatFxTextGradientBClear" type="button">Clear</button>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="gradient angle">
+<label>Gradient angle</label>
+<div class="chatFxSliderRow">
+<input id="chatFxTextGradientAngle" max="360" min="0" step="1" type="range"/>
+<span class="chatFxSliderValue" id="chatFxTextGradientAngleValue">135</span>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="auto contrast">
+<div class="toggleRow">
+<label class="switch">
+<input id="chatFxAutoContrast" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Auto-contrast text</div>
+</div>
+</div>
+</div>
+</details><div class="customizeResetRow">
+<button class="btn secondary" id="resetTextIdentityBtn" type="button">Reset this section</button>
+</div></section></div>
 
-                <div class="customizeSubpage" data-category="profile" id="customizeProfilePage">
-                  <div class="customizeHeader">
-                    <button class="iconBtn customizeBackBtn" type="button" data-back="profile" aria-label="Back">←</button>
-                    <div>
-                      <div class="title">Profile Appearance</div>
-                      <div class="small muted">Header gradient and avatar accents.</div>
-                    </div>
-                  </div>
-                  <div class="customizeSection">
-                    <div class="sectionTitle">Basic</div>
-                    <div class="panelBox" id="profileAppearanceBasic">
-                      <div class="field" data-customize-item data-search="header gradient">
-                        <label>Header gradient</label>
-                        <div class="colorInputRow tight">
-                          <input id="headerColorA" type="color" aria-label="Header color A">
-                          <input id="headerColorAText" type="text" placeholder="#ff6a2b" aria-label="Header color A text">
-                        </div>
-                        <div class="colorInputRow tight" style="margin-top:6px;">
-                          <input id="headerColorB" type="color" aria-label="Header color B">
-                          <input id="headerColorBText" type="text" placeholder="#2b0f08" aria-label="Header color B text">
-                        </div>
-                        <div class="small">Pick two colors for your profile header gradient.</div>
-                      </div>
-                      <div class="field" data-customize-item data-search="avatar aura">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="chatFxPolishAuras" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Avatar aura</div>
-                        </div>
-                        <div class="small muted">Requires Polish Pack.</div>
-                      </div>
-                    </div>
-                  </div>
-                  <details class="customizeSection" data-section="profile-advanced">
-                    <summary>Advanced</summary>
-                    <div class="panelBox" id="profileAppearanceAdvanced">
-                      <div class="field" data-customize-item data-search="accent color">
-                        <label>Profile accent color</label>
-                        <input id="chatFxAccent" type="text" placeholder="#RRGGBB">
-                        <div class="small">Leave blank to keep your theme accent.</div>
-                      </div>
-                    </div>
-                  </details>
-                  <div class="customizeResetRow">
-                    <button class="btn secondary" id="resetProfileAppearanceBtn" type="button">Reset this section</button>
-                  </div>
-                </div>
-
-                <div class="customizeSubpage" data-category="effects" id="customizeEffectsPage">
-                  <div class="customizeHeader">
-                    <button class="iconBtn customizeBackBtn" type="button" data-back="effects" aria-label="Back">←</button>
-                    <div>
-                      <div class="title">Effects</div>
-                      <div class="small muted">Animation and polish options.</div>
-                    </div>
-                  </div>
-                  <div class="customizeSection">
-                    <div class="sectionTitle">Basic</div>
-                    <div class="panelBox" id="effectsBasic">
-                      <div class="field" data-customize-item data-search="animations">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="chatFxPolishAnimations" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Animations</div>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="comfort mode">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="prefComfortMode" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Comfort mode</div>
-                        </div>
-                        <div class="small muted" id="prefComfortHelp">Softens glows, confetti, and motion-heavy animations.</div>
-                      </div>
-                      <div class="field" data-customize-item data-search="preset">
-                        <label>Effect preset</label>
-                        <select id="effectsPreset">
-                          <option value="">Custom</option>
-                          <option value="soft">Soft</option>
-                          <option value="neon">Neon</option>
-                          <option value="minimal">Minimal</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                  <details class="customizeSection" data-section="effects-advanced">
-                    <summary>Advanced</summary>
-                    <div class="panelBox" id="effectsAdvanced">
-                      <div class="field" data-customize-item data-search="polish pack">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="chatFxPolishPack" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Enable Polish Pack</div>
-                        </div>
-                      </div>
-                    </div>
-                  </details>
-                  <div class="customizeResetRow">
-                    <button class="btn secondary" id="resetEffectsBtn" type="button">Reset this section</button>
-                  </div>
-                </div>
-
-                <div class="customizeSubpage" data-category="layout" id="customizeLayoutPage">
-                  <div class="customizeHeader">
-                    <button class="iconBtn customizeBackBtn" type="button" data-back="layout" aria-label="Back">←</button>
-                    <div>
-                      <div class="title">Layout &amp; Accessibility</div>
-                      <div class="small muted">Scale, clarity, and motion overrides.</div>
-                    </div>
-                  </div>
-                  <div class="customizeSection">
-                    <div class="sectionTitle">Basic</div>
-                    <div class="panelBox" id="layoutBasic">
-                      <div class="field" data-customize-item data-search="ui scale">
-                        <label>UI scale</label>
-                        <div class="uiScaleRow">
-                          <input id="uiScaleRange" type="range" min="0.80" max="1.05" step="0.05" value="1" aria-label="UI size">
-                          <div class="small muted" id="uiScaleValue">100%</div>
-                        </div>
-                        <div class="uiScaleActions">
-                          <button class="btn secondary" id="uiScaleResetBtn" type="button">Auto</button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <details class="customizeSection" data-section="layout-advanced">
-                    <summary>Advanced</summary>
-                    <div class="panelBox" id="layoutAdvanced">
-                      <div class="field" data-customize-item data-search="reduced motion">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="reduceMotionToggle" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Reduced motion override</div>
-                        </div>
-                        <div class="small muted">Mirrors your comfort mode preference.</div>
-                      </div>
-                    </div>
-                  </details>
-                  <div class="customizeResetRow">
-                    <button class="btn secondary" id="resetLayoutBtn" type="button">Reset this section</button>
-                  </div>
-                </div>
-
-                <div class="customizeSubpage" data-category="advanced" id="customizeAdvancedPage">
-                  <div class="customizeHeader">
-                    <button class="iconBtn customizeBackBtn" type="button" data-back="advanced" aria-label="Back">←</button>
-                    <div>
-                      <div class="title">Advanced</div>
-                      <div class="small muted">Sound cues, diagnostics, and extras.</div>
-                    </div>
-                  </div>
-                  <div class="customizeSection">
-                    <div class="sectionTitle">Basic</div>
-                    <div class="panelBox" id="advancedBasic">
-                      <div class="field" data-customize-item data-search="sound cues">
-                        <div class="small" style="margin-bottom:10px;">Sound cues are quiet and optional. On iOS you may need to toggle once to enable audio.</div>
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="prefSoundEnabled" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Enable sound cues</div>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="room messages sound">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="prefSoundRoom" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Room messages</div>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="direct messages sound">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="prefSoundDm" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Direct messages</div>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="mentions sound">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="prefSoundMention" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Mentions (@you)</div>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="message sent sound">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="prefSoundSent" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Message sent</div>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="message received sound">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="prefSoundReceive" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Message received</div>
-                        </div>
-                      </div>
-                      <div class="field" data-customize-item data-search="reaction sound">
-                        <div class="toggleRow">
-                          <label class="switch">
-                            <input id="prefSoundReaction" type="checkbox">
-                            <span class="slider"></span>
-                          </label>
-                          <div class="toggleLabel">Reaction added</div>
-                        </div>
-                      </div>
-                      <div class="small" id="prefSoundStatus" style="margin-top:8px;"></div>
-                    </div>
-                  </div>
-                  <details class="customizeSection" data-section="advanced-extra">
-                    <summary>Advanced</summary>
-                    <div class="panelBox" id="advancedAdvanced">
-                      <div class="field" data-customize-item data-search="dm background">
-                        <div class="small">DM background</div>
-                        <div class="colorInputRow tight">
-                          <input id="dmBgColor" type="color" aria-label="DM background color">
-                          <input id="dmBgColorText" type="text" placeholder="#1e1f22 or blue" aria-label="DM background color text">
-                        </div>
-                        <div class="small">Change the backdrop behind your DM threads and conversation.</div>
-                      </div>
-
-                      <div class="field" data-customize-item data-search="dm badge color">
-                        <label>Direct message badge color</label>
-                        <div class="colorInputRow">
-                          <input id="directBadgeColor" type="color" aria-label="Direct message badge color">
-                          <input id="directBadgeColorText" type="text" placeholder="#ed4245 or red" aria-label="Direct message badge color text">
-                        </div>
-                      </div>
-
-                      <div class="field" data-customize-item data-search="group dm badge color">
-                        <label>Group DM badge color</label>
-                        <div class="colorInputRow">
-                          <input id="groupBadgeColor" type="color" aria-label="Group DM badge color">
-                          <input id="groupBadgeColorText" type="text" placeholder="#5865f2 or blue" aria-label="Group DM badge color text">
-                        </div>
-                      </div>
-
-                      <div class="row" style="margin-top:6px;">
-                        <button class="btn btnPrimary" id="saveBadgePrefsBtn" type="button">Save badge colors</button>
-                      </div>
-
-                      <div class="msgline" id="customizeMsg"></div>
-
-                      <div class="sectionTitle" style="margin-top:16px;">VIP gifts</div>
-                      <div class="panelBox">
-                        <div class="small">This section is wired and ready — add your gifts system whenever you want.</div>
-                        <div class="small" style="margin-top:6px;">Tip: later load inventory/history via an endpoint like <code>/gifts</code> and render it here.</div>
-                      </div>
-                    </div>
-                  </details>
-                  <div class="customizeResetRow">
-                    <button class="btn secondary" id="resetAdvancedBtn" type="button">Reset this section</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div id="viewActions" style="display:none;">
-            <div class="sectionTitle">Quick actions</div>
-            <div class="panelBox actionList">
-              <button class="btn secondary" id="actionMuteBtn" type="button">Mute</button>
-              <button class="btn secondary" id="actionKickBtn" type="button">Kick</button>
-              <button class="btn danger" id="actionBanBtn" type="button">Ban</button>
-              <button class="btn secondary" id="actionAppealsBtn" type="button">View appeals</button>
-            </div>
-
-            <div id="viewModeration">
-              <div class="sectionTitle">Moderation panel</div>
-
-              <div class="panelBox modCard">
-                <div class="field">
-                  <label>Target</label>
-                  <select id="modUserSelect"></select>
-                  <input id="modUser" placeholder="Search or type username" autocomplete="off">
-                  <div class="row modTargetActions" style="gap:8px; flex-wrap:wrap;">
-                    <button class="btn secondary" id="modOpenProfileBtn" type="button">View profile</button>
-                    <button class="btn secondary" id="modRefreshTargetsBtn" type="button">Refresh list</button>
-                  </div>
-                </div>
-
-                <div class="field">
-                  <label>Reason</label>
-                  <div class="pillRow" id="modReasonPresets"></div>
-                  <textarea id="modReason" rows="2" placeholder="Choose a preset and add details (required)"></textarea>
-                </div>
-
-                <div class="modGrid">
-                  <div class="field">
-                    <label>Mute length</label>
-                    <select id="modMuteMins">
-                      <option value="10">10 minutes</option>
-                      <option value="30">30 minutes</option>
-                      <option value="60">1 hour</option>
-                      <option value="240">4 hours</option>
-                      <option value="1440">24 hours</option>
-                    </select>
-                  </div>
-                  <div class="field">
-                    <label>Ban length</label>
-                    <select id="modBanMins">
-                      <option value="0">Permanent</option>
-                      <option value="60">1 hour</option>
-                      <option value="720">12 hours</option>
-                      <option value="1440">24 hours</option>
-                      <option value="10080">7 days</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div class="actionGrid" style="margin-top:8px;">
-                  <button class="btn btnSecondary" id="modKickBtn" type="button">Kick</button>
-                  <button class="btn btnSecondary" id="modWarnBtn" type="button">Warn</button>
-                  <button class="btn btnSecondary" id="modMuteBtn" type="button">Mute</button>
-                  <button class="btn btnDanger" id="modBanBtn" type="button">Ban</button>
-                  <button class="btn btnSecondary" id="modUnmuteBtn" type="button">Unmute</button>
-                  <button class="btn btnSecondary" id="modUnbanBtn" type="button">Unban</button>
-                </div>
-
-                <div class="field" style="margin-top:8px;">
-                  <label>Role assignment</label>
-                  <div class="row" style="gap:8px; flex-wrap:wrap;">
-                    <select id="modSetRole">
-                      <option value="">Set role (Owner only)</option>
-                      <option>Owner</option>
-                      <option>Co-owner</option>
-                      <option>Admin</option>
-                      <option>Moderator</option>
-                      <option>VIP</option>
-                      <option>User</option>
-                      <option>Guest</option>
-                    </select>
-                    <button class="btn btnPrimary" id="modSetRoleBtn" type="button">Apply role</button>
-                  </div>
-                </div>
-
-                <div class="msgline" id="modMsg"></div>
-              </div>
-
-              <div class="sectionTitle">Moderation logs</div>
-              <div class="panelBox">
-                <div class="row" style="align-items:center;">
-                  <input id="logUser" placeholder="Filter by user (actor or target)" style="flex:1; min-width:220px;">
-                  <select id="logAction" style="width:220px;">
-                    <option value="">All actions</option>
-                    <option value="KICK">KICK</option>
-                    <option value="MUTE">MUTE</option>
-                    <option value="BAN">BAN</option>
-                    <option value="DELETE_MESSAGE">DELETE_MESSAGE</option>
-                    <option value="UNMUTE">UNMUTE</option>
-                    <option value="UNBAN">UNBAN</option>
-                    <option value="WARN">WARN</option>
-                    <option value="SET_ROLE">SET_ROLE</option>
-                  </select>
-                  <select id="logLimit" style="width:160px;">
-                    <option value="25">Last 25</option>
-                    <option value="50" selected>Last 50</option>
-                    <option value="100">Last 100</option>
-                    <option value="200">Last 200</option>
-                  </select>
-                  <button class="btn secondary" id="refreshLogsBtn" type="button">Refresh</button>
-                </div>
-
-                <div class="msgline" id="logsMsg"></div>
-
-                <div class="logTableWrap">
-                  <table class="logTable">
-                    <thead>
-                      <tr>
-                        <th>Time</th>
-                        <th>Actor</th>
-                        <th>Action</th>
-                        <th>Target</th>
-                        <th>Room</th>
-                        <th>Details</th>
-                      </tr>
-                    </thead>
-                    <tbody id="logsBody"></tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Quick Actions overlay (staff) -->
-          <div class="inlineModalOverlay" id="inlineMemberActionsShade" style="display:none;">
-            <div class="inlineModalCard">
+<div class="customizeSubpage" data-category="profile" id="customizeProfilePage">
+<div class="customizeHeader">
+<button aria-label="Back" class="iconBtn customizeBackBtn" data-back="profile" type="button">←</button>
+<div>
+<div class="title">Profile Appearance</div>
+<div class="small muted">Header gradient and avatar accents.</div>
+</div>
+</div>
+<div class="customizeSection">
+<div class="sectionTitle">Basic</div>
+<div class="panelBox" id="profileAppearanceBasic">
+<div class="field" data-customize-item="" data-search="header gradient">
+<label>Header gradient</label>
+<div class="colorInputRow tight">
+<input aria-label="Header color A" id="headerColorA" type="color"/>
+<input aria-label="Header color A text" id="headerColorAText" placeholder="#ff6a2b" type="text"/>
+</div>
+<div class="colorInputRow tight" style="margin-top:6px;">
+<input aria-label="Header color B" id="headerColorB" type="color"/>
+<input aria-label="Header color B text" id="headerColorBText" placeholder="#2b0f08" type="text"/>
+</div>
+<div class="small">Pick two colors for your profile header gradient.</div>
+</div>
+<div class="field" data-customize-item="" data-search="avatar aura">
+<div class="toggleRow">
+<label class="switch">
+<input id="chatFxPolishAuras" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Avatar aura</div>
+</div>
+<div class="small muted">Requires Polish Pack.</div>
+</div>
+</div>
+</div>
+<details class="customizeSection" data-section="profile-advanced">
+<summary>Advanced</summary>
+<div class="panelBox" id="profileAppearanceAdvanced">
+<div class="field" data-customize-item="" data-search="accent color">
+<label>Profile accent color</label>
+<input id="chatFxAccent" placeholder="#RRGGBB" type="text"/>
+<div class="small">Leave blank to keep your theme accent.</div>
+</div>
+</div>
+</details>
+<div class="customizeResetRow">
+<button class="btn secondary" id="resetProfileAppearanceBtn" type="button">Reset this section</button>
+</div>
+</div>
+<div class="customizeSubpage" data-category="effects" id="customizeEffectsPage">
+<div class="customizeHeader">
+<button aria-label="Back" class="iconBtn customizeBackBtn" data-back="effects" type="button">←</button>
+<div>
+<div class="title">Effects</div>
+<div class="small muted">Animation and polish options.</div>
+</div>
+</div>
+<div class="customizeSection">
+<div class="sectionTitle">Basic</div>
+<div class="panelBox" id="effectsBasic">
+<div class="field" data-customize-item="" data-search="animations">
+<div class="toggleRow">
+<label class="switch">
+<input id="chatFxPolishAnimations" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Animations</div>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="comfort mode">
+<div class="toggleRow">
+<label class="switch">
+<input id="prefComfortMode" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Comfort mode</div>
+</div>
+<div class="small muted" id="prefComfortHelp">Softens glows, confetti, and motion-heavy animations.</div>
+</div>
+<div class="field" data-customize-item="" data-search="preset">
+<label>Effect preset</label>
+<select id="effectsPreset">
+<option value="">Custom</option>
+<option value="soft">Soft</option>
+<option value="neon">Neon</option>
+<option value="minimal">Minimal</option>
+</select>
+</div>
+</div>
+</div>
+<details class="customizeSection" data-section="effects-advanced">
+<summary>Advanced</summary>
+<div class="panelBox" id="effectsAdvanced">
+<div class="field" data-customize-item="" data-search="polish pack">
+<div class="toggleRow">
+<label class="switch">
+<input id="chatFxPolishPack" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Enable Polish Pack</div>
+</div>
+</div>
+</div>
+</details>
+<div class="customizeResetRow">
+<button class="btn secondary" id="resetEffectsBtn" type="button">Reset this section</button>
+</div>
+</div>
+<div class="customizeSubpage" data-category="layout" id="customizeLayoutPage">
+<div class="customizeHeader">
+<button aria-label="Back" class="iconBtn customizeBackBtn" data-back="layout" type="button">←</button>
+<div>
+<div class="title">Layout &amp; Accessibility</div>
+<div class="small muted">Scale, clarity, and motion overrides.</div>
+</div>
+</div>
+<div class="customizeSection">
+<div class="sectionTitle">Basic</div>
+<div class="panelBox" id="layoutBasic">
+<div class="field" data-customize-item="" data-search="ui scale">
+<label>UI scale</label>
+<div class="uiScaleRow">
+<input aria-label="UI size" id="uiScaleRange" max="1.05" min="0.80" step="0.05" type="range" value="1"/>
+<div class="small muted" id="uiScaleValue">100%</div>
+</div>
+<div class="uiScaleActions">
+<button class="btn secondary" id="uiScaleResetBtn" type="button">Auto</button>
+</div>
+</div>
+</div>
+</div>
+<details class="customizeSection" data-section="layout-advanced">
+<summary>Advanced</summary>
+<div class="panelBox" id="layoutAdvanced">
+<div class="field" data-customize-item="" data-search="reduced motion">
+<div class="toggleRow">
+<label class="switch">
+<input id="reduceMotionToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Reduced motion override</div>
+</div>
+<div class="small muted">Mirrors your comfort mode preference.</div>
+</div>
+</div>
+</details>
+<div class="customizeResetRow">
+<button class="btn secondary" id="resetLayoutBtn" type="button">Reset this section</button>
+</div>
+</div>
+<div class="customizeSubpage" data-category="advanced" id="customizeAdvancedPage">
+<div class="customizeHeader">
+<button aria-label="Back" class="iconBtn customizeBackBtn" data-back="advanced" type="button">←</button>
+<div>
+<div class="title">Advanced</div>
+<div class="small muted">Sound cues, diagnostics, and extras.</div>
+</div>
+</div>
+<div class="customizeSection">
+<div class="sectionTitle">Basic</div>
+<div class="panelBox" id="advancedBasic">
+<div class="field" data-customize-item="" data-search="sound cues">
+<div class="small" style="margin-bottom:10px;">Sound cues are quiet and optional. On iOS you may need to toggle once to enable audio.</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="prefSoundEnabled" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Enable sound cues</div>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="room messages sound">
+<div class="toggleRow">
+<label class="switch">
+<input id="prefSoundRoom" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Room messages</div>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="direct messages sound">
+<div class="toggleRow">
+<label class="switch">
+<input id="prefSoundDm" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Direct messages</div>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="mentions sound">
+<div class="toggleRow">
+<label class="switch">
+<input id="prefSoundMention" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Mentions (@you)</div>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="message sent sound">
+<div class="toggleRow">
+<label class="switch">
+<input id="prefSoundSent" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Message sent</div>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="message received sound">
+<div class="toggleRow">
+<label class="switch">
+<input id="prefSoundReceive" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Message received</div>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="reaction sound">
+<div class="toggleRow">
+<label class="switch">
+<input id="prefSoundReaction" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Reaction added</div>
+</div>
+</div>
+<div class="small" id="prefSoundStatus" style="margin-top:8px;"></div>
+</div>
+</div>
+<details class="customizeSection" data-section="advanced-extra">
+<summary>Advanced</summary>
+<div class="panelBox" id="advancedAdvanced">
+<div class="field" data-customize-item="" data-search="dm background">
+<div class="small">DM background</div>
+<div class="colorInputRow tight">
+<input aria-label="DM background color" id="dmBgColor" type="color"/>
+<input aria-label="DM background color text" id="dmBgColorText" placeholder="#1e1f22 or blue" type="text"/>
+</div>
+<div class="small">Change the backdrop behind your DM threads and conversation.</div>
+</div>
+<div class="field" data-customize-item="" data-search="dm badge color">
+<label>Direct message badge color</label>
+<div class="colorInputRow">
+<input aria-label="Direct message badge color" id="directBadgeColor" type="color"/>
+<input aria-label="Direct message badge color text" id="directBadgeColorText" placeholder="#ed4245 or red" type="text"/>
+</div>
+</div>
+<div class="field" data-customize-item="" data-search="group dm badge color">
+<label>Group DM badge color</label>
+<div class="colorInputRow">
+<input aria-label="Group DM badge color" id="groupBadgeColor" type="color"/>
+<input aria-label="Group DM badge color text" id="groupBadgeColorText" placeholder="#5865f2 or blue" type="text"/>
+</div>
+</div>
+<div class="row" style="margin-top:6px;">
+<button class="btn btnPrimary" id="saveBadgePrefsBtn" type="button">Save badge colors</button>
+</div>
+<div class="msgline" id="customizeMsg"></div>
+<div class="sectionTitle" style="margin-top:16px;">VIP gifts</div>
+<div class="panelBox">
+<div class="small">This section is wired and ready — add your gifts system whenever you want.</div>
+<div class="small" style="margin-top:6px;">Tip: later load inventory/history via an endpoint like <code>/gifts</code> and render it here.</div>
+</div>
+</div>
+</details>
+<div class="customizeResetRow">
+<button class="btn secondary" id="resetAdvancedBtn" type="button">Reset this section</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="viewActions" style="display:none;">
+<div class="sectionTitle">Quick actions</div>
+<div class="panelBox actionList">
+<button class="btn secondary" id="actionMuteBtn" type="button">Mute</button>
+<button class="btn secondary" id="actionKickBtn" type="button">Kick</button>
+<button class="btn danger" id="actionBanBtn" type="button">Ban</button>
+<button class="btn secondary" id="actionAppealsBtn" type="button">View appeals</button>
+</div>
+<div id="viewModeration">
+<div class="sectionTitle">Moderation panel</div>
+<div class="panelBox modCard">
+<div class="field">
+<label>Target</label>
+<select id="modUserSelect"></select>
+<input autocomplete="off" id="modUser" placeholder="Search or type username"/>
+<div class="row modTargetActions" style="gap:8px; flex-wrap:wrap;">
+<button class="btn secondary" id="modOpenProfileBtn" type="button">View profile</button>
+<button class="btn secondary" id="modRefreshTargetsBtn" type="button">Refresh list</button>
+</div>
+</div>
+<div class="field">
+<label>Reason</label>
+<div class="pillRow" id="modReasonPresets"></div>
+<textarea id="modReason" placeholder="Choose a preset and add details (required)" rows="2"></textarea>
+</div>
+<div class="modGrid">
+<div class="field">
+<label>Mute length</label>
+<select id="modMuteMins">
+<option value="10">10 minutes</option>
+<option value="30">30 minutes</option>
+<option value="60">1 hour</option>
+<option value="240">4 hours</option>
+<option value="1440">24 hours</option>
+</select>
+</div>
+<div class="field">
+<label>Ban length</label>
+<select id="modBanMins">
+<option value="0">Permanent</option>
+<option value="60">1 hour</option>
+<option value="720">12 hours</option>
+<option value="1440">24 hours</option>
+<option value="10080">7 days</option>
+</select>
+</div>
+</div>
+<div class="actionGrid" style="margin-top:8px;">
+<button class="btn btnSecondary" id="modKickBtn" type="button">Kick</button>
+<button class="btn btnSecondary" id="modWarnBtn" type="button">Warn</button>
+<button class="btn btnSecondary" id="modMuteBtn" type="button">Mute</button>
+<button class="btn btnDanger" id="modBanBtn" type="button">Ban</button>
+<button class="btn btnSecondary" id="modUnmuteBtn" type="button">Unmute</button>
+<button class="btn btnSecondary" id="modUnbanBtn" type="button">Unban</button>
+</div>
+<div class="field" style="margin-top:8px;">
+<label>Role assignment</label>
+<div class="row" style="gap:8px; flex-wrap:wrap;">
+<select id="modSetRole">
+<option value="">Set role (Owner only)</option>
+<option>Owner</option>
+<option>Co-owner</option>
+<option>Admin</option>
+<option>Moderator</option>
+<option>VIP</option>
+<option>User</option>
+<option>Guest</option>
+</select>
+<button class="btn btnPrimary" id="modSetRoleBtn" type="button">Apply role</button>
+</div>
+</div>
+<div class="msgline" id="modMsg"></div>
+</div>
+<div class="sectionTitle">Moderation logs</div>
+<div class="panelBox">
+<div class="row" style="align-items:center;">
+<input id="logUser" placeholder="Filter by user (actor or target)" style="flex:1; min-width:220px;"/>
+<select id="logAction" style="width:220px;">
+<option value="">All actions</option>
+<option value="KICK">KICK</option>
+<option value="MUTE">MUTE</option>
+<option value="BAN">BAN</option>
+<option value="DELETE_MESSAGE">DELETE_MESSAGE</option>
+<option value="UNMUTE">UNMUTE</option>
+<option value="UNBAN">UNBAN</option>
+<option value="WARN">WARN</option>
+<option value="SET_ROLE">SET_ROLE</option>
+</select>
+<select id="logLimit" style="width:160px;">
+<option value="25">Last 25</option>
+<option selected="" value="50">Last 50</option>
+<option value="100">Last 100</option>
+<option value="200">Last 200</option>
+</select>
+<button class="btn secondary" id="refreshLogsBtn" type="button">Refresh</button>
+</div>
+<div class="msgline" id="logsMsg"></div>
+<div class="logTableWrap">
+<table class="logTable">
+<thead>
+<tr>
+<th>Time</th>
+<th>Actor</th>
+<th>Action</th>
+<th>Target</th>
+<th>Room</th>
+<th>Details</th>
+</tr>
+</thead>
+<tbody id="logsBody"></tbody>
+</table>
+</div>
+</div>
+</div>
+</div>
+<!-- Quick Actions overlay (staff) -->
+<div class="inlineModalOverlay" id="inlineMemberActionsShade" style="display:none;">
+<div class="inlineModalCard">
 <div id="memberActionsOverlay" style="display:none;">
-                  <div class="inlineModalHeader"><div class="sectionTitle" style="margin:0;">Actions</div><button class="iconBtn" id="closeMemberActionsBtn" type="button" aria-label="Close">✕</button></div>
-                  <div class="panelBox modCard">
-                    <div class="field">
-                      <label>Reason</label>
-                      <div class="pillRow" id="quickReasonPresets"></div>
-                      <textarea id="quickReason" rows="2" placeholder="Add context (required)"></textarea>
-                    </div>
-                    <div class="modGrid">
-                      <div class="field">
-                        <label>Kick length</label>
-                        <select id="quickKickSeconds">
-                          <option value="60">1 minute</option>
-                          <option value="300" selected>5 minutes</option>
-                          <option value="900">15 minutes</option>
-                          <option value="3600">1 hour</option>
-                          <option value="21600">6 hours</option>
-                          <option value="86400">24 hours</option>
-                          <option value="604800">1 week</option>
-                        </select>
-                      </div>
-                      <div class="field">
-                        <label>Mute length</label>
-                        <select id="quickMuteMins">
-                          <option value="10">10 minutes</option>
-                          <option value="30">30 minutes</option>
-                          <option value="60">1 hour</option>
-                          <option value="240">4 hours</option>
-                          <option value="1440">24 hours</option>
-                        </select>
-                      </div>
-                      <div class="field">
-                        <label>Ban length</label>
-                        <select id="quickBanMins">
-                          <option value="0">Permanent</option>
-                          <option value="60">1 hour</option>
-                          <option value="720">12 hours</option>
-                          <option value="1440">24 hours</option>
-                          <option value="10080">7 days</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div class="actionGrid" style="margin-top:8px;">
-                      <button class="btn btnSecondary" id="quickKickBtn" type="button">Kick</button>
-                      <button class="btn btnSecondary" id="quickUnkickBtn" type="button">Unkick</button>
-                      <button class="btn btnSecondary" id="quickMuteBtn" type="button">Mute</button>
-                      <button class="btn btnSecondary" id="quickUnmuteBtn" type="button">Unmute</button>
-                      <button class="btn btnDanger" id="quickBanBtn" type="button">Ban</button>
-                    </div>
-                    <div class="msgline" id="quickModMsg"></div>
-                  </div>
-                </div>
-
-
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="mediaLightbox" id="mediaLightbox">
-    <button class="iconBtn largeClose" id="mediaLightboxClose" type="button" aria-label="Close media">✕</button>
-    <img id="mediaLightboxImg" alt="Expanded media">
-    <video id="mediaLightboxVideo" playsinline controls></video>
-  </div>
-
-  </div>
-
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="/app.js" defer></script>
-
+<div class="inlineModalHeader"><div class="sectionTitle" style="margin:0;">Actions</div><button aria-label="Close" class="iconBtn" id="closeMemberActionsBtn" type="button">✕</button></div>
+<div class="panelBox modCard">
+<div class="field">
+<label>Reason</label>
+<div class="pillRow" id="quickReasonPresets"></div>
+<textarea id="quickReason" placeholder="Add context (required)" rows="2"></textarea>
+</div>
+<div class="modGrid">
+<div class="field">
+<label>Kick length</label>
+<select id="quickKickSeconds">
+<option value="60">1 minute</option>
+<option selected="" value="300">5 minutes</option>
+<option value="900">15 minutes</option>
+<option value="3600">1 hour</option>
+<option value="21600">6 hours</option>
+<option value="86400">24 hours</option>
+<option value="604800">1 week</option>
+</select>
+</div>
+<div class="field">
+<label>Mute length</label>
+<select id="quickMuteMins">
+<option value="10">10 minutes</option>
+<option value="30">30 minutes</option>
+<option value="60">1 hour</option>
+<option value="240">4 hours</option>
+<option value="1440">24 hours</option>
+</select>
+</div>
+<div class="field">
+<label>Ban length</label>
+<select id="quickBanMins">
+<option value="0">Permanent</option>
+<option value="60">1 hour</option>
+<option value="720">12 hours</option>
+<option value="1440">24 hours</option>
+<option value="10080">7 days</option>
+</select>
+</div>
+</div>
+<div class="actionGrid" style="margin-top:8px;">
+<button class="btn btnSecondary" id="quickKickBtn" type="button">Kick</button>
+<button class="btn btnSecondary" id="quickUnkickBtn" type="button">Unkick</button>
+<button class="btn btnSecondary" id="quickMuteBtn" type="button">Mute</button>
+<button class="btn btnSecondary" id="quickUnmuteBtn" type="button">Unmute</button>
+<button class="btn btnDanger" id="quickBanBtn" type="button">Ban</button>
+</div>
+<div class="msgline" id="quickModMsg"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="mediaLightbox" id="mediaLightbox">
+<button aria-label="Close media" class="iconBtn largeClose" id="mediaLightboxClose" type="button">✕</button>
+<img alt="Expanded media" id="mediaLightboxImg"/>
+<video controls="" id="mediaLightboxVideo" playsinline=""></video>
+</div>
+</div>
+<script src="/socket.io/socket.io.js"></script>
+<script defer="" src="/app.js"></script>
 <!-- STAFF: Kick/Ban Appeals Panel -->
-<div class="appealsPanel" id="appealsPanel" hidden>
-  <div class="appealsPanelHeader">
-    <div>
-      <div class="title">Appeals</div>
-      <div class="small muted">Open tickets from kicked/banned users.</div>
-    </div>
-    <button class="iconBtn" id="appealsCloseBtn" type="button" title="Close">✕</button>
-  </div>
-
-  <div class="appealsPanelBody">
-    <div class="appealsList" id="appealsList"></div>
-
-    <div class="appealsDetail" id="appealsDetail" hidden>
-      <div class="appealsDetailTop">
-        <div class="appealsDetailUser">
-          <div class="title" id="appealsDetailUser">—</div>
-          <div class="small muted" id="appealsDetailMeta">—</div>
-        </div>
-        <button class="btn secondary" id="appealsBackBtn" type="button">Back</button>
-      </div>
-
-      <div class="card">
-        <div class="small muted">Restriction reason</div>
-        <div id="appealsDetailReason" style="margin-top:6px;"></div>
-      </div>
-
-      <div class="card">
-        <div class="title">Moderation logs</div>
-        <div class="appealsModlogs" id="appealsModlogs"></div>
-      </div>
-
-      <div class="card">
-        <div class="title">Ticket</div>
-        <div class="appealThread staffThread" id="appealsThread"></div>
-        <textarea id="appealsReplyInput" rows="3" maxlength="2000" placeholder="Reply as staff..."></textarea>
-        <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:10px;">
-          <button class="btn" id="appealsReplyBtn" type="button">Send reply</button>
-          <div class="msgline" id="appealsReplyMsg"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="title">Actions</div>
-        <div class="row" style="gap:10px; flex-wrap:wrap; align-items:center;">
-          <label class="small muted">Kick duration</label>
-          <select id="appealsDurationSelect"></select>
-          <button class="btn secondary" id="appealsBanToKickBtn" type="button">Ban → Kick</button>
-          <button class="btn secondary" id="appealsUpdateKickBtn" type="button">Update kick</button>
-          <button class="btn danger" id="appealsUnlockBtn" type="button">Unban / Unlock</button>
-        </div>
-      </div>
-    </div>
-  </div>
+<div class="appealsPanel" hidden="" id="appealsPanel">
+<div class="appealsPanelHeader">
+<div>
+<div class="title">Appeals</div>
+<div class="small muted">Open tickets from kicked/banned users.</div>
 </div>
-
-
+<button class="iconBtn" id="appealsCloseBtn" title="Close" type="button">✕</button>
+</div>
+<div class="appealsPanelBody">
+<div class="appealsList" id="appealsList"></div>
+<div class="appealsDetail" hidden="" id="appealsDetail">
+<div class="appealsDetailTop">
+<div class="appealsDetailUser">
+<div class="title" id="appealsDetailUser">—</div>
+<div class="small muted" id="appealsDetailMeta">—</div>
+</div>
+<button class="btn secondary" id="appealsBackBtn" type="button">Back</button>
+</div>
+<div class="card">
+<div class="small muted">Restriction reason</div>
+<div id="appealsDetailReason" style="margin-top:6px;"></div>
+</div>
+<div class="card">
+<div class="title">Moderation logs</div>
+<div class="appealsModlogs" id="appealsModlogs"></div>
+</div>
+<div class="card">
+<div class="title">Ticket</div>
+<div class="appealThread staffThread" id="appealsThread"></div>
+<textarea id="appealsReplyInput" maxlength="2000" placeholder="Reply as staff..." rows="3"></textarea>
+<div class="row" style="gap:10px; flex-wrap:wrap; margin-top:10px;">
+<button class="btn" id="appealsReplyBtn" type="button">Send reply</button>
+<div class="msgline" id="appealsReplyMsg"></div>
+</div>
+</div>
+<div class="card">
+<div class="title">Actions</div>
+<div class="row" style="gap:10px; flex-wrap:wrap; align-items:center;">
+<label class="small muted">Kick duration</label>
+<select id="appealsDurationSelect"></select>
+<button class="btn secondary" id="appealsBanToKickBtn" type="button">Ban → Kick</button>
+<button class="btn secondary" id="appealsUpdateKickBtn" type="button">Update kick</button>
+<button class="btn danger" id="appealsUnlockBtn" type="button">Unban / Unlock</button>
+</div>
+</div>
+</div>
+</div>
+</div>
 <!-- STAFF: Referrals Panel -->
-<div class="referralsPanel" id="referralsPanel" hidden>
-  <div class="appealsPanelHeader">
-    <div>
-      <div class="title">Referrals</div>
-      <div class="small muted">Moderator requests for admin review.</div>
-    </div>
-    <div class="appealsPanelHeaderActions">
-      <button class="btn secondary small" id="referralsRefreshBtn" type="button">Refresh</button>
-      <button class="iconBtn" id="referralsCloseBtn" type="button" title="Close">✕</button>
-    </div>
-  </div>
-  <div class="appealsPanelBody">
-    <div class="appealsSplit">
-      <div class="appealsList" id="referralsList"></div>
-      <div class="appealsDetail" id="referralsDetail">
-        <div class="card">
-          <div class="title" id="referralsDetailUser">Select a referral</div>
-          <div class="small muted" id="referralsDetailMeta"></div>
-        </div>
-
-        <div class="card">
-          <div class="small muted">Reason</div>
-          <div id="referralsDetailReason" style="margin-top:6px;"></div>
-        </div>
-
-        <div class="card">
-          <div class="title">Actions</div>
-          <div class="small muted" style="margin-bottom:10px;">Resolve the referral once handled.</div>
-          <div style="display:flex; gap:10px; flex-wrap:wrap;">
-            <button class="btn secondary small" id="referralsCopyUserBtn" type="button">Copy username</button>
-            <button class="btn secondary small" id="referralsMarkDoneBtn" type="button">Mark done</button>
-          </div>
-          <div class="msgline" id="referralsActionMsg" style="margin-top:8px;"></div>
-        </div>
-      </div>
-    </div>
-  </div>
+<div class="referralsPanel" hidden="" id="referralsPanel">
+<div class="appealsPanelHeader">
+<div>
+<div class="title">Referrals</div>
+<div class="small muted">Moderator requests for admin review.</div>
 </div>
-
+<div class="appealsPanelHeaderActions">
+<button class="btn secondary small" id="referralsRefreshBtn" type="button">Refresh</button>
+<button class="iconBtn" id="referralsCloseBtn" title="Close" type="button">✕</button>
+</div>
+</div>
+<div class="appealsPanelBody">
+<div class="appealsSplit">
+<div class="appealsList" id="referralsList"></div>
+<div class="appealsDetail" id="referralsDetail">
+<div class="card">
+<div class="title" id="referralsDetailUser">Select a referral</div>
+<div class="small muted" id="referralsDetailMeta"></div>
+</div>
+<div class="card">
+<div class="small muted">Reason</div>
+<div id="referralsDetailReason" style="margin-top:6px;"></div>
+</div>
+<div class="card">
+<div class="title">Actions</div>
+<div class="small muted" style="margin-bottom:10px;">Resolve the referral once handled.</div>
+<div style="display:flex; gap:10px; flex-wrap:wrap;">
+<button class="btn secondary small" id="referralsCopyUserBtn" type="button">Copy username</button>
+<button class="btn secondary small" id="referralsMarkDoneBtn" type="button">Mark done</button>
+</div>
+<div class="msgline" id="referralsActionMsg" style="margin-top:8px;"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
 <!-- STAFF: Role Debug Panel -->
-<div class="roleDebugPanel" id="roleDebugPanel" hidden>
-  <div class="appealsPanelHeader">
-    <div>
-      <div class="title">Role debug</div>
-      <div class="small muted">Quickly set a user's role (Owner/Co-Owner/Admin/Moderator/VIP/User/Guest).</div>
-    </div>
-    <div class="appealsPanelHeaderActions">
-      <button class="iconBtn" id="roleDebugCloseBtn" type="button" title="Close">✕</button>
-    </div>
-  </div>
-  <div class="appealsPanelBody">
-    <div class="card">
-      <div class="small muted">Target user</div>
-      <input class="input" id="roleDebugTarget" placeholder="username" autocomplete="off" style="margin-top:6px;">
-      <div class="small muted" style="margin-top:10px;">Role</div>
-      <select class="select" id="roleDebugRole" style="margin-top:6px;">
-        <option value="">Choose role…</option>
-        <option>Owner</option>
-        <option>Co-owner</option>
-        <option>Admin</option>
-        <option>Moderator</option>
-        <option>VIP</option>
-        <option>User</option>
-        <option>Guest</option>
-      </select>
-      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
-        <button class="btn btnPrimary" id="roleDebugApplyBtn" type="button">Apply</button>
-        <button class="btn btnSecondary" id="roleDebugUseSelectedBtn" type="button">Use selected member</button>
-      </div>
-      <div class="msgline" id="roleDebugMsg" style="margin-top:8px;"></div>
-    </div>
-
-    <div class="card">
-      <div class="title">Tip</div>
-      <div class="small muted">This uses the same server-side permissions as normal moderation tools, so only authorized roles can make changes.</div>
-    </div>
-  </div>
+<div class="roleDebugPanel" hidden="" id="roleDebugPanel">
+<div class="appealsPanelHeader">
+<div>
+<div class="title">Role debug</div>
+<div class="small muted">Quickly set a user's role (Owner/Co-Owner/Admin/Moderator/VIP/User/Guest).</div>
 </div>
-
+<div class="appealsPanelHeaderActions">
+<button class="iconBtn" id="roleDebugCloseBtn" title="Close" type="button">✕</button>
+</div>
+</div>
+<div class="appealsPanelBody">
+<div class="card">
+<div class="small muted">Target user</div>
+<input autocomplete="off" class="input" id="roleDebugTarget" placeholder="username" style="margin-top:6px;"/>
+<div class="small muted" style="margin-top:10px;">Role</div>
+<select class="select" id="roleDebugRole" style="margin-top:6px;">
+<option value="">Choose role…</option>
+<option>Owner</option>
+<option>Co-owner</option>
+<option>Admin</option>
+<option>Moderator</option>
+<option>VIP</option>
+<option>User</option>
+<option>Guest</option>
+</select>
+<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+<button class="btn btnPrimary" id="roleDebugApplyBtn" type="button">Apply</button>
+<button class="btn btnSecondary" id="roleDebugUseSelectedBtn" type="button">Use selected member</button>
+</div>
+<div class="msgline" id="roleDebugMsg" style="margin-top:8px;"></div>
+</div>
+<div class="card">
+<div class="title">Tip</div>
+<div class="small muted">This uses the same server-side permissions as normal moderation tools, so only authorized roles can make changes.</div>
+</div>
+</div>
+</div>
 </body>
-  </html>
+</html>
