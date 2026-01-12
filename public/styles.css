@@ -37,6 +37,12 @@
   --shadowSm: 0 4px 12px rgba(0, 0, 0, 0.22);
   --shadowMd: 0 10px 30px rgba(0, 0, 0, 0.35);
   --shadowLg: 0 18px 60px rgba(0, 0, 0, 0.45);
+  --aura-online: 0 220 130;
+  --aura-typing: 105 157 255;
+  --aura-idle: 255 204 102;
+  --aura-dnd: 255 92 92;
+  --aura-strength: 0.28;
+  --aura-strength-vip: 0.45;
 
   /* legacy aliases so existing rules consume theme tokens */
   --soft: rgba(0, 0, 0, 0.13);
@@ -2503,6 +2509,14 @@ body.dice-room .sys .diceFace{
 .msg.self{ align-self:flex-end; flex-direction:row-reverse; }
 .msgAvatar{ width:38px; height:38px; border-radius:50%; background:var(--avatar-bg); overflow:hidden; flex:0 0 auto; border:1px solid var(--border); }
 .msgAvatar img{ width:100%; height:100%; object-fit:cover; display:block; }
+.msgItem,
+.dmRow,
+.dmThreadRow,
+.dmItem,
+.profileSheetHero{
+  --userGlow: transparent;
+  --userGlowRgb: 88 101 242;
+}
 .bubble{
   --fx-base: var(--fx-bubble-bg, var(--messageOtherBg));
   color:var(--fx-text, var(--messageOtherText));
@@ -2530,6 +2544,31 @@ body.dice-room .sys .diceFace{
     0 0 calc(var(--fx-glow, 0) * 6px) color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent),
     0 0 calc(var(--fx-glow, 0) * 14px) color-mix(in srgb, var(--fx-accent, var(--accent)) 28%, transparent);
 }
+.bubble,
+.dmBubble{
+  position:relative;
+}
+.bubble::after,
+.dmBubble::after{
+  content:"";
+  position:absolute;
+  inset:-1px;
+  border-radius:inherit;
+  pointer-events:none;
+  opacity:0.6;
+  box-shadow:
+    0 0 0 1px rgba(var(--userGlowRgb, 88 101 242) / 0.22),
+    0 0 12px rgba(var(--userGlowRgb, 88 101 242) / 0.12);
+  transition: opacity 180ms ease, box-shadow 180ms ease;
+}
+@supports (color: color-mix(in srgb, #000, #fff)){
+  .bubble::after,
+  .dmBubble::after{
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--userGlow) 28%, transparent),
+      0 0 12px color-mix(in srgb, var(--userGlow) 20%, transparent);
+  }
+}
 .self .bubble{
   --fx-base: var(--fx-bubble-bg, var(--messageSelfBg));
   color:var(--fx-text, var(--messageSelfText));
@@ -2540,6 +2579,34 @@ body.dice-room .sys .diceFace{
 .bubble,
 .dmBubble{
   transition: filter 180ms ease, box-shadow 180ms ease;
+}
+.msgEnter{
+  --msg-enter-anim: msgEnterBase;
+  --msg-vip-anim: none;
+  animation: var(--msg-enter-anim) 280ms ease-out both, var(--msg-vip-anim) 520ms ease-out both;
+}
+.msgEnter--long{ --msg-enter-anim: msgEnterLong; }
+.msgEnter--media{ --msg-enter-anim: msgEnterMedia; }
+.msgEnter--vip{ --msg-vip-anim: msgEnterVip; }
+@keyframes msgEnterBase{
+  0%{ opacity:0; transform: translateY(10px); }
+  100%{ opacity:1; transform: translateY(0); }
+}
+@keyframes msgEnterLong{
+  0%{ opacity:0; transform: translateY(12px) scaleY(0.98); }
+  100%{ opacity:1; transform: translateY(0) scaleY(1); }
+}
+@keyframes msgEnterMedia{
+  0%{ opacity:0; transform: translateY(8px) scale(0.96); }
+  100%{ opacity:1; transform: translateY(0) scale(1); }
+}
+@keyframes msgEnterVip{
+  0%{ box-shadow: 0 0 0 rgba(var(--userGlowRgb, 88 101 242) / 0); }
+  40%{ box-shadow: 0 0 18px rgba(var(--userGlowRgb, 88 101 242) / 0.45); }
+  100%{ box-shadow: 0 0 0 rgba(var(--userGlowRgb, 88 101 242) / 0); }
+}
+@media (prefers-reduced-motion: reduce){
+  .msgEnter{ animation:none; }
 }
 .msgItem:hover .bubble,
 .dmRow:hover .dmBubble,
@@ -3703,6 +3770,37 @@ body.lockScroll{ overflow:hidden; }
 .dmItem:hover{ background:var(--panel); }
 .dmItem.active{ background:var(--bubble); }
 .dmItem:last-child{ border-bottom:0; }
+.dmItem,
+.dmThreadRow{
+  position:relative;
+}
+.dmItem::after,
+.dmThreadRow::after{
+  content:"";
+  position:absolute;
+  inset:2px;
+  border-radius:12px;
+  pointer-events:none;
+  opacity:0;
+  transition: opacity 160ms ease, box-shadow 160ms ease;
+  box-shadow:
+    0 0 0 1px rgba(var(--userGlowRgb, 88 101 242) / 0.2),
+    0 0 14px rgba(var(--userGlowRgb, 88 101 242) / 0.12);
+}
+@supports (color: color-mix(in srgb, #000, #fff)){
+  .dmItem::after,
+  .dmThreadRow::after{
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--userGlow) 26%, transparent),
+      0 0 14px color-mix(in srgb, var(--userGlow) 18%, transparent);
+  }
+}
+.dmItem:hover::after,
+.dmItem.active::after,
+.dmThreadBtn:hover .dmThreadRow::after,
+.dmThreadBtn.active .dmThreadRow::after{
+  opacity:1;
+}
 .dmItem .name{ font-weight:900; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .dmItem .small{ color:var(--muted); font-size:11px; }
 .dmItem .preview{ display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -5485,28 +5583,34 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 body.polish-pack .presenceAura{
   position:relative;
   isolation:isolate;
+  --aura-color: var(--aura-online);
+  --aura-glow: var(--aura-strength);
 }
 body.polish-pack.polish-auras .presenceAura::after{
   content:"";
   position:absolute;
   inset:2px;
   border-radius:inherit;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
   pointer-events:none;
-  transition: box-shadow 180ms ease, opacity 180ms ease;
+  opacity:0.9;
+  transition: box-shadow 180ms ease, opacity 180ms ease, filter 180ms ease;
+  box-shadow:
+    0 0 0 2px rgb(var(--aura-color) / calc(var(--aura-glow) + 0.08)),
+    0 0 10px rgb(var(--aura-color) / var(--aura-glow));
+  animation: var(--aura-anim, none);
 }
 body.polish-pack.polish-auras .presenceAura.isOnline::after{
-  box-shadow: 0 0 0 2px rgba(0, 220, 130, 0.28), 0 0 8px rgba(0, 220, 130, 0.18);
-  animation: auraPulse 7s ease-in-out infinite;
+  --aura-color: var(--aura-online);
+  --aura-anim: auraPulse 7s ease-in-out infinite;
 }
 body.polish-pack.polish-auras .presenceAura.isIdle::after{
-  box-shadow: 0 0 0 2px rgba(255, 200, 80, 0.22), 0 0 6px rgba(255, 200, 80, 0.14);
+  --aura-color: var(--aura-idle);
+  --aura-anim: auraPulse 7.5s ease-in-out infinite;
   opacity:0.75;
-  animation: auraPulse 7.5s ease-in-out infinite;
 }
 body.polish-pack.polish-auras .presenceAura.isActiveDm::after{
-  box-shadow: 0 0 0 2px rgba(120, 180, 255, 0.3), 0 0 7px rgba(120, 180, 255, 0.18);
-  animation: auraPulse 7s ease-in-out infinite;
+  --aura-color: var(--aura-typing);
+  --aura-anim: auraPulse 7s ease-in-out infinite;
 }
 @keyframes auraPulse{
   0%{ opacity:0.55; }
@@ -5514,13 +5618,31 @@ body.polish-pack.polish-auras .presenceAura.isActiveDm::after{
   100%{ opacity:0.55; }
 }
 body.polish-pack.polish-auras .presenceAura.isTyping::after{
-  animation: auraPulse 3.6s ease-in-out infinite;
+  --aura-color: var(--aura-typing);
+  --aura-anim: auraPulse 3.6s ease-in-out infinite;
+}
+body.polish-pack.polish-auras .presenceAura.isDnd::after{
+  --aura-color: var(--aura-dnd);
+  --aura-anim: auraPulse 6.2s ease-in-out infinite;
+}
+body.polish-pack.polish-auras .presenceAura.isVip{
+  --aura-glow: var(--aura-strength-vip);
+}
+body.polish-pack.polish-auras .presenceAura.isVip::after{
+  animation: var(--aura-anim, none), auraVipShimmer 12s ease-in-out infinite;
+}
+@keyframes auraVipShimmer{
+  0%{ filter: saturate(1); opacity:0.85; }
+  50%{ filter: saturate(1.25); opacity:1; }
+  100%{ filter: saturate(1); opacity:0.85; }
 }
 @media (prefers-reduced-motion: reduce){
   body.polish-pack.polish-auras .presenceAura.isTyping::after,
   body.polish-pack.polish-auras .presenceAura.isOnline::after,
   body.polish-pack.polish-auras .presenceAura.isIdle::after,
-  body.polish-pack.polish-auras .presenceAura.isActiveDm::after{
+  body.polish-pack.polish-auras .presenceAura.isActiveDm::after,
+  body.polish-pack.polish-auras .presenceAura.isDnd::after,
+  body.polish-pack.polish-auras .presenceAura.isVip::after{
     animation:none;
   }
 }
@@ -5542,6 +5664,24 @@ body.polish-pack.polish-auras .presenceAura.isTyping::after{
   --profileHeaderText: #fff;
   --profileHeaderPillBg: rgba(0,0,0,.32);
   --profileHeaderPillBorder: rgba(255,255,255,.18);
+}
+.profileSheetHero::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:inherit;
+  pointer-events:none;
+  opacity:0.65;
+  box-shadow:
+    0 0 0 1px rgba(var(--userGlowRgb, 88 101 242) / 0.2),
+    0 0 24px rgba(var(--userGlowRgb, 88 101 242) / 0.16);
+}
+@supports (color: color-mix(in srgb, #000, #fff)){
+  .profileSheetHero::after{
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--userGlow) 24%, transparent),
+      0 0 24px color-mix(in srgb, var(--userGlow) 18%, transparent);
+  }
 }
 .profileSheetBg{
   position: absolute;
