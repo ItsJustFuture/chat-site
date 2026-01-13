@@ -6405,7 +6405,12 @@ app.delete("/profile/avatar", requireLogin, async (req, res) => {
       req.session.user.avatar = null;
       clearAvatarInLivePresence();
       tryDeleteLocalAvatarFile(oldAvatar);
-      return res.jso// ---- Uploads (25MB images/gifs, 100MB videos). VIP can upload videos, everyone can upload images.
+      return res.json({ ok: true });
+    });
+  });
+});
+
+// ---- Uploads (25MB images/gifs, 100MB videos). VIP can upload videos, everyone can upload images.
 const MAX_IMAGE_GIF_BYTES = 25 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
@@ -6477,10 +6482,6 @@ app.post("/upload", requireLogin, (req, res) => {
   });
 });
 
-mage" : "video",
-    });
-  });
-});
 
 // ---- Mod logs API (Moderator+)
 app.get("/mod/logs", requireLogin, (req, res) => {
