@@ -34,6 +34,40 @@ const PRIVATE_THEME_ALLOWLIST = {
 const ONLINE_USERS = new Set();
 
 
+// --- Owner session map (in-memory)
+const sessionMetaBySocketId = new Map(); // socket.id -> meta
+const sessionByUserId = new Map(); // userId -> Set(socket.id)
+
+// --- Behaviour heat score (in-memory; admin/owner only)
+const heatByUserId = new Map(); // userId -> number
+const lastRoomHopByUserId = new Map(); // userId -> {room, ts}
+const lastMentionByUserId = new Map(); // userId -> ts
+const lastReactionByUserId = new Map(); // userId -> ts
+
+// --- Room events (in-memory, roomName -> {type,title,endsAt,startedBy})
+const ACTIVE_ROOM_EVENTS = new Map();
+
+
+
+function bumpHeat(userId, delta = 1) {
+  const d = Math.max(0, Number(delta) || 0);
+  if (!userId || !d) return;
+  const prev = heatByUserId.get(userId) || 0;
+  const next = Math.min(100, prev + d);
+  heatByUserId.set(userId, next);
+}
+
+function decayHeat() {
+  for (const [uid, val] of heatByUserId.entries()) {
+    const next = Math.max(0, Math.floor(val * 0.92)); // gentle decay
+    if (next <= 0) heatByUserId.delete(uid);
+    else heatByUserId.set(uid, next);
+  }
+}
+setInterval(decayHeat, 60_000).unref?.();
+
+
+
 
 const path = require("path");
 const fs = require("fs");
@@ -280,6 +314,22 @@ const pgInitPromise = (async () => {
       CREATE INDEX IF NOT EXISTS idx_gold_transactions_user ON gold_transactions(user_id);
       CREATE INDEX IF NOT EXISTS idx_gold_transactions_created ON gold_transactions(created_at DESC);
     `);
+
+    // Daily micro-challenges progress (per-user, per-day)
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS daily_challenge_progress (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        day_key TEXT NOT NULL,
+        progress_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        claimed_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (user_id, day_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_daily_challenge_progress_user ON daily_challenge_progress(user_id);
+      CREATE INDEX IF NOT EXISTS idx_daily_challenge_progress_day ON daily_challenge_progress(day_key);
+    `);
+
+
 
     // Best-effort backfill of legacy SQLite likes into Postgres so leaderboards/profile counts stay consistent.
     try {
@@ -1623,6 +1673,19 @@ db.get(`SELECT value FROM config WHERE key='maintenance'`, [], (_e, row) => {
   maintenanceState.enabled = row?.value === "on";
 });
 
+db.get(`SELECT value FROM config WHERE key='active_room_events'`, [], (_e, row) => {
+  try {
+    const obj = safeJsonParse(row?.value || "{}", {});
+    for (const [room, ev] of Object.entries(obj || {})) {
+      if (!ev || typeof ev !== "object") continue;
+      if (ev.endsAt && Number(ev.endsAt) < Date.now()) continue;
+      ACTIVE_ROOM_EVENTS.set(room, ev);
+    }
+  } catch {}
+});
+
+
+
 function dbGetAsync(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.get(sql, params, (err, row) => {
@@ -1649,6 +1712,47 @@ function dbRunAsync(sql, params = []) {
     });
   });
 }
+
+async function getConfigValue(key, fallback = null) {
+  try {
+    const row = await dbGetAsync("SELECT value FROM config WHERE key = ?", [key]);
+    return row?.value ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function setConfigValue(key, value) {
+  const v = value == null ? "" : String(value);
+  await dbRunAsync(
+    "INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    [key, v]
+  );
+  return v;
+}
+
+function safeJsonParse(str, fallback) {
+  try {
+    return JSON.parse(str);
+  } catch {
+    return fallback;
+  }
+}
+
+async function getConfigJson(key, fallback = {}) {
+  const raw = await getConfigValue(key, null);
+  if (raw == null) return fallback;
+  const parsed = safeJsonParse(raw, null);
+  return parsed && typeof parsed === "object" ? parsed : fallback;
+}
+
+async function setConfigJson(key, obj) {
+  const raw = JSON.stringify(obj ?? {});
+  await setConfigValue(key, raw);
+  return obj;
+}
+
+
 
 // Serialize XP updates per user to prevent race conditions between concurrent XP events.
 async function withXpLock(userId, fn) {
@@ -2020,7 +2124,7 @@ const commandRegistry = {
     description: "Create room",
     usage: "/createroom room-name",
     example: "/createroom chill",
-    handler: async ({ args, actor }) => {
+    handler: async ({ args, room, actor }) => {
       const name = sanitizeRoomName(args[0] || "");
       if (!name) return { ok: false, message: "Invalid room" };
       await dbRunAsync(`INSERT OR IGNORE INTO rooms (name, created_by, created_at) VALUES (?, ?, ?)`, [name, actor.id, Date.now()]);
@@ -2207,6 +2311,42 @@ const commandRegistry = {
       return { ok: true, message: `Maintenance ${val}` };
     },
   },
+  event: {
+    minRole: "Moderator",
+    description: "Start/stop a room event banner (mods+)",
+    usage: "/event start <type> <minutes> <title...> | /event stop",
+    example: "/event start trivia 10 Quick Trivia",
+    handler: async ({ args, actor }) => {
+      const sub = String(args[0] || "").toLowerCase();
+      if (!room) return { ok: false, message: "Join a room first." };
+
+      if (sub === "stop") {
+        ACTIVE_ROOM_EVENTS.delete(room);
+        await setConfigJson("active_room_events", Object.fromEntries(ACTIVE_ROOM_EVENTS.entries()));
+        io.to(room).emit("room:event", { room, active: null, at: Date.now() });
+        return { ok: true, message: "Room event cleared." };
+      }
+
+      if (sub !== "start") return { ok: false, message: "Use /event start ... or /event stop" };
+
+      const type = String(args[1] || "event").slice(0, 24);
+      const mins = Math.max(1, Math.min(120, Math.floor(Number(args[2]) || 10)));
+      const title = String(args.slice(3).join(" ") || "").slice(0, 80) || "Room Event";
+      const ev = {
+        type,
+        title,
+        startedBy: actor?.username || "",
+        startedAt: Date.now(),
+        endsAt: Date.now() + mins * 60_000,
+      };
+      ACTIVE_ROOM_EVENTS.set(room, ev);
+      await setConfigJson("active_room_events", Object.fromEntries(ACTIVE_ROOM_EVENTS.entries()));
+      io.to(room).emit("room:event", { room, active: ev, at: Date.now() });
+      return { ok: true, message: `Event started for ${mins} min.` };
+    },
+  },
+
+
   wipeuser: {
     minRole: "Owner",
     description: "Delete a user",
@@ -4159,6 +4299,255 @@ app.get("/api/restriction", async (req, res) => {
     res.json({ type: r.type || "none", reason: r.reason || "", expiresAt: r.expiresAt || null, now: Date.now() });
   } catch (e) {
     res.json({ type: "none" });
+  }
+});
+
+
+
+//
+// Owner-only: live feature flags
+//
+app.get("/api/owner/flags", requireOwner, async (_req, res) => {
+  try {
+    const flags = await getConfigJson("feature_flags", {});
+    res.json({ ok: true, flags });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: "failed_to_load_flags" });
+  }
+});
+
+app.post("/api/owner/flags", requireOwner, express.json({ limit: "64kb" }), async (req, res) => {
+  try {
+    const incoming = req.body?.flags;
+    if (!incoming || typeof incoming !== "object") return res.status(400).json({ ok: false, error: "bad_flags" });
+    // sanitize: flat object of booleans/numbers/strings
+    const next = {};
+    for (const [k, v] of Object.entries(incoming)) {
+      if (!k || typeof k !== "string") continue;
+      if (typeof v === "boolean" || typeof v === "number" || typeof v === "string") next[k] = v;
+    }
+    await setConfigJson("feature_flags", next);
+    try { io.emit("featureFlags:update", next); } catch {}
+    res.json({ ok: true, flags: next });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: "failed_to_save_flags" });
+  }
+});
+
+//
+// Owner-only: session map
+//
+app.get("/api/owner/sessions", requireOwner, async (_req, res) => {
+  try {
+    const out = [];
+    for (const [sid, meta] of sessionMetaBySocketId.entries()) {
+      if (!meta) continue;
+      out.push({ socketId: sid, ...meta });
+    }
+    // Sort: newest first
+    out.sort((a, b) => (b.connectedAt || 0) - (a.connectedAt || 0));
+    res.json({ ok: true, sessions: out, now: Date.now() });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: "failed_to_load_sessions" });
+  }
+});
+
+//
+// Admin/Owner: heat score snapshot (invisible to users)
+//
+app.get("/api/mod/heat", requireLogin, async (req, res) => {
+  try {
+    if (!requireMinRole(req.session.user.role, "Admin")) return res.status(403).send("Forbidden");
+    const rows = [];
+    for (const [uid, heat] of heatByUserId.entries()) {
+      rows.push({ userId: uid, heat });
+    }
+    rows.sort((a, b) => b.heat - a.heat);
+    res.json({ ok: true, rows, now: Date.now() });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: "failed_to_load_heat" });
+  }
+});
+
+//
+// Daily micro-challenges
+//
+function dayKeyNow() {
+  // UTC day key to keep consistent across timezones
+  const d = new Date();
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const da = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${da}`;
+}
+
+const DAILY_CHALLENGE_POOL = [
+  { id: "room_msgs_5", label: "Send 5 room messages", type: "room_messages", goal: 5, rewardXp: 30, rewardGold: 25 },
+  { id: "react_3", label: "React 3 times", type: "reactions", goal: 3, rewardXp: 25, rewardGold: 20 },
+  { id: "rooms_2", label: "Visit 2 different rooms", type: "unique_rooms", goal: 2, rewardXp: 25, rewardGold: 15 },
+];
+
+function pickDailyChallenges() {
+  // deterministic order for now (stable + simple)
+  return DAILY_CHALLENGE_POOL.slice(0, 3);
+}
+
+async function loadDailyProgress(userId, dayKey) {
+  const now = Date.now();
+  // prefer PG if user exists there
+  if (await pgUserExists(userId)) {
+    const { rows } = await pgPool.query(
+      "SELECT progress_json, claimed_json FROM daily_challenge_progress WHERE user_id=$1 AND day_key=$2",
+      [userId, dayKey]
+    );
+    if (rows?.length) return { progress: rows[0].progress_json || {}, claimed: rows[0].claimed_json || {}, updatedAt: now, pg: true };
+    return { progress: {}, claimed: {}, updatedAt: now, pg: true };
+  }
+  const row = await dbGetAsync(
+    "SELECT progress_json, claimed_json FROM daily_challenge_progress WHERE user_id=? AND day_key=?",
+    [userId, dayKey]
+  );
+  return {
+    progress: safeJsonParse(row?.progress_json || "{}", {}),
+    claimed: safeJsonParse(row?.claimed_json || "{}", {}),
+    updatedAt: now,
+    pg: false,
+  };
+}
+
+async function saveDailyProgress(userId, dayKey, progress, claimed, pg) {
+  const now = Date.now();
+  if (pg) {
+    await pgPool.query(
+      `INSERT INTO daily_challenge_progress (user_id, day_key, progress_json, claimed_json, updated_at)
+       VALUES ($1,$2,$3::jsonb,$4::jsonb,$5)
+       ON CONFLICT (user_id, day_key)
+       DO UPDATE SET progress_json=EXCLUDED.progress_json, claimed_json=EXCLUDED.claimed_json, updated_at=EXCLUDED.updated_at`,
+      [userId, dayKey, JSON.stringify(progress || {}), JSON.stringify(claimed || {}), now]
+    );
+    return;
+  }
+  await dbRunAsync(
+    `INSERT INTO daily_challenge_progress (user_id, day_key, progress_json, claimed_json, updated_at)
+     VALUES (?,?,?,?,?)
+     ON CONFLICT(user_id, day_key) DO UPDATE SET progress_json=excluded.progress_json, claimed_json=excluded.claimed_json, updated_at=excluded.updated_at`,
+    [userId, dayKey, JSON.stringify(progress || {}), JSON.stringify(claimed || {}), now]
+  );
+}
+
+
+
+async function bumpDailyProgress(userId, dayKey, challengeId, delta, pgHint = null) {
+  const d = Math.max(0, Math.floor(Number(delta) || 0));
+  if (!userId || !challengeId || !d) return;
+  try {
+    const prog = await loadDailyProgress(userId, dayKey);
+    const progress = prog.progress || {};
+    const claimed = prog.claimed || {};
+    progress[challengeId] = Math.max(0, Math.floor(Number(progress[challengeId] || 0) + d));
+    await saveDailyProgress(userId, dayKey, progress, claimed, prog.pg);
+  } catch {}
+}
+
+async function bumpDailyUniqueRoom(userId, dayKey, roomName, pgHint = null) {
+  if (!userId || !roomName) return;
+  const key = "__rooms";
+  try {
+    const prog = await loadDailyProgress(userId, dayKey);
+    const progress = prog.progress || {};
+    const claimed = prog.claimed || {};
+    const arr = Array.isArray(progress[key]) ? progress[key] : [];
+    if (!arr.includes(roomName)) arr.push(roomName);
+    progress[key] = arr.slice(0, 25);
+    // mirror into rooms_2 challenge progress as count
+    progress["rooms_2"] = arr.length;
+    await saveDailyProgress(userId, dayKey, progress, claimed, prog.pg);
+  } catch {}
+}
+
+async function creditGold(userId, amount, reason = "reward") {
+  const amt = Math.max(0, Math.floor(Number(amount) || 0));
+  if (!amt) return null;
+
+  if (await pgUserExists(userId)) {
+    const client = await pgPool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query("SELECT gold FROM users WHERE id=$1 FOR UPDATE", [userId]);
+      const current = Number(rows?.[0]?.gold || 0);
+      const next = current + amt;
+      await client.query("UPDATE users SET gold=$1 WHERE id=$2", [next, userId]);
+      await client.query(
+        "INSERT INTO gold_transactions (user_id, amount, reason, created_at) VALUES ($1,$2,$3,$4)",
+        [userId, amt, String(reason || "reward"), Date.now()]
+      );
+      await client.query("COMMIT");
+      try { emitProgressionUpdate(userId); } catch {}
+      return { ok: true, gold: next };
+    } catch (e) {
+      try { await client.query("ROLLBACK"); } catch {}
+      return null;
+    } finally {
+      client.release();
+    }
+  }
+
+  await dbRunAsync("UPDATE users SET gold = gold + ? WHERE id = ?", [amt, userId]);
+  try { emitProgressionUpdate(userId); } catch {}
+  return { ok: true };
+}
+
+app.get("/api/challenges/today", requireLogin, async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const dk = dayKeyNow();
+    const picked = pickDailyChallenges();
+    const prog = await loadDailyProgress(userId, dk);
+    const progress = prog.progress || {};
+    const claimed = prog.claimed || {};
+    const challenges = picked.map((c) => {
+      const p = Number(progress[c.id] || 0);
+      const done = p >= c.goal;
+      return {
+        ...c,
+        progress: p,
+        done,
+        claimed: !!claimed[c.id],
+      };
+    });
+    res.json({ ok: true, dayKey: dk, challenges });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: "failed_to_load_challenges" });
+  }
+});
+
+app.post("/api/challenges/claim", requireLogin, express.json({ limit: "32kb" }), async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const dk = dayKeyNow();
+    const id = String(req.body?.id || "");
+    const picked = pickDailyChallenges();
+    const challenge = picked.find((c) => c.id === id);
+    if (!challenge) return res.status(400).json({ ok: false, error: "unknown_challenge" });
+
+    const prog = await loadDailyProgress(userId, dk);
+    const progress = prog.progress || {};
+    const claimed = prog.claimed || {};
+    if (claimed[id]) return res.json({ ok: true, already: true });
+
+    const p = Number(progress[id] || 0);
+    if (p < challenge.goal) return res.status(400).json({ ok: false, error: "not_complete" });
+
+    claimed[id] = true;
+    await saveDailyProgress(userId, dk, progress, claimed, prog.pg);
+
+    // reward
+    try { await applyXpGain(userId, challenge.rewardXp || 0, { reason: "daily_challenge" }); } catch {}
+    try { await creditGold(userId, challenge.rewardGold || 0, `daily_challenge:${id}`); } catch {}
+
+    res.json({ ok: true, claimed: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: "failed_to_claim" });
   }
 });
 
@@ -6873,6 +7262,72 @@ function emitOnlineUsers() {
   } catch {}
 }
 
+
+function roleRank(role) {
+  // Keep consistent with requireMinRole ordering
+  const order = ["Guest", "User", "VIP", "Moderator", "Admin", "Co-owner", "Owner"];
+  const idx = order.indexOf(String(role || "User"));
+  return idx === -1 ? 1 : idx;
+}
+
+function parseSmartMentionKinds(text) {
+  const t = String(text || "").toLowerCase();
+  const kinds = new Set();
+  if (t.includes("@here")) kinds.add("here");
+  if (t.includes("@mods")) kinds.add("mods");
+  if (t.includes("@admins")) kinds.add("admins");
+  if (t.includes("@staff")) kinds.add("staff");
+  if (t.includes("@owner")) kinds.add("owner");
+  return Array.from(kinds);
+}
+
+function emitSmartMentionPings({ room, fromUser, messageId, text }) {
+  const kinds = parseSmartMentionKinds(text);
+  if (!kinds.length) return;
+
+  const now = Date.now();
+  const uid = fromUser?.id;
+  const last = lastMentionByUserId.get(uid) || 0;
+  if (now - last < 5000) {
+    bumpHeat(uid, 1); // spammy mentions
+    return; // cooldown
+  }
+  lastMentionByUserId.set(uid, now);
+
+  // @here only pings users currently in the same room
+  const sockets = Array.from(io.sockets.sockets.values());
+  for (const s of sockets) {
+    try {
+      if (!s?.user?.id) continue;
+      if (s.id === fromUser?.socketId) continue;
+      const inRoom = room && s.rooms?.has(room);
+      if (!inRoom) continue;
+
+      const r = String(s.user.role || "User");
+      const rr = roleRank(r);
+
+      for (const kind of kinds) {
+        let ok = false;
+        if (kind === "here") ok = true;
+        else if (kind === "mods") ok = rr >= roleRank("Moderator");
+        else if (kind === "admins") ok = rr >= roleRank("Admin");
+        else if (kind === "staff") ok = rr >= roleRank("Moderator");
+        else if (kind === "owner") ok = rr >= roleRank("Owner");
+        if (!ok) continue;
+
+        s.emit("mention:ping", {
+          kind,
+          room,
+          messageId: messageId || null,
+          from: { id: fromUser?.id, username: fromUser?.username || "" },
+          at: now,
+        });
+      }
+    } catch {}
+  }
+}
+
+
 function updateLiveUsername(userId, newUsername) {
   const sid = socketIdByUserId.get(userId);
   const s = sid ? io.sockets.sockets.get(sid) : null;
@@ -7042,6 +7497,51 @@ io.on("connection", async (socket) => {
     vibe_tags: Array.isArray(sessUser.vibe_tags) ? sessUser.vibe_tags : [],
     chatFx: sanitizeChatFx(sessUser.chatFx),
   };
+
+  // --- Owner session map: register basic meta
+  try {
+    const uid = socket.user?.id;
+    const set = sessionByUserId.get(uid) || new Set();
+    set.add(socket.id);
+    sessionByUserId.set(uid, set);
+
+    sessionMetaBySocketId.set(socket.id, {
+      userId: uid,
+      username: socket.user?.username || "",
+      role: socket.user?.role || "",
+      room: null,
+      connectedAt: Date.now(),
+      userAgent: String(socket.request?.headers?.["user-agent"] || ""),
+      tz: null,
+      locale: null,
+      platform: null,
+    });
+  } catch {}
+
+  socket.on("client:hello", (info = {}) => {
+    try {
+      const meta = sessionMetaBySocketId.get(socket.id) || {};
+      meta.tz = info.tz ? String(info.tz).slice(0, 64) : meta.tz;
+      meta.locale = info.locale ? String(info.locale).slice(0, 32) : meta.locale;
+      meta.platform = info.platform ? String(info.platform).slice(0, 64) : meta.platform;
+      meta.lastSeenAt = Date.now();
+      sessionMetaBySocketId.set(socket.id, meta);
+    } catch {}
+  });
+
+  socket.on("disconnect", () => {
+    try {
+      sessionMetaBySocketId.delete(socket.id);
+      const uid = socket.user?.id;
+      const set = sessionByUserId.get(uid);
+      if (set) {
+        set.delete(socket.id);
+        if (!set.size) sessionByUserId.delete(uid);
+      }
+    } catch {}
+  });
+
+
 
 
 
@@ -7307,6 +7807,31 @@ function doJoin(room, status) {
 
   socket.currentRoom = room;
   socket.join(room);
+
+  // session map + heat + daily unique rooms
+  try {
+    const meta = sessionMetaBySocketId.get(socket.id) || {};
+    meta.room = room;
+    meta.lastSeenAt = Date.now();
+    sessionMetaBySocketId.set(socket.id, meta);
+  } catch {}
+
+  try {
+    const uid = socket.user?.id;
+    const prev = lastRoomHopByUserId.get(uid);
+    const now = Date.now();
+    if (prev && prev.room && prev.room !== room && now - (prev.ts || 0) < 15_000) bumpHeat(uid, 2);
+    lastRoomHopByUserId.set(uid, { room, ts: now });
+    // daily challenge: unique rooms
+    bumpDailyUniqueRoom(uid, dayKeyNow(), String(room));
+  } catch {}
+
+
+  // send active room event (if any) to joining socket
+  try {
+    const ev = ACTIVE_ROOM_EVENTS.get(room);
+    if (ev) socket.emit("room:event", { room, active: ev, at: Date.now() });
+  } catch {}
 
   socket.user.status = normalizeStatus(status || socket.user.status, "Online");
 
@@ -7826,6 +8351,16 @@ socket.on("status change", ({ status }) => {
                     replyToText: replyText || "",
                     chatFx: sanitizeChatFx(socket.user.chatFx),
                   };
+                  // Daily challenges + smart mentions
+                  try { bumpDailyProgress(socket.user.id, dayKeyNow(), "room_msgs_5", 1); } catch {}
+                  try {
+                    emitSmartMentionPings({
+                      room,
+                      fromUser: { id: socket.user.id, username: socket.user.username, socketId: socket.id },
+                      messageId: msg.id || msg.messageId || null,
+                      text: msg.text || "",
+                    });
+                  } catch {}
                   io.to(room).emit("chat message", msg);
                 }
               );
@@ -7889,6 +8424,17 @@ socket.on("status change", ({ status }) => {
     const mid = String(messageId || "").trim();
     const em = String(emoji || "").slice(0, 8);
     if (!mid || !em) return;
+
+    try {
+      const uid = socket.user?.id;
+      const now = Date.now();
+      const last = lastReactionByUserId.get(uid) || 0;
+      if (now - last < 800) bumpHeat(uid, 1);
+      if (now - last >= 800) {
+        bumpDailyProgress(uid, dayKeyNow(), "react_3", 1);
+        lastReactionByUserId.set(uid, now);
+      }
+    } catch {}
 
     db.run(
       `INSERT INTO reactions (message_id, username, emoji)

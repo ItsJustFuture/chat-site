@@ -234,6 +234,18 @@ await run(`
   )
 `);
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS daily_challenge_progress (
+      user_id INTEGER NOT NULL,
+      day_key TEXT NOT NULL,
+      progress_json TEXT NOT NULL DEFAULT '{}',
+      claimed_json TEXT NOT NULL DEFAULT '{}',
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, day_key)
+    )
+  `);
+
+
 await run(`
   CREATE TABLE IF NOT EXISTS appeals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

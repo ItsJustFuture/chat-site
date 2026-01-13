@@ -1,3 +1,5 @@
+
+dailyReloadBtn?.addEventListener("click", ensureDailyLoaded);
 "use strict";
 
 // Debug hook: enable tap hit-testing logs by setting `window.__TAP_DEBUG__ = true` in the console.
@@ -750,6 +752,7 @@ let currentProfileIsSelf = false;
 let profileLikeState = { count: 0, liked: false, isSelf: false };
 let modalFriendInfo = null;
 let currentRoom = "main";
+let featureFlags = {};
 function displayRoomName(room){ return room==="diceroom" ? "Dice Room" : room; }
 
 let lastUsers = [];
@@ -2112,6 +2115,8 @@ const appealStatusText = document.getElementById("appealStatusText");
 const appealsPanelBtn = document.getElementById("appealsPanelBtn");
 const referralsPanelBtn = document.getElementById("referralsPanelBtn");
 const roleDebugPanelBtn = document.getElementById("roleDebugPanelBtn");
+const featureFlagsPanelBtn = document.getElementById("featureFlagsPanelBtn");
+const sessionsPanelBtn = document.getElementById("sessionsPanelBtn");
 const appealsPanel = document.getElementById("appealsPanel");
 const referralsPanel = document.getElementById("referralsPanel");
 const roleDebugPanel = document.getElementById("roleDebugPanel");
@@ -2128,6 +2133,16 @@ const referralsMarkDoneBtn = document.getElementById("referralsMarkDoneBtn");
 const referralsActionMsg = document.getElementById("referralsActionMsg");
 
 const roleDebugCloseBtn = document.getElementById("roleDebugCloseBtn");
+const featureFlagsCloseBtn = document.getElementById("featureFlagsCloseBtn");
+const featureFlagsReloadBtn = document.getElementById("featureFlagsReloadBtn");
+const featureFlagsGrid = document.getElementById("featureFlagsGrid");
+const featureFlagsMsg = document.getElementById("featureFlagsMsg");
+
+const sessionsCloseBtn = document.getElementById("sessionsCloseBtn");
+const sessionsReloadBtn = document.getElementById("sessionsReloadBtn");
+const sessionsTbody = document.getElementById("sessionsTbody");
+const sessionsMsg = document.getElementById("sessionsMsg");
+
 const roleDebugTarget = document.getElementById("roleDebugTarget");
 const roleDebugRole = document.getElementById("roleDebugRole");
 const roleDebugApplyBtn = document.getElementById("roleDebugApplyBtn");
@@ -2206,6 +2221,10 @@ const changelogSaveBtn = document.getElementById("changelogSaveBtn");
 const changelogCancelBtn = document.getElementById("changelogCancelBtn");
 const changelogEditMsg = document.getElementById("changelogEditMsg");
 const faqList = document.getElementById("faqList");
+const dailyList = document.getElementById("dailyList");
+const dailyReloadBtn = document.getElementById("dailyReloadBtn");
+const dailyMsg = document.getElementById("dailyMsg");
+
 const faqMsg = document.getElementById("faqMsg");
 const faqAskBtn = document.getElementById("faqAskBtn");
 const faqForm = document.getElementById("faqForm");
@@ -2285,6 +2304,7 @@ togglePassBtn?.addEventListener("click", ()=>{
 
 const chanList = document.getElementById("chanList");
 const nowRoom = document.getElementById("nowRoom");
+const roomEventBanner = document.getElementById("roomEventBanner");
 const roomTitle = document.getElementById("roomTitle");
 
 const msgs = document.getElementById("msgs");
@@ -3680,6 +3700,41 @@ function canUseThemeName(themeName){
 }
 
 function roleRank(role){ const norm = normalizeRole(role); const i = ROLES.findIndex(r=>r.toLowerCase()===String(norm).toLowerCase()); return i===-1?1:i; }
+
+
+function getFeatureFlag(key, fallback=false){
+  const v = featureFlags && Object.prototype.hasOwnProperty.call(featureFlags, key) ? featureFlags[key] : undefined;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return !!v;
+  if (typeof v === "string") return v === "true" || v === "1" || v === "on";
+  return fallback;
+}
+
+function applyAmbientClasses(){
+  const enabled = getFeatureFlag("ambientFx", true);
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const on = !!enabled && !reduce;
+  document.body.classList.toggle("ambientfx", on);
+  document.body.classList.toggle("ambient-main", on && String(currentRoom)==="main");
+  document.body.classList.toggle("ambient-diceroom", on && String(currentRoom)==="diceroom");
+  document.body.classList.toggle("ambient-music", on && String(currentRoom)==="music");
+  document.body.classList.toggle("ambient-nsfw", on && String(currentRoom)==="nsfw");
+}
+
+function applyAutoContrast(){
+  const enabled = getFeatureFlag("autoContrast", true);
+  document.body.classList.toggle("auto-contrast", !!enabled);
+  try{
+    if(typeof updateContrastReinforcementAll === "function"){
+      updateContrastReinforcementAll();
+    }
+  }catch(_){}
+}
+
+function applyFeatureFlags(){
+  applyAmbientClasses();
+  applyAutoContrast();
+}
 
 const STATUS_ALIASES = {
   "Do Not Disturb": "DnD",
@@ -8024,6 +8079,41 @@ function setActiveRoom(room){
     el.classList.toggle("active", el.dataset.room === room);
   });
 }
+
+let activeRoomEvent = null;
+let roomEventTimer = null;
+
+function updateRoomEventBanner(){
+  if(!roomEventBanner) return;
+  if(!getFeatureFlag("roomEvents", true) || !activeRoomEvent || !activeRoomEvent.endsAt){
+    roomEventBanner.hidden = true;
+    roomEventBanner.innerHTML = "";
+    if(roomEventTimer){ clearInterval(roomEventTimer); roomEventTimer=null; }
+    return;
+  }
+  roomEventBanner.hidden = false;
+  const leftMs = Math.max(0, Number(activeRoomEvent.endsAt) - Date.now());
+  const leftSec = Math.ceil(leftMs/1000);
+  const mm = Math.floor(leftSec/60);
+  const ss = String(leftSec%60).padStart(2,"0");
+  roomEventBanner.innerHTML = `
+    <div class="meta">
+      <span class="tag">${escapeHtml(String(activeRoomEvent.type||"event"))}</span>
+      <span>${escapeHtml(String(activeRoomEvent.title||"Room Event"))}</span>
+      <span class="count">• ${mm}:${ss}</span>
+    </div>
+  `;
+}
+
+function setRoomEvent(ev){
+  activeRoomEvent = ev || null;
+  updateRoomEventBanner();
+  if(roomEventTimer){ clearInterval(roomEventTimer); roomEventTimer=null; }
+  if(activeRoomEvent && activeRoomEvent.endsAt){
+    roomEventTimer = setInterval(updateRoomEventBanner, 1000);
+  }
+}
+
 function joinRoom(room){
   room = sanitizeRoomClient(room) || "main";
   saveRoomDraft();
@@ -8105,6 +8195,69 @@ function ensureFaqLoaded(force = false){
   if(activeMenuTab !== "faq") return;
   return loadFaq(force);
 }
+
+let dailyLoadedForKey = null;
+
+async function ensureDailyLoaded(){
+  if(!getFeatureFlag("dailyChallenges", true)) return;
+  try{
+    const r = await fetch("/api/challenges/today");
+    const j = await r.json();
+    if(!j?.ok) throw new Error("bad");
+    if(dailyLoadedForKey === j.dayKey) {
+      renderDaily(j);
+      return;
+    }
+    dailyLoadedForKey = j.dayKey;
+    renderDaily(j);
+  }catch(e){
+    if(dailyMsg) dailyMsg.textContent = "Failed to load daily challenges.";
+  }
+}
+
+function renderDaily(data){
+  if(!dailyList) return;
+  if(dailyMsg) dailyMsg.textContent = "";
+  const challenges = data.challenges || [];
+  dailyList.innerHTML = "";
+  for(const c of challenges){
+    const done = !!c.done;
+    const claimed = !!c.claimed;
+    const item = document.createElement("div");
+    item.className = "dailyItem";
+    const prog = Math.min(Number(c.progress||0), Number(c.goal||0));
+    item.innerHTML = `
+      <div class="dailyLeft">
+        <div class="title">${escapeHtml(c.label || c.id)}</div>
+        <div class="small muted">${prog}/${c.goal} • Reward: ${c.rewardXp||0} XP + ${c.rewardGold||0} gold</div>
+      </div>
+      <div class="dailyRight">
+        <span class="badge ${done ? "done" : ""}">${done ? "Complete" : "In progress"}</span>
+        <button class="btn ${claimed ? "secondary" : ""}" ${(!done || claimed) ? "disabled" : ""}>${claimed ? "Claimed" : "Claim"}</button>
+      </div>
+    `;
+    const btn = item.querySelector("button");
+    btn?.addEventListener("click", async ()=>{
+      try{
+        btn.disabled = true;
+        const r = await fetch("/api/challenges/claim", {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ id: c.id })
+        });
+        const j = await r.json();
+        if(!j?.ok) throw new Error("bad");
+        await ensureDailyLoaded();
+        try{ await loadProgression(); }catch(_){}
+      }catch(e){
+        if(dailyMsg) dailyMsg.textContent = "Could not claim yet.";
+        btn.disabled = false;
+      }
+    });
+    dailyList.appendChild(item);
+  }
+}
+
 
 function renderLeaderboard(listEl, items, mapper){
   if (!listEl) return;
@@ -8225,6 +8378,7 @@ function setMenuTab(tab){
   });
   if(activeMenuTab === "changelog") ensureChangelogLoaded();
   if(activeMenuTab === "faq") ensureFaqLoaded();
+  if(activeMenuTab === "daily") ensureDailyLoaded();
   setLeaderboardOpen(activeMenuTab === "leaderboards" && rightPanelMode === "menu");
 }
 
@@ -10220,6 +10374,139 @@ function getHeaderGradientInputValues(){
   const b = sanitizeHexColorInput(bRaw, PROFILE_GRADIENT_DEFAULT_B) || PROFILE_GRADIENT_DEFAULT_B;
   return { a, b };
 }
+
+function closeFeatureFlagsPanel(){
+  if(featureFlagsPanel) featureFlagsPanel.hidden = true;
+  if(featureFlagsMsg) featureFlagsMsg.textContent = "";
+}
+function closeSessionsPanel(){
+  if(sessionsPanel) sessionsPanel.hidden = true;
+  if(sessionsMsg) sessionsMsg.textContent = "";
+}
+
+async function loadFeatureFlags(){
+  if(!me || roleRank(me.role) < roleRank("Owner")) return;
+  if(featureFlagsMsg) featureFlagsMsg.textContent = "Loading…";
+  try{
+    const r = await fetch("/api/owner/flags");
+    const j = await r.json();
+    if(!j?.ok) throw new Error("bad");
+    featureFlags = j.flags || {};
+    renderFeatureFlagsGrid();
+    applyFeatureFlags();
+    if(featureFlagsMsg) featureFlagsMsg.textContent = "Loaded.";
+  }catch(e){
+    if(featureFlagsMsg) featureFlagsMsg.textContent = "Failed to load.";
+  }
+}
+
+function renderFeatureFlagsGrid(){
+  if(!featureFlagsGrid) return;
+  const known = [
+    { key:"ambientFx", label:"Ambient FX", hint:"Subtle room ambience (Main/Dice/Music/NSFW)." },
+    { key:"autoContrast", label:"Auto Contrast", hint:"Auto-adjust text/bubble contrast for readability." },
+    { key:"dailyChallenges", label:"Daily Challenges", hint:"Enable daily XP + gold micro-challenges." },
+    { key:"smartMentions", label:"Smart Mentions", hint:"Enable @here/@mods/@admins/@owner pings." },
+    { key:"roomEvents", label:"Room Events", hint:"Enable /event banners." },
+  ];
+
+  featureFlagsGrid.innerHTML = "";
+  for(const item of known){
+    const val = getFeatureFlag(item.key, true);
+    const card = document.createElement("div");
+    card.className = "flagCard";
+    card.innerHTML = `
+      <div class="flagRow">
+        <div>
+          <div class="title">${escapeHtml(item.label)}</div>
+          <div class="small muted">${escapeHtml(item.hint)}</div>
+        </div>
+        <div class="switch ${val ? "on" : ""}" role="switch" aria-checked="${val ? "true":"false"}"></div>
+      </div>
+    `;
+    const sw = card.querySelector(".switch");
+    sw?.addEventListener("click", async ()=>{
+      const next = !getFeatureFlag(item.key, false);
+      featureFlags[item.key] = next;
+      sw.classList.toggle("on", next);
+      sw.setAttribute("aria-checked", next ? "true":"false");
+      try{
+        const r = await fetch("/api/owner/flags", {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ flags: featureFlags })
+        });
+        const j = await r.json();
+        if(!j?.ok) throw new Error("bad");
+        featureFlags = j.flags || featureFlags;
+        applyFeatureFlags();
+        if(featureFlagsMsg) featureFlagsMsg.textContent = "Saved.";
+        setTimeout(()=>{ if(featureFlagsMsg) featureFlagsMsg.textContent = ""; }, 1200);
+      }catch(e){
+        if(featureFlagsMsg) featureFlagsMsg.textContent = "Save failed.";
+      }
+    });
+
+    featureFlagsGrid.appendChild(card);
+  }
+}
+
+function openFeatureFlagsPanel(){
+  if(!me || roleRank(me.role) < roleRank("Owner")) return;
+  if(featureFlagsPanel) featureFlagsPanel.hidden = false;
+  loadFeatureFlags();
+}
+
+async function loadSessions(){
+  if(!me || roleRank(me.role) < roleRank("Owner")) return;
+  if(sessionsMsg) sessionsMsg.textContent = "Loading…";
+  try{
+    const r = await fetch("/api/owner/sessions");
+    const j = await r.json();
+    if(!j?.ok) throw new Error("bad");
+    renderSessions(j.sessions || []);
+    if(sessionsMsg) sessionsMsg.textContent = "Loaded.";
+  }catch(e){
+    if(sessionsMsg) sessionsMsg.textContent = "Failed to load.";
+  }
+}
+
+function renderSessions(rows){
+  if(!sessionsTbody) return;
+  sessionsTbody.innerHTML = "";
+  for(const s of rows){
+    const tr = document.createElement("tr");
+    const user = s.username || ("#"+s.userId);
+    const ua = (s.userAgent || "").slice(0, 40);
+    const connected = s.connectedAt ? new Date(s.connectedAt).toLocaleString() : "";
+    tr.innerHTML = `
+      <td>${escapeHtml(user)}</td>
+      <td>${escapeHtml(String(s.role||""))}</td>
+      <td>${escapeHtml(String(s.room||""))}</td>
+      <td>${escapeHtml(connected)}</td>
+      <td>${escapeHtml(ua)}</td>
+      <td>${escapeHtml(String(s.tz||""))}</td>
+    `;
+    sessionsTbody.appendChild(tr);
+  }
+}
+
+function openSessionsPanel(){
+  if(!me || roleRank(me.role) < roleRank("Owner")) return;
+  if(sessionsPanel) sessionsPanel.hidden = false;
+  loadSessions();
+}
+
+function bindOwnerPanels(){
+  featureFlagsPanelBtn?.addEventListener("click", openFeatureFlagsPanel);
+  featureFlagsCloseBtn?.addEventListener("click", closeFeatureFlagsPanel);
+  featureFlagsReloadBtn?.addEventListener("click", loadFeatureFlags);
+
+  sessionsPanelBtn?.addEventListener("click", openSessionsPanel);
+  sessionsCloseBtn?.addEventListener("click", closeSessionsPanel);
+  sessionsReloadBtn?.addEventListener("click", loadSessions);
+}
+
 function scheduleProfileHeaderPreview(colorA, colorB){
   const next = { a: colorA, b: colorB };
   headerGradientPreviewNext = next;
@@ -11914,7 +12201,10 @@ async function initChatApp(){
   if(referralsPanelBtn) referralsPanelBtn.hidden = !(me?.role==="Admin" || me?.role==="Co-owner" || me?.role==="Owner");
   // Role debug is for Owner/Co-Owner (and Admin as fallback)
   if(roleDebugPanelBtn) roleDebugPanelBtn.hidden = !(me?.role==="Owner" || me?.role==="Co-owner" || me?.role==="Admin");
-  initAppealsDurationSelect();
+  
+  if(featureFlagsPanelBtn) featureFlagsPanelBtn.hidden = !(me?.role==="Owner");
+  if(sessionsPanelBtn) sessionsPanelBtn.hidden = !(me?.role==="Owner");
+initAppealsDurationSelect();
 
   await loadVibeTags();
   await loadThemePreference();
@@ -11935,6 +12225,14 @@ async function initChatApp(){
   }
   socket = io();
   socket.on("connect", () => {
+    try{
+      socket.emit("client:hello", {
+        tz: (Intl.DateTimeFormat && Intl.DateTimeFormat().resolvedOptions().timeZone) || null,
+        locale: navigator.language || null,
+        platform: navigator.platform || null,
+      });
+    }catch(_){}
+
     // Join initial room so history + realtime messages work reliably
     joinRoom(currentRoom);
   });
@@ -11955,6 +12253,31 @@ async function initChatApp(){
   socket.on("connect_error", (err) => {
   addSystem(`⚠️ Realtime connection failed: ${err?.message || err}`);
 });
+
+
+  socket.on("featureFlags:update", (flags={})=>{
+    featureFlags = (flags && typeof flags==="object") ? flags : {};
+    applyFeatureFlags();
+    // Keep owner panel in sync if open
+    try{ renderFeatureFlagsGrid(); }catch(_){}
+  });
+
+  socket.on("room:event", (payload={})=>{
+    if(payload && payload.room && String(payload.room) !== String(currentRoom)) return;
+    const ev = payload.active || null;
+    setRoomEvent(ev);
+  });
+
+  socket.on("mention:ping", (payload={})=>{
+    if(!getFeatureFlag("smartMentions", true)) return;
+    const kind = String(payload.kind||"mention");
+    const from = payload.from?.username || "Someone";
+    showToast(`${from} pinged ${kind === "here" ? "@here" : "@"+kind}`, { durationMs: 2400 });
+    // Optional: mention sound hook if present
+    try{
+      if(typeof playSound === "function") playSound("mention");
+    }catch(_){}
+  });
 
 socket.on("disconnect", (reason) => {
   addSystem(`⚠️ Disconnected: ${reason}`);
@@ -12389,6 +12712,7 @@ async function bootApp(){
   bindStaffAppealsUI();
   bindReferralsUI();
   bindRoleDebugUI();
+  bindOwnerPanels();
 
   const sessionUser = await validateSession({ silent: true });
   if(sessionUser){

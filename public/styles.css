@@ -7301,3 +7301,109 @@ body.comfortMode[data-theme="Iris & Lola Neon"] .chat::after{
   font-size:14px;
   opacity:0.95;
 }
+
+
+/* --- Room event banner --- */
+.roomEventBanner{
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 14px;
+  margin: 6px 0 0 0;
+  font-size: 13px;
+  line-height: 1.2;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  backdrop-filter: blur(8px);
+}
+.roomEventBanner .meta{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.roomEventBanner .tag{ font-weight:700; opacity:0.9; }
+.roomEventBanner .count{ opacity:0.85; }
+
+/* --- Owner panels --- */
+.ownerPanel{
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0,0,0,0.70);
+  backdrop-filter: blur(10px);
+}
+.ownerPanelHeader{
+  display:flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.12);
+}
+.ownerPanelBody{
+  padding: 14px;
+  overflow: auto;
+}
+.flagsGrid{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.flagCard{
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+}
+.flagRow{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.switch{
+  width: 46px; height: 26px;
+  border-radius: 26px;
+  background: rgba(255,255,255,0.18);
+  border: 1px solid rgba(255,255,255,0.20);
+  position: relative;
+  cursor: pointer;
+}
+.switch::after{
+  content:"";
+  width: 20px; height: 20px;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.92);
+  position:absolute;
+  top: 2px; left: 3px;
+  transition: transform 160ms ease;
+}
+.switch.on{ background: rgba(120,255,180,0.25); border-color: rgba(120,255,180,0.35); }
+.switch.on::after{ transform: translateX(18px); }
+
+.tableWrap{ overflow:auto; margin-top: 10px; }
+.table{ width:100%; border-collapse: collapse; font-size: 12px; }
+.table th, .table td{ text-align:left; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.10); white-space: nowrap; }
+.table th{ opacity: 0.9; font-weight: 700; }
+
+/* --- Daily challenges --- */
+.dailyList{ display:flex; flex-direction: column; gap: 10px; }
+.dailyItem{
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  display:flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dailyLeft .title{ font-weight: 700; }
+.dailyLeft .small{ opacity: 0.85; }
+.dailyRight{ display:flex; align-items:center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.badge{
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.14);
+}
+.badge.done{ background: rgba(120,255,180,0.18); border-color: rgba(120,255,180,0.30); }
+
+/* --- Ambient effects (very subtle; respects reduce motion in JS) --- */
+body.ambientfx.ambient-main{ }
+body.ambientfx.ambient-diceroom{ }
+body.ambientfx.ambient-music{ }
+body.ambientfx.ambient-nsfw{ }
+
