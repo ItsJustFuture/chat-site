@@ -1,5 +1,3 @@
-
-dailyReloadBtn?.addEventListener("click", ensureDailyLoaded);
 "use strict";
 
 // Debug hook: enable tap hit-testing logs by setting `window.__TAP_DEBUG__ = true` in the console.
@@ -2223,6 +2221,7 @@ const changelogEditMsg = document.getElementById("changelogEditMsg");
 const faqList = document.getElementById("faqList");
 const dailyList = document.getElementById("dailyList");
 const dailyReloadBtn = document.getElementById("dailyReloadBtn");
+dailyReloadBtn?.addEventListener("click", ensureDailyLoaded);
 const dailyMsg = document.getElementById("dailyMsg");
 
 const faqMsg = document.getElementById("faqMsg");
