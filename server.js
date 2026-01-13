@@ -903,8 +903,8 @@ app.use((req, res, next) => {
     "Content-Security-Policy",
     [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com",
-      "script-src-elem 'self' 'unsafe-eval' 'unsafe-inline' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com",
+      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com",
+      "script-src-elem 'self' 'unsafe-eval' 'unsafe-inline' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com",
       // Inline style attributes are set by the client JS (e.g. show/hide panels),
       // so allow them alongside our external stylesheet.
       // Also allow Google Fonts stylesheets for optional custom fonts.
@@ -6405,13 +6405,9 @@ app.delete("/profile/avatar", requireLogin, async (req, res) => {
       req.session.user.avatar = null;
       clearAvatarInLivePresence();
       tryDeleteLocalAvatarFile(oldAvatar);
-      return res.json({ ok: true });
-    });
-  });
-});
-
-// ---- Uploads (25MB images/gifs, 100MB videos). VIP can upload videos, everyone can upload images.
+      return res.jso// ---- Uploads (25MB images/gifs, 100MB videos). VIP can upload videos, everyone can upload images.
 const MAX_IMAGE_GIF_BYTES = 25 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 const chatUpload = multer({
   storage: multer.diskStorage({
@@ -6438,13 +6434,14 @@ app.post("/upload", requireLogin, (req, res) => {
     const role = req.session.user.role;
 
     const isImage = /^image\//i.test(mime);
+    const isAudio = /^audio\//i.test(mime);
     const isVideo = /^video\//i.test(mime);
 
     const cleanupUpload = () => {
       try { fs.unlinkSync(path.join(UPLOADS_DIR, req.file.filename)); } catch {}
     };
 
-    if (!isImage && !isVideo) {
+    if (!isImage && !isAudio && !isVideo) {
       cleanupUpload();
       return res.status(400).json({ message: "File type not allowed" });
     }
@@ -6452,6 +6449,11 @@ app.post("/upload", requireLogin, (req, res) => {
     if (isImage && req.file.size > MAX_IMAGE_GIF_BYTES) {
       cleanupUpload();
       return res.status(413).json({ message: "Image/GIF too large (max 25MB)." });
+    }
+
+    if (isAudio && req.file.size > MAX_AUDIO_BYTES) {
+      cleanupUpload();
+      return res.status(413).json({ message: "Audio too large (max 15MB)." });
     }
 
     if (isVideo && req.file.size > MAX_VIDEO_BYTES) {
@@ -6465,11 +6467,17 @@ app.post("/upload", requireLogin, (req, res) => {
     }
 
     const url = `/uploads/${req.file.filename}`;
+    const type = isImage ? "image" : (isAudio ? "audio" : "video");
     return res.json({
       url,
       mime,
       size: req.file.size,
-      type: isImage ? "image" : "video",
+      type,
+    });
+  });
+});
+
+mage" : "video",
     });
   });
 });
