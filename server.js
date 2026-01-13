@@ -122,9 +122,9 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
     cors: { origin: true, credentials: true },
 
     // More tolerant of mobile/background + Render sleep
-    pingInterval: 30_000,  // send pings every 30s
-    pingTimeout: 120_000,  // wait 120s for pong before disconnect
-    upgradeTimeout: 30_000,
+    pingInterval: 25_000,  // send pings every 25s
+    pingTimeout: 300_000,  // wait 5 minutes for pong before disconnect (mobile suspend)
+    upgradeTimeout: 45_000,
   });
   const pgPool = new Pool({
   connectionString: process.env.DATABASE_URL,
