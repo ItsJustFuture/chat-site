@@ -2070,6 +2070,7 @@ const DEFAULT_THEME = "Minimal Dark";
 let currentTheme = document.body?.getAttribute("data-theme") || DEFAULT_THEME;
 let themeFilter = "all";
 const MAX_IMAGE_GIF_BYTES = 25 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
 let modalTargetUsername = null;
@@ -5161,6 +5162,7 @@ document.addEventListener("keydown", (e) => {
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
 const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "m4v", "ogg"]);
+const AUDIO_EXTS = new Set(["mp3", "m4a", "aac", "wav", "ogg", "opus", "flac"]);
 function inferAttachmentKind({ mime, type, url } = {}) {
   const typeKey = normalizeUserKey(type);
   if (typeKey === "image" || typeKey === "gif") return "image";
@@ -5168,11 +5170,13 @@ function inferAttachmentKind({ mime, type, url } = {}) {
 
   const mimeKey = normalizeUserKey(mime);
   if (mimeKey.startsWith("image/")) return "image";
+  if (mimeKey.startsWith("audio/")) return "audio";
   if (mimeKey.startsWith("video/")) return "video";
 
   const cleanUrl = String(url || "").split(/[?#]/)[0];
   const ext = cleanUrl.includes(".") ? cleanUrl.split(".").pop().toLowerCase() : "";
   if (IMAGE_EXTS.has(ext)) return "image";
+  if (AUDIO_EXTS.has(ext)) return "audio";
   if (VIDEO_EXTS.has(ext)) return "video";
   return "file";
 }
@@ -5206,6 +5210,114 @@ function renderAttachmentNode({ url, mime, type } = {}) {
     video.preload = "metadata";
     att.appendChild(video);
     return att;
+  }
+
+
+  if (kind === "audio") {
+    const wrap = document.createElement("div");
+    wrap.className = "attachment audioAttachment";
+    wrap.dataset.src = cleanUrl;
+
+    const btn = document.createElement("button");
+    btn.className = "audioPlayBtn";
+    btn.type = "button";
+    btn.setAttribute("aria-label", "Play audio");
+    btn.textContent = "▶";
+    wrap.appendChild(btn);
+
+    const wave = document.createElement("div");
+    wave.className = "audioWave";
+    wrap.appendChild(wave);
+
+    const meta = document.createElement("div");
+    meta.className = "audioMeta";
+    const time = document.createElement("span");
+    time.className = "audioTime";
+    time.textContent = "";
+    meta.appendChild(time);
+
+    const dl = document.createElement("a");
+    dl.className = "audioDownload";
+    dl.href = cleanUrl;
+    dl.target = "_blank";
+    dl.rel = "noopener";
+    dl.textContent = "Download";
+    meta.appendChild(dl);
+
+    wrap.appendChild(meta);
+
+    // Lazy-init waveform only when user interacts (better for mobile performance)
+    let ws = null;
+    let ready = false;
+
+    const ensurePlayer = () => {
+      if (ws || wrap.dataset.fallback === "1") return;
+      if (!window.WaveSurfer || typeof window.WaveSurfer.create !== "function") {
+        // Fallback: native audio control
+        wrap.dataset.fallback = "1";
+        wave.innerHTML = "";
+        const audio = document.createElement("audio");
+        audio.src = cleanUrl;
+        audio.controls = true;
+        audio.preload = "metadata";
+        audio.className = "audioNative";
+        wave.appendChild(audio);
+        audio.addEventListener("loadedmetadata", () => {
+          if (isFinite(audio.duration)) time.textContent = formatSeconds(audio.duration);
+        });
+        return;
+      }
+
+      ws = window.WaveSurfer.create({
+        container: wave,
+        height: 44,
+        barWidth: 2,
+        barGap: 2,
+        barRadius: 2,
+        cursorWidth: 0,
+        interact: true,
+        normalize: true,
+      });
+
+      ws.on("ready", () => {
+        ready = true;
+        const dur = ws.getDuration ? ws.getDuration() : 0;
+        if (dur && isFinite(dur)) time.textContent = formatSeconds(dur);
+      });
+
+      ws.on("play", () => { btn.textContent = "❚❚"; wrap.classList.add("playing"); });
+      ws.on("pause", () => { btn.textContent = "▶"; wrap.classList.remove("playing"); });
+      ws.on("finish", () => { btn.textContent = "▶"; wrap.classList.remove("playing"); });
+
+      ws.load(cleanUrl);
+    };
+
+    // Format helper (local)
+    function formatSeconds(sec){
+      const s = Math.max(0, Math.floor(sec || 0));
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return `${m}:${String(r).padStart(2,"0")}`;
+    }
+
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      ensurePlayer();
+      // If fallback, clicking play does nothing special (native controls)
+      if (!ws) return;
+      if (!ready) {
+        // Queue play once ready
+        if (typeof ws.once === "function") {
+          ws.once("ready", () => { try { ws.play(); } catch {} });
+        } else {
+          ws.on("ready", () => { try { ws.play(); } catch {} });
+        }
+        return;
+      }
+      try { ws.isPlaying() ? ws.pause() : ws.play(); } catch {}
+    });
+
+    return wrap;
   }
 
   const a = document.createElement("a");
@@ -7795,16 +7907,17 @@ pickFileBtn?.addEventListener("click", () => {
 function validateUploadFile(file){
   const mime = String(file?.type || "");
   const isImage = /^image\//i.test(mime);
+  const isAudio = /^audio\//i.test(mime);
   const isVideo = /^video\//i.test(mime);
-  if(!isImage && !isVideo){
-    return { ok: false, message: "Only images, GIFs, or videos are allowed." };
+  if(!isImage && !isAudio && !isVideo){
+    return { ok: false, message: "Only images, GIFs, audio, or videos are allowed." };
   }
-  const maxBytes = isVideo ? MAX_VIDEO_BYTES : MAX_IMAGE_GIF_BYTES;
+  const maxBytes = isVideo ? MAX_VIDEO_BYTES : (isAudio ? MAX_AUDIO_BYTES : MAX_IMAGE_GIF_BYTES);
   if(file.size > maxBytes){
-    const label = isVideo ? "video" : "image/GIF";
+    const label = isVideo ? "video" : (isAudio ? "audio" : "image/GIF");
     return { ok: false, message: `Max ${label} size is ${bytesToNice(maxBytes)}.` };
   }
-  return { ok: true, isImage, isVideo, maxBytes };
+  return { ok: true, isImage, isAudio, isVideo, maxBytes };
 }
 function setRoomUploadingState(isUploading){
   roomUploading = isUploading;
@@ -7829,6 +7942,11 @@ function showUploadPreview(file){
     img.src=url;
     img.onload=()=>URL.revokeObjectURL(url);
     previewThumb.appendChild(img);
+  } else if ((file.type || "").startsWith("audio/")) {
+    const a=document.createElement("audio");
+    a.src=url; a.controls=true; a.preload="metadata";
+    a.onloadeddata=()=>URL.revokeObjectURL(url);
+    previewThumb.appendChild(a);
   } else if (file.type === "video/mp4" || file.type === "video/quicktime") {
     const v=document.createElement("video");
     v.src=url; v.muted=true; v.playsInline=true; v.preload="metadata";

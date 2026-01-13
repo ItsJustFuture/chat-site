@@ -7407,3 +7407,53 @@ body.ambientfx.ambient-diceroom{ }
 body.ambientfx.ambient-music{ }
 body.ambientfx.ambient-nsfw{ }
 
+
+
+/* --- Audio attachments (waveform player) --- */
+.audioAttachment{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  padding:10px 12px;
+  border-radius:14px;
+  background: rgba(255,255,255,0.06);
+  max-width: 360px;
+}
+
+.audioAttachment .audioPlayBtn{
+  align-self:flex-start;
+  width:42px;
+  height:42px;
+  border-radius:12px;
+  border:0;
+  cursor:pointer;
+  font-size:18px;
+}
+
+.audioAttachment .audioWave{
+  width:100%;
+  min-width: 220px;
+  max-width: 100%;
+}
+
+.audioAttachment .audioMeta{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  font-size:12px;
+  opacity:0.9;
+}
+
+.audioAttachment .audioDownload{
+  text-decoration:none;
+  font-size:12px;
+}
+
+.audioAttachment.playing{
+  transform: translateZ(0);
+}
+
+.audioAttachment .audioNative{
+  width:100%;
+}
