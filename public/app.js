@@ -2537,7 +2537,41 @@ let jumpToLatestBtn = null;
 msgs?.addEventListener("scroll", handleChatScroll, { passive:true });
 
 const fileInput = document.getElementById("fileInput");
-const pickFileBtn = document.getElementById("pickFileBtn");
+const audioFileInput = document.getElementById("audioFileInput");
+const mediaBtn = document.getElementById("mediaBtn");
+const mediaMenu = document.getElementById("mediaMenu");
+const mediaMenuImage = document.getElementById("mediaMenuImage");
+const mediaMenuAudioUpload = document.getElementById("mediaMenuAudioUpload");
+const mediaMenuVoice = document.getElementById("mediaMenuVoice");
+const mediaVoiceLabel = document.getElementById("mediaVoiceLabel");
+
+let mediaMenuOpen = false;
+let voiceRec = { recorder: null, stream: null, chunks: [], startedAt: 0 };
+
+function closeMediaMenu(){
+  if(!mediaMenu) return;
+  mediaMenuOpen = false;
+  mediaMenu.hidden = true;
+  mediaBtn?.setAttribute("aria-expanded","false");
+}
+function openMediaMenu(){
+  if(!mediaMenu) return;
+  mediaMenuOpen = true;
+  mediaMenu.hidden = false;
+  mediaBtn?.setAttribute("aria-expanded","true");
+}
+function toggleMediaMenu(){
+  if(mediaMenuOpen) closeMediaMenu();
+  else openMediaMenu();
+}
+
+// Click-away to close
+document.addEventListener("pointerdown", (e)=>{
+  if(!mediaMenuOpen) return;
+  const t = e.target;
+  if(mediaMenu?.contains(t) || mediaBtn?.contains(t)) return;
+  closeMediaMenu();
+});
 
 if(chatShell){
   jumpToLatestBtn = document.createElement("button");
@@ -7887,8 +7921,9 @@ profileSettingsBtn?.addEventListener("click", async () => {
   await loadChatFxPrefs({ force: true });
 });
 
-// upload button icon -> open file picker
-pickFileBtn?.addEventListener("click", () => {
+// unified media button
+mediaBtn?.addEventListener("click", () => {
+  // Dice Room keeps the "tap to roll" affordance
   if (currentRoom === "diceroom") {
     const now = Date.now();
     if (now < diceCooldownUntil) {
@@ -7898,9 +7933,108 @@ pickFileBtn?.addEventListener("click", () => {
     }
     diceCooldownUntil = now + 3000;
     socket?.emit("dice:roll");
-  } else {
-    fileInput.click();
+    return;
   }
+  toggleMediaMenu();
+});
+
+// close menu when clicking outside
+document.addEventListener("pointerdown", (e) => {
+  if (!mediaMenuOpen) return;
+  const t = e.target;
+  if (!t) return;
+  if (mediaMenu?.contains(t) || mediaBtn?.contains(t)) return;
+  closeMediaMenu();
+}, { capture: true });
+
+// menu actions
+mediaMenuImage?.addEventListener("click", () => {
+  closeMediaMenu();
+  // images + videos share fileInput (validation will gate)
+  fileInput?.click();
+});
+mediaMenuAudioUpload?.addEventListener("click", () => {
+  closeMediaMenu();
+  audioFileInput?.click();
+});
+
+async function startVoiceRecording(){
+  if (voiceRec.recorder) return;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    addSystem("Voice notes aren't supported on this browser.");
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Prefer iOS-friendly types when available
+    const candidates = [
+      "audio/mp4",      // iOS Safari often prefers this
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/ogg;codecs=opus",
+    ];
+    let mimeType = "";
+    for (const t of candidates) {
+      if (window.MediaRecorder && MediaRecorder.isTypeSupported?.(t)) { mimeType = t; break; }
+    }
+    const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    voiceRec = { recorder: rec, stream, chunks: [], startedAt: Date.now() };
+    mediaVoiceLabel && (mediaVoiceLabel.textContent = "Stop");
+    mediaMenuVoice?.classList.add("recording");
+    rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) voiceRec.chunks.push(ev.data); };
+    rec.onstop = async () => {
+      try {
+        const blob = new Blob(voiceRec.chunks, { type: rec.mimeType || "audio/webm" });
+        const ext = (rec.mimeType || "").includes("mp4") ? "m4a" : ((rec.mimeType || "").includes("ogg") ? "ogg" : "webm");
+        const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: blob.type });
+
+        // Reuse your existing upload pipeline
+        roomPendingAttachment = null;
+        const validation = validateUploadFile(file);
+        if (!validation.ok) {
+          addSystem(validation.message || "Voice note not allowed.");
+          return;
+        }
+        showUploadPreview(file);
+        roomUploadToken = `${Date.now()}-${Math.random()}`;
+        const token = roomUploadToken;
+        setRoomUploadingState(true);
+        const up = await uploadChatFileWithProgress(file);
+        if (token !== roomUploadToken) return;
+        roomPendingAttachment = { url: up.url, mime: up.mime, type: up.type, size: up.size };
+        roomUploadToken = null;
+        setRoomUploadingState(false);
+        sendMessage();
+      } catch (err) {
+        addSystem(`Voice note upload failed: ${err?.message || "Upload failed."}`);
+      }
+    };
+    rec.start();
+    addSystem("🎙️ Recording… tap Voice again to stop.");
+  } catch (e) {
+    addSystem("Microphone permission denied.");
+  }
+}
+
+function stopVoiceRecording(){
+  try { voiceRec.recorder?.stop(); } catch {}
+  try { voiceRec.stream?.getTracks?.().forEach(t=>t.stop()); } catch {}
+  voiceRec.recorder = null;
+  voiceRec.stream = null;
+  voiceRec.chunks = [];
+  voiceRec.startedAt = 0;
+  mediaVoiceLabel && (mediaVoiceLabel.textContent = "Voice");
+  mediaMenuVoice?.classList.remove("recording");
+}
+
+mediaMenuVoice?.addEventListener("click", async () => {
+  // don't close menu while recording; toggle start/stop
+  if (voiceRec.recorder) {
+    stopVoiceRecording();
+    closeMediaMenu();
+    return;
+  }
+  await startVoiceRecording();
 });
 
 // upload preview
@@ -7992,9 +8126,41 @@ fileInput.addEventListener("change", () => {
     addSystem(`Upload failed: ${e?.message || "Upload failed."}`);
   });
 });
+
+audioFileInput?.addEventListener("change", () => {
+  const f = audioFileInput.files?.[0];
+  if(!f) return clearUploadPreview();
+  roomPendingAttachment = null;
+  const validation = validateUploadFile(f);
+  if(!validation.ok){
+    addSystem(validation.message || "File not allowed.");
+    audioFileInput.value = "";
+    return clearUploadPreview();
+  }
+  showUploadPreview(f);
+  roomUploadToken = `${Date.now()}-${Math.random()}`;
+  const token = roomUploadToken;
+  setRoomUploadingState(true);
+  uploadChatFileWithProgress(f).then((up) => {
+    if(token !== roomUploadToken) return;
+    roomPendingAttachment = { url: up.url, mime: up.mime, type: up.type, size: up.size };
+    roomUploadToken = null;
+    setRoomUploadingState(false);
+    sendMessage();
+  }).catch((e) => {
+    if(token !== roomUploadToken) return;
+    roomUploadToken = null;
+    setRoomUploadingState(false);
+    addSystem(`Upload failed: ${e?.message || "Upload failed."}`);
+  }).finally(() => {
+    try { audioFileInput.value = ""; } catch {}
+  });
+});
 cancelUploadBtn.addEventListener("click", () => {
   if(uploadXhr){ uploadXhr.abort(); uploadXhr=null; addSystem("Upload canceled."); }
   fileInput.value="";
+  try { audioFileInput.value=""; } catch {}
+  try { if (voiceRec.recorder) stopVoiceRecording(); } catch {}
   roomUploadToken = null;
   roomPendingAttachment = null;
   setRoomUploadingState(false);
@@ -8182,14 +8348,15 @@ function setActiveRoom(room){
   loadRoomDraft();
 
 
-  // Dice Room: swap upload button to dice roll
-  if (pickFileBtn) {
+  // Dice Room: swap media button to dice roll
+  try { closeMediaMenu(); } catch {}
+  if (mediaBtn) {
     if (room === "diceroom") {
-      pickFileBtn.textContent = "🎲";
-      pickFileBtn.title = "Roll Dice";
+      mediaBtn.textContent = "🎲";
+      mediaBtn.title = "Roll Dice";
     } else {
-      pickFileBtn.textContent = "📷";
-      pickFileBtn.title = "Upload";
+      mediaBtn.textContent = "＋";
+      mediaBtn.title = "Media";
     }
   }
   document.querySelectorAll(".chan").forEach(el=>{

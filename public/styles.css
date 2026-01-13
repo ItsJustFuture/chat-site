@@ -2912,6 +2912,55 @@ body.dice-room .sys .diceFace{
   color:var(--inputText);
   outline:none;
 }
+
+/* Unified media menu (pop-up above composer) */
+#mediaBtn{
+  width:44px;
+  height:44px;
+  border-radius:14px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size:26px;
+  line-height:1;
+}
+.mediaMenu{
+  position:absolute;
+  left:12px;
+  bottom: calc(100% + 10px);
+  display:flex;
+  gap:10px;
+  padding:10px 12px;
+  border-radius:18px;
+  border:1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  box-shadow: var(--shadowMd);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 200;
+}
+.mediaMenu[hidden]{ display:none; }
+.mediaMenuItem{
+  border:0;
+  background: color-mix(in srgb, var(--panel2) 70%, transparent);
+  color: var(--text);
+  padding:10px 12px;
+  border-radius:16px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:6px;
+  min-width:74px;
+  cursor:pointer;
+  box-shadow: var(--shadowSm);
+}
+.mediaMenuItem:active{ transform: translateY(1px); }
+.mediaIcon{ font-size:22px; line-height:1; }
+.mediaLabel{ font-weight:800; font-size:12px; letter-spacing:.2px; }
+.mediaMenuItem.recording{
+  outline:2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent), var(--shadowSm);
+}
 .inputBar #sendBtn,
 .dmInput #dmSendBtn{
   order:4;

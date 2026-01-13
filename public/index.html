@@ -369,11 +369,26 @@
 <button aria-label="Cancel reply" class="iconBtn smallIcon" id="replyPreviewClose" type="button">✕</button>
 </div>
 <div class="inputBar">
-<input id="msgInput" maxlength="800" placeholder="Message main" type="text"/>
-<!-- hidden native input -->
-<input accept="image/*,video/mp4,video/quicktime" id="fileInput" type="file"/>
-<!-- camera icon button -->
-<button class="iconBtn" id="pickFileBtn" title="Upload" type="button">📷</button>
+  <input id="msgInput" maxlength="800" placeholder="Message main" type="text"/>
+
+  <!-- hidden native inputs -->
+  <input accept="image/*,video/mp4,video/quicktime" id="fileInput" type="file"/>
+  <input accept="audio/*" id="audioFileInput" type="file"/>
+
+  <!-- unified media button + pop-up menu -->
+  <button class="iconBtn" id="mediaBtn" title="Media" type="button">＋</button>
+  <div class="mediaMenu" hidden="" id="mediaMenu">
+    <button class="mediaMenuItem" id="mediaMenuImage" type="button" title="Upload image">
+      <span class="mediaIcon">🖼️</span><span class="mediaLabel">Image</span>
+    </button>
+    <button class="mediaMenuItem" id="mediaMenuAudioUpload" type="button" title="Upload audio">
+      <span class="mediaIcon">🎵</span><span class="mediaLabel">Audio</span>
+    </button>
+    <button class="mediaMenuItem" id="mediaMenuVoice" type="button" title="Record voice">
+      <span class="mediaIcon">🎙️</span><span class="mediaLabel" id="mediaVoiceLabel">Voice</span>
+    </button>
+  </div>
+
 <div aria-label="Tone indicator" class="tonePicker" id="tonePicker"></div>
 <button class="btn" id="sendBtn" type="button">Send</button>
 <div class="mentionDropdown" id="mentionDropdown"></div>
