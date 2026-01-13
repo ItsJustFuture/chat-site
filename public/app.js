@@ -12222,7 +12222,33 @@ initAppealsDurationSelect();
     try { socket.removeAllListeners(); } catch {}
     try { socket.disconnect(); } catch {}
   }
-  socket = io();
+  socket = io({
+    transports: ["websocket", "polling"],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 500,
+    reconnectionDelayMax: 4000,
+    timeout: 15000,
+  });
+
+  // ---- Mobile suspend/resume: treat common disconnect reasons as benign ----
+  let suppressRealtimeNoticesUntil = 0;
+
+  function suppressRealtimeNoticesFor(ms = 5000){
+    suppressRealtimeNoticesUntil = Date.now() + ms;
+  }
+
+  function isBenignDisconnect(reason){
+    const r = String(reason || "").toLowerCase();
+    return (
+      Date.now() < suppressRealtimeNoticesUntil ||
+      r === "transport close" ||
+      r === "ping timeout" ||
+      r === "io client disconnect" ||
+      r === "io server disconnect"
+    );
+  }
+
   socket.on("connect", () => {
     try{
       socket.emit("client:hello", {
@@ -12250,8 +12276,10 @@ initAppealsDurationSelect();
     updateIrisLolaTogetherClass();
   });
   socket.on("connect_error", (err) => {
-  addSystem(`⚠️ Realtime connection failed: ${err?.message || err}`);
-});
+    // Very common during resume/network switching; avoid spooking users
+    if(Date.now() < suppressRealtimeNoticesUntil) return;
+    addSystem(`⚠️ Realtime connection failed: ${err?.message || err}`);
+  });
 
 
   socket.on("featureFlags:update", (flags={})=>{
@@ -12279,9 +12307,42 @@ initAppealsDurationSelect();
   });
 
 socket.on("disconnect", (reason) => {
+  if(isBenignDisconnect(reason)) return;
   addSystem(`⚠️ Disconnected: ${reason}`);
 });
-  socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
+  
+
+// Force a clean reconnect when returning from background (iOS Safari will often suspend sockets)
+document.addEventListener("visibilitychange", () => {
+  if(!socket) return;
+
+  if(document.visibilityState === "hidden"){
+    // Suppress scary notices while the app is backgrounded
+    suppressRealtimeNoticesFor(60_000);
+    try{ socket.disconnect(); }catch(_){}
+    return;
+  }
+
+  // Visible again
+  suppressRealtimeNoticesFor(5000);
+  if(!socket.connected){
+    try{ socket.connect(); }catch(_){}
+  }
+
+  // Re-join current room after reconnect (extra defensive)
+  setTimeout(() => {
+    try{ joinRoom(currentRoom); }catch(_){}
+  }, 400);
+});
+
+window.addEventListener("online", () => {
+  if(!socket) return;
+  suppressRealtimeNoticesFor(5000);
+  if(!socket.connected){
+    try{ socket.connect(); }catch(_){}
+  }
+});
+socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   socket.on("changelog updated", ()=>{
     changelogDirty = true;
     if(rightPanelMode === "menu" && activeMenuTab === "changelog") loadChangelog(true);
