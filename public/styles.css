@@ -3078,6 +3078,13 @@ body:not(.polish-pack) .tonePicker{
   width:1px; height:1px;
   opacity:0;
 }
+#audioFileInput{
+  position:absolute;
+  left:-9999px;
+  width:1px; height:1px;
+  opacity:0;
+}
+
 
 .replyPreview{ display:none; align-items:center; gap:10px; padding:8px 12px; margin:8px 12px; background:color-mix(in srgb, var(--panel) 80%, transparent); border:1px solid var(--border); border-radius:var(--radiusLg); }
 .replyPreview.show{ display:flex; }
