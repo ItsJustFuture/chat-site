@@ -949,7 +949,13 @@ const sessionMiddleware = session({
 app.use(sessionMiddleware);
 
 // ---- Static
-app.use("/uploads", express.static(UPLOADS_DIR));
+app.use("/uploads", express.static(UPLOADS_DIR, {
+  setHeaders: (res, filePath) => {
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === ".mp3") res.setHeader("Content-Type", "audio/mpeg");
+    if (ext === ".m4a") res.setHeader("Content-Type", "audio/mp4");
+  },
+}));
 app.use("/avatars", express.static(AVATARS_DIR));
 app.use(express.static(PUBLIC_DIR));
 
@@ -6414,6 +6420,8 @@ app.delete("/profile/avatar", requireLogin, async (req, res) => {
 const MAX_IMAGE_GIF_BYTES = 25 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+const AUDIO_UPLOAD_ALLOWED_MIME = new Set(["audio/mpeg", "audio/mp4"]);
+const AUDIO_UPLOAD_ALLOWED_EXT = new Set([".mp3", ".m4a"]);
 
 function inferUploadMimeFromName(originalname){
   const name = String(originalname || "").toLowerCase();
@@ -6452,6 +6460,7 @@ app.post("/upload", requireLogin, (req, res) => {
     }
     if (!req.file) return res.status(400).send("No file");
 
+    const uploadKind = String(req.body?.uploadKind || "").trim();
     let mime = String(req.file.mimetype || "");
     if(!mime || mime === "application/octet-stream"){
       const inferred = inferUploadMimeFromName(req.file.originalname);
@@ -6470,6 +6479,16 @@ app.post("/upload", requireLogin, (req, res) => {
     if (!isImage && !isAudio && !isVideo) {
       cleanupUpload();
       return res.status(400).json({ message: "File type not allowed" });
+    }
+
+    if (isAudio && uploadKind === "audio-upload") {
+      const ext = path.extname(req.file.originalname || "").toLowerCase();
+      const mimeAllowed = AUDIO_UPLOAD_ALLOWED_MIME.has(mime);
+      const extAllowed = AUDIO_UPLOAD_ALLOWED_EXT.has(ext);
+      if (!mimeAllowed || !extAllowed) {
+        cleanupUpload();
+        return res.status(400).json({ message: "Audio upload supports MP3 or M4A only." });
+      }
     }
 
     if (isImage && req.file.size > MAX_IMAGE_GIF_BYTES) {
