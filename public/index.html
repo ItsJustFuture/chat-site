@@ -1758,5 +1758,36 @@
   </button>
 </div>
 
+
+<!-- === Voice Recorder Modal === -->
+<div id="voiceRecBackdrop" class="voice-rec-backdrop hidden" aria-hidden="true"></div>
+<div id="voiceRecModal" class="voice-rec-modal hidden" role="dialog" aria-modal="true" aria-label="Voice recorder">
+  <div class="voice-rec-card">
+    <div class="voice-rec-head">
+      <div class="voice-rec-title">Voice message</div>
+      <button id="voiceRecClose" class="voice-rec-x" type="button" aria-label="Close">✕</button>
+    </div>
+
+    <div class="voice-rec-body">
+      <div class="voice-rec-status">
+        <div id="voiceRecTimer" class="voice-rec-timer">00:00</div>
+        <div id="voiceRecWave" class="voice-rec-wave" aria-hidden="true"></div>
+      </div>
+
+      <audio id="voiceRecAudio" class="voice-rec-audio hidden" controls></audio>
+
+      <div class="voice-rec-actions">
+        <button id="voiceRecStartStop" class="btn btnPrimary" type="button">Start</button>
+        <button id="voiceRecRerecord" class="btn btnSecondary" type="button" disabled>Re-record</button>
+        <button id="voiceRecSend" class="btn btnPrimary" type="button" disabled>Send</button>
+      </div>
+
+      <div id="voiceRecHint" class="small muted" style="margin-top:8px;">
+        Tip: tap Start, then Stop when you’re done. You can preview before sending.
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
