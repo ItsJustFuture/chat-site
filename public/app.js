@@ -2592,12 +2592,7 @@ mediaMenuAudioUpload?.addEventListener('click', (e)=>{
 mediaMenuVoice?.addEventListener('click', async (e)=>{
   e.preventDefault();
   e.stopPropagation();
-  // Prefer the full recorder modal (record → preview → send).
-  if (typeof openVoiceRecorderModal === "function") {
-    closeMediaMenu();
-    return openVoiceRecorderModal();
-  }
-  // Fallback: tap-to-record/tap-to-stop quick mode.
+  // Keep menu open while recording so the label can show Stop
   try {
     if(voiceRec?.recorder && voiceRec.recorder.state === 'recording'){
       await stopVoiceRec();
@@ -2606,6 +2601,7 @@ mediaMenuVoice?.addEventListener('click', async (e)=>{
     }
   } catch(err){
     addSystem(`Voice recording failed: ${err?.message || 'Unknown error'}`);
+    // If mic fails, ensure we are not stuck in 'open' state
     mediaVoiceLabel && (mediaVoiceLabel.textContent = 'Voice');
     mediaMenuVoice?.classList.remove('recording');
   }
@@ -2763,7 +2759,8 @@ hideAllDmQuickBars();
 // DM media upload
 dmPickFileBtn?.addEventListener("click", () => { dmFileInput?.click(); });
 dmFileInput?.addEventListener("change", async () => {
-  const file = dmFileInput.files && dmFileInput.files[0] ? dmFileInput.files[0] : null;
+  const fileRaw = dmFileInput.files && dmFileInput.files[0] ? dmFileInput.files[0] : null;
+  const file = normalizeSelectedFile(fileRaw);
   if(!file) return;
   // reset input so the same file can be re-selected
   try{ dmFileInput.value = ""; }catch{}
@@ -8074,248 +8071,6 @@ function stopVoiceRecording(){
   mediaMenuVoice?.classList.remove("recording");
 }
 
-// Aliases used by older UI handlers (bottom sheet / menu)
-async function startVoiceRec(){ return startVoiceRecording(); }
-async function stopVoiceRec(){ return stopVoiceRecording(); }
-
-/* === Voice Recorder Modal (record → preview → send) === */
-const voiceRecBackdrop = document.getElementById("voiceRecBackdrop");
-const voiceRecModal = document.getElementById("voiceRecModal");
-const voiceRecClose = document.getElementById("voiceRecClose");
-const voiceRecTimer = document.getElementById("voiceRecTimer");
-const voiceRecWave = document.getElementById("voiceRecWave");
-const voiceRecAudio = document.getElementById("voiceRecAudio");
-const voiceRecStartStop = document.getElementById("voiceRecStartStop");
-const voiceRecRerecord = document.getElementById("voiceRecRerecord");
-const voiceRecSend = document.getElementById("voiceRecSend");
-const voiceRecHint = document.getElementById("voiceRecHint");
-
-let vr = {
-  stream: null,
-  recorder: null,
-  chunks: [],
-  blob: null,
-  url: null,
-  mime: "",
-  startedAt: 0,
-  timerInt: null,
-  isRecording: false
-};
-
-function vrPad(n){ return String(n).padStart(2, "0"); }
-function vrSetTime(ms){
-  const s = Math.max(0, Math.floor(ms/1000));
-  const mm = Math.floor(s/60);
-  const ss = s % 60;
-  if (voiceRecTimer) voiceRecTimer.textContent = `${vrPad(mm)}:${vrPad(ss)}`;
-}
-function vrStopTimer(){
-  try { if (vr.timerInt) clearInterval(vr.timerInt); } catch {}
-  vr.timerInt = null;
-}
-function vrStartTimer(){
-  vrStopTimer();
-  vr.startedAt = Date.now();
-  vrSetTime(0);
-  vr.timerInt = setInterval(()=> vrSetTime(Date.now() - vr.startedAt), 250);
-}
-
-function vrCleanupAudio(){
-  try { if (vr.url) URL.revokeObjectURL(vr.url); } catch {}
-  vr.url = null;
-  vr.blob = null;
-  vr.mime = "";
-  if (voiceRecAudio) {
-    voiceRecAudio.pause?.();
-    voiceRecAudio.removeAttribute("src");
-    voiceRecAudio.load?.();
-    voiceRecAudio.classList.add("hidden");
-  }
-}
-function vrResetUi(){
-  vrStopTimer();
-  vrSetTime(0);
-  vrCleanupAudio();
-  if (voiceRecWave) voiceRecWave.classList.remove("recording");
-  if (voiceRecStartStop) voiceRecStartStop.textContent = "Start";
-  if (voiceRecRerecord) { voiceRecRerecord.disabled = true; }
-  if (voiceRecSend) { voiceRecSend.disabled = true; }
-  if (voiceRecHint) voiceRecHint.textContent = "Tip: tap Start, then Stop when you’re done. You can preview before sending.";
-}
-
-function vrClose(){
-  if (!voiceRecModal || !voiceRecBackdrop) return;
-  try {
-    if (vr.recorder && vr.recorder.state === "recording") {
-      vr.recorder.stop();
-    }
-  } catch {}
-  try { vr.stream?.getTracks?.().forEach(t=>t.stop()); } catch {}
-  vr.stream = null;
-  vr.recorder = null;
-  vr.chunks = [];
-  vr.isRecording = false;
-  vrResetUi();
-  voiceRecModal.classList.add("hidden");
-  voiceRecBackdrop.classList.add("hidden");
-  voiceRecBackdrop.setAttribute("aria-hidden", "true");
-}
-
-async function vrStart(){
-  if (vr.isRecording) return;
-  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-    const msg = "Voice notes aren't supported on this browser.";
-    addSystem?.(msg);
-    if (voiceRecHint) voiceRecHint.textContent = msg;
-    return;
-  }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const candidates = [
-      "audio/mp4",                 // iOS Safari often prefers this
-      "audio/webm;codecs=opus",
-      "audio/webm",
-      "audio/ogg;codecs=opus",
-    ];
-    let mimeType = "";
-    for (const t of candidates) {
-      try {
-        if (MediaRecorder.isTypeSupported?.(t)) { mimeType = t; break; }
-      } catch {}
-    }
-    const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-
-    vrCleanupAudio();
-    vr.stream = stream;
-    vr.recorder = rec;
-    vr.chunks = [];
-    vr.mime = rec.mimeType || mimeType || "";
-    vr.isRecording = true;
-
-    if (voiceRecWave) voiceRecWave.classList.add("recording");
-    if (voiceRecStartStop) voiceRecStartStop.textContent = "Stop";
-    if (voiceRecRerecord) voiceRecRerecord.disabled = true;
-    if (voiceRecSend) voiceRecSend.disabled = true;
-    if (voiceRecHint) voiceRecHint.textContent = "Recording… tap Stop when you’re done.";
-
-    rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) vr.chunks.push(ev.data); };
-    rec.onstop = () => {
-      vr.isRecording = false;
-      vrStopTimer();
-      try { vr.stream?.getTracks?.().forEach(t=>t.stop()); } catch {}
-      vr.stream = null;
-
-      const blob = new Blob(vr.chunks, { type: vr.mime || "audio/webm" });
-      vr.blob = blob;
-      try { vr.url = URL.createObjectURL(blob); } catch {}
-
-      if (voiceRecAudio && vr.url) {
-        voiceRecAudio.src = vr.url;
-        voiceRecAudio.classList.remove("hidden");
-      }
-      if (voiceRecWave) voiceRecWave.classList.remove("recording");
-      if (voiceRecStartStop) voiceRecStartStop.textContent = "Start";
-      if (voiceRecRerecord) voiceRecRerecord.disabled = false;
-      if (voiceRecSend) voiceRecSend.disabled = false;
-      if (voiceRecHint) voiceRecHint.textContent = "Preview it, then tap Send (or Re-record).";
-    };
-
-    vrStartTimer();
-    rec.start();
-  } catch (e) {
-    const msg = "Microphone permission denied.";
-    addSystem?.(msg);
-    if (voiceRecHint) voiceRecHint.textContent = msg;
-    try { vr.stream?.getTracks?.().forEach(t=>t.stop()); } catch {}
-    vr.stream = null;
-    vr.recorder = null;
-    vr.isRecording = false;
-    if (voiceRecWave) voiceRecWave.classList.remove("recording");
-    if (voiceRecStartStop) voiceRecStartStop.textContent = "Start";
-  }
-}
-
-function vrStop(){
-  if (!vr.recorder) return;
-  try { vr.recorder.stop(); } catch {}
-  try { vr.recorder = null; } catch {}
-}
-
-async function vrSend(){
-  if (!vr.blob) return;
-  const mime = vr.blob.type || vr.mime || "audio/webm";
-  const ext = mime.includes("mp4") ? "m4a" : (mime.includes("ogg") ? "ogg" : "webm");
-  const file = new File([vr.blob], `voice-${Date.now()}.${ext}`, { type: mime });
-
-  const validation = validateUploadFile(file);
-  if (!validation?.ok) {
-    const msg = validation?.message || "Voice note not allowed.";
-    addSystem?.(msg);
-    if (voiceRecHint) voiceRecHint.textContent = msg;
-    return;
-  }
-
-  // DM if a DM thread is active, otherwise room chat.
-  const isDm = !!activeDmId;
-  try {
-    if (isDm) {
-      dmPendingAttachment = null;
-      dmUploadToken = `${Date.now()}-${Math.random()}`;
-      const token = dmUploadToken;
-      setDmUploadingState?.(true);
-      const up = await uploadChatFileWithProgress(file);
-      if (token !== dmUploadToken) return;
-      dmPendingAttachment = { url: up.url, mime: up.mime, type: up.type, size: up.size };
-      dmUploadToken = null;
-      setDmUploadingState?.(false);
-      sendDmMessage?.();
-    } else {
-      roomPendingAttachment = null;
-      roomUploadToken = `${Date.now()}-${Math.random()}`;
-      const token = roomUploadToken;
-      setRoomUploadingState?.(true);
-      const up = await uploadChatFileWithProgress(file);
-      if (token !== roomUploadToken) return;
-      roomPendingAttachment = { url: up.url, mime: up.mime, type: up.type, size: up.size };
-      roomUploadToken = null;
-      setRoomUploadingState?.(false);
-      sendMessage?.();
-    }
-    vrClose();
-  } catch (e) {
-    const msg = String(e?.message || "Upload failed.");
-    if (isDm) setDmNotice?.(msg); else addSystem?.(msg);
-    if (isDm) { try{ setDmUploadingState?.(false);}catch{}; dmUploadToken=null; dmPendingAttachment=null; }
-    else { try{ setRoomUploadingState?.(false);}catch{}; roomUploadToken=null; roomPendingAttachment=null; }
-    if (voiceRecHint) voiceRecHint.textContent = msg;
-  }
-}
-
-function openVoiceRecorderModal(){
-  if (!voiceRecModal || !voiceRecBackdrop) {
-    // fallback
-    return startVoiceRecording();
-  }
-  vrResetUi();
-  voiceRecModal.classList.remove("hidden");
-  voiceRecBackdrop.classList.remove("hidden");
-  voiceRecBackdrop.setAttribute("aria-hidden", "false");
-}
-
-voiceRecBackdrop?.addEventListener("click", vrClose);
-voiceRecClose?.addEventListener("click", vrClose);
-
-voiceRecStartStop?.addEventListener("click", () => {
-  if (vr.isRecording) vrStop();
-  else vrStart();
-});
-voiceRecRerecord?.addEventListener("click", async () => {
-  vrCleanupAudio();
-  vrSetTime(0);
-  await vrStart();
-});
-voiceRecSend?.addEventListener("click", vrSend);
-
 mediaMenuVoice?.addEventListener("click", async () => {
   // don't close menu while recording; toggle start/stop
   if (voiceRec.recorder) {
@@ -8327,8 +8082,41 @@ mediaMenuVoice?.addEventListener("click", async () => {
 });
 
 // upload preview
+
+function inferMimeFromFilename(filename){
+  const name = String(filename || "").toLowerCase();
+  const ext = (name.includes(".") ? name.split(".").pop() : "").slice(0, 10);
+  switch(ext){
+    case "mp3": return "audio/mpeg";
+    case "m4a": return "audio/mp4";
+    case "aac": return "audio/aac";
+    case "wav": return "audio/wav";
+    case "ogg": return "audio/ogg";
+    case "oga": return "audio/ogg";
+    case "opus": return "audio/opus";
+    case "webm": return "audio/webm";
+    default: return "";
+  }
+}
+function normalizeSelectedFile(file){
+  if(!file) return file;
+  const mime = String(file.type || "");
+  if(mime && mime !== "application/octet-stream") return file;
+  const inferred = inferMimeFromFilename(file.name);
+  if(!inferred) return file;
+  try{
+    return new File([file], file.name, { type: inferred, lastModified: file.lastModified });
+  }catch{
+    return file;
+  }
+}
+
 function validateUploadFile(file){
-  const mime = String(file?.type || "");
+  let mime = String(file?.type || "");
+  if(!mime || mime === "application/octet-stream"){
+    const inferred = inferMimeFromFilename(file?.name);
+    if(inferred) mime = inferred;
+  }
   const isImage = /^image\//i.test(mime);
   const isAudio = /^audio\//i.test(mime);
   const isVideo = /^video\//i.test(mime);
@@ -8389,7 +8177,8 @@ function clearUploadPreview(){
   uploadProgress.style.width="0%";
 }
 fileInput.addEventListener("change", () => {
-  const f=fileInput.files?.[0];
+  const fRaw=fileInput.files?.[0];
+  const f=normalizeSelectedFile(fRaw);
   if(!f) return clearUploadPreview();
   roomPendingAttachment = null;
   const validation = validateUploadFile(f);
@@ -8417,7 +8206,8 @@ fileInput.addEventListener("change", () => {
 });
 
 audioFileInput?.addEventListener("change", () => {
-  const f = audioFileInput.files?.[0];
+  const fRaw = audioFileInput.files?.[0];
+  const f = normalizeSelectedFile(fRaw);
   if(!f) return clearUploadPreview();
   roomPendingAttachment = null;
   const validation = validateUploadFile(f);
@@ -13734,6 +13524,10 @@ try {
 /* === Media Bottom Sheet Logic === */
 const mediaSheet = document.getElementById("mediaSheet");
 const mediaBackdrop = document.getElementById("mediaSheetBackdrop");
+// Reuse existing refs if already declared earlier in the file
+const mediaBtnEl = (typeof mediaBtn !== "undefined" && mediaBtn) ? mediaBtn : document.getElementById("mediaBtn");
+const fileInputEl = (typeof fileInput !== "undefined" && fileInput) ? fileInput : document.getElementById("fileInput");
+const audioFileInputEl = (typeof audioFileInput !== "undefined" && audioFileInput) ? audioFileInput : document.getElementById("audioFileInput");
 
 let sheetStartY = null;
 
@@ -13756,7 +13550,7 @@ function closeMediaSheet() {
   }, 280);
 }
 
-mediaBtn?.addEventListener("click", e => {
+mediaBtnEl?.addEventListener("click", e => {
   e.preventDefault();
   e.stopPropagation();
   openMediaSheet();
@@ -13765,19 +13559,18 @@ mediaBtn?.addEventListener("click", e => {
 document.getElementById("mediaPickImage")?.addEventListener("click", () => {
   haptic();
   closeMediaSheet();
-  fileInput?.click();
+  fileInputEl?.click();
 });
 
 document.getElementById("mediaPickAudio")?.addEventListener("click", () => {
   haptic();
   closeMediaSheet();
-  audioFileInput?.click();
+  audioFileInputEl?.click();
 });
 
 document.getElementById("mediaPickVoice")?.addEventListener("click", () => {
   haptic();
   closeMediaSheet();
-  if (typeof openVoiceRecorderModal === "function") return openVoiceRecorderModal();
   if (typeof startVoiceRec === "function") startVoiceRec();
 });
 
