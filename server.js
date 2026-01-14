@@ -6414,6 +6414,23 @@ app.delete("/profile/avatar", requireLogin, async (req, res) => {
 const MAX_IMAGE_GIF_BYTES = 25 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+
+function inferUploadMimeFromName(originalname){
+  const name = String(originalname || "").toLowerCase();
+  const ext = (name.includes(".") ? name.split(".").pop() : "").slice(0, 10);
+  switch(ext){
+    case "mp3": return "audio/mpeg";
+    case "m4a": return "audio/mp4";
+    case "aac": return "audio/aac";
+    case "wav": return "audio/wav";
+    case "ogg":
+    case "oga": return "audio/ogg";
+    case "opus": return "audio/opus";
+    case "webm": return "audio/webm";
+    default: return "";
+  }
+}
+
 const chatUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
@@ -6435,7 +6452,11 @@ app.post("/upload", requireLogin, (req, res) => {
     }
     if (!req.file) return res.status(400).send("No file");
 
-    const mime = String(req.file.mimetype || "");
+    let mime = String(req.file.mimetype || "");
+    if(!mime || mime === "application/octet-stream"){
+      const inferred = inferUploadMimeFromName(req.file.originalname);
+      if(inferred) mime = inferred;
+    }
     const role = req.session.user.role;
 
     const isImage = /^image\//i.test(mime);
