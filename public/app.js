@@ -2072,6 +2072,8 @@ let themeFilter = "all";
 const MAX_IMAGE_GIF_BYTES = 25 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+const AUDIO_UPLOAD_ALLOWED_MIME = new Set(["audio/mpeg", "audio/mp4"]);
+const AUDIO_UPLOAD_ALLOWED_EXT = new Set(["mp3", "m4a"]);
 
 let modalTargetUsername = null;
 let modalTargetUserId = null;
@@ -2564,57 +2566,6 @@ function toggleMediaMenu(){
   if(mediaMenuOpen) closeMediaMenu();
   else openMediaMenu();
 }
-
-// Wire up composer media button + menu (image/audio/voice)
-if(mediaBtn){
-  mediaBtn.addEventListener('click', (e)=>{
-    e.preventDefault();
-    e.stopPropagation();
-    toggleMediaMenu();
-  });
-}
-
-mediaMenuImage?.addEventListener('click', (e)=>{
-  e.preventDefault();
-  e.stopPropagation();
-  closeMediaMenu();
-  // Trigger the hidden native picker (iOS-friendly)
-  fileInput?.click();
-});
-
-mediaMenuAudioUpload?.addEventListener('click', (e)=>{
-  e.preventDefault();
-  e.stopPropagation();
-  closeMediaMenu();
-  audioFileInput?.click();
-});
-
-mediaMenuVoice?.addEventListener('click', async (e)=>{
-  e.preventDefault();
-  e.stopPropagation();
-  // Keep menu open while recording so the label can show Stop
-  try {
-    if(voiceRec?.recorder && voiceRec.recorder.state === 'recording'){
-      await stopVoiceRec();
-    } else {
-      await startVoiceRec();
-    }
-  } catch(err){
-    addSystem(`Voice recording failed: ${err?.message || 'Unknown error'}`);
-    // If mic fails, ensure we are not stuck in 'open' state
-    mediaVoiceLabel && (mediaVoiceLabel.textContent = 'Voice');
-    mediaMenuVoice?.classList.remove('recording');
-  }
-});
-
-
-// Click-away to close
-document.addEventListener("pointerdown", (e)=>{
-  if(!mediaMenuOpen) return;
-  const t = e.target;
-  if(mediaMenu?.contains(t) || mediaBtn?.contains(t)) return;
-  closeMediaMenu();
-});
 
 if(chatShell){
   jumpToLatestBtn = document.createElement("button");
@@ -8098,6 +8049,10 @@ function inferMimeFromFilename(filename){
     default: return "";
   }
 }
+function getFileExtension(filename){
+  const name = String(filename || "").toLowerCase();
+  return name.includes(".") ? name.split(".").pop() : "";
+}
 function normalizeSelectedFile(file){
   if(!file) return file;
   const mime = String(file.type || "");
@@ -8129,6 +8084,25 @@ function validateUploadFile(file){
     return { ok: false, message: `Max ${label} size is ${bytesToNice(maxBytes)}.` };
   }
   return { ok: true, isImage, isAudio, isVideo, maxBytes };
+}
+function validateAudioUploadFile(file){
+  const base = validateUploadFile(file);
+  if (!base.ok) return base;
+  if (!base.isAudio) {
+    return { ok: false, message: "Audio upload supports MP3 or M4A only." };
+  }
+  let mime = String(file?.type || "");
+  if(!mime || mime === "application/octet-stream"){
+    const inferred = inferMimeFromFilename(file?.name);
+    if(inferred) mime = inferred;
+  }
+  const ext = getFileExtension(file?.name);
+  const mimeAllowed = AUDIO_UPLOAD_ALLOWED_MIME.has(mime);
+  const extAllowed = AUDIO_UPLOAD_ALLOWED_EXT.has(ext);
+  if (!mimeAllowed || !extAllowed) {
+    return { ok: false, message: "Audio upload supports MP3 or M4A only." };
+  }
+  return base;
 }
 function setRoomUploadingState(isUploading){
   roomUploading = isUploading;
@@ -8210,7 +8184,7 @@ audioFileInput?.addEventListener("change", () => {
   const f = normalizeSelectedFile(fRaw);
   if(!f) return clearUploadPreview();
   roomPendingAttachment = null;
-  const validation = validateUploadFile(f);
+  const validation = validateAudioUploadFile(f);
   if(!validation.ok){
     addSystem(validation.message || "File not allowed.");
     audioFileInput.value = "";
@@ -8220,7 +8194,7 @@ audioFileInput?.addEventListener("change", () => {
   roomUploadToken = `${Date.now()}-${Math.random()}`;
   const token = roomUploadToken;
   setRoomUploadingState(true);
-  uploadChatFileWithProgress(f).then((up) => {
+  uploadChatFileWithProgress(f, { uploadKind: "audio-upload" }).then((up) => {
     if(token !== roomUploadToken) return;
     roomPendingAttachment = { url: up.url, mime: up.mime, type: up.type, size: up.size };
     roomUploadToken = null;
@@ -8245,10 +8219,11 @@ cancelUploadBtn.addEventListener("click", () => {
   setRoomUploadingState(false);
   clearUploadPreview();
 });
-function uploadChatFileWithProgress(file){
+function uploadChatFileWithProgress(file, options = {}){
   return new Promise((resolve,reject)=>{
     const form=new FormData();
     form.append("file", file);
+    if (options?.uploadKind) form.append("uploadKind", String(options.uploadKind));
     const xhr=new XMLHttpRequest();
     uploadXhr=xhr;
     xhr.open("POST","/upload");
@@ -13571,7 +13546,7 @@ document.getElementById("mediaPickAudio")?.addEventListener("click", () => {
 document.getElementById("mediaPickVoice")?.addEventListener("click", () => {
   haptic();
   closeMediaSheet();
-  if (typeof startVoiceRec === "function") startVoiceRec();
+  if (typeof startVoiceRecording === "function") startVoiceRecording();
 });
 
 mediaBackdrop?.addEventListener("click", closeMediaSheet);
