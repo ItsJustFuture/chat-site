@@ -2565,6 +2565,49 @@ function toggleMediaMenu(){
   else openMediaMenu();
 }
 
+// Wire up composer media button + menu (image/audio/voice)
+if(mediaBtn){
+  mediaBtn.addEventListener('click', (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    toggleMediaMenu();
+  });
+}
+
+mediaMenuImage?.addEventListener('click', (e)=>{
+  e.preventDefault();
+  e.stopPropagation();
+  closeMediaMenu();
+  // Trigger the hidden native picker (iOS-friendly)
+  fileInput?.click();
+});
+
+mediaMenuAudioUpload?.addEventListener('click', (e)=>{
+  e.preventDefault();
+  e.stopPropagation();
+  closeMediaMenu();
+  audioFileInput?.click();
+});
+
+mediaMenuVoice?.addEventListener('click', async (e)=>{
+  e.preventDefault();
+  e.stopPropagation();
+  // Keep menu open while recording so the label can show Stop
+  try {
+    if(voiceRec?.recorder && voiceRec.recorder.state === 'recording'){
+      await stopVoiceRec();
+    } else {
+      await startVoiceRec();
+    }
+  } catch(err){
+    addSystem(`Voice recording failed: ${err?.message || 'Unknown error'}`);
+    // If mic fails, ensure we are not stuck in 'open' state
+    mediaVoiceLabel && (mediaVoiceLabel.textContent = 'Voice');
+    mediaMenuVoice?.classList.remove('recording');
+  }
+});
+
+
 // Click-away to close
 document.addEventListener("pointerdown", (e)=>{
   if(!mediaMenuOpen) return;
