@@ -7513,3 +7513,72 @@ body.ambientfx.ambient-nsfw{ }
 .audioAttachment .audioNative{
   width:100%;
 }
+
+
+
+/* === Media Bottom Sheet === */
+.media-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 9998;
+  touch-action: none;
+}
+
+.media-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    180deg,
+    var(--panel-bg, #111),
+    var(--panel-bg-alt, #0b0b0b)
+  );
+  border-radius: 18px 18px 0 0;
+  padding: 10px 16px 20px;
+  z-index: 9999;
+  transform: translateY(100%);
+  transition: transform 0.28s cubic-bezier(.2,.8,.2,1);
+  will-change: transform;
+}
+
+.media-sheet.show { transform: translateY(0); }
+
+.media-sheet-handle {
+  width: 42px;
+  height: 4px;
+  background: rgba(255,255,255,0.35);
+  border-radius: 2px;
+  margin: 8px auto 14px;
+}
+
+.media-sheet-btn {
+  width: 100%;
+  padding: 14px;
+  margin-bottom: 10px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.06);
+  color: #fff;
+  border: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 16px;
+}
+
+.media-sheet-btn:active {
+  background: rgba(255,255,255,0.12);
+}
+
+.media-icon { font-size: 20px; }
+
+.media-sheet-cancel {
+  width: 100%;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255,80,80,0.15);
+  color: #ff6b6b;
+  border: none;
+  font-size: 16px;
+}

@@ -13483,3 +13483,79 @@ try {
   const oldOpenMyProfile = openMyProfile;
   // openMyProfile exists; it opens modal and fills UI. We'll just hook after it runs.
 } catch {}
+
+
+/* === Media Bottom Sheet Logic === */
+const mediaBtn = document.getElementById("mediaBtn");
+const mediaSheet = document.getElementById("mediaSheet");
+const mediaBackdrop = document.getElementById("mediaSheetBackdrop");
+const fileInput = document.getElementById("fileInput");
+const audioFileInput = document.getElementById("audioFileInput");
+
+let sheetStartY = null;
+
+function haptic() {
+  if (navigator.vibrate) navigator.vibrate(10);
+}
+
+function openMediaSheet() {
+  haptic();
+  mediaBackdrop.classList.remove("hidden");
+  mediaSheet.classList.remove("hidden");
+  requestAnimationFrame(() => mediaSheet.classList.add("show"));
+}
+
+function closeMediaSheet() {
+  mediaSheet.classList.remove("show");
+  setTimeout(() => {
+    mediaSheet.classList.add("hidden");
+    mediaBackdrop.classList.add("hidden");
+  }, 280);
+}
+
+mediaBtn?.addEventListener("click", e => {
+  e.preventDefault();
+  e.stopPropagation();
+  openMediaSheet();
+});
+
+document.getElementById("mediaPickImage")?.addEventListener("click", () => {
+  haptic();
+  closeMediaSheet();
+  fileInput?.click();
+});
+
+document.getElementById("mediaPickAudio")?.addEventListener("click", () => {
+  haptic();
+  closeMediaSheet();
+  audioFileInput?.click();
+});
+
+document.getElementById("mediaPickVoice")?.addEventListener("click", () => {
+  haptic();
+  closeMediaSheet();
+  if (typeof startVoiceRec === "function") startVoiceRec();
+});
+
+mediaBackdrop?.addEventListener("click", closeMediaSheet);
+document.getElementById("mediaSheetCancel")?.addEventListener("click", closeMediaSheet);
+
+mediaSheet?.addEventListener("touchstart", e => {
+  sheetStartY = e.touches[0].clientY;
+});
+
+mediaSheet?.addEventListener("touchmove", e => {
+  if (sheetStartY === null) return;
+  const delta = e.touches[0].clientY - sheetStartY;
+  if (delta > 80) closeMediaSheet();
+});
+
+window.visualViewport?.addEventListener("resize", () => {
+  if (!mediaSheet.classList.contains("hidden")) closeMediaSheet();
+});
+
+const composerForm = document.querySelector(".chat-composer form");
+composerForm?.addEventListener("submit", e => {
+  e.preventDefault();
+  e.stopPropagation();
+});
