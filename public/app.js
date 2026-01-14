@@ -2545,6 +2545,40 @@ const mediaMenuAudioUpload = document.getElementById("mediaMenuAudioUpload");
 const mediaMenuVoice = document.getElementById("mediaMenuVoice");
 const mediaVoiceLabel = document.getElementById("mediaVoiceLabel");
 
+const mediaSheet = document.getElementById("mediaSheet");
+const mediaBackdrop = document.getElementById("mediaSheetBackdrop");
+const mediaPickImage = document.getElementById("mediaPickImage");
+const mediaPickAudio = document.getElementById("mediaPickAudio");
+const mediaPickVoice = document.getElementById("mediaPickVoice");
+const mediaSheetCancel = document.getElementById("mediaSheetCancel");
+
+let sheetStartY = null;
+
+function haptic(){
+  try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
+}
+
+function openMediaSheet(){
+  if(!mediaSheet || !mediaBackdrop) return;
+  haptic();
+  mediaBackdrop.classList.remove("hidden");
+  mediaSheet.classList.remove("hidden");
+  requestAnimationFrame(()=>mediaSheet.classList.add("show"));
+}
+
+function closeMediaSheet(){
+  if(!mediaSheet || !mediaBackdrop) return;
+  mediaSheet.classList.remove("show");
+  setTimeout(()=>{
+    mediaSheet.classList.add("hidden");
+    mediaBackdrop.classList.add("hidden");
+  }, 180);
+}
+
+function hasMediaSheet(){
+  return !!(mediaSheet && mediaBackdrop && mediaPickImage && mediaPickAudio && mediaPickVoice && mediaSheetCancel);
+}
+
 let mediaMenuOpen = false;
 let voiceRec = { recorder: null, stream: null, chunks: [], startedAt: 0 };
 
@@ -2561,6 +2595,11 @@ function openMediaMenu(){
   mediaBtn?.setAttribute("aria-expanded","true");
 }
 function toggleMediaMenu(){
+  if(hasMediaSheet()){
+    // Prefer bottom sheet when available (mobile)
+    openMediaSheet();
+    return;
+  }
   if(mediaMenuOpen) closeMediaMenu();
   else openMediaMenu();
 }
@@ -2572,6 +2611,55 @@ if(mediaBtn){
     e.stopPropagation();
     toggleMediaMenu();
   });
+}
+
+// Bottom sheet wiring (if present)
+if (hasMediaSheet()) {
+  mediaBtn?.setAttribute("aria-haspopup", "dialog");
+
+  mediaBackdrop?.addEventListener("click", closeMediaSheet);
+  mediaSheetCancel?.addEventListener("click", closeMediaSheet);
+
+  mediaPickImage?.addEventListener("click", (e)=>{
+    e.preventDefault(); e.stopPropagation();
+    closeMediaSheet();
+    fileInput?.click();
+  });
+
+  mediaPickAudio?.addEventListener("click", (e)=>{
+    e.preventDefault(); e.stopPropagation();
+    closeMediaSheet();
+    audioFileInput?.click();
+  });
+
+  mediaPickVoice?.addEventListener("click", async (e)=>{
+    e.preventDefault(); e.stopPropagation();
+    // Toggle start/stop recording
+    if (voiceRec.recorder) {
+      stopVoiceRecording();
+      closeMediaSheet();
+      return;
+    }
+    closeMediaSheet();
+    await startVoiceRecording();
+  });
+
+  mediaSheet?.addEventListener("touchstart", (e)=>{
+    sheetStartY = e.touches?.[0]?.clientY ?? null;
+  }, { passive:true });
+
+  mediaSheet?.addEventListener("touchmove", (e)=>{
+    if (sheetStartY === null) return;
+    const delta = (e.touches?.[0]?.clientY ?? sheetStartY) - sheetStartY;
+    if (delta > 80) closeMediaSheet();
+  }, { passive:true });
+
+  // If keyboard opens while sheet is up, close it to avoid layout glitches on iOS
+  try {
+    window.visualViewport?.addEventListener("resize", ()=>{
+      if (!mediaSheet.classList.contains("hidden")) closeMediaSheet();
+    });
+  } catch {}
 }
 
 mediaMenuImage?.addEventListener('click', (e)=>{
@@ -2589,23 +2677,7 @@ mediaMenuAudioUpload?.addEventListener('click', (e)=>{
   audioFileInput?.click();
 });
 
-mediaMenuVoice?.addEventListener('click', async (e)=>{
-  e.preventDefault();
-  e.stopPropagation();
-  // Keep menu open while recording so the label can show Stop
-  try {
-    if(voiceRec?.recorder && voiceRec.recorder.state === 'recording'){
-      await stopVoiceRec();
-    } else {
-      await startVoiceRec();
-    }
-  } catch(err){
-    addSystem(`Voice recording failed: ${err?.message || 'Unknown error'}`);
-    // If mic fails, ensure we are not stuck in 'open' state
-    mediaVoiceLabel && (mediaVoiceLabel.textContent = 'Voice');
-    mediaMenuVoice?.classList.remove('recording');
-  }
-});
+/* mediaMenuVoice handler wired later (voice recording section) */
 
 
 // Click-away to close
@@ -13483,79 +13555,3 @@ try {
   const oldOpenMyProfile = openMyProfile;
   // openMyProfile exists; it opens modal and fills UI. We'll just hook after it runs.
 } catch {}
-
-
-/* === Media Bottom Sheet Logic === */
-const mediaBtn = document.getElementById("mediaBtn");
-const mediaSheet = document.getElementById("mediaSheet");
-const mediaBackdrop = document.getElementById("mediaSheetBackdrop");
-const fileInput = document.getElementById("fileInput");
-const audioFileInput = document.getElementById("audioFileInput");
-
-let sheetStartY = null;
-
-function haptic() {
-  if (navigator.vibrate) navigator.vibrate(10);
-}
-
-function openMediaSheet() {
-  haptic();
-  mediaBackdrop.classList.remove("hidden");
-  mediaSheet.classList.remove("hidden");
-  requestAnimationFrame(() => mediaSheet.classList.add("show"));
-}
-
-function closeMediaSheet() {
-  mediaSheet.classList.remove("show");
-  setTimeout(() => {
-    mediaSheet.classList.add("hidden");
-    mediaBackdrop.classList.add("hidden");
-  }, 280);
-}
-
-mediaBtn?.addEventListener("click", e => {
-  e.preventDefault();
-  e.stopPropagation();
-  openMediaSheet();
-});
-
-document.getElementById("mediaPickImage")?.addEventListener("click", () => {
-  haptic();
-  closeMediaSheet();
-  fileInput?.click();
-});
-
-document.getElementById("mediaPickAudio")?.addEventListener("click", () => {
-  haptic();
-  closeMediaSheet();
-  audioFileInput?.click();
-});
-
-document.getElementById("mediaPickVoice")?.addEventListener("click", () => {
-  haptic();
-  closeMediaSheet();
-  if (typeof startVoiceRec === "function") startVoiceRec();
-});
-
-mediaBackdrop?.addEventListener("click", closeMediaSheet);
-document.getElementById("mediaSheetCancel")?.addEventListener("click", closeMediaSheet);
-
-mediaSheet?.addEventListener("touchstart", e => {
-  sheetStartY = e.touches[0].clientY;
-});
-
-mediaSheet?.addEventListener("touchmove", e => {
-  if (sheetStartY === null) return;
-  const delta = e.touches[0].clientY - sheetStartY;
-  if (delta > 80) closeMediaSheet();
-});
-
-window.visualViewport?.addEventListener("resize", () => {
-  if (!mediaSheet.classList.contains("hidden")) closeMediaSheet();
-});
-
-const composerForm = document.querySelector(".chat-composer form");
-composerForm?.addEventListener("submit", e => {
-  e.preventDefault();
-  e.stopPropagation();
-});
