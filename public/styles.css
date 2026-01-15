@@ -6327,6 +6327,27 @@ body.polish-pack.polish-auras .presenceAura.isVip::after{
 .profileInfoRow .infoValue{ font-size: 12px; font-weight: 800; }
 .profileCustomEmpty .panelBox{ border-style: dashed; }
 
+/* Memory timeline */
+.memoryTimeline{ display:flex; flex-direction:column; gap:12px; }
+.memoryFilters{ position:sticky; top:0; z-index:3; background:var(--panel2); border:1px solid var(--border); border-radius:12px; padding:8px; }
+.memoryFilterRow{ display:flex; gap:8px; overflow-x:auto; padding-bottom:2px; }
+.memoryFilterRow::-webkit-scrollbar{ height:4px; }
+.memoryFilterChip{ border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:999px; padding:6px 12px; font-size:12px; white-space:nowrap; cursor:pointer; }
+.memoryFilterChip.active{ background:var(--accent); color:var(--btnPrimaryText); border-color:transparent; }
+.memoryFeatured{ display:flex; flex-direction:column; gap:8px; }
+.memoryFeaturedRow{ display:grid; grid-auto-flow:column; grid-auto-columns:minmax(220px, 1fr); gap:10px; overflow-x:auto; padding-bottom:4px; }
+.memoryTimelineList{ display:flex; flex-direction:column; gap:10px; }
+.memoryCard{ display:grid; grid-template-columns:40px 1fr; gap:10px; align-items:flex-start; }
+.memoryCardIcon{ width:36px; height:36px; border-radius:10px; display:grid; place-items:center; background:var(--panel); border:1px solid var(--border); font-size:18px; }
+.memoryCardHeader{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.memoryCardTitle{ font-weight:600; }
+.memoryCardMeta{ font-size:12px; color:var(--muted); margin-top:2px; }
+.memoryCardDesc{ font-size:13px; color:var(--text); margin-top:6px; }
+.memoryPinBtn.active{ color:var(--accent); }
+.memoryCard.compact .memoryCardDesc{ display:none; }
+.memoryCard.compact .memoryCardMeta{ margin-top:0; }
+.memoryEmptyState .panelBox{ border-style:dashed; }
+
 .profileMenu{
   display: grid;
   gap: 10px;

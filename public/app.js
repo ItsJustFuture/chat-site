@@ -751,6 +751,12 @@ let profileLikeState = { count: 0, liked: false, isSelf: false };
 let modalFriendInfo = null;
 let currentRoom = "main";
 let featureFlags = {};
+let memoryFeatureAvailable = false;
+let memoryEnabled = false;
+let memorySettingsLoaded = false;
+let memoryFilter = "all";
+let memoryLoading = false;
+const memoryCacheByFilter = new Map();
 function displayRoomName(room){ return room==="diceroom" ? "Dice Room" : room; }
 
 let lastUsers = [];
@@ -2850,12 +2856,14 @@ const profileStatusValue = document.getElementById("profileStatus");
 
 // tabs/views
 const tabProfile = document.getElementById("tabProfile");
+const tabTimeline = document.getElementById("tabTimeline");
 const tabCustomize = document.getElementById("tabCustomize");
 const tabActions = document.getElementById("tabActions");
 const addFriendBtn = document.getElementById("addFriendBtn");
 const declineFriendBtn = document.getElementById("declineFriendBtn");
 
 const viewAccount = document.getElementById("viewProfile");
+const viewTimeline = document.getElementById("viewTimeline");
 const viewMore = document.getElementById("viewActions");
 const viewAbout = document.getElementById("viewAbout");
 const viewModeration = document.getElementById("viewModeration");
@@ -2876,6 +2884,14 @@ const levelToastText = document.getElementById("levelToastText");
 const profileSheetVibes = document.getElementById("profileSheetVibes");
 const profileSheetOverlay = document.getElementById("profileSheetOverlay");
 
+const memoryFilterBar = document.getElementById("memoryFilterBar");
+const memoryFilterChips = Array.from(document.querySelectorAll(".memoryFilterChip"));
+const memoryFeaturedSection = document.getElementById("memoryFeaturedSection");
+const memoryFeaturedRow = document.getElementById("memoryFeaturedRow");
+const memoryTimelineList = document.getElementById("memoryTimelineList");
+const memoryEmptyState = document.getElementById("memoryEmptyState");
+const memoryTimelineMsg = document.getElementById("memoryTimelineMsg");
+
 const directBadgeColor = document.getElementById("directBadgeColor");
 const groupBadgeColor = document.getElementById("groupBadgeColor");
 const directBadgeColorText = document.getElementById("directBadgeColorText");
@@ -2885,6 +2901,9 @@ const saveBadgePrefsBtn = document.getElementById("saveBadgePrefsBtn");
 
 // my profile edit
 const myProfileEdit = document.getElementById("myProfileEdit");
+const memorySettingsPanel = document.getElementById("memorySettingsPanel");
+const memoryEnabledToggle = document.getElementById("memoryEnabledToggle");
+const memorySettingsMsg = document.getElementById("memorySettingsMsg");
 const avatarFile = document.getElementById("avatarFile");
 const headerColorA = document.getElementById("headerColorA");
 const headerColorB = document.getElementById("headerColorB");
@@ -8271,6 +8290,7 @@ function setTab(tab){
     el.classList.toggle("active", el.dataset.tab===tab);
   }
   if (viewAccount) viewAccount.style.display = tab==="profile" ? "block" : "none";
+  if (viewTimeline) viewTimeline.style.display = tab==="timeline" ? "block" : "none";
   if (viewCustom) viewCustom.style.display = tab==="customize" ? "block" : "none";
   if (viewMore) viewMore.style.display = tab==="actions" ? "block" : "none";
   if (tab !== "profile") setProfileEditMode(false);
@@ -8281,12 +8301,19 @@ function setTab(tab){
       loadChatFxPrefs({ force: true }).catch(() => {});
     }
   }
+  if (tab === "timeline") {
+    void loadMemories();
+  }
   syncProfileEditUi();
   focusActiveTab();
   const scrollHost = modal?.querySelector(".modalBody");
   if (scrollHost) scrollHost.scrollTop = 0;
 }
 tabCustomize?.addEventListener("click", ()=>setTab("customize"));
+tabTimeline?.addEventListener("click", async () => {
+  setTab("timeline");
+  await loadMemories();
+});
 
 function applyCustomizeVisibility(){
   const showCustomize = currentProfileIsSelf;
@@ -8339,6 +8366,16 @@ customizeBackBtns.forEach((btn) => {
 customizeSearch?.addEventListener("input", () => {
   const value = customizeSearch.value;
   filterCustomize(value);
+});
+
+memoryFilterChips.forEach((chip) => {
+  chip.addEventListener("click", async () => {
+    const next = chip.dataset.filter || "all";
+    if (memoryFilter === next) return;
+    memoryFilter = next;
+    updateMemoryFilterChips();
+    await loadMemories({ force: true });
+  });
 });
 
 // New profile edit menu + avatar action wiring
@@ -11133,6 +11170,7 @@ function updateProfileActions({ isSelf = false, canModerate = false } = {}){
     profileSettingsBtn.style.display = "none";
   }
   syncProfileEditUi();
+  updateMemoryVisibility();
   setMsgline(profileActionMsg, "");
 }
 
@@ -11964,6 +12002,164 @@ function syncCustomizationUI(){
   if (customizeMsg) customizeMsg.textContent = "";
 }
 
+function updateMemoryFilterChips(){
+  memoryFilterChips.forEach((chip) => {
+    const active = chip.dataset.filter === memoryFilter;
+    chip.classList.toggle("active", active);
+  });
+}
+
+function updateMemoryVisibility(){
+  const showTimeline = currentProfileIsSelf && memoryEnabled;
+  if (tabTimeline) tabTimeline.style.display = showTimeline ? "" : "none";
+  if (viewTimeline) viewTimeline.style.display = activeProfileTab === "timeline" && showTimeline ? "block" : "none";
+  if (!showTimeline && activeProfileTab === "timeline") setTab("profile");
+
+  const isOwner = roleRank(me?.role || "User") >= roleRank("Owner");
+  const showSettings = currentProfileIsSelf && isOwner && memoryFeatureAvailable;
+  if (memorySettingsPanel) memorySettingsPanel.style.display = showSettings ? "block" : "none";
+  if (memoryEnabledToggle) memoryEnabledToggle.checked = !!memoryEnabled;
+}
+
+function renderMemoryTimeline(){
+  if (!memoryTimelineList || !memoryFeaturedRow || !memoryEmptyState) return;
+  const list = memoryCacheByFilter.get(memoryFilter) || [];
+  const pinned = list.filter((m) => m.pinned);
+
+  memoryTimelineList.innerHTML = "";
+  memoryFeaturedRow.innerHTML = "";
+
+  if (pinned.length) {
+    if (memoryFeaturedSection) memoryFeaturedSection.style.display = "";
+    pinned.forEach((memory) => {
+      memoryFeaturedRow.appendChild(buildMemoryCard(memory, { compact: true }));
+    });
+  } else if (memoryFeaturedSection) {
+    memoryFeaturedSection.style.display = "none";
+  }
+
+  list.forEach((memory) => {
+    memoryTimelineList.appendChild(buildMemoryCard(memory));
+  });
+
+  memoryEmptyState.style.display = list.length ? "none" : "block";
+}
+
+function buildMemoryCard(memory, { compact = false } = {}){
+  const card = document.createElement("div");
+  card.className = `panelBox memoryCard${compact ? " compact" : ""}`;
+
+  const icon = document.createElement("div");
+  icon.className = "memoryCardIcon";
+  icon.textContent = memory.icon || "✨";
+
+  const body = document.createElement("div");
+  const header = document.createElement("div");
+  header.className = "memoryCardHeader";
+
+  const title = document.createElement("div");
+  title.className = "memoryCardTitle";
+  title.textContent = memory.title || "Memory";
+
+  const pinBtn = document.createElement("button");
+  pinBtn.className = "iconBtn smallIcon memoryPinBtn";
+  pinBtn.type = "button";
+  pinBtn.textContent = "📌";
+  pinBtn.setAttribute("aria-label", memory.pinned ? "Unpin memory" : "Pin memory");
+  pinBtn.setAttribute("aria-pressed", memory.pinned ? "true" : "false");
+  pinBtn.classList.toggle("active", !!memory.pinned);
+  pinBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    await toggleMemoryPin(memory);
+  });
+
+  const meta = document.createElement("div");
+  meta.className = "memoryCardMeta";
+  meta.textContent = formatChangelogDate(memory.created_at || Date.now());
+
+  const desc = document.createElement("div");
+  desc.className = "memoryCardDesc";
+  desc.textContent = memory.description || "";
+
+  header.appendChild(title);
+  header.appendChild(pinBtn);
+  body.appendChild(header);
+  body.appendChild(meta);
+  if (!compact && desc.textContent) body.appendChild(desc);
+
+  card.appendChild(icon);
+  card.appendChild(body);
+  return card;
+}
+
+async function refreshMemorySettings({ force = false } = {}){
+  if (!currentProfileIsSelf) return;
+  if (memorySettingsLoaded && !force) {
+    updateMemoryVisibility();
+    return;
+  }
+  try {
+    const res = await fetch("/api/memory-settings");
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    memoryFeatureAvailable = !!data.available;
+    memoryEnabled = !!data.enabled;
+    memorySettingsLoaded = true;
+    if (memorySettingsMsg) memorySettingsMsg.textContent = "";
+  } catch (e) {
+    memoryFeatureAvailable = false;
+    memoryEnabled = false;
+    if (memorySettingsMsg) memorySettingsMsg.textContent = "Memories are unavailable right now.";
+  }
+  updateMemoryVisibility();
+}
+
+async function loadMemories({ force = false } = {}){
+  if (!currentProfileIsSelf || !memoryEnabled) return;
+  if (!force && memoryCacheByFilter.has(memoryFilter)) {
+    renderMemoryTimeline();
+    return;
+  }
+  if (memoryLoading) return;
+  memoryLoading = true;
+  if (memoryTimelineMsg) memoryTimelineMsg.textContent = "Loading memories...";
+  try {
+    const res = await fetch(`/api/memories?filter=${encodeURIComponent(memoryFilter)}`);
+    if (res.status === 403) {
+      memoryEnabled = false;
+      updateMemoryVisibility();
+      return;
+    }
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    memoryCacheByFilter.set(memoryFilter, Array.isArray(data.memories) ? data.memories : []);
+  } catch (e) {
+    if (memoryTimelineMsg) memoryTimelineMsg.textContent = e?.message || "Could not load memories.";
+  } finally {
+    memoryLoading = false;
+    if (memoryTimelineMsg && memoryTimelineMsg.textContent === "Loading memories...") memoryTimelineMsg.textContent = "";
+  }
+  renderMemoryTimeline();
+}
+
+async function toggleMemoryPin(memory){
+  if (!memory?.id) return;
+  try {
+    const res = await fetch(`/api/memories/${memory.id}/pin`, { method: "POST" });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    memory.pinned = !!data.pinned;
+    memoryCacheByFilter.set(
+      memoryFilter,
+      (memoryCacheByFilter.get(memoryFilter) || []).map((m) => (m.id === memory.id ? memory : m))
+    );
+    renderMemoryTimeline();
+  } catch (e) {
+    if (memoryTimelineMsg) memoryTimelineMsg.textContent = e?.message || "Could not update memory pin.";
+  }
+}
+
 async function openMyProfile(){
   closeDrawers();
   clearAvatarPreview();
@@ -11986,6 +12182,11 @@ async function openMyProfile(){
 
   fillProfileUI(p, true);
   syncCustomizationUI();
+  memoryFilter = "all";
+  memoryCacheByFilter.clear();
+  updateMemoryFilterChips();
+  await refreshMemorySettings({ force: true });
+  if (memoryEnabled) await loadMemories({ force: true });
 
   if (myProfileEdit) myProfileEdit.style.display="block";
   try { refreshCouplesUI(); } catch {}
@@ -12070,6 +12271,32 @@ changeUsernameBtn?.addEventListener("click", async () => {
 });
 refreshProfileBtn.addEventListener("click", openMyProfile);
 
+memoryEnabledToggle?.addEventListener("change", async () => {
+  if (!currentProfileIsSelf) return;
+  if (memorySettingsMsg) memorySettingsMsg.textContent = "Saving...";
+  memoryEnabledToggle.disabled = true;
+  try {
+    const res = await fetch("/api/memory-settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !!memoryEnabledToggle.checked }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    memoryFeatureAvailable = !!data.available;
+    memoryEnabled = !!data.enabled;
+    if (!memoryEnabled) memoryCacheByFilter.clear();
+    if (memorySettingsMsg) memorySettingsMsg.textContent = "Memory settings updated.";
+    updateMemoryVisibility();
+    if (memoryEnabled) await loadMemories({ force: true });
+  } catch (e) {
+    if (memorySettingsMsg) memorySettingsMsg.textContent = e?.message || "Could not update memory settings.";
+    memoryEnabledToggle.checked = memoryEnabled;
+  } finally {
+    memoryEnabledToggle.disabled = false;
+  }
+});
+
 async function openMemberProfile(username){
   modalTargetUsername = username;
   closeDrawers();
@@ -12087,6 +12314,18 @@ async function openMemberProfile(username){
   fillProfileUI(p, isSelf);
   modalFriendInfo = p.friend || null;
   syncCustomizationUI();
+  memoryFilter = "all";
+  memoryCacheByFilter.clear();
+  updateMemoryFilterChips();
+  if (isSelf) {
+    await refreshMemorySettings({ force: true });
+    if (memoryEnabled) await loadMemories({ force: true });
+  } else {
+    memoryFeatureAvailable = false;
+    memoryEnabled = false;
+    memorySettingsLoaded = false;
+    updateMemoryVisibility();
+  }
 
   if (myProfileEdit) myProfileEdit.style.display = isSelf ? "block" : "none";
 

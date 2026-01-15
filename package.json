@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "echo \"No tests yet\" && exit 0",
+    "test:memory": "node scripts/memory-sanity.js",
     "check": "node --check server.js && node --check public/app.js && node --check public/theme-init.js && node --check database.js",
     "audit": "npm audit --audit-level=high",
     "fund": "npm fund",

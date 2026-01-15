@@ -90,6 +90,14 @@ const { Server } = require("socket.io");
 const { db, migrationsReady } = require("./database");
 const { VIBE_TAGS, VIBE_TAG_LIMIT } = require("./vibe-tags");
 
+const MEMORY_SYSTEM_ENABLED = process.env.MEMORY_SYSTEM_ENABLED === "1";
+const MEMORY_SYSTEM_ALLOWLIST = new Set(
+  String(process.env.MEMORY_SYSTEM_ALLOWLIST || "")
+    .split(",")
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean)
+);
+
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, "public");
 const UPLOADS_DIR = path.join(__dirname, "uploads");
@@ -300,6 +308,33 @@ const pgInitPromise = (async () => {
       );
       CREATE INDEX IF NOT EXISTS idx_profile_likes_target ON profile_likes(target_user_id);
       CREATE INDEX IF NOT EXISTS idx_profile_likes_user ON profile_likes(user_id);
+    `);
+
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS memories (
+        id BIGSERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        room_id TEXT,
+        type TEXT NOT NULL,
+        key TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        icon TEXT,
+        created_at BIGINT NOT NULL,
+        metadata JSONB,
+        visibility TEXT NOT NULL DEFAULT 'private',
+        pinned BOOLEAN NOT NULL DEFAULT false,
+        seen BOOLEAN NOT NULL DEFAULT false
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_user_key ON memories(user_id, key);
+      CREATE INDEX IF NOT EXISTS idx_memories_user_created ON memories(user_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memories_user_pinned ON memories(user_id, pinned);
+
+      CREATE TABLE IF NOT EXISTS memory_settings (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        enabled BOOLEAN NOT NULL DEFAULT false,
+        last_seen_at BIGINT
+      );
     `);
 
     // Centralized gold spending ledger so spend reasons can be audited later.
@@ -1758,6 +1793,215 @@ async function setConfigJson(key, obj) {
   return obj;
 }
 
+function isMemoryFeatureAvailableFor(user) {
+  if (MEMORY_SYSTEM_ENABLED) return true;
+  const username = String(user?.username || "").toLowerCase();
+  const role = user?.role || "User";
+  if (requireMinRole(role, "Owner")) return true;
+  return MEMORY_SYSTEM_ALLOWLIST.has(username);
+}
+
+function normalizeMemoryBool(value) {
+  return value === true || value === 1 || value === "1";
+}
+
+async function getMemorySettingsRow(userId) {
+  try {
+    if (await pgUserExists(userId)) {
+      const { rows } = await pgPool.query(
+        "SELECT enabled, last_seen_at FROM memory_settings WHERE user_id = $1 LIMIT 1",
+        [userId]
+      );
+      return rows[0] || null;
+    }
+  } catch (e) {
+    console.warn("[memory][pg settings]", e?.message || e);
+  }
+
+  try {
+    return await dbGetAsync("SELECT enabled, last_seen_at FROM memory_settings WHERE user_id = ?", [userId]);
+  } catch (e) {
+    console.warn("[memory][sqlite settings]", e?.message || e);
+    return null;
+  }
+}
+
+async function setMemorySettingsRow(userId, enabled) {
+  const isEnabled = !!enabled;
+  try {
+    if (await pgUserExists(userId)) {
+      await pgPool.query(
+        `
+        INSERT INTO memory_settings (user_id, enabled)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id) DO UPDATE SET enabled = EXCLUDED.enabled
+        `,
+        [userId, isEnabled]
+      );
+      return;
+    }
+  } catch (e) {
+    console.warn("[memory][pg settings set]", e?.message || e);
+  }
+
+  await dbRunAsync(
+    `
+    INSERT INTO memory_settings (user_id, enabled)
+    VALUES (?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET enabled = excluded.enabled
+    `,
+    [userId, isEnabled ? 1 : 0]
+  );
+}
+
+async function getMemorySettingsForUser(user) {
+  const available = isMemoryFeatureAvailableFor(user);
+  if (!available) return { available: false, enabled: false, lastSeenAt: null };
+
+  const row = await getMemorySettingsRow(user.id);
+  const enabled = row ? normalizeMemoryBool(row.enabled) : MEMORY_SYSTEM_ENABLED;
+  const lastSeenAt = row?.last_seen_at ?? row?.lastSeenAt ?? null;
+  return { available: true, enabled: !!enabled, lastSeenAt };
+}
+
+async function getUserIdentityForMemory(userId, hint) {
+  if (hint?.id && hint?.username) {
+    return { id: Number(hint.id), username: hint.username, role: hint.role || "User" };
+  }
+  try {
+    if (await pgUserExists(userId)) {
+      const row = await pgGetUserRowById(userId, ["id", "username", "role"]);
+      if (row) return { id: Number(row.id), username: row.username, role: row.role || "User" };
+    }
+  } catch (e) {
+    console.warn("[memory][pg user]", e?.message || e);
+  }
+  try {
+    const row = await dbGetAsync("SELECT id, username, role FROM users WHERE id = ?", [userId]);
+    if (row) return { id: Number(row.id), username: row.username, role: row.role || "User" };
+  } catch (e) {
+    console.warn("[memory][sqlite user]", e?.message || e);
+  }
+  return null;
+}
+
+function normalizeMemoryRow(row) {
+  if (!row) return null;
+  const metadata = row.metadata == null ? null : (typeof row.metadata === "object" ? row.metadata : safeJsonParse(row.metadata, null));
+  return {
+    id: Number(row.id),
+    user_id: row.user_id ?? row.userId ?? null,
+    room_id: row.room_id ?? row.roomId ?? null,
+    type: row.type,
+    key: row.key,
+    title: row.title,
+    description: row.description || "",
+    icon: row.icon || "",
+    created_at: Number(row.created_at ?? row.createdAt ?? Date.now()),
+    metadata,
+    visibility: row.visibility || "private",
+    pinned: normalizeMemoryBool(row.pinned),
+    seen: normalizeMemoryBool(row.seen),
+  };
+}
+
+async function ensureMemory(userId, key, payload, userHint) {
+  const identity = await getUserIdentityForMemory(userId, userHint);
+  if (!identity || !key) return null;
+
+  const settings = await getMemorySettingsForUser(identity);
+  if (!settings.available || !settings.enabled) return null;
+
+  const now = Date.now();
+  const memory = {
+    user_id: identity.id,
+    room_id: payload.room_id ?? payload.roomId ?? null,
+    type: payload.type || "event",
+    key: String(key),
+    title: String(payload.title || "Memory"),
+    description: payload.description ? String(payload.description) : "",
+    icon: payload.icon ? String(payload.icon) : "",
+    created_at: Number(payload.created_at || payload.createdAt || now),
+    metadata: payload.metadata ?? null,
+    visibility: payload.visibility || "private",
+  };
+
+  try {
+    if (await pgUserExists(identity.id)) {
+      const { rows } = await pgPool.query(
+        `
+        INSERT INTO memories (user_id, room_id, type, key, title, description, icon, created_at, metadata, visibility, pinned, seen)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,false,false)
+        ON CONFLICT (user_id, key) DO NOTHING
+        RETURNING *
+        `,
+        [
+          memory.user_id,
+          memory.room_id,
+          memory.type,
+          memory.key,
+          memory.title,
+          memory.description,
+          memory.icon,
+          memory.created_at,
+          memory.metadata,
+          memory.visibility,
+        ]
+      );
+      const created = normalizeMemoryRow(rows[0]);
+      if (created) {
+        const sid = socketIdByUserId.get(identity.id);
+        if (sid) io.to(sid).emit("memory:created", created);
+      }
+      return created;
+    }
+  } catch (e) {
+    console.warn("[memory][pg ensure]", e?.message || e);
+  }
+
+  const metadataJson = memory.metadata == null ? null : JSON.stringify(memory.metadata);
+  const result = await dbRunAsync(
+    `
+    INSERT OR IGNORE INTO memories (user_id, room_id, type, key, title, description, icon, created_at, metadata, visibility, pinned, seen)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
+    `,
+    [
+      memory.user_id,
+      memory.room_id,
+      memory.type,
+      memory.key,
+      memory.title,
+      memory.description,
+      memory.icon,
+      memory.created_at,
+      metadataJson,
+      memory.visibility,
+    ]
+  );
+  if (!result?.changes) return null;
+  const row = await dbGetAsync("SELECT * FROM memories WHERE id = ?", [result.lastID]);
+  const created = normalizeMemoryRow(row);
+  if (created) {
+    const sid = socketIdByUserId.get(identity.id);
+    if (sid) io.to(sid).emit("memory:created", created);
+  }
+  return created;
+}
+
+const MEMORY_FILTER_TYPES = {
+  all: null,
+  social: ["social"],
+  progress: ["progress", "milestone", "streak"],
+  media: ["media"],
+  rooms: ["room"],
+  rare: ["rare"],
+};
+
+function resolveMemoryTypes(filter) {
+  const key = String(filter || "all").toLowerCase();
+  return MEMORY_FILTER_TYPES[key] ?? null;
+}
+
 
 
 // Serialize XP updates per user to prevent race conditions between concurrent XP events.
@@ -2504,6 +2748,8 @@ function xpRatesForRole(role) {
   };
 }
 
+const MEMORY_LEVEL_MILESTONES = new Set([5, 10, 25]);
+
 function levelInfo(xpRaw) {
   let xp = Math.max(0, Math.floor(Number(xpRaw) || 0));
   let level = 1;
@@ -2646,6 +2892,21 @@ async function persistXpState(userId, data) {
   return await dbRunAsync(`UPDATE users SET ${sqliteSets.join(", ")} WHERE id = ?`, [...sqliteParams, userId]);
 }
 
+async function maybeCreateLevelMemories(userId, prevLevel, nextLevel) {
+  if (!Number.isFinite(prevLevel) || !Number.isFinite(nextLevel)) return;
+  for (const milestone of MEMORY_LEVEL_MILESTONES) {
+    if (milestone > prevLevel && milestone <= nextLevel) {
+      await ensureMemory(userId, `level_${milestone}`, {
+        type: "progress",
+        title: `Level ${milestone} reached`,
+        description: `You hit level ${milestone}.`,
+        icon: "⭐",
+        metadata: { level: milestone },
+      });
+    }
+  }
+}
+
 async function applyXpGain(userId, delta, opts = {}) {
   const amount = Math.max(0, Math.floor(Number(delta) || 0));
   if (!amount) return null;
@@ -2717,7 +2978,10 @@ async function applyXpGain(userId, delta, opts = {}) {
     }
 
     // Emit level-up only after the committed XP write to avoid racey toasts.
-    if (info && info.level > prevLevel) emitLevelUp(userId, info.level);
+    if (info && info.level > prevLevel) {
+      emitLevelUp(userId, info.level);
+      void maybeCreateLevelMemories(userId, prevLevel, info.level);
+    }
     emitProgressionUpdate(userId);
     emitLeaderboardUpdateThrottled();
     return info ? { xp: newXp, ...info } : null;
@@ -5773,6 +6037,110 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
   }
 });
 
+app.get("/api/memory-settings", requireLogin, async (req, res) => {
+  try {
+    const settings = await getMemorySettingsForUser(req.session.user);
+    return res.json({ ok: true, ...settings });
+  } catch (e) {
+    console.warn("[memory] settings fetch failed:", e?.message || e);
+    return res.status(500).json({ ok: false, error: "failed_to_load_settings" });
+  }
+});
+
+app.post("/api/memory-settings", requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
+  try {
+    const user = req.session.user;
+    const settings = await getMemorySettingsForUser(user);
+    if (!settings.available) return res.status(403).json({ ok: false, error: "feature_disabled" });
+    const enabled = !!req.body?.enabled;
+    await setMemorySettingsRow(user.id, enabled);
+    return res.json({ ok: true, available: true, enabled });
+  } catch (e) {
+    console.warn("[memory] settings update failed:", e?.message || e);
+    return res.status(500).json({ ok: false, error: "failed_to_save_settings" });
+  }
+});
+
+app.get("/api/memories", requireLogin, async (req, res) => {
+  const user = req.session.user;
+  try {
+    const settings = await getMemorySettingsForUser(user);
+    if (!settings.available || !settings.enabled) return res.status(403).json({ ok: false, error: "disabled" });
+
+    const types = resolveMemoryTypes(req.query?.filter);
+    if (await pgUserExists(user.id)) {
+      const params = [user.id];
+      let whereSql = "user_id = $1";
+      if (types?.length) {
+        params.push(types);
+        whereSql += ` AND type = ANY($${params.length}::text[])`;
+      }
+      const { rows } = await pgPool.query(
+        `SELECT * FROM memories WHERE ${whereSql} ORDER BY created_at DESC`,
+        params
+      );
+      const memories = rows.map(normalizeMemoryRow);
+      return res.json({ ok: true, memories });
+    }
+  } catch (e) {
+    console.warn("[memory] pg list failed, falling back to sqlite:", e?.message || e);
+  }
+
+  try {
+    const params = [user.id];
+    let whereSql = "user_id = ?";
+    if (types?.length) {
+      whereSql += ` AND type IN (${types.map(() => "?").join(", ")})`;
+      params.push(...types);
+    }
+    const rows = await dbAllAsync(
+      `SELECT * FROM memories WHERE ${whereSql} ORDER BY created_at DESC`,
+      params
+    );
+    const memories = rows.map(normalizeMemoryRow);
+    return res.json({ ok: true, memories });
+  } catch (e) {
+    console.warn("[memory] sqlite list failed:", e?.message || e);
+    return res.status(500).json({ ok: false, error: "failed_to_load_memories" });
+  }
+});
+
+app.post("/api/memories/:id/pin", requireLogin, async (req, res) => {
+  const user = req.session.user;
+  const memoryId = Number(req.params.id) || 0;
+  if (!memoryId) return res.status(400).json({ ok: false, error: "bad_request" });
+
+  try {
+    const settings = await getMemorySettingsForUser(user);
+    if (!settings.available || !settings.enabled) return res.status(403).json({ ok: false, error: "disabled" });
+
+    if (await pgUserExists(user.id)) {
+      const { rows } = await pgPool.query(
+        `UPDATE memories SET pinned = NOT pinned WHERE id = $1 AND user_id = $2 RETURNING pinned`,
+        [memoryId, user.id]
+      );
+      const row = rows[0];
+      if (!row) return res.status(404).json({ ok: false, error: "not_found" });
+      return res.json({ ok: true, pinned: normalizeMemoryBool(row.pinned) });
+    }
+  } catch (e) {
+    console.warn("[memory] pg pin failed, falling back to sqlite:", e?.message || e);
+  }
+
+  try {
+    await dbRunAsync(
+      `UPDATE memories SET pinned = CASE WHEN pinned = 1 THEN 0 ELSE 1 END WHERE id = ? AND user_id = ?`,
+      [memoryId, user.id]
+    );
+    const row = await dbGetAsync(`SELECT pinned FROM memories WHERE id = ? AND user_id = ?`, [memoryId, user.id]);
+    if (!row) return res.status(404).json({ ok: false, error: "not_found" });
+    return res.json({ ok: true, pinned: normalizeMemoryBool(row.pinned) });
+  } catch (e) {
+    console.warn("[memory] sqlite pin failed:", e?.message || e);
+    return res.status(500).json({ ok: false, error: "failed_to_pin" });
+  }
+});
+
 
 // ---- Couples API (opt-in). Postgres only.
 app.get("/api/couples/me", requireLogin, async (req, res) => {
@@ -5873,6 +6241,32 @@ app.post("/api/couples/respond", requireLogin, async (req, res) => {
       `UPDATE couple_links SET status='active', activated_at=$2, updated_at=$2 WHERE id=$1`,
       [linkId, now]
     );
+
+    try {
+      const userIds = [Number(link.user1_id) || 0, Number(link.user2_id) || 0].filter(Boolean);
+      if (userIds.length === 2) {
+        const { rows: users } = await pgPool.query(
+          `SELECT id, username, role FROM users WHERE id = ANY($1::int[])`,
+          [userIds]
+        );
+        const map = new Map(users.map((u) => [Number(u.id), u]));
+        const u1 = map.get(userIds[0]);
+        const u2 = map.get(userIds[1]);
+        if (u1 && u2) {
+          const payloadFor = (self, partner) => ({
+            type: "social",
+            title: "Couple linked",
+            description: `Linked with ${partner.username}.`,
+            icon: "💜",
+            metadata: { partnerId: partner.id, partnerName: partner.username },
+          });
+          void ensureMemory(u1.id, `couple_linked_${u2.id}`, payloadFor(u1, u2), u1);
+          void ensureMemory(u2.id, `couple_linked_${u1.id}`, payloadFor(u2, u1), u2);
+        }
+      }
+    } catch (e) {
+      console.warn("[couples] memory create failed:", e?.message || e);
+    }
 
     const summary = await pgGetCoupleSummaryFor(meId);
     return res.json(summary);
@@ -6513,6 +6907,29 @@ app.post("/upload", requireLogin, (req, res) => {
 
     const url = `/uploads/${req.file.filename}`;
     const type = isImage ? "image" : (isAudio ? "audio" : "video");
+
+    if (req.session?.user?.id) {
+      const userHint = req.session.user;
+      if (isAudio && uploadKind === "audio-upload") {
+        void ensureMemory(req.session.user.id, "first_voice_note", {
+          type: "media",
+          title: "First voice note",
+          description: "Sent your first voice note.",
+          icon: "🎙️",
+          metadata: { kind: "voice_note" },
+        }, userHint);
+      }
+      if (isImage) {
+        void ensureMemory(req.session.user.id, "first_image_upload", {
+          type: "media",
+          title: "First image upload",
+          description: "Shared your first image.",
+          icon: "🖼️",
+          metadata: { kind: "image" },
+        }, userHint);
+      }
+    }
+
     return res.json({
       url,
       mime,
@@ -7772,6 +8189,16 @@ socket.on("join room", ({ room, status }) => {
           io.to(room).emit("system", msg);
 
           io.to(room).emit("dice:rolled", { userId: uid, username: socket.user.username, value, won });
+          if (won) {
+            void ensureMemory(uid, "dice_jackpot", {
+              type: "rare",
+              title: "Dice jackpot!",
+              description: "Landed the jackpot roll in Dice Room.",
+              icon: "🎲",
+              room_id: room,
+              metadata: { value, deltaGold },
+            }, socket.user);
+          }
           return;
         }
       } catch (e) {
@@ -7822,6 +8249,16 @@ socket.on("join room", ({ room, status }) => {
             io.to(room).emit("system", msg);
 
             io.to(room).emit("dice:rolled", { userId: uid, username: socket.user.username, value, won });
+            if (won) {
+              void ensureMemory(uid, "dice_jackpot", {
+                type: "rare",
+                title: "Dice jackpot!",
+                description: "Landed the jackpot roll in Dice Room.",
+                icon: "🎲",
+                room_id: room,
+                metadata: { value, deltaGold },
+              }, socket.user);
+            }
           }
         );
       });
