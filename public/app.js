@@ -2833,6 +2833,12 @@ const profileSheetLikes = document.getElementById("profileSheetLikes");
 const profileSheetSub = document.getElementById("profileSheetSub");
 const profileCoupleChip = document.getElementById("profileCoupleChip");
 const profileCoupleCard = document.getElementById("profileCoupleCard");
+const profileCoupleBody = document.getElementById("profileCoupleBody");
+const profileCoupleAvatars = document.getElementById("profileCoupleAvatars");
+const profileCoupleName = document.getElementById("profileCoupleName");
+const profileCoupleBadge = document.getElementById("profileCoupleBadge");
+const profileCoupleMeta = document.getElementById("profileCoupleMeta");
+const profileCoupleBio = document.getElementById("profileCoupleBio");
 const profileSheetAge = document.getElementById("profileSheetAge");
 const profileSheetGender = document.getElementById("profileSheetGender");
 const profileSheetDetails = document.getElementById("profileSheetDetails");
@@ -2924,6 +2930,16 @@ const couplesBadgeToggle = document.getElementById("couplesBadgeToggle");
 const couplesAuraToggle = document.getElementById("couplesAuraToggle");
 const couplesShowMembersToggle = document.getElementById("couplesShowMembersToggle");
 const couplesGroupToggle = document.getElementById("couplesGroupToggle");
+const couplesAllowPingToggle = document.getElementById("couplesAllowPingToggle");
+const couplesV2Box = document.getElementById("couplesV2Box");
+const couplesPrivacySelect = document.getElementById("couplesPrivacySelect");
+const couplesNameInput = document.getElementById("couplesNameInput");
+const couplesBioInput = document.getElementById("couplesBioInput");
+const couplesShowBadgeToggle = document.getElementById("couplesShowBadgeToggle");
+const couplesBonusesToggle = document.getElementById("couplesBonusesToggle");
+const couplesSettingsSaveBtn = document.getElementById("couplesSettingsSaveBtn");
+const couplesNudgeBtn = document.getElementById("couplesNudgeBtn");
+const couplesV2Status = document.getElementById("couplesV2Status");
 const couplesUnlinkBtn = document.getElementById("couplesUnlinkBtn");
 const couplesMsg = document.getElementById("couplesMsg");
 
@@ -3756,6 +3772,29 @@ function getFeatureFlag(key, fallback=false){
   if (typeof v === "number") return !!v;
   if (typeof v === "string") return v === "true" || v === "1" || v === "on";
   return fallback;
+}
+
+function parseFeatureAllowlist(value){
+  if(!value) return new Set();
+  if(Array.isArray(value)){
+    return new Set(value.map((item)=>String(item).trim().toLowerCase()).filter(Boolean));
+  }
+  if(typeof value === "string"){
+    return new Set(value.split(",").map((item)=>String(item).trim().toLowerCase()).filter(Boolean));
+  }
+  return new Set();
+}
+
+function isCouplesV2EnabledFor(user){
+  if(!getFeatureFlag("COUPLES_V2_ENABLED", false)) return false;
+  if(roleRank(user?.role || "User") >= roleRank("Owner")) return true;
+  const allowlist = parseFeatureAllowlist(featureFlags?.COUPLES_V2_ALLOWLIST);
+  if(!allowlist.size) return false;
+  const username = String(user?.username || "").trim().toLowerCase();
+  const userId = user?.id ?? user?.user_id ?? user?.userId;
+  if(username && allowlist.has(username)) return true;
+  if(userId != null && allowlist.has(String(userId).toLowerCase())) return true;
+  return false;
 }
 
 function applyAmbientClasses(){
@@ -6135,8 +6174,11 @@ function reorderCouplesInMembers(list){
     seen.add(name);
     const c = u?.couple;
     if (c && c.group && c.partner && byName.has(c.partner) && !seen.has(c.partner)) {
-      out.push(byName.get(c.partner));
-      seen.add(c.partner);
+      const partnerUser = byName.get(c.partner);
+      if (partnerUser && roleRank(partnerUser.role) === roleRank(u.role)) {
+        out.push(partnerUser);
+        seen.add(c.partner);
+      }
     }
   }
   return (out.length === users.length) ? out : users;
@@ -10984,6 +11026,49 @@ function fillProfileUI(p, isSelf){
     }
   } catch {}
 
+  try {
+    const card = p?.coupleCard;
+    const members = Array.isArray(card?.members) ? card.members.filter(Boolean) : [];
+    const hasCard = members.length >= 2;
+    if (profileCoupleBody) profileCoupleBody.style.display = hasCard ? "" : "none";
+    if (profileCoupleChip) {
+      const hasChip = !!(p?.couple?.partner);
+      profileCoupleChip.style.display = (!hasCard && hasChip) ? "" : "none";
+    }
+    if (hasCard) {
+      if (profileCoupleAvatars) {
+        profileCoupleAvatars.innerHTML = "";
+        members.slice(0, 2).forEach((m) => {
+          profileCoupleAvatars.appendChild(avatarNode(m.avatar, m.username, m.role));
+        });
+      }
+      if (profileCoupleName) {
+        const defaultName = members.length >= 2 ? `${members[0].username} + ${members[1].username}` : "Couple";
+        profileCoupleName.textContent = card?.coupleName ? card.coupleName : defaultName;
+      }
+      if (profileCoupleBadge) {
+        if (card?.showBadge && card?.statusEmoji) {
+          profileCoupleBadge.style.display = "";
+          profileCoupleBadge.textContent = card.statusEmoji;
+          profileCoupleBadge.title = `${card.statusEmoji} ${card.statusLabel || "Linked"}`;
+        } else {
+          profileCoupleBadge.style.display = "none";
+          profileCoupleBadge.textContent = "";
+          profileCoupleBadge.title = "";
+        }
+      }
+      if (profileCoupleMeta) {
+        const sinceTxt = card?.since ? `Together ${fmtDaysSince(card.since)}` : "Together";
+        const privacyLabel = card?.privacy ? card.privacy.charAt(0).toUpperCase() + card.privacy.slice(1) : "Private";
+        profileCoupleMeta.textContent = `${sinceTxt} • ${privacyLabel}`;
+      }
+      if (profileCoupleBio) {
+        const bio = String(card?.coupleBio || "").trim();
+        profileCoupleBio.textContent = bio ? bio : "No couple bio yet.";
+      }
+    }
+  } catch {}
+
   if (infoAge) infoAge.textContent = (p.age ?? "—");
   if (infoGender) infoGender.textContent = (p.gender ?? "—");
   if (infoLanguage){
@@ -11004,8 +11089,9 @@ function fillProfileUI(p, isSelf){
   setMsgline(profileLikeMsg, "");
   setMsgline(profileActionMsg, "");
   setMsgline(mediaMsg, "");
-  if (profileCoupleChip && profileCoupleCard){
-    const showCouple = profileCoupleChip.style.display !== "none";
+  if (profileCoupleCard){
+    const showCouple = (profileCoupleBody && profileCoupleBody.style.display !== "none")
+      || (profileCoupleChip && profileCoupleChip.style.display !== "none");
     profileCoupleCard.style.display = showCouple ? "" : "none";
   }
   fillProfileSheetHeader(p, isSelf);
@@ -12867,6 +12953,16 @@ initAppealsDurationSelect();
     try{ renderFeatureFlagsGrid(); }catch(_){}
   });
 
+  socket.on("couples:update", () => {
+    try { refreshCouplesUI(); } catch {}
+    try { emitLocalMembersRefresh(); } catch {}
+  });
+
+  socket.on("couples:nudge", (payload={}) => {
+    const fromName = payload?.fromName || "Your partner";
+    showToast(`${fromName} nudged you 💜`, { durationMs: 3200 });
+  });
+
   socket.on("room:event", (payload={})=>{
     if(payload && payload.room && String(payload.room) !== String(currentRoom)) return;
     const ev = payload.active || null;
@@ -13637,13 +13733,36 @@ async function refreshCouplesUI(){
     if (couplesAuraToggle) couplesAuraToggle.checked = !!p.aura;
     if (couplesShowMembersToggle) couplesShowMembersToggle.checked = !!p.showMembers;
     if (couplesGroupToggle) couplesGroupToggle.checked = !!p.groupMembers;
+    if (couplesAllowPingToggle) couplesAllowPingToggle.checked = !!p.allowPing;
   }
 
   // disable toggles if no active link
-  const toggles = [couplesEnabledToggle,couplesShowProfileToggle,couplesBadgeToggle,couplesAuraToggle,couplesShowMembersToggle,couplesGroupToggle];
+  const toggles = [couplesEnabledToggle,couplesShowProfileToggle,couplesBadgeToggle,couplesAuraToggle,couplesShowMembersToggle,couplesGroupToggle,couplesAllowPingToggle];
   toggles.forEach(t => { if (t) t.disabled = !active; });
 
   if (couplesUnlinkBtn) couplesUnlinkBtn.disabled = !active;
+
+  const canEditSettings = isCoupleMember(me?.id ?? me?.user_id ?? me?.userId, couplesState?.couple);
+  const v2Enabled = !!(couplesState?.v2Enabled && active && canEditSettings);
+  if (couplesV2Box) couplesV2Box.style.display = v2Enabled ? "" : "none";
+  if (v2Enabled && couplesState?.couple) {
+    const c = couplesState.couple;
+    if (couplesPrivacySelect) couplesPrivacySelect.value = c.privacy || "private";
+    if (couplesNameInput) couplesNameInput.value = c.couple_name || "";
+    if (couplesBioInput) couplesBioInput.value = c.couple_bio || "";
+    if (couplesShowBadgeToggle) couplesShowBadgeToggle.checked = c.show_badge !== false;
+    if (couplesBonusesToggle) couplesBonusesToggle.checked = !!c.bonuses_enabled;
+    if (couplesSettingsSaveBtn) couplesSettingsSaveBtn.disabled = false;
+    if (couplesNudgeBtn) couplesNudgeBtn.disabled = false;
+    if (couplesV2Status) {
+      const sinceTxt = active?.since ? `Together ${fmtDaysSince(active.since)}` : "Couple card settings";
+      couplesV2Status.textContent = sinceTxt;
+    }
+  } else {
+    if (couplesSettingsSaveBtn) couplesSettingsSaveBtn.disabled = true;
+    if (couplesNudgeBtn) couplesNudgeBtn.disabled = true;
+    if (couplesV2Status) couplesV2Status.textContent = "";
+  }
 }
 
 function emitLocalMembersRefresh(){
@@ -13657,6 +13776,14 @@ function emitUserListNow(){
   // The server pushes user list on join/updates; we can also request by toggling a no-op room refresh if such exists.
   // If socket exists, ask it to refresh:
   try { if (socket) socket.emit("refresh user list"); } catch {}
+}
+
+function isCoupleMember(currentUserId, couple){
+  const uid = Number(currentUserId) || 0;
+  if (!uid || !couple) return false;
+  const a = Number(couple.user_a_id ?? couple.user1_id ?? couple.userAId ?? couple.user1Id ?? 0) || 0;
+  const b = Number(couple.user_b_id ?? couple.user2_id ?? couple.userBId ?? couple.user2Id ?? 0) || 0;
+  return uid === a || uid === b;
 }
 
 async function setCouplePrefs(patch){
@@ -13675,6 +13802,37 @@ async function setCouplePrefs(patch){
     emitLocalMembersRefresh();
   } catch (e) {
     setMsgline(couplesMsg, e?.message || "Could not save");
+  }
+}
+
+async function setCoupleSettings(patch){
+  const active = couplesState?.active;
+  if (!active?.linkId) return;
+  if (couplesV2Status) couplesV2Status.textContent = "Saving…";
+  try {
+    const r = await fetch("/api/couples/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch || {})
+    });
+    if (!r.ok) throw new Error(await r.text().catch(()=> "Could not save"));
+    couplesState = await r.json();
+    await refreshCouplesUI();
+    emitLocalMembersRefresh();
+    if (couplesV2Status) couplesV2Status.textContent = "Saved.";
+  } catch (e) {
+    if (couplesV2Status) couplesV2Status.textContent = e?.message || "Could not save";
+  }
+}
+
+async function sendCoupleNudge(){
+  if (couplesV2Status) couplesV2Status.textContent = "";
+  try {
+    const r = await fetch("/api/couples/nudge", { method: "POST" });
+    if (!r.ok) throw new Error(await r.text().catch(()=> "Could not nudge"));
+    if (couplesV2Status) couplesV2Status.textContent = "Nudge sent.";
+  } catch (e) {
+    if (couplesV2Status) couplesV2Status.textContent = e?.message || "Could not nudge";
   }
 }
 
@@ -13705,6 +13863,18 @@ if (couplesBadgeToggle) couplesBadgeToggle.onchange = () => setCouplePrefs({ bad
 if (couplesAuraToggle) couplesAuraToggle.onchange = () => setCouplePrefs({ aura: !!couplesAuraToggle.checked });
 if (couplesShowMembersToggle) couplesShowMembersToggle.onchange = () => setCouplePrefs({ showMembers: !!couplesShowMembersToggle.checked });
 if (couplesGroupToggle) couplesGroupToggle.onchange = () => setCouplePrefs({ groupMembers: !!couplesGroupToggle.checked });
+if (couplesAllowPingToggle) couplesAllowPingToggle.onchange = () => setCouplePrefs({ allowPing: !!couplesAllowPingToggle.checked });
+
+if (couplesSettingsSaveBtn) {
+  couplesSettingsSaveBtn.onclick = () => setCoupleSettings({
+    privacy: couplesPrivacySelect?.value || "private",
+    couple_name: couplesNameInput?.value || "",
+    couple_bio: couplesBioInput?.value || "",
+    show_badge: !!couplesShowBadgeToggle?.checked,
+    bonuses_enabled: !!couplesBonusesToggle?.checked
+  });
+}
+if (couplesNudgeBtn) couplesNudgeBtn.onclick = () => sendCoupleNudge();
 
 if (couplesUnlinkBtn) {
   couplesUnlinkBtn.onclick = async () => {
