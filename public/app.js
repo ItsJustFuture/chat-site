@@ -2642,6 +2642,11 @@ const meRole = document.getElementById("meRole");
 const meStatusText = document.getElementById("meStatusText");
 const statusSelect = document.getElementById("statusSelect");
 const profileBtn = document.getElementById("profileBtn");
+const couplesBtn = document.getElementById("couplesBtn");
+const couplesModal = document.getElementById("couplesModal");
+const couplesModalBody = document.getElementById("couplesModalBody");
+const couplesModalClose = document.getElementById("couplesModalClose");
+let couplesModalDock = null;
 const replyPreview = document.getElementById("replyPreview");
 const replyPreviewText = document.getElementById("replyPreviewText");
 const replyPreviewClose = document.getElementById("replyPreviewClose");
@@ -8468,6 +8473,82 @@ function closeModal(){
     modal.classList.remove("modal-closing");
   }, 220);
 }
+
+// Couples popout modal (reuses the existing Couples nodes from the profile editor)
+function dockCouplesIntoModal(){
+  if (!couplesModalBody) return;
+  const couplesFieldEl = document.getElementById("couplesField");
+  const couplesActiveEl = document.getElementById("couplesActiveBox");
+  const couplesMsgEl = document.getElementById("couplesMsg");
+  if (!couplesFieldEl || !couplesActiveEl) return;
+
+  if (!couplesModalDock) {
+    couplesModalDock = {
+      field: { el: couplesFieldEl, parent: couplesFieldEl.parentNode, next: couplesFieldEl.nextSibling },
+      active: { el: couplesActiveEl, parent: couplesActiveEl.parentNode, next: couplesActiveEl.nextSibling },
+      msg: couplesMsgEl ? { el: couplesMsgEl, parent: couplesMsgEl.parentNode, next: couplesMsgEl.nextSibling } : null,
+    };
+  }
+
+  // Clear modal body then append the existing nodes (no duplicated IDs)
+  couplesModalBody.innerHTML = "";
+  couplesModalBody.appendChild(couplesFieldEl);
+  couplesModalBody.appendChild(couplesActiveEl);
+  if (couplesMsgEl) couplesModalBody.appendChild(couplesMsgEl);
+}
+
+function undockCouplesFromModal(){
+  if (!couplesModalDock) return;
+  try {
+    const d = couplesModalDock;
+    if (d.field?.parent) d.field.parent.insertBefore(d.field.el, d.field.next || null);
+    if (d.active?.parent) d.active.parent.insertBefore(d.active.el, d.active.next || null);
+    if (d.msg?.parent) d.msg.parent.insertBefore(d.msg.el, d.msg.next || null);
+  } catch {}
+}
+
+function openCouplesModal(){
+  if (!couplesModal) return;
+  dockCouplesIntoModal();
+  couplesModal.style.display = "flex";
+  couplesModal.classList.remove("modal-closing");
+  if (PREFERS_REDUCED_MOTION) {
+    couplesModal.classList.add("modal-visible");
+  } else {
+    requestAnimationFrame(() => couplesModal.classList.add("modal-visible"));
+  }
+  // Refresh state so the popout shows the latest immediately
+  try { refreshCouplesUI(); } catch {}
+}
+
+function closeCouplesModal(){
+  if (!couplesModal) return;
+  couplesModal.classList.remove("modal-visible");
+  undockCouplesFromModal();
+
+  if (PREFERS_REDUCED_MOTION) {
+    couplesModal.style.display = "none";
+    couplesModal.classList.remove("modal-closing");
+    return;
+  }
+  couplesModal.classList.add("modal-closing");
+  setTimeout(() => {
+    couplesModal.style.display = "none";
+    couplesModal.classList.remove("modal-closing");
+  }, 140);
+}
+
+couplesBtn?.addEventListener("click", openCouplesModal);
+couplesModalClose?.addEventListener("click", closeCouplesModal);
+couplesModal?.addEventListener("click", (e) => {
+  if (e.target === couplesModal) closeCouplesModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && couplesModal && couplesModal.style.display !== "none") {
+    closeCouplesModal();
+  }
+});
+
 closeModalBtn.addEventListener("click", closeModal);
 modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
 

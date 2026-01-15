@@ -247,6 +247,7 @@
 <div class="row" style="gap:8px; align-items:center;">
 <div class="meStatusText" id="meStatusText">Online</div>
 <button class="iconBtn" id="profileBtn" title="Profile" type="button">👤</button>
+<button class="iconBtn" id="couplesBtn" title="Couples" type="button">💜</button>
 </div>
 </div>
 <select id="statusSelect">
@@ -1637,6 +1638,17 @@
 </div>
 </div>
 </div>
+<!-- COUPLES POPOUT MODAL -->
+<div id="couplesModal" aria-hidden="true">
+  <div class="modalCard couplesModalCard">
+    <div class="modalTop">
+      <strong>Couples</strong>
+      <button class="iconBtn" id="couplesModalClose" type="button" title="Close">✕</button>
+    </div>
+    <div class="modalBody" id="couplesModalBody"></div>
+  </div>
+</div>
+
 <div class="mediaLightbox" id="mediaLightbox">
 <button aria-label="Close media" class="iconBtn largeClose" id="mediaLightboxClose" type="button">✕</button>
 <img alt="Expanded media" id="mediaLightboxImg"/>

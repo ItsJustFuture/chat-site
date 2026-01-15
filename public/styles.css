@@ -3218,6 +3218,23 @@ body:not(.polish-pack) .tonePicker{
   z-index: 400;
 }
 #modal.modal-visible{ opacity: 1; }
+
+#couplesModal{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  overflow: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 18px;
+  z-index: 401; /* above main modal */
+}
+#couplesModal.modal-visible{ opacity: 1; }
 .modalCard{
   position: relative;
   display: flex;

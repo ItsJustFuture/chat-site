@@ -2021,9 +2021,15 @@ function parseFeatureAllowlist(value) {
 function isCouplesV2EnabledFor(user, flags = FEATURE_FLAGS_CACHE) {
   const enabled = !!(flags && flags.COUPLES_V2_ENABLED);
   if (!enabled) return false;
+
+  // Owners always get access (for management/testing).
   if (requireMinRole(user?.role || "User", "Owner")) return true;
+
+  // If no allowlist is configured, treat Couples V2 as globally enabled.
+  // (This avoids the "only the acceptor sees options" problem when allowlist is empty/misconfigured.)
   const allowlist = parseFeatureAllowlist(flags?.COUPLES_V2_ALLOWLIST);
-  if (!allowlist.size) return false;
+  if (!allowlist.size) return true;
+
   const username = String(user?.username || "").trim().toLowerCase();
   const userId = user?.id ?? user?.user_id ?? user?.userId;
   if (username && allowlist.has(username)) return true;
@@ -6539,6 +6545,14 @@ app.post("/api/couples/respond", requireLogin, async (req, res) => {
       [linkId, now]
     );
     emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
+
+    // Ensure both sides have default prefs rows (so both requestor + acceptor see options)
+    try {
+      await pgUpsertCouplePrefs(linkId, Number(link.user1_id) || 0, {});
+      await pgUpsertCouplePrefs(linkId, Number(link.user2_id) || 0, {});
+    } catch (e) {
+      console.warn("[couples] ensure prefs rows failed:", e?.message || e);
+    }
 
     try {
       await ensureCoupleLinkedMemories(link);
