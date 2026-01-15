@@ -636,6 +636,19 @@
 </div>
 <div class="profileInfoCard profileInfoWide" id="profileCoupleCard" style="display:none;">
 <div class="infoLabel">Couple</div>
+<div class="coupleCardBody" id="profileCoupleBody" style="display:none;">
+<div class="coupleCardHeader">
+<div class="coupleCardAvatars" id="profileCoupleAvatars"></div>
+<div class="coupleCardMeta">
+<div class="coupleCardTitleRow">
+<div class="coupleCardTitle" id="profileCoupleName"></div>
+<span class="coupleBadge small" id="profileCoupleBadge" style="display:none;"></span>
+</div>
+<div class="coupleCardSub" id="profileCoupleMeta"></div>
+</div>
+</div>
+<div class="coupleCardBio" id="profileCoupleBio"></div>
+</div>
 <span class="coupleChip" id="profileCoupleChip" style="display:none;"></span>
 </div>
 </div>
@@ -743,6 +756,37 @@
 <span class="slider"></span>
 </label>
 <div class="toggleLabel">Allow partner pings</div>
+</div>
+<div class="panelBox couplesV2Box" id="couplesV2Box" style="margin-top:12px; display:none;">
+<div class="small">Couple card (shared settings)</div>
+<div class="row" style="margin-top:8px; gap:8px; align-items:center;">
+<select aria-label="Couple privacy" id="couplesPrivacySelect">
+<option value="private">Private</option>
+<option value="friends">Friends</option>
+<option value="public">Public</option>
+</select>
+<input id="couplesNameInput" maxlength="48" placeholder="Couple name (optional)" style="flex:1;"/>
+</div>
+<textarea id="couplesBioInput" maxlength="220" placeholder="Couple bio (optional)" style="width:100%; min-height:70px; margin-top:8px;"></textarea>
+<div class="toggleRow" style="margin-top:8px;">
+<label class="switch">
+<input id="couplesShowBadgeToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Show couple badge publicly</div>
+</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesBonusesToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Enable couple bonuses (tiny)</div>
+</div>
+<div class="row" style="margin-top:8px; gap:8px; align-items:center;">
+<button class="btn secondary" id="couplesSettingsSaveBtn" type="button">Save couple card</button>
+<button class="btn secondary" id="couplesNudgeBtn" type="button" aria-label="Nudge your partner">Nudge</button>
+</div>
+<div class="small" id="couplesV2Status" style="margin-top:6px;"></div>
 </div>
 <div class="row" style="margin-top:10px; gap:8px;">
 <button class="btn danger" id="couplesUnlinkBtn" type="button">Unlink</button>

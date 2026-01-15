@@ -47,6 +47,23 @@ const lastReactionByUserId = new Map(); // userId -> ts
 // --- Room events (in-memory, roomName -> {type,title,endsAt,startedBy})
 const ACTIVE_ROOM_EVENTS = new Map();
 
+function emitToUserIds(userIds, event, payload) {
+  const ids = Array.isArray(userIds) ? userIds : [userIds];
+  for (const uidRaw of ids) {
+    const uid = Number(uidRaw) || 0;
+    if (!uid) continue;
+    const sockets = sessionByUserId.get(uid);
+    if (sockets && sockets.size) {
+      for (const sid of sockets) {
+        io.to(sid).emit(event, payload);
+      }
+    } else {
+      const sid = socketIdByUserId.get(uid);
+      if (sid) io.to(sid).emit(event, payload);
+    }
+  }
+}
+
 
 
 function bumpHeat(userId, delta = 1) {
@@ -545,11 +562,23 @@ try {
         status TEXT NOT NULL DEFAULT 'pending', -- pending | active
         status_emoji TEXT NOT NULL DEFAULT '💜',
         status_label TEXT NOT NULL DEFAULT 'Linked',
+        privacy TEXT NOT NULL DEFAULT 'private',
+        couple_name TEXT,
+        couple_bio TEXT,
+        settings_json TEXT,
+        show_badge BOOLEAN NOT NULL DEFAULT true,
+        bonuses_enabled BOOLEAN NOT NULL DEFAULT false,
         created_at BIGINT NOT NULL,
         activated_at BIGINT,
         updated_at BIGINT NOT NULL
       )
     `);
+    await pgPool.query(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS privacy TEXT NOT NULL DEFAULT 'private'`);
+    await pgPool.query(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS couple_name TEXT`);
+    await pgPool.query(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS couple_bio TEXT`);
+    await pgPool.query(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS settings_json TEXT`);
+    await pgPool.query(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS show_badge BOOLEAN NOT NULL DEFAULT true`);
+    await pgPool.query(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS bonuses_enabled BOOLEAN NOT NULL DEFAULT false`);
 
     // Best-effort FK constraints (may fail if legacy schemas differ); couples will still work without them.
     try {
@@ -574,10 +603,12 @@ try {
         group_members BOOLEAN NOT NULL DEFAULT false,
         aura BOOLEAN NOT NULL DEFAULT true,
         badge BOOLEAN NOT NULL DEFAULT true,
+        allow_ping BOOLEAN NOT NULL DEFAULT true,
         updated_at BIGINT NOT NULL,
         PRIMARY KEY (link_id, user_id)
       )
     `);
+    await pgPool.query(`ALTER TABLE couple_prefs ADD COLUMN IF NOT EXISTS allow_ping BOOLEAN NOT NULL DEFAULT true`);
     try {
       await pgPool.query(`ALTER TABLE couple_prefs ADD CONSTRAINT couple_prefs_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`);
     } catch {}
@@ -660,6 +691,33 @@ function orderPair(a, b) {
   return x < y ? [x, y] : [y, x];
 }
 
+function normalizeCoupleMembers(couple) {
+  if (!couple) return { user_a_id: 0, user_b_id: 0 };
+  const userA = Number(
+    couple.user_a_id ?? couple.userAId ?? couple.user1_id ?? couple.user1Id ?? couple.user_a ?? 0
+  ) || 0;
+  const userB = Number(
+    couple.user_b_id ?? couple.userBId ?? couple.user2_id ?? couple.user2Id ?? couple.user_b ?? 0
+  ) || 0;
+  return { user_a_id: userA, user_b_id: userB };
+}
+
+function isCoupleMember(userId, couple) {
+  const uid = Number(userId) || 0;
+  if (!uid || !couple) return false;
+  const { user_a_id, user_b_id } = normalizeCoupleMembers(couple);
+  return uid === user_a_id || uid === user_b_id;
+}
+
+function getCouplePartnerId(userId, couple) {
+  const uid = Number(userId) || 0;
+  if (!uid || !couple) return 0;
+  const { user_a_id, user_b_id } = normalizeCoupleMembers(couple);
+  if (uid === user_a_id) return user_b_id;
+  if (uid === user_b_id) return user_a_id;
+  return 0;
+}
+
 async function pgGetCoupleLinkForUser(userId) {
   const uid = Number(userId) || 0;
   if (!uid) return null;
@@ -680,6 +738,31 @@ async function pgGetCoupleLinkForUser(userId) {
   return rows[0] || null;
 }
 
+async function pgGetActiveCoupleLinkForUser(userId) {
+  const uid = Number(userId) || 0;
+  if (!uid) return null;
+  const { rows } = await pgPool.query(
+    `
+    SELECT cl.*,
+           u1.username AS user1_name,
+           u2.username AS user2_name,
+           u1.avatar AS user1_avatar,
+           u2.avatar AS user2_avatar,
+           u1.role AS user1_role,
+           u2.role AS user2_role
+      FROM couple_links cl
+      JOIN users u1 ON u1.id = cl.user1_id
+      JOIN users u2 ON u2.id = cl.user2_id
+     WHERE cl.status='active'
+       AND (cl.user1_id=$1 OR cl.user2_id=$1)
+     ORDER BY cl.updated_at DESC
+     LIMIT 1
+    `,
+    [uid]
+  );
+  return rows[0] || null;
+}
+
 async function pgGetCouplePrefs(linkId, userId) {
   const { rows } = await pgPool.query(
     `SELECT * FROM couple_prefs WHERE link_id=$1 AND user_id=$2 LIMIT 1`,
@@ -688,8 +771,9 @@ async function pgGetCouplePrefs(linkId, userId) {
   return rows[0] || null;
 }
 
-async function pgGetCoupleSummaryFor(userId) {
-  const link = await pgGetCoupleLinkForUser(userId);
+async function pgGetCoupleSummaryFor(user) {
+  const userId = Number(user?.id ?? user?.user_id ?? user?.userId) || 0;
+  const link = await pgGetActiveCoupleLinkForUser(userId);
 
   // Pending links involving this user (incoming/outgoing)
   const { rows: pending } = await pgPool.query(
@@ -725,11 +809,40 @@ async function pgGetCoupleSummaryFor(userId) {
   }
 
   let active = null;
-  if (link && link.status === "active") {
+  let couple = null;
+  let partner = null;
+  if (link && link.status === "active" && isCoupleMember(userId, link)) {
     const prefsMe = await pgGetCouplePrefs(link.id, userId);
-    const partnerId = (Number(link.user1_id) === Number(userId)) ? Number(link.user2_id) : Number(link.user1_id);
+    const partnerId = getCouplePartnerId(userId, link);
     const prefsPartner = await pgGetCouplePrefs(link.id, partnerId);
-    const partnerName = (Number(link.user1_id) === Number(userId)) ? link.user2_name : link.user1_name;
+    const isU1 = Number(link.user1_id) === Number(userId);
+    const partnerName = isU1 ? link.user2_name : link.user1_name;
+    const partnerAvatar = isU1 ? link.user2_avatar : link.user1_avatar;
+    const partnerRole = isU1 ? link.user2_role : link.user1_role;
+
+    couple = {
+      id: link.id,
+      user_a_id: Number(link.user1_id) || 0,
+      user_b_id: Number(link.user2_id) || 0,
+      partner_id: partnerId,
+      status: link.status,
+      created_at: Number(link.created_at) || null,
+      activated_at: Number(link.activated_at || link.created_at) || null,
+      privacy: link.privacy || "private",
+      couple_name: link.couple_name || "",
+      couple_bio: link.couple_bio || "",
+      show_badge: link.show_badge !== false,
+      bonuses_enabled: !!link.bonuses_enabled,
+      status_emoji: link.status_emoji || "💜",
+      status_label: link.status_label || "Linked"
+    };
+
+    partner = {
+      id: partnerId,
+      username: partnerName,
+      avatar: partnerAvatar || "",
+      role: partnerRole || "User"
+    };
 
     active = {
       linkId: link.id,
@@ -738,13 +851,15 @@ async function pgGetCoupleSummaryFor(userId) {
       since: Number(link.activated_at || link.created_at) || null,
       statusEmoji: link.status_emoji || "💜",
       statusLabel: link.status_label || "Linked",
+      settingsAvailable: true,
       prefs: prefsMe ? {
         enabled: !!prefsMe.enabled,
         showProfile: !!prefsMe.show_profile,
         showMembers: !!prefsMe.show_members,
         groupMembers: !!prefsMe.group_members,
         aura: !!prefsMe.aura,
-        badge: !!prefsMe.badge
+        badge: !!prefsMe.badge,
+        allowPing: prefsMe.allow_ping !== false
       } : null,
       partnerPrefs: prefsPartner ? {
         enabled: !!prefsPartner.enabled,
@@ -752,12 +867,22 @@ async function pgGetCoupleSummaryFor(userId) {
         showMembers: !!prefsPartner.show_members,
         groupMembers: !!prefsPartner.group_members,
         aura: !!prefsPartner.aura,
-        badge: !!prefsPartner.badge
-      } : null
+        badge: !!prefsPartner.badge,
+        allowPing: prefsPartner.allow_ping !== false
+      } : null,
+      couple
     };
   }
 
-  return { active, incoming, outgoing };
+  return {
+    active,
+    incoming,
+    outgoing,
+    couple,
+    partner,
+    isCoupleMember: !!(active && active.settingsAvailable),
+    v2Enabled: isCouplesV2EnabledFor(user)
+  };
 }
 
 function canShowCoupleFeature(mePrefs, partnerPrefs, key) {
@@ -771,6 +896,79 @@ function canShowCoupleFeature(mePrefs, partnerPrefs, key) {
   return false;
 }
 
+function canShowCoupleBadge(mePrefs, partnerPrefs, link) {
+  if (!canShowCoupleFeature(mePrefs, partnerPrefs, "badge")) return false;
+  if (link && link.show_badge === false) return false;
+  return true;
+}
+
+async function ensureCoupleLinkedMemories(link) {
+  if (!FEATURE_FLAGS_CACHE?.COUPLES_V2_ENABLED) return;
+  if (!link) return;
+  const userIds = [Number(link.user1_id) || 0, Number(link.user2_id) || 0].filter(Boolean);
+  if (userIds.length !== 2) return;
+  const { rows: users } = await pgPool.query(
+    `SELECT id, username, role FROM users WHERE id = ANY($1::int[])`,
+    [userIds]
+  );
+  const map = new Map(users.map((u) => [Number(u.id), u]));
+  const u1 = map.get(userIds[0]);
+  const u2 = map.get(userIds[1]);
+  if (!u1 || !u2) return;
+  const payloadFor = (self, partner) => ({
+    type: "social",
+    title: "Couple linked",
+    description: `Linked with ${partner.username}.`,
+    icon: "💜",
+    metadata: { partnerId: partner.id, partnerName: partner.username, coupleId: link.id },
+  });
+  if (isCouplesV2EnabledFor(u1)) {
+    void ensureMemory(u1.id, `couple_linked_${link.id}`, payloadFor(u1, u2), u1);
+  }
+  if (isCouplesV2EnabledFor(u2)) {
+    void ensureMemory(u2.id, `couple_linked_${link.id}`, payloadFor(u2, u1), u2);
+  }
+}
+
+async function ensureCoupleMilestoneMemories(link) {
+  if (!FEATURE_FLAGS_CACHE?.COUPLES_V2_ENABLED) return;
+  if (!link) return;
+  const since = Number(link.activated_at || link.activatedAt || link.created_at || link.createdAt) || 0;
+  if (!since) return;
+  const days = Math.floor((Date.now() - since) / 86400000);
+  if (days < 7) return;
+  const userIds = [Number(link.user1_id ?? link.user_a_id) || 0, Number(link.user2_id ?? link.user_b_id) || 0].filter(Boolean);
+  if (userIds.length !== 2) return;
+  const { rows: users } = await pgPool.query(
+    `SELECT id, username, role FROM users WHERE id = ANY($1::int[])`,
+    [userIds]
+  );
+  const map = new Map(users.map((u) => [Number(u.id), u]));
+  const u1 = map.get(userIds[0]);
+  const u2 = map.get(userIds[1]);
+  if (!u1 || !u2) return;
+  const milestones = [
+    { days: 7, key: `couple_days_7_${link.id}`, title: "7 days together", icon: "🫶" },
+    { days: 30, key: `couple_days_30_${link.id}`, title: "30 days together", icon: "💞" }
+  ];
+  for (const milestone of milestones) {
+    if (days < milestone.days) continue;
+    const payloadFor = (self, partner) => ({
+      type: "social",
+      title: milestone.title,
+      description: `${milestone.days} days together with ${partner.username}.`,
+      icon: milestone.icon,
+      metadata: { partnerId: partner.id, partnerName: partner.username, coupleId: link.id, days: milestone.days },
+    });
+    if (isCouplesV2EnabledFor(u1)) {
+      void ensureMemory(u1.id, milestone.key, payloadFor(u1, u2), u1);
+    }
+    if (isCouplesV2EnabledFor(u2)) {
+      void ensureMemory(u2.id, milestone.key, payloadFor(u2, u1), u2);
+    }
+  }
+}
+
 async function pgUpsertCouplePrefs(linkId, userId, patch) {
   const now = Date.now();
   const p = patch || {};
@@ -780,7 +978,8 @@ async function pgUpsertCouplePrefs(linkId, userId, patch) {
     show_members: typeof p.showMembers === "boolean" ? p.showMembers : undefined,
     group_members: typeof p.groupMembers === "boolean" ? p.groupMembers : undefined,
     aura: typeof p.aura === "boolean" ? p.aura : undefined,
-    badge: typeof p.badge === "boolean" ? p.badge : undefined
+    badge: typeof p.badge === "boolean" ? p.badge : undefined,
+    allow_ping: typeof p.allowPing === "boolean" ? p.allowPing : undefined
   };
 
   // If row doesn't exist, insert defaults first
@@ -788,8 +987,8 @@ async function pgUpsertCouplePrefs(linkId, userId, patch) {
   if (!existing) {
     await pgPool.query(
       `
-      INSERT INTO couple_prefs(link_id, user_id, enabled, show_profile, show_members, group_members, aura, badge, updated_at)
-      VALUES($1,$2,true,true,true,false,true,true,$3)
+      INSERT INTO couple_prefs(link_id, user_id, enabled, show_profile, show_members, group_members, aura, badge, allow_ping, updated_at)
+      VALUES($1,$2,true,true,true,false,true,true,true,$3)
       ON CONFLICT (link_id, user_id) DO NOTHING
       `,
       [Number(linkId) || 0, Number(userId) || 0, now]
@@ -1792,6 +1991,47 @@ async function setConfigJson(key, obj) {
   await setConfigValue(key, raw);
   return obj;
 }
+
+let FEATURE_FLAGS_CACHE = {};
+async function refreshFeatureFlags() {
+  try {
+    FEATURE_FLAGS_CACHE = await getConfigJson("feature_flags", {});
+  } catch {
+    FEATURE_FLAGS_CACHE = {};
+  }
+  return FEATURE_FLAGS_CACHE;
+}
+
+function parseFeatureAllowlist(value) {
+  if (!value) return new Set();
+  if (Array.isArray(value)) {
+    return new Set(value.map((item) => String(item).trim().toLowerCase()).filter(Boolean));
+  }
+  if (typeof value === "string") {
+    return new Set(
+      value
+        .split(",")
+        .map((item) => String(item).trim().toLowerCase())
+        .filter(Boolean)
+    );
+  }
+  return new Set();
+}
+
+function isCouplesV2EnabledFor(user, flags = FEATURE_FLAGS_CACHE) {
+  const enabled = !!(flags && flags.COUPLES_V2_ENABLED);
+  if (!enabled) return false;
+  if (requireMinRole(user?.role || "User", "Owner")) return true;
+  const allowlist = parseFeatureAllowlist(flags?.COUPLES_V2_ALLOWLIST);
+  if (!allowlist.size) return false;
+  const username = String(user?.username || "").trim().toLowerCase();
+  const userId = user?.id ?? user?.user_id ?? user?.userId;
+  if (username && allowlist.has(username)) return true;
+  if (userId != null && allowlist.has(String(userId).toLowerCase())) return true;
+  return false;
+}
+
+refreshFeatureFlags().catch(() => {});
 
 function isMemoryFeatureAvailableFor(user) {
   if (MEMORY_SYSTEM_ENABLED) return true;
@@ -4579,7 +4819,7 @@ app.get("/api/restriction", async (req, res) => {
 //
 app.get("/api/owner/flags", requireOwner, async (_req, res) => {
   try {
-    const flags = await getConfigJson("feature_flags", {});
+    const flags = await refreshFeatureFlags();
     res.json({ ok: true, flags });
   } catch (e) {
     res.status(500).json({ ok: false, error: "failed_to_load_flags" });
@@ -4597,6 +4837,7 @@ app.post("/api/owner/flags", requireOwner, express.json({ limit: "64kb" }), asyn
       if (typeof v === "boolean" || typeof v === "number" || typeof v === "string") next[k] = v;
     }
     await setConfigJson("feature_flags", next);
+    FEATURE_FLAGS_CACHE = { ...next };
     try { io.emit("featureFlags:update", next); } catch {}
     res.json({ ok: true, flags: next });
   } catch (e) {
@@ -5926,6 +6167,10 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
           SELECT cl.*,
                  u1.username AS user1_name,
                  u2.username AS user2_name,
+                 u1.avatar AS user1_avatar,
+                 u2.avatar AS user2_avatar,
+                 u1.role AS user1_role,
+                 u2.role AS user2_role,
                  p1.enabled AS p1_enabled, p1.show_profile AS p1_show_profile, p1.show_members AS p1_show_members,
                  p1.group_members AS p1_group_members, p1.aura AS p1_aura, p1.badge AS p1_badge,
                  p2.enabled AS p2_enabled, p2.show_profile AS p2_show_profile, p2.show_members AS p2_show_members,
@@ -5947,6 +6192,10 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
         if (cl) {
           const isU1 = Number(cl.user1_id) === targetId;
           const partnerName = isU1 ? cl.user2_name : cl.user1_name;
+          const partnerId = getCouplePartnerId(targetId, cl);
+          const viewerId = Number(req.session.user?.id) || 0;
+          const isMember = isCoupleMember(viewerId, cl);
+          const privacy = cl.privacy || "private";
 
           const mePrefs = isU1 ? {
             enabled: !!cl.p1_enabled,
@@ -5980,16 +6229,58 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
             badge: !!cl.p1_badge
           };
 
-          if (canShowCoupleFeature(mePrefs, partnerPrefs, "profile")) {
+          let privacyAllows = privacy === "public";
+          if (privacy === "private") privacyAllows = isMember;
+          if (privacy === "friends" && !privacyAllows) {
+            if (isMember) privacyAllows = true;
+            else if (viewerId && viewerId !== targetId && partnerId) {
+              try {
+                if (PG_READY && FRIENDS_READY) {
+                  privacyAllows = (await pgAreFriends(viewerId, targetId)) || (await pgAreFriends(viewerId, partnerId));
+                } else {
+                  privacyAllows = (await dbAreFriends(viewerId, targetId)) || (await dbAreFriends(viewerId, partnerId));
+                }
+              } catch {}
+            }
+          }
+
+          if (privacyAllows && canShowCoupleFeature(mePrefs, partnerPrefs, "profile")) {
             payload.couple = {
               partner: partnerName,
               since: Number(cl.activated_at || cl.created_at) || null,
               statusEmoji: cl.status_emoji || "💜",
               statusLabel: cl.status_label || "Linked",
-              badge: canShowCoupleFeature(mePrefs, partnerPrefs, "badge"),
+              badge: canShowCoupleBadge(mePrefs, partnerPrefs, cl),
               aura: canShowCoupleFeature(mePrefs, partnerPrefs, "aura"),
               showMembers: canShowCoupleFeature(mePrefs, partnerPrefs, "members"),
               groupMembers: canShowCoupleFeature(mePrefs, partnerPrefs, "group")
+            };
+          }
+
+          if (privacyAllows && isCouplesV2EnabledFor(req.session.user)) {
+            const members = [
+              {
+                id: Number(cl.user1_id) || 0,
+                username: cl.user1_name,
+                avatar: avatarUrlFromRow({ avatar: cl.user1_avatar }),
+                role: cl.user1_role || "User"
+              },
+              {
+                id: Number(cl.user2_id) || 0,
+                username: cl.user2_name,
+                avatar: avatarUrlFromRow({ avatar: cl.user2_avatar }),
+                role: cl.user2_role || "User"
+              }
+            ];
+            payload.coupleCard = {
+              coupleName: cl.couple_name || "",
+              coupleBio: cl.couple_bio || "",
+              privacy,
+              showBadge: cl.show_badge !== false,
+              statusEmoji: cl.status_emoji || "💜",
+              statusLabel: cl.status_label || "Linked",
+              since: Number(cl.activated_at || cl.created_at) || null,
+              members
             };
           }
         }
@@ -6147,7 +6438,12 @@ app.get("/api/couples/me", requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
     if (!COUPLES_READY) return res.status(503).send("Couples not ready");
-    const summary = await pgGetCoupleSummaryFor(req.session.user.id);
+    const summary = await pgGetCoupleSummaryFor(req.session.user);
+    if (summary?.v2Enabled && summary?.couple) {
+      ensureCoupleMilestoneMemories(summary.couple).catch((e) => {
+        console.warn("[couples] milestone memory failed:", e?.message || e);
+      });
+    }
     return res.json(summary);
   } catch (e) {
     console.warn("[couples] /me failed:", e?.message || e);
@@ -6198,16 +6494,16 @@ app.post("/api/couples/request", requireLogin, async (req, res) => {
 
     await pgPool.query(
       `
-      INSERT INTO couple_prefs(link_id, user_id, enabled, show_profile, show_members, group_members, aura, badge, updated_at)
+      INSERT INTO couple_prefs(link_id, user_id, enabled, show_profile, show_members, group_members, aura, badge, allow_ping, updated_at)
       VALUES
-        ($1,$2,true,true,true,false,true,true,$4),
-        ($1,$3,true,true,true,false,true,true,$4)
+        ($1,$2,true,true,true,false,true,true,true,$4),
+        ($1,$3,true,true,true,false,true,true,true,$4)
       ON CONFLICT (link_id, user_id) DO NOTHING
       `,
       [linkId, u1, u2, now]
     );
 
-    const summary = await pgGetCoupleSummaryFor(meId);
+    const summary = await pgGetCoupleSummaryFor(req.session.user);
     return res.json(summary);
   } catch (e) {
     console.warn("[couples] request failed:", e?.message || e);
@@ -6228,11 +6524,12 @@ app.post("/api/couples/respond", requireLogin, async (req, res) => {
     const link = rows[0];
     if (!link) return res.status(404).send("Not found");
     if (link.status !== "pending") return res.status(409).send("Not pending");
-    if (Number(link.user1_id) !== meId && Number(link.user2_id) !== meId) return res.status(403).send("Forbidden");
+    if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
 
     if (!accept) {
       await pgPool.query(`DELETE FROM couple_links WHERE id=$1`, [linkId]);
-      const summary = await pgGetCoupleSummaryFor(meId);
+      emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
+      const summary = await pgGetCoupleSummaryFor(req.session.user);
       return res.json(summary);
     }
 
@@ -6241,34 +6538,15 @@ app.post("/api/couples/respond", requireLogin, async (req, res) => {
       `UPDATE couple_links SET status='active', activated_at=$2, updated_at=$2 WHERE id=$1`,
       [linkId, now]
     );
+    emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
 
     try {
-      const userIds = [Number(link.user1_id) || 0, Number(link.user2_id) || 0].filter(Boolean);
-      if (userIds.length === 2) {
-        const { rows: users } = await pgPool.query(
-          `SELECT id, username, role FROM users WHERE id = ANY($1::int[])`,
-          [userIds]
-        );
-        const map = new Map(users.map((u) => [Number(u.id), u]));
-        const u1 = map.get(userIds[0]);
-        const u2 = map.get(userIds[1]);
-        if (u1 && u2) {
-          const payloadFor = (self, partner) => ({
-            type: "social",
-            title: "Couple linked",
-            description: `Linked with ${partner.username}.`,
-            icon: "💜",
-            metadata: { partnerId: partner.id, partnerName: partner.username },
-          });
-          void ensureMemory(u1.id, `couple_linked_${u2.id}`, payloadFor(u1, u2), u1);
-          void ensureMemory(u2.id, `couple_linked_${u1.id}`, payloadFor(u2, u1), u2);
-        }
-      }
+      await ensureCoupleLinkedMemories(link);
     } catch (e) {
       console.warn("[couples] memory create failed:", e?.message || e);
     }
 
-    const summary = await pgGetCoupleSummaryFor(meId);
+    const summary = await pgGetCoupleSummaryFor(req.session.user);
     return res.json(summary);
   } catch (e) {
     console.warn("[couples] respond failed:", e?.message || e);
@@ -6287,10 +6565,11 @@ app.post("/api/couples/unlink", requireLogin, async (req, res) => {
     const { rows } = await pgPool.query(`SELECT user1_id,user2_id FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
     const link = rows[0];
     if (!link) return res.status(404).send("Not found");
-    if (Number(link.user1_id) !== meId && Number(link.user2_id) !== meId) return res.status(403).send("Forbidden");
+    if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
 
     await pgPool.query(`DELETE FROM couple_links WHERE id=$1`, [linkId]);
-    const summary = await pgGetCoupleSummaryFor(meId);
+    emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
+    const summary = await pgGetCoupleSummaryFor(req.session.user);
     return res.json(summary);
   } catch (e) {
     console.warn("[couples] unlink failed:", e?.message || e);
@@ -6309,10 +6588,11 @@ app.post("/api/couples/prefs", requireLogin, async (req, res) => {
     const { rows } = await pgPool.query(`SELECT user1_id,user2_id FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
     const link = rows[0];
     if (!link) return res.status(404).send("Not found");
-    if (Number(link.user1_id) !== meId && Number(link.user2_id) !== meId) return res.status(403).send("Forbidden");
+    if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
 
     await pgUpsertCouplePrefs(linkId, meId, req.body?.prefs || {});
-    const summary = await pgGetCoupleSummaryFor(meId);
+    emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
+    const summary = await pgGetCoupleSummaryFor(req.session.user);
     return res.json(summary);
   } catch (e) {
     console.warn("[couples] prefs failed:", e?.message || e);
@@ -6332,7 +6612,7 @@ app.post("/api/couples/status", requireLogin, async (req, res) => {
     const link = rows[0];
     if (!link) return res.status(404).send("Not found");
     if (link.status !== "active") return res.status(409).send("Not active");
-    if (Number(link.user1_id) !== meId && Number(link.user2_id) !== meId) return res.status(403).send("Forbidden");
+    if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
 
     const emoji = String(req.body?.statusEmoji || "💜").trim().slice(0, 8) || "💜";
     const label = String(req.body?.statusLabel || "Linked").trim().slice(0, 20) || "Linked";
@@ -6342,12 +6622,89 @@ app.post("/api/couples/status", requireLogin, async (req, res) => {
       `UPDATE couple_links SET status_emoji=$2, status_label=$3, updated_at=$4 WHERE id=$1`,
       [linkId, emoji, label, now]
     );
+    emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
 
-    const summary = await pgGetCoupleSummaryFor(meId);
+    const summary = await pgGetCoupleSummaryFor(req.session.user);
     return res.json(summary);
   } catch (e) {
     console.warn("[couples] status failed:", e?.message || e);
     return res.status(500).send("Could not update status");
+  }
+});
+
+app.post("/api/couples/settings", requireLogin, async (req, res) => {
+  try {
+    if (!PG_READY) return res.status(503).send("DB not ready");
+    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
+    if (!isCouplesV2EnabledFor(req.session.user)) return res.status(403).send("Forbidden");
+
+    const link = await pgGetActiveCoupleLinkForUser(req.session.user.id);
+    if (!link) return res.status(404).send("Not linked");
+    if (!isCoupleMember(req.session.user.id, link)) return res.status(403).send("Forbidden");
+
+    const privacyRaw = String(req.body?.privacy || "").trim().toLowerCase();
+    const privacy = ["private", "friends", "public"].includes(privacyRaw) ? privacyRaw : undefined;
+    const coupleName = typeof req.body?.couple_name === "string" ? String(req.body.couple_name).trim().slice(0, 48) : undefined;
+    const coupleBio = typeof req.body?.couple_bio === "string" ? String(req.body.couple_bio).trim().slice(0, 220) : undefined;
+    const showBadge = typeof req.body?.show_badge === "boolean" ? req.body.show_badge : undefined;
+    const bonusesEnabled = typeof req.body?.bonuses_enabled === "boolean" ? req.body.bonuses_enabled : undefined;
+    const now = Date.now();
+
+    const sets = [];
+    const vals = [];
+    if (privacy) { sets.push(`privacy=$${vals.length + 1}`); vals.push(privacy); }
+    if (coupleName !== undefined) { sets.push(`couple_name=$${vals.length + 1}`); vals.push(coupleName || null); }
+    if (coupleBio !== undefined) { sets.push(`couple_bio=$${vals.length + 1}`); vals.push(coupleBio || null); }
+    if (showBadge !== undefined) { sets.push(`show_badge=$${vals.length + 1}`); vals.push(showBadge); }
+    if (bonusesEnabled !== undefined) { sets.push(`bonuses_enabled=$${vals.length + 1}`); vals.push(bonusesEnabled); }
+    sets.push(`updated_at=$${vals.length + 1}`); vals.push(now);
+
+    if (sets.length) {
+      vals.push(link.id);
+      await pgPool.query(`UPDATE couple_links SET ${sets.join(", ")} WHERE id=$${vals.length}`, vals);
+    }
+
+    emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId: link.id });
+    const summary = await pgGetCoupleSummaryFor(req.session.user);
+    return res.json(summary);
+  } catch (e) {
+    console.warn("[couples] settings failed:", e?.message || e);
+    return res.status(500).send("Could not update settings");
+  }
+});
+
+const coupleNudgeCooldownMs = 60_000;
+const coupleNudgeLastByUser = new Map(); // key: `${linkId}:${userId}` -> ts
+
+app.post("/api/couples/nudge", requireLogin, async (req, res) => {
+  try {
+    if (!PG_READY) return res.status(503).send("DB not ready");
+    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
+    if (!isCouplesV2EnabledFor(req.session.user)) return res.status(403).send("Forbidden");
+
+    const link = await pgGetActiveCoupleLinkForUser(req.session.user.id);
+    if (!link) return res.status(404).send("Not linked");
+    if (!isCoupleMember(req.session.user.id, link)) return res.status(403).send("Forbidden");
+
+    const partnerId = getCouplePartnerId(req.session.user.id, link);
+    if (!partnerId) return res.status(404).send("Partner not found");
+    const prefsPartner = await pgGetCouplePrefs(link.id, partnerId);
+    if (prefsPartner && prefsPartner.allow_ping === false) return res.status(403).send("Partner muted nudges");
+
+    const key = `${link.id}:${req.session.user.id}`;
+    const last = coupleNudgeLastByUser.get(key) || 0;
+    if (Date.now() - last < coupleNudgeCooldownMs) return res.status(429).send("Slow down");
+    coupleNudgeLastByUser.set(key, Date.now());
+
+    emitToUserIds([partnerId], "couples:nudge", {
+      fromId: req.session.user.id,
+      fromName: req.session.user.username,
+      linkId: link.id
+    });
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn("[couples] nudge failed:", e?.message || e);
+    return res.status(500).send("Could not send nudge");
   }
 });
 
@@ -7858,6 +8215,7 @@ async function emitUserList(room) {
           SELECT cl.id AS link_id,
                  cl.user1_id, cl.user2_id,
                  cl.status_emoji, cl.status_label,
+                 cl.show_badge,
                  cl.activated_at, cl.created_at,
                  u1.username AS user1_name,
                  u2.username AS user2_name,
@@ -7897,14 +8255,14 @@ async function emitUserList(room) {
           uA.couple = {
             ...base,
             partner: c.user2_name,
-            badge: canShowCoupleFeature(prefsA, prefsB, "badge"),
+            badge: canShowCoupleBadge(prefsA, prefsB, c),
             aura: canShowCoupleFeature(prefsA, prefsB, "aura"),
             group: canShowCoupleFeature(prefsA, prefsB, "group"),
           };
           uB.couple = {
             ...base,
             partner: c.user1_name,
-            badge: canShowCoupleFeature(prefsA, prefsB, "badge"),
+            badge: canShowCoupleBadge(prefsA, prefsB, c),
             aura: canShowCoupleFeature(prefsA, prefsB, "aura"),
             group: canShowCoupleFeature(prefsA, prefsB, "group"),
           };
@@ -7933,8 +8291,11 @@ async function emitUserList(room) {
       seen.add(u.name);
       const c = u.couple;
       if (c && c.group && c.partner && byName.has(c.partner) && !seen.has(c.partner)) {
-        out.push(byName.get(c.partner));
-        seen.add(c.partner);
+        const partnerUser = byName.get(c.partner);
+        if (partnerUser && roleRank(partnerUser.role) === roleRank(u.role)) {
+          out.push(partnerUser);
+          seen.add(c.partner);
+        }
       }
     }
     if (out.length === users.length) users.splice(0, users.length, ...out);
@@ -9699,7 +10060,11 @@ socket.on("disconnect", () => {
 });
 
 // ---- Start
-Promise.allSettled([migrationsReady, pgInitPromise]).then((results) => {
+const startupReady = Promise.allSettled([migrationsReady, pgInitPromise]);
+let SERVER_STARTED = false;
+async function startServer() {
+  if (SERVER_STARTED) return httpServer;
+  const results = await startupReady;
   const [sqliteResult, pgResult] = results;
   if (sqliteResult.status === "rejected") {
     console.error("[startup] SQLite migration failed", sqliteResult.reason);
@@ -9709,10 +10074,21 @@ Promise.allSettled([migrationsReady, pgInitPromise]).then((results) => {
     console.error("[startup] Postgres init failed", pgResult.reason);
   }
 
-  httpServer.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  await new Promise((resolve) => {
+    httpServer.listen(PORT, () => {
+      SERVER_STARTED = true;
+      console.log(`Server running on http://localhost:${PORT}`);
+      resolve();
+    });
   });
-});
+  return httpServer;
+}
+
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = { app, httpServer, io, startServer, startupReady };
 
 
 function normalizeUserKey(value) {
