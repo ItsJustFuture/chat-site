@@ -285,6 +285,35 @@ await run(`CREATE INDEX IF NOT EXISTS idx_appeal_messages_appeal ON appeal_messa
   `);
 
   await run(`
+    CREATE TABLE IF NOT EXISTS memories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
+      room_id TEXT,
+      type TEXT NOT NULL,
+      key TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      icon TEXT,
+      created_at INTEGER NOT NULL,
+      metadata TEXT,
+      visibility TEXT NOT NULL DEFAULT 'private',
+      pinned INTEGER NOT NULL DEFAULT 0,
+      seen INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_user_key ON memories(user_id, key)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_memories_user_created ON memories(user_id, created_at DESC)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_memories_user_pinned ON memories(user_id, pinned)`);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS memory_settings (
+      user_id INTEGER PRIMARY KEY,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      last_seen_at INTEGER
+    )
+  `);
+
+  await run(`
     CREATE TABLE IF NOT EXISTS changelog_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       seq INTEGER NOT NULL UNIQUE,

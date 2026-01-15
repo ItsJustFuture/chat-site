@@ -585,6 +585,7 @@
 <div class="profileActions">
 <div class="tabs profileActionTabs profileCompactTabs" id="profileTabs">
 <button class="tab active" data-tab="profile" id="tabProfile" type="button">Profile</button>
+<button class="tab" data-tab="timeline" id="tabTimeline" type="button">Timeline</button>
 <button class="tab" data-tab="customize" id="tabCustomize" type="button">Customize</button>
 <button class="tab" data-tab="actions" id="tabActions" style="display:none;" type="button">Actions</button>
 </div>
@@ -805,6 +806,18 @@
 <div class="small muted">Use BBCode for simple formatting. Links/images require full URLs.</div>
 </div>
 </div>
+<div class="panelBox" id="memorySettingsPanel" style="display:none;">
+<div class="sectionTitle">Memory &amp; Lore System</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="memoryEnabledToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Enable Memory Timeline</div>
+</div>
+<div class="small muted">Unlock memory cards and your profile timeline (Owner only during early rollout).</div>
+<div class="msgline" id="memorySettingsMsg"></div>
+</div>
 <div class="row">
 <button class="btn btnPrimary" id="saveProfileBtn" type="button">Save</button>
 <button class="btn btnSecondary" id="refreshProfileBtn" type="button">Cancel</button>
@@ -813,6 +826,32 @@
 <div class="msgline" id="profileMsg"></div>
 </div>
 </div>
+</div>
+</div>
+<div id="viewTimeline" style="display:none;">
+<div class="memoryTimeline">
+<div class="memoryFilters" id="memoryFilterBar">
+<div class="memoryFilterRow">
+<button class="memoryFilterChip active" data-filter="all" type="button">All</button>
+<button class="memoryFilterChip" data-filter="social" type="button">Social</button>
+<button class="memoryFilterChip" data-filter="progress" type="button">Progress</button>
+<button class="memoryFilterChip" data-filter="media" type="button">Media</button>
+<button class="memoryFilterChip" data-filter="rooms" type="button">Rooms</button>
+<button class="memoryFilterChip" data-filter="rare" type="button">Rare</button>
+</div>
+</div>
+<div class="memoryFeatured" id="memoryFeaturedSection" style="display:none;">
+<div class="sectionTitle">Featured Memories</div>
+<div class="memoryFeaturedRow" id="memoryFeaturedRow"></div>
+</div>
+<div class="memoryTimelineList" id="memoryTimelineList"></div>
+<div class="memoryEmptyState" id="memoryEmptyState" style="display:none;">
+<div class="panelBox">
+<div class="sectionTitle">No memories yet</div>
+<div class="small muted">Your timeline will capture milestones like your first voice note, image upload, and level ups.</div>
+</div>
+</div>
+<div class="msgline" id="memoryTimelineMsg"></div>
 </div>
 </div>
 <div id="viewCustomize" style="display:none;">
