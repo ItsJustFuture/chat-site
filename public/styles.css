@@ -2657,15 +2657,23 @@ body.dice-room .luckMeter{
   inset:-1px;
   border-radius:inherit;
   pointer-events:none;
-  opacity:0.6;
-  box-shadow:
-    0 0 0 1px rgba(var(--userGlowRgb, 88 101 242) / 0.22),
-    0 0 12px rgba(var(--userGlowRgb, 88 101 242) / 0.12);
+  /*
+    IMPORTANT:
+    iOS/WebKit variants that don't support color-mix() will fall back to the
+    rgba(--userGlowRgb) shadow below. That was showing a visible outline on
+    *every* message (seen as green squares), even when --userGlow is transparent.
+
+    Default to NO outline, and only enable the glow in the color-mix() branch
+    where we can respect --userGlow.
+  */
+  opacity:0;
+  box-shadow:none;
   transition: opacity 180ms ease, box-shadow 180ms ease;
 }
 @supports (color: color-mix(in srgb, #000, #fff)){
   .bubble::after,
   .dmBubble::after{
+    opacity:0.6;
     box-shadow:
       0 0 0 1px color-mix(in srgb, var(--userGlow) 28%, transparent),
       0 0 12px color-mix(in srgb, var(--userGlow) 20%, transparent);
