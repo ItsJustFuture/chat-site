@@ -39,6 +39,8 @@ const sessionMetaBySocketId = new Map(); // socket.id -> meta
 const sessionByUserId = new Map(); // userId -> Set(socket.id)
 const DICE_ROLL_MIN_INTERVAL_MS = 1000;
 const diceRollRateByUserId = new Map();
+const qualifyingMsgWindowByUserId = new Map();
+const rollCadenceWindowByUserId = new Map();
 
 // --- Behaviour heat score (in-memory; admin/owner only)
 const heatByUserId = new Map(); // userId -> number
@@ -48,6 +50,56 @@ const lastReactionByUserId = new Map(); // userId -> ts
 
 // --- Room events (in-memory, roomName -> {type,title,endsAt,startedBy})
 const ACTIVE_ROOM_EVENTS = new Map();
+
+function pruneWindowTimestamps(list, now, windowMs) {
+  const cutoff = now - windowMs;
+  while (list.length && list[0] < cutoff) list.shift();
+  return list;
+}
+
+function getQualifyingMessageCount(uid, now) {
+  const list = qualifyingMsgWindowByUserId.get(uid) || [];
+  pruneWindowTimestamps(list, now, LUCK_MESSAGE_WINDOW_MS);
+  qualifyingMsgWindowByUserId.set(uid, list);
+  return list.length;
+}
+
+function recordQualifyingMessage(uid, now) {
+  const list = qualifyingMsgWindowByUserId.get(uid) || [];
+  pruneWindowTimestamps(list, now, LUCK_MESSAGE_WINDOW_MS);
+  list.push(now);
+  qualifyingMsgWindowByUserId.set(uid, list);
+  return list.length;
+}
+
+function updateRollCadenceWindow(uid, now) {
+  const list = rollCadenceWindowByUserId.get(uid) || [];
+  list.push(now);
+  while (list.length > LUCK_CADENCE_WINDOW) list.shift();
+  rollCadenceWindowByUserId.set(uid, list);
+  return list;
+}
+
+function isCadenceFlagged(uid, now, rollStreak, lastQualMsgAt) {
+  const list = updateRollCadenceWindow(uid, now);
+  if (rollStreak < 6 || list.length < 5) return false;
+  if (lastQualMsgAt && now - Number(lastQualMsgAt || 0) < LUCK_RECENT_BREAK_WINDOW_MS) return false;
+  const intervals = [];
+  for (let i = 1; i < list.length; i += 1) {
+    intervals.push(list[i] - list[i - 1]);
+  }
+  if (!intervals.length) return false;
+  const mean = intervals.reduce((sum, n) => sum + n, 0) / intervals.length;
+  if (mean > LUCK_CADENCE_MEAN_MAX_MS) return false;
+  const variance =
+    intervals.reduce((sum, n) => sum + Math.pow(n - mean, 2), 0) / intervals.length;
+  const stddev = Math.sqrt(variance);
+  return stddev <= LUCK_CADENCE_STDDEV_THRESHOLD_MS;
+}
+
+function emitLuckUpdate(uid, luck, rollStreak) {
+  emitToUserIds(uid, "luck:update", { luck, rollStreak, ts: Date.now() });
+}
 
 function emitToUserIds(userIds, event, payload) {
   const ids = Array.isArray(userIds) ? userIds : [userIds];
@@ -104,9 +156,26 @@ const {
   DICE_VARIANTS,
   DICE_VARIANT_LABELS,
   normalizeDiceVariant,
-  rollDiceVariant,
+  rollDiceVariantWithLuck,
+  isLuckWin,
   computeDiceReward,
 } = require("./dice-utils");
+const {
+  LUCK_MESSAGE_MIN_LEN,
+  LUCK_MESSAGE_WINDOW_MS,
+  LUCK_REPEAT_WINDOW_MS,
+  LUCK_CADENCE_WINDOW,
+  LUCK_CADENCE_STDDEV_THRESHOLD_MS,
+  LUCK_CADENCE_MEAN_MAX_MS,
+  LUCK_CADENCE_PENALTY,
+  LUCK_RECENT_BREAK_WINDOW_MS,
+  clampLuck,
+  hashLuckMessage,
+  computeQualifyingLuckGain,
+  computeRollStreakPenalty,
+  applyWinCut,
+  normalizeLuckMessage,
+} = require("./luck-utils");
 
 // ---- Safety nets (prevents silent crashes in prod) ----
 process.on("unhandledRejection", (err) => {
@@ -473,6 +542,10 @@ try {
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastDailyLoginGoldAt BIGINT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS lastDiceRollAt BIGINT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS dice_sixes INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS luck DOUBLE PRECISION NOT NULL DEFAULT 0`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS roll_streak INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_qual_msg_hash TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_qual_msg_at BIGINT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS vibe_tags JSONB NOT NULL DEFAULT '[]'::jsonb`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS header_grad_a TEXT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS header_grad_b TEXT`,
@@ -1739,7 +1812,7 @@ async function pgGetUserRowById(id, columns) {
     "id","username","password_hash","role","created_at","avatar","avatar_bytes","avatar_mime","avatar_updated","bio","mood","age","gender",
     "last_seen","last_room","last_status","theme","gold","xp",
     "lastXpMessageAt","lastDailyLoginAt","lastGoldTickAt","lastMessageGoldAt","lastDailyLoginGoldAt",
-    "lastDiceRollAt","dice_sixes","vibe_tags","header_grad_a","header_grad_b"
+    "lastDiceRollAt","dice_sixes","luck","roll_streak","last_qual_msg_hash","last_qual_msg_at","vibe_tags","header_grad_a","header_grad_b"
   ]);
   const cols = (Array.isArray(columns) && columns.length)
     ? columns.filter((c) => allow.has(String(c)))
@@ -1771,7 +1844,7 @@ async function pgUpsertFromSqliteRow(row) {
       last_seen, last_room, last_status,
       theme, gold, xp,
       "lastXpMessageAt", "lastDailyLoginAt", "lastGoldTickAt", "lastMessageGoldAt", "lastDailyLoginGoldAt",
-      "lastDiceRollAt", dice_sixes
+      "lastDiceRollAt", dice_sixes, luck, roll_streak, last_qual_msg_hash, last_qual_msg_at
     )
     VALUES (
       $1,$2,$3,$4,
@@ -1779,7 +1852,7 @@ async function pgUpsertFromSqliteRow(row) {
       $10,$11,$12,
       $13,$14,$15,
       $16,$17,$18,$19,$20,
-      $21,$22
+      $21,$22,$23,$24,$25,$26
     )
     ON CONFLICT (username) DO UPDATE SET
       password_hash = COALESCE(EXCLUDED.password_hash, users.password_hash),
@@ -1795,7 +1868,15 @@ async function pgUpsertFromSqliteRow(row) {
       theme = COALESCE(EXCLUDED.theme, users.theme),
       gold = GREATEST(users.gold, EXCLUDED.gold),
       xp = GREATEST(users.xp, EXCLUDED.xp),
-      dice_sixes = GREATEST(users.dice_sixes, EXCLUDED.dice_sixes)
+      dice_sixes = GREATEST(users.dice_sixes, EXCLUDED.dice_sixes),
+      luck = COALESCE(EXCLUDED.luck, users.luck),
+      roll_streak = COALESCE(EXCLUDED.roll_streak, users.roll_streak),
+      last_qual_msg_hash = COALESCE(EXCLUDED.last_qual_msg_hash, users.last_qual_msg_hash),
+      last_qual_msg_at = CASE
+        WHEN users.last_qual_msg_at IS NULL THEN EXCLUDED.last_qual_msg_at
+        WHEN EXCLUDED.last_qual_msg_at IS NULL THEN users.last_qual_msg_at
+        ELSE GREATEST(users.last_qual_msg_at, EXCLUDED.last_qual_msg_at)
+      END
     RETURNING *;
   `;
 
@@ -1805,7 +1886,7 @@ async function pgUpsertFromSqliteRow(row) {
     row.last_seen ?? null, row.last_room || null, row.last_status || null,
     theme, row.gold ?? 0, row.xp ?? 0,
     row.lastXpMessageAt ?? null, row.lastDailyLoginAt ?? null, row.lastGoldTickAt ?? null, row.lastMessageGoldAt ?? null, row.lastDailyLoginGoldAt ?? null,
-    row.lastDiceRollAt ?? null, row.dice_sixes ?? 0
+    row.lastDiceRollAt ?? null, row.dice_sixes ?? 0, row.luck ?? 0, row.roll_streak ?? 0, row.last_qual_msg_hash ?? null, row.last_qual_msg_at ?? null
   ]);
 
   return pgRowToUser(rows[0]);
@@ -9147,6 +9228,124 @@ async function emitUserList(room) {
   io.to(room).emit("user list", users);
 }
 
+// ---- Luck system: qualifying message handling (server-authoritative)
+async function applyLuckForQualifyingMessage({ userId, room, text }) {
+  if (!userId || room === "diceroom") return;
+  const trimmed = String(text || "").trim();
+  if (trimmed.length < LUCK_MESSAGE_MIN_LEN) return;
+
+  const normalized = normalizeLuckMessage(trimmed);
+  if (!normalized) return;
+
+  const now = Date.now();
+  const msgHash = hashLuckMessage(normalized);
+
+  try {
+    if (await pgUserExists(userId)) {
+      const row = await pgGetUserRowById(userId, [
+        "luck",
+        "roll_streak",
+        "last_qual_msg_hash",
+        "last_qual_msg_at",
+      ]);
+      if (!row) return;
+      const lastHash = row.last_qual_msg_hash || null;
+      const lastAt = Number(row.last_qual_msg_at || 0);
+      if (lastHash && lastHash === msgHash && now - lastAt < LUCK_REPEAT_WINDOW_MS) return;
+
+      const count = getQualifyingMessageCount(userId, now);
+      const gain = computeQualifyingLuckGain(count);
+      recordQualifyingMessage(userId, now);
+
+      const nextLuck = clampLuck(Number(row.luck || 0) + gain);
+      const nextStreak = 0;
+      await pgPool.query(
+        `UPDATE users
+           SET luck = $1,
+               roll_streak = $2,
+               last_qual_msg_hash = $3,
+               last_qual_msg_at = $4
+         WHERE id = $5`,
+        [nextLuck, nextStreak, msgHash, now, userId]
+      );
+      emitLuckUpdate(userId, nextLuck, nextStreak);
+      return;
+    }
+  } catch (e) {
+    console.warn("[luck][pg] qualifying message failed:", e?.message || e);
+  }
+
+  try {
+    const row = await dbGetAsync(
+      "SELECT luck, roll_streak, last_qual_msg_hash, last_qual_msg_at FROM users WHERE id = ?",
+      [userId]
+    );
+    if (!row) return;
+    const lastHash = row.last_qual_msg_hash || null;
+    const lastAt = Number(row.last_qual_msg_at || 0);
+    if (lastHash && lastHash === msgHash && now - lastAt < LUCK_REPEAT_WINDOW_MS) return;
+
+    const count = getQualifyingMessageCount(userId, now);
+    const gain = computeQualifyingLuckGain(count);
+    recordQualifyingMessage(userId, now);
+
+    const nextLuck = clampLuck(Number(row.luck || 0) + gain);
+    const nextStreak = 0;
+    await dbRunAsync(
+      "UPDATE users SET luck = ?, roll_streak = ?, last_qual_msg_hash = ?, last_qual_msg_at = ? WHERE id = ?",
+      [nextLuck, nextStreak, msgHash, now, userId]
+    );
+    emitLuckUpdate(userId, nextLuck, nextStreak);
+  } catch (e) {
+    console.warn("[luck][sqlite] qualifying message failed:", e?.message || e);
+  }
+}
+
+async function emitLuckStateToSocket(socket) {
+  const uid = Number(socket?.user?.id || 0);
+  if (!uid) return;
+  try {
+    if (await pgUserExists(uid)) {
+      const row = await pgGetUserRowById(uid, ["luck", "roll_streak"]);
+      if (!row) return;
+      socket.emit("luck:update", {
+        luck: Number(row.luck || 0),
+        rollStreak: Number(row.roll_streak || 0),
+        ts: Date.now(),
+      });
+      return;
+    }
+  } catch (e) {
+    console.warn("[luck][pg] state fetch failed:", e?.message || e);
+  }
+  try {
+    const row = await dbGetAsync("SELECT luck, roll_streak FROM users WHERE id = ?", [uid]);
+    if (!row) return;
+    socket.emit("luck:update", {
+      luck: Number(row.luck || 0),
+      rollStreak: Number(row.roll_streak || 0),
+      ts: Date.now(),
+    });
+  } catch (e) {
+    console.warn("[luck][sqlite] state fetch failed:", e?.message || e);
+  }
+}
+
+function applyLuckForRoll({ luck, rollStreak, lastQualMsgAt, userId, now }) {
+  const nextStreak = Number(rollStreak || 0) + 1;
+  let nextLuck = Number(luck || 0);
+
+  const streakPenalty = computeRollStreakPenalty(nextStreak);
+  if (streakPenalty) nextLuck -= streakPenalty;
+
+  if (isCadenceFlagged(userId, now, nextStreak, lastQualMsgAt)) {
+    nextLuck -= LUCK_CADENCE_PENALTY;
+  }
+
+  nextLuck = clampLuck(nextLuck);
+  return { nextLuck, nextStreak };
+}
+
 // ---- Socket handlers
 io.on("connection", async (socket) => {
   const sessUser = socket.request.session?.user;
@@ -9207,6 +9406,10 @@ io.on("connection", async (socket) => {
       meta.lastSeenAt = Date.now();
       sessionMetaBySocketId.set(socket.id, meta);
     } catch {}
+  });
+
+  socket.on("luck:get", () => {
+    void emitLuckStateToSocket(socket);
   });
 
   socket.on("disconnect", () => {
@@ -9396,7 +9599,13 @@ socket.on("join room", ({ room, status }) => {
     (async () => {
       try {
         if (await pgUserExists(uid)) {
-          const row = await pgGetUserRowById(uid, ["gold", "lastDiceRollAt"]);
+          const row = await pgGetUserRowById(uid, [
+            "gold",
+            "lastDiceRollAt",
+            "luck",
+            "roll_streak",
+            "last_qual_msg_at",
+          ]);
           if (!row) {
             socket.emit("dice:error", "Could not roll dice right now.");
             return;
@@ -9412,7 +9621,14 @@ socket.on("join room", ({ room, status }) => {
           }
 
           const gold = Number(row.gold || 0);
-          const roll = rollDiceVariant(variant);
+          const luckState = applyLuckForRoll({
+            luck: row.luck,
+            rollStreak: row.roll_streak,
+            lastQualMsgAt: row.last_qual_msg_at,
+            userId: uid,
+            now,
+          });
+          const roll = rollDiceVariantWithLuck(variant, luckState.nextLuck);
           const reward = computeDiceReward(variant, roll.result, roll.breakdown);
           if (gold < (reward.minBalanceRequired || 0)) {
             socket.emit(
@@ -9426,14 +9642,18 @@ socket.on("join room", ({ room, status }) => {
           const breakdownArr = Array.isArray(roll.breakdown) ? roll.breakdown : [];
           const sixGain =
             variant === "d6" ? (roll.result === 6 ? 1 : 0) : variant === "2d6" ? breakdownArr.filter((n) => n === 6).length : 0;
+          const didWinForLuck = isLuckWin(variant, roll.result, roll.breakdown);
+          const finalLuck = clampLuck(applyWinCut(luckState.nextLuck, didWinForLuck));
 
           await pgPool.query(
             `UPDATE users
                SET gold = GREATEST(0, gold + $1),
                    lastDiceRollAt = $2,
-                   dice_sixes = dice_sixes + $3
-             WHERE id = $4`,
-            [deltaGold, now, sixGain, uid]
+                   dice_sixes = dice_sixes + $3,
+                   luck = $4,
+                   roll_streak = $5
+             WHERE id = $6`,
+            [deltaGold, now, sixGain, finalLuck, luckState.nextStreak, uid]
           );
 
           const payloadBase = {
@@ -9452,6 +9672,7 @@ socket.on("join room", ({ room, status }) => {
           socket.emit("dice:result", { ...payloadBase, deltaGold });
           socket.to(room).emit("dice:result", { ...payloadBase, deltaGold });
           emitProgressionUpdate(uid);
+          emitLuckUpdate(uid, finalLuck, luckState.nextStreak);
 
           io.to(room).emit(
             "system",
@@ -9480,7 +9701,10 @@ socket.on("join room", ({ room, status }) => {
       }
 
       // SQLite fallback (original behavior)
-      db.get(`SELECT gold, lastDiceRollAt FROM users WHERE id=?`, [uid], (err, row) => {
+      db.get(
+        `SELECT gold, lastDiceRollAt, luck, roll_streak, last_qual_msg_at FROM users WHERE id=?`,
+        [uid],
+        (err, row) => {
         if (err || !row) {
           socket.emit("dice:error", "Could not roll dice right now.");
           return;
@@ -9496,7 +9720,14 @@ socket.on("join room", ({ room, status }) => {
         }
 
         const gold = Number(row.gold || 0);
-        const roll = rollDiceVariant(variant);
+        const luckState = applyLuckForRoll({
+          luck: row.luck,
+          rollStreak: row.roll_streak,
+          lastQualMsgAt: row.last_qual_msg_at,
+          userId: uid,
+          now,
+        });
+        const roll = rollDiceVariantWithLuck(variant, luckState.nextLuck);
         const reward = computeDiceReward(variant, roll.result, roll.breakdown);
         if (gold < (reward.minBalanceRequired || 0)) {
           socket.emit(
@@ -9510,10 +9741,18 @@ socket.on("join room", ({ room, status }) => {
         const breakdownArr = Array.isArray(roll.breakdown) ? roll.breakdown : [];
         const sixGain =
           variant === "d6" ? (roll.result === 6 ? 1 : 0) : variant === "2d6" ? breakdownArr.filter((n) => n === 6).length : 0;
+        const didWinForLuck = isLuckWin(variant, roll.result, roll.breakdown);
+        const finalLuck = clampLuck(applyWinCut(luckState.nextLuck, didWinForLuck));
 
         db.run(
-          `UPDATE users SET gold = MAX(0, gold + ?), lastDiceRollAt=?, dice_sixes = dice_sixes + ? WHERE id=?`,
-          [deltaGold, now, sixGain, uid],
+          `UPDATE users
+             SET gold = MAX(0, gold + ?),
+                 lastDiceRollAt = ?,
+                 dice_sixes = dice_sixes + ?,
+                 luck = ?,
+                 roll_streak = ?
+           WHERE id = ?`,
+          [deltaGold, now, sixGain, finalLuck, luckState.nextStreak, uid],
           (uerr) => {
             if (uerr) {
               socket.emit("dice:error", "Could not apply dice result.");
@@ -9536,6 +9775,7 @@ socket.on("join room", ({ room, status }) => {
             socket.emit("dice:result", { ...payloadBase, deltaGold });
             socket.to(room).emit("dice:result", { ...payloadBase, deltaGold });
             emitProgressionUpdate(uid);
+            emitLuckUpdate(uid, finalLuck, luckState.nextStreak);
 
             io.to(room).emit(
               "system",
@@ -9559,7 +9799,8 @@ socket.on("join room", ({ room, status }) => {
             }
           }
         );
-      });
+      }
+      );
     })();
   });
 
@@ -10159,6 +10400,11 @@ socket.on("status change", ({ status }) => {
                       text: msg.text || "",
                     });
                   } catch {}
+                  void applyLuckForQualifyingMessage({
+                    userId: socket.user.id,
+                    room,
+                    text,
+                  });
                   io.to(room).emit("chat message", msg);
                 }
               );
