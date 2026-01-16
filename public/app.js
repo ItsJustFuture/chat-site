@@ -2300,6 +2300,14 @@ const togglePassBtn = document.getElementById("togglePassBtn");
 const captchaWrap = document.getElementById("captchaWrap");
 const captchaWidget = document.getElementById("captchaWidget");
 const captchaNote = document.getElementById("captchaNote");
+const passwordUpgradeView = document.getElementById("passwordUpgradeView");
+const passwordUpgradeForm = document.getElementById("passwordUpgradeForm");
+const upgradeCurrentPass = document.getElementById("upgradeCurrentPass");
+const upgradeNewPass = document.getElementById("upgradeNewPass");
+const upgradeConfirmPass = document.getElementById("upgradeConfirmPass");
+const passwordUpgradeMsg = document.getElementById("passwordUpgradeMsg");
+const passwordUpgradeSubmitBtn = document.getElementById("passwordUpgradeSubmitBtn");
+const passwordUpgradeLogoutBtn = document.getElementById("passwordUpgradeLogoutBtn");
 
 
 // Auth: show/hide password
@@ -10006,6 +10014,7 @@ statusSelect.addEventListener("change", ()=>{
 // ---- auth helpers
 let authUserState = null;
 let authHandlersBound = false;
+let passwordUpgradeHandlersBound = false;
 
 function getAuthUser(){
   return authUserState;
@@ -10027,18 +10036,27 @@ function setView(mode){
     loginView.hidden = false;
     chatView.hidden = true;
     if(restrictedView) restrictedView.hidden = true;
+    if(passwordUpgradeView) passwordUpgradeView.hidden = true;
   }else if(mode === "chat"){
     loginView.hidden = true;
     chatView.hidden = false;
     if(restrictedView) restrictedView.hidden = true;
+    if(passwordUpgradeView) passwordUpgradeView.hidden = true;
   }else if(mode === "restricted"){
     loginView.hidden = true;
     chatView.hidden = true;
     if(restrictedView) restrictedView.hidden = false;
+    if(passwordUpgradeView) passwordUpgradeView.hidden = true;
+  }else if(mode === "password-upgrade"){
+    loginView.hidden = true;
+    chatView.hidden = true;
+    if(restrictedView) restrictedView.hidden = true;
+    if(passwordUpgradeView) passwordUpgradeView.hidden = false;
   }else{
     loginView.hidden = true;
     chatView.hidden = true;
     if(restrictedView) restrictedView.hidden = true;
+    if(passwordUpgradeView) passwordUpgradeView.hidden = true;
   }
 }
 
@@ -10053,6 +10071,49 @@ function setAuthLoading(loading, message = ""){
 
 function setAuthValidation(message = ""){
   if(authValidation) authValidation.textContent = message;
+}
+
+let passwordUpgradeNonce = "";
+let passwordUpgradeSubmitting = false;
+
+function setPasswordUpgradeMessage(message = ""){
+  if(passwordUpgradeMsg) passwordUpgradeMsg.textContent = message;
+}
+
+function setPasswordUpgradeLoading(loading, message = ""){
+  passwordUpgradeSubmitting = loading;
+  if(passwordUpgradeSubmitBtn) passwordUpgradeSubmitBtn.disabled = loading;
+  if(passwordUpgradeLogoutBtn) passwordUpgradeLogoutBtn.disabled = loading;
+  if(upgradeCurrentPass) upgradeCurrentPass.disabled = loading;
+  if(upgradeNewPass) upgradeNewPass.disabled = loading;
+  if(upgradeConfirmPass) upgradeConfirmPass.disabled = loading;
+  if(message) setPasswordUpgradeMessage(message);
+}
+
+function showPasswordUpgradeView({ nonce = "" } = {}){
+  passwordUpgradeNonce = nonce || "";
+  setView("password-upgrade");
+  setPasswordUpgradeLoading(false, "");
+  setPasswordUpgradeMessage("");
+  if(upgradeCurrentPass){
+    upgradeCurrentPass.value = "";
+    upgradeNewPass.value = "";
+    upgradeConfirmPass.value = "";
+    requestAnimationFrame(()=> upgradeCurrentPass?.focus?.());
+  }
+}
+
+async function checkPasswordUpgradeStatus(){
+  try{
+    const res = await fetch("/password-upgrade/status", { credentials: "include" });
+    if(!res.ok) return false;
+    const data = await res.json().catch(()=>({}));
+    if(data?.required){
+      showPasswordUpgradeView({ nonce: data?.nonce || "" });
+      return true;
+    }
+  }catch{}
+  return false;
 }
 
 async function api(path, options){
@@ -10161,6 +10222,7 @@ function initLoginUI(){
   setAuthLoading(false, "");
   setAuthValidation("");
   initCaptcha();
+  initPasswordUpgradeUI();
   if(!authHandlersBound){
     authHandlersBound = true;
     authForm?.addEventListener("submit", (e)=>{
@@ -10173,6 +10235,19 @@ function initLoginUI(){
   if(authUser && !isAuthenticated()){
     requestAnimationFrame(()=> authUser?.focus?.());
   }
+}
+
+function initPasswordUpgradeUI(){
+  if(passwordUpgradeHandlersBound) return;
+  passwordUpgradeHandlersBound = true;
+  passwordUpgradeForm?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    doPasswordUpgrade();
+  });
+  passwordUpgradeLogoutBtn?.addEventListener("click", (e)=>{
+    e?.preventDefault?.();
+    doLogout();
+  });
 }
 
 const KICK_LENGTH_OPTIONS = [
@@ -10674,9 +10749,67 @@ async function doLogin(){
     resetCaptchaToken();
     return;
   }
+  const payload = safeJsonParse(text, {});
+  if(payload?.code === "PASSWORD_UPGRADE_REQUIRED"){
+    setAuthLoading(false, "");
+    resetCaptchaToken();
+    const pending = await checkPasswordUpgradeStatus();
+    if(!pending){
+      setAuthValidation("Password upgrade required. Please try again.");
+    }
+    return;
+  }
   await initChatApp();
   setAuthLoading(false, "");
   resetCaptchaToken();
+}
+
+async function doPasswordUpgrade(){
+  if(passwordUpgradeSubmitting) return;
+  const currentPassword = upgradeCurrentPass?.value || "";
+  const newPassword = upgradeNewPass?.value || "";
+  const confirmPassword = upgradeConfirmPass?.value || "";
+
+  if(!currentPassword){
+    setPasswordUpgradeMessage("Enter your current password.");
+    upgradeCurrentPass?.focus?.();
+    return;
+  }
+  if(!newPassword){
+    setPasswordUpgradeMessage("Enter a new password.");
+    upgradeNewPass?.focus?.();
+    return;
+  }
+  if(newPassword.length < 12){
+    setPasswordUpgradeMessage("New password must be at least 12 characters.");
+    upgradeNewPass?.focus?.();
+    return;
+  }
+  if(newPassword !== confirmPassword){
+    setPasswordUpgradeMessage("Passwords do not match.");
+    upgradeConfirmPass?.focus?.();
+    return;
+  }
+
+  setPasswordUpgradeLoading(true, "Updating password...");
+  const {res,text} = await api("/password-upgrade", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      currentPassword,
+      newPassword,
+      confirmPassword,
+      nonce: passwordUpgradeNonce,
+    })
+  });
+  const payload = safeJsonParse(text, {});
+  if(!res.ok || !payload?.ok){
+    const message = payload?.message || text || "Password upgrade failed.";
+    setPasswordUpgradeLoading(false, message);
+    return;
+  }
+  setPasswordUpgradeLoading(false, "");
+  window.location.reload();
 }
 
 async function doRegister(){
@@ -13609,6 +13742,7 @@ async function bootApp(){
   bindReferralsUI();
   bindRoleDebugUI();
   bindOwnerPanels();
+  initPasswordUpgradeUI();
 
   const sessionUser = await validateSession({ silent: true });
   if(sessionUser){
@@ -13631,6 +13765,8 @@ async function bootApp(){
     await initChatApp();
     return;
   }
+  const pendingUpgrade = await checkPasswordUpgradeStatus();
+  if(pendingUpgrade) return;
   initLoginUI();
 }
 
@@ -13671,7 +13807,7 @@ function focusMainComposer(){
   });
 }
 
-const SOFT_INPUT_SELECTOR = ".menuContent input, .menuContent textarea, .modalContent input, .modalContent textarea, .faqAnswerEdit";
+const SOFT_INPUT_SELECTOR = ".menuContent input, .menuContent textarea, .modalContent input, .modalContent textarea, .faqAnswerEdit, #passwordUpgradeView input";
 
 function updateKeyboardInset(target){
   const vv = window.visualViewport;
