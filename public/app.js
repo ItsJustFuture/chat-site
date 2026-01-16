@@ -2608,6 +2608,7 @@ const diceVariantMenu = document.getElementById("diceVariantMenu");
 const diceVariantLabel = document.getElementById("diceVariantLabel");
 const diceInfoBtn = document.getElementById("diceInfoBtn");
 const dicePayoutPopover = document.getElementById("dicePayoutPopover");
+const diceVariantWrap = document.getElementById("diceVariantWrap");
 const luckMeter = document.getElementById("luckMeter");
 const luckMeterBar = document.getElementById("luckMeterBar");
 const luckMeterBarText = document.getElementById("luckMeterBarText");
@@ -2617,6 +2618,13 @@ const luckMeterStreak = document.getElementById("luckMeterStreak");
 let mediaMenuOpen = false;
 let voiceRec = { recorder: null, stream: null, chunks: [], startedAt: 0 };
 let dicePayoutOpen = false;
+
+// On boot, hide dice-only UI unless we are already in the Dice Room.
+try {
+  const nowDiceRoom = isDiceRoom(currentRoom);
+  if (diceVariantWrap) diceVariantWrap.style.display = nowDiceRoom ? "" : "none";
+  if (luckMeter) luckMeter.style.display = nowDiceRoom ? "" : "none";
+} catch {}
 
 function closeMediaMenu(){
   if(!mediaMenu) return;
@@ -2922,6 +2930,16 @@ const couplesModal = document.getElementById("couplesModal");
 const couplesModalBody = document.getElementById("couplesModalBody");
 const couplesModalClose = document.getElementById("couplesModalClose");
 let couplesModalDock = null;
+
+// Defensive: ensure Couples modal is truly closed on boot. (Prevents a "stuck" top bar if
+// something rehydrates styles or the DOM ends up in a weird state after prior patches.)
+try {
+  if (couplesModal) {
+    couplesModal.style.display = "none";
+    couplesModal.classList.remove("modal-visible", "modal-closing");
+    couplesModal.hidden = true;
+  }
+} catch {}
 const replyPreview = document.getElementById("replyPreview");
 const replyPreviewText = document.getElementById("replyPreviewText");
 const replyPreviewClose = document.getElementById("replyPreviewClose");
@@ -8655,7 +8673,19 @@ function setTab(tab){
     }
   }
   if (tab === "timeline") {
-    void loadMemories();
+    // If the user hasn't enabled the feature yet, show a helpful message instead of a blank panel.
+    if (!memoryEnabled) {
+      try {
+        if (memoryTimelineList) memoryTimelineList.innerHTML = "";
+        if (memoryFeaturedSection) memoryFeaturedSection.style.display = "none";
+        if (memoryEmptyState) memoryEmptyState.style.display = "";
+        if (memoryTimelineMsg) {
+          memoryTimelineMsg.textContent = "Enable Memory Timeline in your profile settings to start collecting memories.";
+        }
+      } catch {}
+    } else {
+      void loadMemories();
+    }
   }
   syncProfileEditUi();
   focusActiveTab();
@@ -8665,7 +8695,7 @@ function setTab(tab){
 tabCustomize?.addEventListener("click", ()=>setTab("customize"));
 tabTimeline?.addEventListener("click", async () => {
   setTab("timeline");
-  await loadMemories();
+  if (memoryEnabled) await loadMemories();
 });
 
 function applyCustomizeVisibility(){
@@ -8782,11 +8812,13 @@ function closeModal(){
 
 // Couples popout modal (reuses the existing Couples nodes from the profile editor)
 function dockCouplesIntoModal(){
-  if (!couplesModalBody) return;
+  if (!couplesModalBody) return false;
   const couplesFieldEl = document.getElementById("couplesField");
   const couplesActiveEl = document.getElementById("couplesActiveBox");
   const couplesMsgEl = document.getElementById("couplesMsg");
-  if (!couplesFieldEl || !couplesActiveEl) return;
+  // If the profile modal isn't open yet (or these nodes aren't mounted),
+  // don't open an empty Couples modal that looks "stuck" at the top.
+  if (!couplesFieldEl || !couplesActiveEl) return false;
 
   if (!couplesModalDock) {
     couplesModalDock = {
@@ -8801,6 +8833,7 @@ function dockCouplesIntoModal(){
   couplesModalBody.appendChild(couplesFieldEl);
   couplesModalBody.appendChild(couplesActiveEl);
   if (couplesMsgEl) couplesModalBody.appendChild(couplesMsgEl);
+  return true;
 }
 
 function undockCouplesFromModal(){
@@ -8815,7 +8848,12 @@ function undockCouplesFromModal(){
 
 function openCouplesModal(){
   if (!couplesModal) return;
-  dockCouplesIntoModal();
+  const ok = dockCouplesIntoModal();
+  if (!ok) {
+    toast?.("Open your profile first to use Couples.");
+    return;
+  }
+  try { couplesModal.hidden = false; } catch {}
   couplesModal.style.display = "flex";
   couplesModal.classList.remove("modal-closing");
   if (PREFERS_REDUCED_MOTION) {
@@ -8835,12 +8873,14 @@ function closeCouplesModal(){
   if (PREFERS_REDUCED_MOTION) {
     couplesModal.style.display = "none";
     couplesModal.classList.remove("modal-closing");
+    try { couplesModal.hidden = true; } catch {}
     return;
   }
   couplesModal.classList.add("modal-closing");
   setTimeout(() => {
     couplesModal.style.display = "none";
     couplesModal.classList.remove("modal-closing");
+    try { couplesModal.hidden = true; } catch {}
   }, 140);
 }
 
@@ -8869,6 +8909,14 @@ function setActiveRoom(room){
   msgInput.placeholder = `Message ${displayRoomName(room)}`;
   loadRoomDraft();
 
+  // Ensure room-specific UI doesn't leak into other rooms.
+  if (diceVariantWrap) diceVariantWrap.style.display = nowDiceRoom ? "" : "none";
+  if (luckMeter) luckMeter.style.display = nowDiceRoom ? "" : "none";
+  // If a modal is open that is built around room/profile context, close it when switching rooms.
+  try {
+    if (couplesModal && couplesModal.style.display && couplesModal.style.display !== "none") closeCouplesModal();
+  } catch {}
+
 
   // Dice Room: swap media button to dice roll
   try { closeMediaMenu(); } catch {}
@@ -8884,6 +8932,7 @@ function setActiveRoom(room){
   }
   if (wasDiceRoom && !nowDiceRoom) {
     resetDiceSessionStats();
+    try { closeDicePayout(); } catch {}
   }
   if (nowDiceRoom) {
     renderLuckMeter();
@@ -12696,7 +12745,9 @@ function updateMemoryFilterChips(){
 }
 
 function updateMemoryVisibility(){
-  const showTimeline = currentProfileIsSelf && memoryEnabled;
+  // The Timeline tab should be usable even when the feature is disabled, so users
+  // can see what's available and toggle it on (instead of the button "doing nothing").
+  const showTimeline = currentProfileIsSelf && memoryFeatureAvailable;
   if (tabTimeline) tabTimeline.style.display = showTimeline ? "" : "none";
   if (viewTimeline) viewTimeline.style.display = activeProfileTab === "timeline" && showTimeline ? "block" : "none";
   if (!showTimeline && activeProfileTab === "timeline") setTab("profile");
