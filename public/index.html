@@ -56,7 +56,46 @@
 </form>
 <div class="loginFooter small muted">
           By continuing, you confirm you are 18+ and agree to follow the community rules.
-        </div>
+</div>
+</div>
+</div>
+</div>
+<!-- PASSWORD UPGRADE -->
+<div hidden="" id="passwordUpgradeView">
+<div aria-hidden="true" class="upgradeBackdrop"></div>
+<div class="upgradeShell">
+<div class="upgradeCard loginCard" role="dialog" aria-label="Password upgrade required">
+<div class="loginHeader">
+<h2>Upgrade your password</h2>
+<p>For security, passwords must be 12+ characters.</p>
+</div>
+<form class="loginForm" id="passwordUpgradeForm">
+<div class="field">
+<label for="upgradeCurrentPass">Current password</label>
+<input autocomplete="current-password" id="upgradeCurrentPass" required="" type="password"/>
+</div>
+<div class="field">
+<label for="upgradeNewPass">New password (12+)</label>
+<input autocomplete="new-password" id="upgradeNewPass" required="" type="password"/>
+</div>
+<div class="field">
+<label for="upgradeConfirmPass">Confirm new password</label>
+<input autocomplete="new-password" id="upgradeConfirmPass" required="" type="password"/>
+</div>
+<div class="upgradeHints small muted">
+<div class="upgradeHintsTitle">Quick tips</div>
+<ul>
+<li>Use 3+ words.</li>
+<li>Add numbers or symbols.</li>
+<li>Mix upper/lowercase.</li>
+</ul>
+</div>
+<div aria-live="polite" class="loginValidation" id="passwordUpgradeMsg"></div>
+<div class="row loginActions">
+<button class="btn" id="passwordUpgradeSubmitBtn" type="submit">Update password</button>
+<button class="btn secondary" id="passwordUpgradeLogoutBtn" type="button">Logout</button>
+</div>
+</form>
 </div>
 </div>
 </div>

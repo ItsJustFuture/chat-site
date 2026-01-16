@@ -1594,6 +1594,57 @@ body.auth-pending #authLoading{
               linear-gradient(180deg, rgba(6,6,12,0.88), rgba(6,6,12,0.96));
 }
 
+#passwordUpgradeView{
+  position: fixed;
+  inset: 0;
+  min-height: var(--vvhPx);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(20px, 4vw, 40px);
+  padding-top: calc(clamp(20px, 4vw, 40px) + env(safe-area-inset-top));
+  padding-bottom: calc(clamp(20px, 4vw, 40px) + env(safe-area-inset-bottom));
+  z-index: 500;
+  background: radial-gradient(900px 520px at 15% 10%, rgba(120,120,255,0.18), transparent 60%),
+              radial-gradient(900px 520px at 85% 15%, rgba(80,220,255,0.16), transparent 55%),
+              linear-gradient(180deg, rgba(6,6,12,0.9), rgba(6,6,12,0.98));
+}
+
+.upgradeBackdrop{
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, rgba(255,255,255,0.04), transparent 40%, rgba(255,255,255,0.03));
+  pointer-events: none;
+}
+
+.upgradeShell{
+  position: relative;
+  width: min(560px, 100%);
+  z-index: 1;
+}
+
+.upgradeCard{
+  width: 100%;
+}
+
+.upgradeHints{
+  margin: 12px 0;
+}
+
+.upgradeHintsTitle{
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  margin-bottom: 6px;
+}
+
+.upgradeHints ul{
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
 .loginBackdrop{
   position:absolute;
   inset:0;

@@ -88,6 +88,7 @@ setInterval(decayHeat, 60_000).unref?.();
 
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const express = require("express");
 const helmet = require("helmet");
 const session = require("express-session");
@@ -1274,6 +1275,15 @@ const loginIpLimiter = rateLimit({
   legacyHeaders: false,
   handler: genericRateLimitHandler,
   keyGenerator: (req) => getClientIp(req),
+});
+
+const passwordUpgradeLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_PASSWORD_UPGRADE || 12),
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: genericRateLimitHandler,
+  keyGenerator: (req) => String(req.session?.passwordUpgrade?.userId || getClientIp(req)),
 });
 
 const registerLimiter = rateLimit({
@@ -4063,6 +4073,34 @@ function clearLoginFailures(key) {
   loginFailureTracker.delete(key);
 }
 
+function getPasswordUpgradeAttemptState(req) {
+  const now = Date.now();
+  const state = req.session?.passwordUpgradeAttempts || { count: 0, resetAt: now + 15 * 60 * 1000, lockedUntil: 0 };
+  if (now > state.resetAt) {
+    state.count = 0;
+    state.resetAt = now + 15 * 60 * 1000;
+    state.lockedUntil = 0;
+  }
+  if (state.lockedUntil && now < state.lockedUntil) {
+    return { blocked: true, retryAfterMs: state.lockedUntil - now, state };
+  }
+  return { blocked: false, state };
+}
+
+function recordPasswordUpgradeFailure(req) {
+  const now = Date.now();
+  const state = getPasswordUpgradeAttemptState(req).state || { count: 0, resetAt: now + 15 * 60 * 1000, lockedUntil: 0 };
+  state.count += 1;
+  if (state.count >= 5) {
+    state.lockedUntil = now + 15 * 60 * 1000;
+  }
+  req.session.passwordUpgradeAttempts = state;
+}
+
+function clearPasswordUpgradeFailures(req) {
+  if (req.session?.passwordUpgradeAttempts) delete req.session.passwordUpgradeAttempts;
+}
+
 async function invalidateSessionsForUserId(userId) {
   if (!userId || !PG_READY) return;
   try {
@@ -4732,15 +4770,34 @@ async function faqReactionPayload(questionId, username){
 }
 
 const COMMON_PASSWORDS = new Set([
+  "123456",
   "password",
   "password123",
+  "1234567",
   "12345678",
   "123456789",
+  "1234567890",
+  "12345678910",
+  "111111",
+  "000000",
+  "qwerty",
   "qwerty123",
+  "qwertyuiop",
+  "abc123",
+  "abc12345",
   "letmein",
-  "welcome",
+  "letmein123",
   "iloveyou",
+  "welcome",
+  "welcome123",
+  "admin",
   "admin123",
+  "monkey",
+  "dragon",
+  "football",
+  "princess",
+  "sunshine",
+  "trustno1",
 ]);
 
 function isPasswordTooWeak(password) {
@@ -4937,6 +4994,25 @@ app.post("/login", loginIpLimiter, async (req, res) => {
         return res.status(401).send("Invalid username or password");
       }
 
+      if (password.length < 12) {
+        const nonce = crypto.randomBytes(18).toString("hex");
+        req.session.user = null;
+        req.session.passwordUpgrade = {
+          userId: pgUser.id,
+          username: pgUser.username,
+          issuedAt: Date.now(),
+          nonce,
+        };
+        clearPasswordUpgradeFailures(req);
+        clearLoginFailures(loginKey);
+        clearLoginFailures(ipKey);
+        logSecurityEvent("password_upgrade_required", { ip, username: pgUser.username, userId: pgUser.id, store: "pg" });
+        return req.session.save((saveErr) => {
+          if (saveErr) return res.status(500).send("Session save failed");
+          return res.json({ ok: false, code: "PASSWORD_UPGRADE_REQUIRED" });
+        });
+      }
+
       const theme = sanitizeThemeNameServer(pgUser.theme || DEFAULT_THEME);
 
       // Mirror into SQLite if missing (some UI/profile/dice logic still reads SQLite)
@@ -5060,6 +5136,25 @@ app.post("/login", loginIpLimiter, async (req, res) => {
     const theme = sanitizeThemeNameServer(row.theme || DEFAULT_THEME);
     if (!row.theme) await dbRunAsync("UPDATE users SET theme = ? WHERE id = ?", [theme, row.id]).catch(() => {});
 
+    if (password.length < 12) {
+      const nonce = crypto.randomBytes(18).toString("hex");
+      req.session.user = null;
+      req.session.passwordUpgrade = {
+        userId: row.id,
+        username: row.username,
+        issuedAt: Date.now(),
+        nonce,
+      };
+      clearPasswordUpgradeFailures(req);
+      clearLoginFailures(loginKey);
+      clearLoginFailures(ipKey);
+      logSecurityEvent("password_upgrade_required", { ip, username: row.username, userId: row.id, store: "sqlite" });
+      return req.session.save((saveErr) => {
+        if (saveErr) return res.status(500).send("Session save failed");
+        return res.json({ ok: false, code: "PASSWORD_UPGRADE_REQUIRED" });
+      });
+    }
+
     // Mirror into Postgres (so /me + progression + persistent systems work)
     await pgPool.query(
       `INSERT INTO users (id, username, password_hash, role, created_at, theme, gold, xp)
@@ -5100,6 +5195,164 @@ app.post("/login", loginIpLimiter, async (req, res) => {
   } catch (e) {
     console.error(e);
     return res.status(500).send("Login failed");
+  }
+});
+
+app.get("/password-upgrade/status", (req, res) => {
+  const pending = req.session?.passwordUpgrade || null;
+  if (!pending?.userId) return res.json({ required: false });
+  return res.json({ required: true, nonce: pending.nonce || "" });
+});
+
+app.get("/password-upgrade", (req, res) => {
+  if (!req.session?.passwordUpgrade?.userId) return res.redirect("/");
+  return res.sendFile(path.join(PUBLIC_DIR, "index.html"));
+});
+
+app.post("/password-upgrade", passwordUpgradeLimiter, async (req, res) => {
+  const pending = req.session?.passwordUpgrade || null;
+  if (!pending?.userId) return res.status(401).json({ ok: false, message: "No password upgrade pending." });
+
+  const ip = getClientIp(req);
+  const attemptState = getPasswordUpgradeAttemptState(req);
+  if (attemptState.blocked) {
+    return res.status(429).json({ ok: false, code: "PASSWORD_UPGRADE_LOCKED", message: "Too many attempts. Try again later." });
+  }
+
+  const currentPassword = String(req.body?.currentPassword || "");
+  const newPassword = String(req.body?.newPassword || "");
+  const confirmPassword = String(req.body?.confirmPassword || "");
+  const nonce = String(req.body?.nonce || "");
+
+  if (pending.nonce && nonce !== pending.nonce) {
+    return res.status(403).json({ ok: false, message: "Invalid session." });
+  }
+
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    return res.status(400).json({ ok: false, message: "Missing required fields." });
+  }
+
+  if (newPassword.length < 12) {
+    return res.status(400).json({ ok: false, message: "Password must be 12+ chars." });
+  }
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({ ok: false, message: "Passwords do not match." });
+  }
+  if (isPasswordTooWeak(newPassword)) {
+    return res.status(400).json({ ok: false, message: "Password is too common." });
+  }
+
+  try {
+    const userId = Number(pending.userId);
+    const pgUser = await pgGetUserById(userId).catch(() => null);
+    const sqliteRow = await dbGetAsync("SELECT * FROM users WHERE id = ?", [userId]).catch(() => null);
+
+    if (!pgUser && !sqliteRow) {
+      recordPasswordUpgradeFailure(req);
+      logSecurityEvent("password_upgrade_failed", { ip, userId, username: pending.username, reason: "user_not_found" });
+      return res.status(401).json({ ok: false, message: "Password upgrade failed." });
+    }
+
+    let stored = "";
+    if (pgUser?.password_hash) stored = String(pgUser.password_hash || "").trim();
+    else if (sqliteRow?.password_hash) stored = String(sqliteRow.password_hash || "").trim();
+    else if (sqliteRow?.password) stored = String(sqliteRow.password || "").trim();
+
+    const looksBcrypt = stored.startsWith("$2");
+    const matches = looksBcrypt
+      ? await bcrypt.compare(currentPassword, stored)
+      : currentPassword === stored;
+
+    if (!matches) {
+      recordPasswordUpgradeFailure(req);
+      logSecurityEvent("password_upgrade_failed", { ip, userId, username: pending.username, reason: "password_mismatch" });
+      return res.status(401).json({ ok: false, message: "Current password incorrect." });
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 12);
+
+    if (pgUser?.id) {
+      await pgPool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [newHash, pgUser.id]).catch(() => {});
+    } else if (sqliteRow?.id) {
+      const createdAtValue = PG_USERS_CREATED_AT_IS_TIMESTAMP
+        ? new Date(Number(sqliteRow.created_at || Date.now()))
+        : Number(sqliteRow.created_at || Date.now());
+      await pgPool.query(
+        `INSERT INTO users (id, username, password_hash, role, created_at, theme, gold, xp)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (username) DO UPDATE
+           SET password_hash = EXCLUDED.password_hash,
+               role = COALESCE(users.role, EXCLUDED.role),
+               theme = COALESCE(users.theme, EXCLUDED.theme),
+               gold = COALESCE(users.gold, EXCLUDED.gold),
+               xp = COALESCE(users.xp, EXCLUDED.xp)`,
+        [
+          sqliteRow.id,
+          sqliteRow.username,
+          newHash,
+          sqliteRow.role || "User",
+          createdAtValue,
+          sanitizeThemeNameServer(sqliteRow.theme || DEFAULT_THEME),
+          Number(sqliteRow.gold || 0),
+          Number(sqliteRow.xp || 0),
+        ]
+      ).catch(() => {});
+    }
+
+    if (sqliteRow?.id) {
+      await dbRunAsync("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [newHash, sqliteRow.id]).catch(() => {});
+    } else if (pgUser?.id) {
+      await dbRunAsync(
+        `INSERT INTO users (id, username, password_hash, role, created_at, gold, xp, theme)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        [
+          pgUser.id,
+          pgUser.username,
+          newHash,
+          pgUser.role || "User",
+          Number(pgUser.created_at || Date.now()),
+          Number(pgUser.gold || 0),
+          Number(pgUser.xp || 0),
+          sanitizeThemeNameServer(pgUser.theme || DEFAULT_THEME),
+        ]
+      ).catch(() => {});
+    }
+
+    const refreshedPgUser = await pgGetUserById(userId).catch(() => null);
+    const sessionRow = refreshedPgUser || sqliteRow || pgUser;
+    const role = sessionRow?.role || "User";
+    const theme = sanitizeThemeNameServer(sessionRow?.theme || DEFAULT_THEME);
+    const avatar = avatarUrlFromRow(sessionRow) || "";
+    const avatarUpdated = sessionRow?.avatar_updated ?? sessionRow?.avatarUpdated ?? null;
+
+    clearPasswordUpgradeFailures(req);
+    delete req.session.passwordUpgrade;
+
+    req.session.regenerate((regenErr) => {
+      if (regenErr) return res.status(500).json({ ok: false, message: "Session failed." });
+      req.session.user = {
+        id: userId,
+        username: sessionRow?.username || pending.username,
+        role,
+        theme,
+        avatar,
+        avatar_updated: avatarUpdated,
+      };
+      dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", userId]).catch(() => {});
+      if (!pgUser && sqliteRow) {
+        awardLoginXp(userId, role);
+        awardDailyLoginGold(sqliteRow);
+      }
+      initGoldTick(userId);
+      logSecurityEvent("password_upgrade_success", { ip, userId, username: sessionRow?.username || pending.username });
+      req.session.save((saveErr) => {
+        if (saveErr) return res.status(500).json({ ok: false, message: "Session save failed." });
+        return res.json({ ok: true });
+      });
+    });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, message: "Password upgrade failed." });
   }
 });
 
