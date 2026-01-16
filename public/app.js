@@ -2595,9 +2595,12 @@ const mediaVoiceLabel = document.getElementById("mediaVoiceLabel");
 const diceVariantToggle = document.getElementById("diceVariantToggle");
 const diceVariantMenu = document.getElementById("diceVariantMenu");
 const diceVariantLabel = document.getElementById("diceVariantLabel");
+const diceInfoBtn = document.getElementById("diceInfoBtn");
+const dicePayoutPopover = document.getElementById("dicePayoutPopover");
 
 let mediaMenuOpen = false;
 let voiceRec = { recorder: null, stream: null, chunks: [], startedAt: 0 };
+let dicePayoutOpen = false;
 
 function closeMediaMenu(){
   if(!mediaMenu) return;
@@ -2619,6 +2622,67 @@ function toggleMediaMenu(){
 function updateDiceVariantLabel(){
   if (!diceVariantLabel) return;
   diceVariantLabel.textContent = DICE_VARIANT_LABELS[diceVariant] || diceVariant;
+}
+
+const DICE_PAYOUT_RULES = {
+  d6: {
+    title: "d6 payouts",
+    lines: ["1–5: -50 Gold", "6: +500 Gold"],
+    note: "Tip: swapping variants changes the risk/reward.",
+  },
+  d20: {
+    title: "d20 payouts",
+    lines: [
+      "1–5: -250 Gold",
+      "6–10: -100 Gold",
+      "11–14: +100 Gold",
+      "15–17: +250 Gold",
+      "18–19: +500 Gold",
+      "20: +1000 Gold",
+    ],
+    note: "High rolls hit bigger bursts.",
+  },
+  "2d6": {
+    title: "2d6 payouts",
+    lines: ["No 6s: -100 Gold", "One 6: +500 Gold", "Two 6s: +1500 Gold"],
+    note: "Each die counts.",
+  },
+  d100: {
+    title: "1–100 payouts",
+    lines: ["69: +69 Gold", "100: +5000 Gold", "Everything else: -25 Gold"],
+    note: "Jackpot is rare — but cheap to try.",
+  },
+};
+
+function renderDicePayoutPopover(){
+  if (!dicePayoutPopover) return;
+  const rule = DICE_PAYOUT_RULES[diceVariant] || DICE_PAYOUT_RULES.d6;
+  const lines = (rule.lines || []).map((t)=>`<li>${escapeHtml(t)}</li>`).join("");
+  dicePayoutPopover.innerHTML = `
+    <h4>${escapeHtml(rule.title)}</h4>
+    <ul>${lines}</ul>
+    <div class="payoutNote">${escapeHtml(rule.note || "")}</div>
+  `;
+}
+
+function openDicePayout(){
+  if (!dicePayoutPopover) return;
+  renderDicePayoutPopover();
+  dicePayoutOpen = true;
+  dicePayoutPopover.hidden = false;
+  diceInfoBtn?.setAttribute("aria-expanded", "true");
+}
+
+function closeDicePayout(){
+  if (!dicePayoutPopover) return;
+  dicePayoutOpen = false;
+  dicePayoutPopover.hidden = true;
+  diceInfoBtn?.setAttribute("aria-expanded", "false");
+}
+
+function toggleDicePayout(){
+  if (dicePayoutOpen) closeDicePayout();
+  else openDicePayout();
 }
 
 function closeDiceVariantMenu(){
@@ -2644,6 +2708,7 @@ function setDiceVariant(nextVariant){
   if (!DICE_VARIANTS.includes(nextVariant)) return;
   diceVariant = nextVariant;
   updateDiceVariantLabel();
+  renderDicePayoutPopover();
   if (diceVariantMenu) {
     diceVariantMenu.querySelectorAll("[data-variant]").forEach((btn) => {
       const isActive = btn.dataset.variant === nextVariant;
@@ -2652,6 +2717,21 @@ function setDiceVariant(nextVariant){
     });
   }
 }
+
+diceInfoBtn?.addEventListener("click", (e)=>{
+  e.preventDefault();
+  e.stopPropagation();
+  // Don't stack menus on top of each other
+  if (diceVariantMenuOpen) closeDiceVariantMenu();
+  toggleDicePayout();
+});
+
+document.addEventListener("click", (e)=>{
+  if (!dicePayoutOpen) return;
+  const t = e.target;
+  if (t && (dicePayoutPopover?.contains(t) || diceInfoBtn?.contains(t))) return;
+  closeDicePayout();
+}, { passive:true });
 
 setDiceVariant(diceVariant);
 
@@ -8175,6 +8255,7 @@ diceVariantToggle?.addEventListener("click", (e) => {
   if (!isDiceRoom(currentRoom)) return;
   e.preventDefault();
   e.stopPropagation();
+  if (dicePayoutOpen) closeDicePayout();
   toggleDiceVariantMenu();
 });
 
@@ -13523,6 +13604,20 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   const diceOverlay = document.createElement("div");
   diceOverlay.id = "diceOverlay";
   diceOverlay.style.display = "none";
+
+  // Inner bits so we can do variant-specific layouts/animations
+  const diceOverlayInner = document.createElement("div");
+  diceOverlayInner.className = "diceOverlayInner";
+  const diceDisplayEl = document.createElement("div");
+  diceDisplayEl.className = "diceDisplay";
+  const diceSubEl = document.createElement("div");
+  diceSubEl.className = "diceSub";
+  const diceDeltaEl = document.createElement("div");
+  diceDeltaEl.className = "diceDelta";
+  diceOverlayInner.appendChild(diceDisplayEl);
+  diceOverlayInner.appendChild(diceSubEl);
+  diceOverlayInner.appendChild(diceDeltaEl);
+  diceOverlay.appendChild(diceOverlayInner);
   const confettiLayer = document.createElement("div");
   confettiLayer.id = "confettiLayer";
   confettiLayer.style.display = "none";
@@ -13533,27 +13628,66 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   chatMain.appendChild(diceOverlay);
   chatMain.appendChild(confettiLayer);
 
-  function showDiceAnimation({ result, variant, won } = {}){
+  function showDiceAnimation({ result, variant, won, deltaGold, breakdown, outcome } = {}){
     const faces = ["⚀","⚁","⚂","⚃","⚄","⚅"];
-    const display = variant === "d6" ? (faces[(result || 1) - 1] || "🎲") : String(result ?? "🎲");
+    const v = String(variant || "d6").toLowerCase();
+    const r = Number(result ?? 0);
+    const dg = Number(deltaGold ?? 0);
+    const sign = dg >= 0 ? "+" : "";
+    const o = String(outcome || (dg > 0 ? "win" : "loss"));
+
     diceOverlay.style.display = "flex";
-    diceOverlay.textContent = "🎲";
+    diceOverlay.classList.remove(
+      "variant-d6",
+      "variant-d20",
+      "variant-2d6",
+      "variant-d100",
+      "outcome-loss",
+      "outcome-win",
+      "outcome-bigwin",
+      "outcome-jackpot",
+      "outcome-nice"
+    );
+    diceOverlay.classList.add(`variant-${v}`);
+    diceOverlay.classList.add(`outcome-${o}`);
+
+    // Subtext + delta always (helps explain the new reward system)
+    diceDeltaEl.textContent = `${sign}${dg} Gold`;
+    diceSubEl.textContent = (v === "d6") ? "d6" : (v === "d20") ? "d20" : (v === "2d6") ? "2d6" : "1–100";
+
+    const b = Array.isArray(breakdown) ? breakdown.map((n)=>Number(n||0)) : [];
+    const twoDiceDisplay = b.length === 2 ? `${faces[b[0]-1]||"🎲"} ${faces[b[1]-1]||"🎲"}` : "🎲 🎲";
+    const finalDisplay =
+      v === "d6" ? (faces[(r || 1) - 1] || "🎲") :
+      v === "2d6" ? twoDiceDisplay :
+      v === "d20" ? String(r || "🎲") :
+      String(r || "🎲");
+
     if (PREFERS_REDUCED_MOTION) {
-      diceOverlay.textContent = display;
-      setTimeout(()=>{ diceOverlay.style.display="none"; }, 220);
+      diceDisplayEl.textContent = finalDisplay;
+      setTimeout(()=>{ diceOverlay.style.display="none"; }, 260);
       return;
     }
+
     let t = 0;
     const iv = setInterval(()=>{
-      diceOverlay.textContent = faces[Math.floor(Math.random()*6)];
-      t += 1;
-      if (t >= 10){
-        clearInterval(iv);
-        diceOverlay.textContent = display;
-        setTimeout(()=>{ diceOverlay.style.display="none"; }, 350);
-        if (won) popConfetti();
+      if (v === "d6") {
+        diceDisplayEl.textContent = faces[Math.floor(Math.random()*6)];
+      } else if (v === "2d6") {
+        diceDisplayEl.textContent = `${faces[Math.floor(Math.random()*6)]} ${faces[Math.floor(Math.random()*6)]}`;
+      } else if (v === "d20") {
+        diceDisplayEl.textContent = String(1 + Math.floor(Math.random()*20));
+      } else {
+        diceDisplayEl.textContent = String(1 + Math.floor(Math.random()*100));
       }
-    }, 90);
+      t += 1;
+      if (t >= 11){
+        clearInterval(iv);
+        diceDisplayEl.textContent = finalDisplay;
+        setTimeout(()=>{ diceOverlay.style.display="none"; }, 420);
+        if (won || dg >= 500) popConfetti();
+      }
+    }, 80);
   }
 
   function popConfetti(){
@@ -13574,7 +13708,14 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
     const result = payload.result ?? payload.value;
     const variant = payload.variant || "d6";
     const won = !!payload.won;
-    showDiceAnimation({ result, variant, won });
+    showDiceAnimation({
+      result,
+      variant,
+      won,
+      deltaGold: payload.deltaGold,
+      breakdown: payload.breakdown,
+      outcome: payload.outcome,
+    });
     if (payload.userId === me?.id) {
       diceCooldownUntil = Date.now() + DICE_ROLL_COOLDOWN_MS;
       updateDiceSessionStats(payload);

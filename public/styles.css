@@ -2985,6 +2985,40 @@ body.dice-room .sys .diceFace{
 body.dice-room .diceVariantWrap{
   display:inline-flex;
 }
+.diceInfoBtn{
+  width:44px;
+  height:44px;
+  border-radius:14px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size:16px;
+  opacity:0.9;
+ }
+.diceInfoBtn:hover{ opacity:1; }
+.dicePayoutPopover{
+  position:absolute;
+  left:0;
+  bottom: calc(100% + 10px);
+  width: min(320px, 88vw);
+  padding:12px;
+  border-radius:16px;
+  border:1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  box-shadow: var(--shadowMd);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 215;
+ }
+.dicePayoutPopover[hidden]{ display:none; }
+.dicePayoutPopover h4{
+  margin:0 0 8px;
+  font-size:13px;
+  font-weight:900;
+ }
+.dicePayoutPopover ul{ margin:0; padding-left:18px; }
+.dicePayoutPopover li{ margin:4px 0; font-size:12px; color:var(--muted); }
+.dicePayoutPopover .payoutNote{ font-size:12px; color:var(--text); opacity:0.9; margin-top:8px; }
 .diceVariantToggle{
   height:44px;
   border-radius:14px;
@@ -4730,17 +4764,60 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
   left:50%;
   top:50%;
   transform:translate(-50%,-50%);
-  width:96px;
-  height:96px;
+  min-width: 170px;
+  min-height: 96px;
+  padding: 14px 14px 12px;
   border-radius:18px;
   display:flex;
   align-items:center;
   justify-content:center;
-  font-size:56px;
+  text-align:center;
   background:var(--panel);
   border:1px solid var(--border);
   box-shadow:0 10px 30px rgba(0,0,0,.25);
   z-index:50;
+}
+#diceOverlay .diceOverlayInner{ width:100%; display:flex; flex-direction:column; gap:6px; align-items:center; }
+#diceOverlay .diceDisplay{ font-size:54px; font-weight:900; letter-spacing:0.5px; line-height:1; }
+#diceOverlay .diceSub{ font-size:12px; color:var(--muted); font-weight:800; }
+#diceOverlay .diceDelta{ font-size:14px; font-weight:900; }
+#diceOverlay.outcome-loss .diceDelta{ opacity:0.95; }
+#diceOverlay.outcome-win .diceDelta,
+#diceOverlay.outcome-bigwin .diceDelta{ text-shadow: 0 6px 18px rgba(0,0,0,0.25); }
+#diceOverlay.outcome-jackpot{ box-shadow:0 14px 40px rgba(0,0,0,.35); }
+#diceOverlay.outcome-loss{ animation: diceLossShake 280ms ease-in-out both; }
+#diceOverlay.outcome-nice{ animation: diceNiceWiggle 420ms ease-in-out both; }
+#diceOverlay.outcome-jackpot{ animation: diceJackpotPulse 720ms ease-out both; }
+
+/* Variant-specific micro animations */
+#diceOverlay.variant-d6 .diceDisplay{ animation: d6Pop 420ms ease-out both; }
+#diceOverlay.variant-d20 .diceDisplay{ animation: d20Spin 520ms cubic-bezier(.2,.9,.2,1) both; }
+#diceOverlay.variant-2d6 .diceDisplay{ animation: twoDiceBounce 520ms ease-out both; }
+#diceOverlay.variant-d100 .diceDisplay{ animation: d100Ticker 520ms ease-out both; }
+
+@keyframes d6Pop{ 0%{ transform:scale(0.85) rotate(-6deg); opacity:0.6; } 100%{ transform:scale(1) rotate(0); opacity:1; } }
+@keyframes d20Spin{ 0%{ transform:rotate(-140deg) scale(0.75); opacity:0.35; } 100%{ transform:rotate(0deg) scale(1); opacity:1; } }
+@keyframes twoDiceBounce{ 0%{ transform:translateY(10px) scale(0.85); opacity:0.6; } 60%{ transform:translateY(-6px) scale(1.03); opacity:1; } 100%{ transform:translateY(0) scale(1); } }
+@keyframes d100Ticker{ 0%{ transform:translateY(-10px) scale(0.9); opacity:0.4; } 100%{ transform:translateY(0) scale(1); opacity:1; } }
+
+@keyframes diceLossShake{
+  0%{ transform:translate(-50%,-50%) translateX(0); }
+  25%{ transform:translate(-50%,-50%) translateX(-3px); }
+  50%{ transform:translate(-50%,-50%) translateX(3px); }
+  75%{ transform:translate(-50%,-50%) translateX(-2px); }
+  100%{ transform:translate(-50%,-50%) translateX(0); }
+}
+@keyframes diceNiceWiggle{
+  0%{ transform:translate(-50%,-50%) rotate(0deg); }
+  35%{ transform:translate(-50%,-50%) rotate(-4deg); }
+  70%{ transform:translate(-50%,-50%) rotate(3deg); }
+  100%{ transform:translate(-50%,-50%) rotate(0deg); }
+}
+@keyframes diceJackpotPulse{
+  0%{ transform:translate(-50%,-50%) scale(0.92); filter:brightness(0.95); }
+  35%{ transform:translate(-50%,-50%) scale(1.03); filter:brightness(1.05); }
+  70%{ transform:translate(-50%,-50%) scale(1); filter:brightness(1); }
+  100%{ transform:translate(-50%,-50%) scale(1); }
 }
 #confettiLayer{
   position:absolute;

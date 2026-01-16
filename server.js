@@ -100,7 +100,13 @@ const rateLimit = require("express-rate-limit");
 const multer = require("multer");
 const { Pool } = require("pg");
 const http = require("http");
-const { DICE_VARIANTS, DICE_VARIANT_LABELS, normalizeDiceVariant, rollDiceVariant } = require("./dice-utils");
+const {
+  DICE_VARIANTS,
+  DICE_VARIANT_LABELS,
+  normalizeDiceVariant,
+  rollDiceVariant,
+  computeDiceReward,
+} = require("./dice-utils");
 
 // ---- Safety nets (prevents silent crashes in prod) ----
 process.on("unhandledRejection", (err) => {
@@ -9371,18 +9377,20 @@ socket.on("join room", ({ room, status }) => {
     }
     diceRollRateByUserId.set(uid, now);
 
-    const formatDiceSystemMessage = ({ result, breakdown, won, deltaGold }) => {
+    const formatDiceSystemMessage = ({ result, breakdown, deltaGold, outcome } = {}) => {
       const faceMap = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
       let display = String(result);
       if (variant === "d6") {
-        display = faceMap[result - 1] || result;
+        display = faceMap[Number(result) - 1] || result;
       } else if (variant === "2d6" && Array.isArray(breakdown)) {
         display = `${result} (2d6: ${breakdown.join("+")})`;
       } else {
         display = `${result} (${DICE_VARIANT_LABELS[variant] || variant})`;
       }
-      const suffix = won ? "🎉 (+500 Gold!)" : "🎲 (-50 Gold!)";
-      return `${socket.user.username} rolled ${display} ${suffix}`;
+      const dg = Number(deltaGold || 0);
+      const sign = dg >= 0 ? "+" : "";
+      const emoji = outcome === "jackpot" ? "💥" : outcome === "bigwin" ? "🎉" : outcome === "win" ? "✨" : outcome === "nice" ? "😏" : "🎲";
+      return `${socket.user.username} rolled ${display} ${emoji} (${sign}${dg} Gold)`;
     };
 
     (async () => {
@@ -9404,14 +9412,20 @@ socket.on("join room", ({ room, status }) => {
           }
 
           const gold = Number(row.gold || 0);
-          if (gold < 50) {
-            socket.emit("dice:error", "You need at least 50 Gold to roll.");
+          const roll = rollDiceVariant(variant);
+          const reward = computeDiceReward(variant, roll.result, roll.breakdown);
+          if (gold < (reward.minBalanceRequired || 0)) {
+            socket.emit(
+              "dice:error",
+              `You need at least ${reward.minBalanceRequired || 0} Gold to roll ${DICE_VARIANT_LABELS[variant] || variant}.`
+            );
             return;
           }
 
-          const roll = rollDiceVariant(variant);
-          const deltaGold = roll.won ? 500 : -50;
-          const sixGain = variant === "d6" && roll.won ? 1 : 0;
+          const deltaGold = Number(reward.deltaGold || 0);
+          const breakdownArr = Array.isArray(roll.breakdown) ? roll.breakdown : [];
+          const sixGain =
+            variant === "d6" ? (roll.result === 6 ? 1 : 0) : variant === "2d6" ? breakdownArr.filter((n) => n === 6).length : 0;
 
           await pgPool.query(
             `UPDATE users
@@ -9429,17 +9443,22 @@ socket.on("join room", ({ room, status }) => {
             result: roll.result,
             value: roll.result,
             breakdown: roll.breakdown,
-            won: roll.won,
+            won: reward.isJackpot || deltaGold > 0,
+            outcome: reward.outcome,
+            isJackpot: !!reward.isJackpot,
             serverTs: now,
           };
 
           socket.emit("dice:result", { ...payloadBase, deltaGold });
-          socket.to(room).emit("dice:result", payloadBase);
+          socket.to(room).emit("dice:result", { ...payloadBase, deltaGold });
           emitProgressionUpdate(uid);
 
-          io.to(room).emit("system", formatDiceSystemMessage({ ...roll, deltaGold }));
+          io.to(room).emit(
+            "system",
+            formatDiceSystemMessage({ result: roll.result, breakdown: roll.breakdown, deltaGold, outcome: reward.outcome })
+          );
 
-          if (roll.won) {
+          if (reward.isJackpot) {
             void ensureMemory(
               uid,
               "dice_jackpot",
@@ -9449,7 +9468,7 @@ socket.on("join room", ({ room, status }) => {
                 description: "Landed the jackpot roll in Dice Room.",
                 icon: "🎲",
                 room_id: room,
-                metadata: { value: roll.result, deltaGold, variant },
+                metadata: { value: roll.result, deltaGold, variant, outcome: reward.outcome },
               },
               socket.user
             );
@@ -9477,14 +9496,20 @@ socket.on("join room", ({ room, status }) => {
         }
 
         const gold = Number(row.gold || 0);
-        if (gold < 50) {
-          socket.emit("dice:error", "You need at least 50 Gold to roll.");
+        const roll = rollDiceVariant(variant);
+        const reward = computeDiceReward(variant, roll.result, roll.breakdown);
+        if (gold < (reward.minBalanceRequired || 0)) {
+          socket.emit(
+            "dice:error",
+            `You need at least ${reward.minBalanceRequired || 0} Gold to roll ${DICE_VARIANT_LABELS[variant] || variant}.`
+          );
           return;
         }
 
-        const roll = rollDiceVariant(variant);
-        const deltaGold = roll.won ? 500 : -50;
-        const sixGain = variant === "d6" && roll.won ? 1 : 0;
+        const deltaGold = Number(reward.deltaGold || 0);
+        const breakdownArr = Array.isArray(roll.breakdown) ? roll.breakdown : [];
+        const sixGain =
+          variant === "d6" ? (roll.result === 6 ? 1 : 0) : variant === "2d6" ? breakdownArr.filter((n) => n === 6).length : 0;
 
         db.run(
           `UPDATE users SET gold = MAX(0, gold + ?), lastDiceRollAt=?, dice_sixes = dice_sixes + ? WHERE id=?`,
@@ -9502,17 +9527,22 @@ socket.on("join room", ({ room, status }) => {
               result: roll.result,
               value: roll.result,
               breakdown: roll.breakdown,
-              won: roll.won,
+              won: reward.isJackpot || deltaGold > 0,
+              outcome: reward.outcome,
+              isJackpot: !!reward.isJackpot,
               serverTs: now,
             };
 
             socket.emit("dice:result", { ...payloadBase, deltaGold });
-            socket.to(room).emit("dice:result", payloadBase);
+            socket.to(room).emit("dice:result", { ...payloadBase, deltaGold });
             emitProgressionUpdate(uid);
 
-            io.to(room).emit("system", formatDiceSystemMessage({ ...roll, deltaGold }));
+            io.to(room).emit(
+              "system",
+              formatDiceSystemMessage({ result: roll.result, breakdown: roll.breakdown, deltaGold, outcome: reward.outcome })
+            );
 
-            if (roll.won) {
+            if (reward.isJackpot) {
               void ensureMemory(
                 uid,
                 "dice_jackpot",
@@ -9522,7 +9552,7 @@ socket.on("join room", ({ room, status }) => {
                   description: "Landed the jackpot roll in Dice Room.",
                   icon: "🎲",
                   room_id: room,
-                  metadata: { value: roll.result, deltaGold, variant },
+                  metadata: { value: roll.result, deltaGold, variant, outcome: reward.outcome },
                 },
                 socket.user
               );
