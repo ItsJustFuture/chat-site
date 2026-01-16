@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "echo \"No tests yet\" && exit 0",
+    "test:dice": "node scripts/dice-variant-smoke.js",
     "test:couples": "node scripts/couples-regression.js",
     "test:memory": "node scripts/memory-sanity.js",
     "check": "node --check server.js && node --check public/app.js && node --check public/theme-init.js && node --check database.js",
