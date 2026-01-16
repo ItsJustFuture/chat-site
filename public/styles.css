@@ -2975,6 +2975,65 @@ body.dice-room .sys .diceFace{
   font-size:26px;
   line-height:1;
 }
+#mediaBtn.diceShaking{
+  animation: diceShake 320ms ease-in-out;
+}
+.diceVariantWrap{
+  display:none;
+  position:relative;
+}
+body.dice-room .diceVariantWrap{
+  display:inline-flex;
+}
+.diceVariantToggle{
+  height:44px;
+  border-radius:14px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  padding:0 12px;
+  font-size:12px;
+  font-weight:800;
+  line-height:1;
+}
+.diceVariantChevron{
+  font-size:11px;
+  opacity:0.7;
+}
+.diceVariantMenu{
+  position:absolute;
+  left:0;
+  bottom: calc(100% + 10px);
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  padding:10px;
+  border-radius:14px;
+  border:1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  box-shadow: var(--shadowMd);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 210;
+  min-width:96px;
+}
+.diceVariantMenu[hidden]{ display:none; }
+.diceVariantOption{
+  border:0;
+  background: color-mix(in srgb, var(--panel2) 70%, transparent);
+  color: var(--text);
+  padding:8px 10px;
+  border-radius:12px;
+  font-size:13px;
+  font-weight:700;
+  cursor:pointer;
+  text-align:left;
+}
+.diceVariantOption.active{
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel2));
+  color: var(--textStrong, var(--text));
+}
 .mediaMenu{
   position:absolute;
   left:12px;
@@ -4054,6 +4113,32 @@ body.lockScroll{ overflow:hidden; }
   background: transparent;
   padding:0;
   cursor:pointer;
+}
+
+.sys.diceResult{
+  animation: diceResultPop 240ms ease-out;
+}
+
+@keyframes diceShake{
+  0%{ transform: translateX(0) rotate(0); }
+  20%{ transform: translateX(-2px) rotate(-6deg); }
+  40%{ transform: translateX(2px) rotate(6deg); }
+  60%{ transform: translateX(-2px) rotate(-4deg); }
+  80%{ transform: translateX(2px) rotate(4deg); }
+  100%{ transform: translateX(0) rotate(0); }
+}
+
+@keyframes diceResultPop{
+  0%{ transform: scale(0.96); }
+  55%{ transform: scale(1.03); }
+  100%{ transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce){
+  #mediaBtn.diceShaking,
+  .sys.diceResult{
+    animation:none !important;
+  }
 }
 .dmAvatarBtn .avatar{
   width:28px;

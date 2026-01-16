@@ -421,6 +421,18 @@
 
   <!-- unified media button + pop-up menu -->
   <button class="iconBtn" id="mediaBtn" title="Media" type="button">＋</button>
+  <div class="diceVariantWrap" id="diceVariantWrap">
+    <button aria-expanded="false" aria-haspopup="menu" class="iconBtn diceVariantToggle" id="diceVariantToggle" title="Dice variants" type="button">
+      <span class="diceVariantLabel" id="diceVariantLabel">d6</span>
+      <span aria-hidden="true" class="diceVariantChevron">▾</span>
+    </button>
+    <div class="diceVariantMenu" hidden="" id="diceVariantMenu" role="menu">
+      <button aria-checked="true" class="diceVariantOption active" data-variant="d6" role="menuitemradio" type="button">d6</button>
+      <button aria-checked="false" class="diceVariantOption" data-variant="d20" role="menuitemradio" type="button">d20</button>
+      <button aria-checked="false" class="diceVariantOption" data-variant="2d6" role="menuitemradio" type="button">2d6</button>
+      <button aria-checked="false" class="diceVariantOption" data-variant="d100" role="menuitemradio" type="button">1–100</button>
+    </div>
+  </div>
   <div class="mediaMenu" hidden="" id="mediaMenu">
     <button class="mediaMenuItem" id="mediaMenuImage" type="button" title="Upload image">
       <span class="mediaIcon">🖼️</span><span class="mediaLabel">Image</span>

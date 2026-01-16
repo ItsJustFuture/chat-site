@@ -757,7 +757,14 @@ let memorySettingsLoaded = false;
 let memoryFilter = "all";
 let memoryLoading = false;
 const memoryCacheByFilter = new Map();
-function displayRoomName(room){ return room==="diceroom" ? "Dice Room" : room; }
+const DICE_ROOM_ID = "diceroom";
+function isDiceRoom(activeRoom){
+  const roomName = typeof activeRoom === "string"
+    ? activeRoom
+    : (activeRoom?.name ?? activeRoom?.id ?? "");
+  return String(roomName || "").toLowerCase() === DICE_ROOM_ID;
+}
+function displayRoomName(room){ return isDiceRoom(room) ? "Dice Room" : room; }
 
 let lastUsers = [];
 let membersViewMode = "room"; // room|friends
@@ -1990,7 +1997,29 @@ let drawerTypingMode = false;
 let drawerFocusOutTimer = null;
 let activeDmUsers = new Set();
 let diceCooldownUntil = 0;
+const DICE_ROLL_COOLDOWN_MS = 1000;
 const DICE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+const DICE_VARIANTS = ["d6", "d20", "2d6", "d100"];
+const DICE_VARIANT_LABELS = {
+  d6: "d6",
+  d20: "d20",
+  "2d6": "2d6",
+  d100: "1–100",
+};
+const DICE_LUCKY_THRESHOLDS = {
+  d6: 6,
+  d20: 20,
+  "2d6": 12,
+  d100: 90,
+};
+let diceVariant = "d6";
+let diceVariantMenuOpen = false;
+const diceSessionStats = {
+  consecutiveRolls: 0,
+  highestRoll: 0,
+  luckyStreak: 0,
+  lastRollAt: 0,
+};
 
 const THEME_LIST = [
   { name: "Minimal Dark", mode: "Dark" },
@@ -2563,6 +2592,9 @@ const mediaMenuImage = document.getElementById("mediaMenuImage");
 const mediaMenuAudioUpload = document.getElementById("mediaMenuAudioUpload");
 const mediaMenuVoice = document.getElementById("mediaMenuVoice");
 const mediaVoiceLabel = document.getElementById("mediaVoiceLabel");
+const diceVariantToggle = document.getElementById("diceVariantToggle");
+const diceVariantMenu = document.getElementById("diceVariantMenu");
+const diceVariantLabel = document.getElementById("diceVariantLabel");
 
 let mediaMenuOpen = false;
 let voiceRec = { recorder: null, stream: null, chunks: [], startedAt: 0 };
@@ -2582,6 +2614,110 @@ function openMediaMenu(){
 function toggleMediaMenu(){
   if(mediaMenuOpen) closeMediaMenu();
   else openMediaMenu();
+}
+
+function updateDiceVariantLabel(){
+  if (!diceVariantLabel) return;
+  diceVariantLabel.textContent = DICE_VARIANT_LABELS[diceVariant] || diceVariant;
+}
+
+function closeDiceVariantMenu(){
+  if (!diceVariantMenu) return;
+  diceVariantMenuOpen = false;
+  diceVariantMenu.hidden = true;
+  diceVariantToggle?.setAttribute("aria-expanded", "false");
+}
+
+function openDiceVariantMenu(){
+  if (!diceVariantMenu) return;
+  diceVariantMenuOpen = true;
+  diceVariantMenu.hidden = false;
+  diceVariantToggle?.setAttribute("aria-expanded", "true");
+}
+
+function toggleDiceVariantMenu(){
+  if (diceVariantMenuOpen) closeDiceVariantMenu();
+  else openDiceVariantMenu();
+}
+
+function setDiceVariant(nextVariant){
+  if (!DICE_VARIANTS.includes(nextVariant)) return;
+  diceVariant = nextVariant;
+  updateDiceVariantLabel();
+  if (diceVariantMenu) {
+    diceVariantMenu.querySelectorAll("[data-variant]").forEach((btn) => {
+      const isActive = btn.dataset.variant === nextVariant;
+      btn.classList.toggle("active", isActive);
+      btn.setAttribute("aria-checked", String(isActive));
+    });
+  }
+}
+
+setDiceVariant(diceVariant);
+
+function resetDiceSessionStats(){
+  diceSessionStats.consecutiveRolls = 0;
+  diceSessionStats.highestRoll = 0;
+  diceSessionStats.luckyStreak = 0;
+  diceSessionStats.lastRollAt = 0;
+}
+
+function isHighRoll(variant, result){
+  const threshold = DICE_LUCKY_THRESHOLDS[variant];
+  if (!threshold) return false;
+  return result >= threshold;
+}
+
+function updateDiceSessionStats(payload){
+  if (!payload || payload.userId !== me?.id) return;
+  const now = Date.now();
+  if (diceSessionStats.lastRollAt && now - diceSessionStats.lastRollAt > 5 * 60 * 1000) {
+    diceSessionStats.consecutiveRolls = 0;
+    diceSessionStats.luckyStreak = 0;
+  }
+  diceSessionStats.lastRollAt = now;
+  diceSessionStats.consecutiveRolls += 1;
+
+  const result = Number(payload.result ?? payload.value ?? 0);
+  if (result > diceSessionStats.highestRoll) {
+    diceSessionStats.highestRoll = result;
+    toast?.(`🎯 New high: ${result}`);
+  }
+
+  if (isHighRoll(payload.variant, result)) {
+    diceSessionStats.luckyStreak += 1;
+  } else {
+    diceSessionStats.luckyStreak = 0;
+  }
+
+  if (diceSessionStats.luckyStreak === 3) {
+    toast?.("🔥 Lucky Streak x3");
+  }
+
+  if (diceSessionStats.consecutiveRolls === 5 || diceSessionStats.consecutiveRolls === 10) {
+    toast?.(`🔥 ${diceSessionStats.consecutiveRolls} roll streak!`);
+  }
+}
+
+function triggerDiceButtonShake(){
+  if (!mediaBtn || PREFERS_REDUCED_MOTION) return;
+  mediaBtn.classList.remove("diceShaking");
+  void mediaBtn.offsetWidth;
+  mediaBtn.classList.add("diceShaking");
+  mediaBtn.addEventListener("animationend", () => mediaBtn.classList.remove("diceShaking"), { once:true });
+}
+
+function rollDiceImmediate(nextVariant = diceVariant){
+  if (!socket || !isDiceRoom(currentRoom)) return;
+  const now = Date.now();
+  if (now < diceCooldownUntil) {
+    const left = Math.max(1, Math.ceil((diceCooldownUntil - now) / 1000));
+    addSystem(`Roll available in ${left}s`);
+    return;
+  }
+  diceCooldownUntil = now + DICE_ROLL_COOLDOWN_MS;
+  triggerDiceButtonShake();
+  socket.emit("dice:roll", { room: currentRoom, variant: nextVariant, clientTs: now });
 }
 
 if(chatShell){
@@ -4324,9 +4460,18 @@ function clearMsgs(){
   unseenMainMessages = 0;
   updateJumpToLatestButton();
 }
-function addSystem(text){
+function isDiceResultSystemMessage(text){
+  if (!isDiceRoom(currentRoom)) return false;
+  const raw = String(text || "");
+  const hasRoll = /rolled/i.test(raw);
+  const hasDiceHint = /[⚀⚁⚂⚃⚄⚅]|d6|d20|2d6|1–100|1-100|d100|🎲/i.test(raw);
+  return hasRoll && hasDiceHint;
+}
+
+function addSystem(text, options = {}){
   const div=document.createElement("div");
   div.className="sys";
+  if (options.className) div.classList.add(options.className);
 
   // Dice Room: make system messages larger, and make dice faces much more visible
   if(currentRoom === "diceroom"){
@@ -7994,17 +8139,13 @@ profileSettingsBtn?.addEventListener("click", async () => {
 });
 
 // unified media button
-mediaBtn?.addEventListener("click", () => {
+mediaBtn?.addEventListener("click", (e) => {
   // Dice Room keeps the "tap to roll" affordance
-  if (currentRoom === "diceroom") {
-    const now = Date.now();
-    if (now < diceCooldownUntil) {
-      const left = Math.max(1, Math.ceil((diceCooldownUntil - now) / 1000));
-      addSystem(`Roll available in ${left}s`);
-      return;
-    }
-    diceCooldownUntil = now + 3000;
-    socket?.emit("dice:roll");
+  if (isDiceRoom(currentRoom)) {
+    e?.preventDefault();
+    e?.stopPropagation();
+    e?.stopImmediatePropagation();
+    rollDiceImmediate(diceVariant);
     return;
   }
   toggleMediaMenu();
@@ -8029,6 +8170,31 @@ mediaMenuAudioUpload?.addEventListener("click", () => {
   closeMediaMenu();
   audioFileInput?.click();
 });
+
+diceVariantToggle?.addEventListener("click", (e) => {
+  if (!isDiceRoom(currentRoom)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  toggleDiceVariantMenu();
+});
+
+diceVariantMenu?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-variant]");
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const nextVariant = btn.dataset.variant;
+  setDiceVariant(nextVariant);
+  closeDiceVariantMenu();
+});
+
+document.addEventListener("pointerdown", (e) => {
+  if (!diceVariantMenuOpen) return;
+  const t = e.target;
+  if (!t) return;
+  if (diceVariantMenu?.contains(t) || diceVariantToggle?.contains(t)) return;
+  closeDiceVariantMenu();
+}, { capture:true });
 
 async function startVoiceRecording(){
   if (voiceRec.recorder) return;
@@ -8565,8 +8731,10 @@ modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
 
 // rooms
 function setActiveRoom(room){
+  const wasDiceRoom = isDiceRoom(currentRoom);
   currentRoom = room;
-  document.body.classList.toggle("dice-room", room === "diceroom");
+  const nowDiceRoom = isDiceRoom(room);
+  document.body.classList.toggle("dice-room", nowDiceRoom);
   nowRoom.textContent = displayRoomName(room);
   roomTitle.textContent = displayRoomName(room);
   msgInput.placeholder = `Message ${displayRoomName(room)}`;
@@ -8575,14 +8743,18 @@ function setActiveRoom(room){
 
   // Dice Room: swap media button to dice roll
   try { closeMediaMenu(); } catch {}
+  try { closeDiceVariantMenu(); } catch {}
   if (mediaBtn) {
-    if (room === "diceroom") {
+    if (nowDiceRoom) {
       mediaBtn.textContent = "🎲";
       mediaBtn.title = "Roll Dice";
     } else {
       mediaBtn.textContent = "＋";
       mediaBtn.title = "Media";
     }
+  }
+  if (wasDiceRoom && !nowDiceRoom) {
+    resetDiceSessionStats();
   }
   document.querySelectorAll(".chan").forEach(el=>{
     el.classList.toggle("active", el.dataset.room === room);
@@ -13343,7 +13515,9 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   }
   updateRoomControlsVisibility();
 
-  socket.on("system", addSystem);
+  socket.on("system", (text) => {
+    addSystem(text, { className: isDiceResultSystemMessage(text) ? "diceResult" : "" });
+  });
 
   // Dice Room UI effects
   const diceOverlay = document.createElement("div");
@@ -13359,17 +13533,23 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   chatMain.appendChild(diceOverlay);
   chatMain.appendChild(confettiLayer);
 
-  function showDiceAnimation(finalValue, won){
+  function showDiceAnimation({ result, variant, won } = {}){
     const faces = ["⚀","⚁","⚂","⚃","⚄","⚅"];
+    const display = variant === "d6" ? (faces[(result || 1) - 1] || "🎲") : String(result ?? "🎲");
     diceOverlay.style.display = "flex";
     diceOverlay.textContent = "🎲";
+    if (PREFERS_REDUCED_MOTION) {
+      diceOverlay.textContent = display;
+      setTimeout(()=>{ diceOverlay.style.display="none"; }, 220);
+      return;
+    }
     let t = 0;
     const iv = setInterval(()=>{
       diceOverlay.textContent = faces[Math.floor(Math.random()*6)];
       t += 1;
       if (t >= 10){
         clearInterval(iv);
-        diceOverlay.textContent = faces[finalValue-1] || "🎲";
+        diceOverlay.textContent = display;
         setTimeout(()=>{ diceOverlay.style.display="none"; }, 350);
         if (won) popConfetti();
       }
@@ -13390,11 +13570,17 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
     setTimeout(()=>{ confettiLayer.style.display="none"; confettiLayer.innerHTML=""; }, 900);
   }
 
-  socket.on("dice:result", ({value, won}) => {
-    diceCooldownUntil = Date.now() + 3000;
-    showDiceAnimation(value, won);
-    // refresh gold display if you already have a refresh_toggle function
-    if (typeof refreshMe === "function") refreshMe();
+  socket.on("dice:result", (payload = {}) => {
+    const result = payload.result ?? payload.value;
+    const variant = payload.variant || "d6";
+    const won = !!payload.won;
+    showDiceAnimation({ result, variant, won });
+    if (payload.userId === me?.id) {
+      diceCooldownUntil = Date.now() + DICE_ROLL_COOLDOWN_MS;
+      updateDiceSessionStats(payload);
+      if (typeof refreshMe === "function") refreshMe();
+    }
+    if (payload.username) noteDiceRoll(payload.username, result);
   });
   socket.on("dice:error", (msg)=> {
     const m = String(msg||"");
@@ -13405,11 +13591,7 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
     }
     addSystem(msg);
   });
-  socket.on("dice:rolled", ({value, won, username}) => {
-    // show animation for other rollers too (nice-to-have)
-    showDiceAnimation(value, won);
-    if (username) noteDiceRoll(username, value);
-  });
+  updateDiceVariantLabel();
 
   socket.on("command response", handleCommandResponse);
   socket.on("user list", (users)=>{
@@ -14233,6 +14415,13 @@ function closeMediaSheet() {
 }
 
 mediaBtnEl?.addEventListener("click", e => {
+  if (isDiceRoom(currentRoom)) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    rollDiceImmediate(diceVariant);
+    return;
+  }
   e.preventDefault();
   e.stopPropagation();
   openMediaSheet();
