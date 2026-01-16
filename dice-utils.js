@@ -7,6 +7,8 @@ const DICE_VARIANT_LABELS = {
   d100: "1–100",
 };
 
+const { computeEffectiveLuck } = require("./luck-utils");
+
 function normalizeDiceVariant(variant) {
   const v = String(variant || "").toLowerCase();
   return DICE_VARIANTS.includes(v) ? v : null;
@@ -33,6 +35,103 @@ function rollDiceVariant(variant) {
     breakdown: null,
     won: result === max,
   };
+}
+
+function clampNumber(value, min, max) {
+  const num = Number(value || 0);
+  return Math.max(min, Math.min(max, num));
+}
+
+// Luck-biased dice rolls. Luck only adjusts win odds; payouts remain unchanged.
+function rollDiceVariantWithLuck(variant, luck) {
+  const v = normalizeDiceVariant(variant) || "d6";
+  const effective = computeEffectiveLuck(luck);
+  const rand = Math.random();
+
+  if (v === "d6") {
+    const baseP6 = 1 / 6;
+    const delta = clampNumber(effective * 0.06, -0.06, 0.01);
+    const p6 = clampNumber(baseP6 + delta, 0.10, 0.22);
+    if (rand < p6) {
+      return { variant: v, result: 6, breakdown: null, won: true };
+    }
+    const result = Math.floor(Math.random() * 5) + 1;
+    return { variant: v, result, breakdown: null, won: result === 6 };
+  }
+
+  if (v === "d20") {
+    const jackpotDelta = clampNumber(effective * 0.004, -0.015, 0.004);
+    const goodDelta = clampNumber(effective * 0.03, -0.15, 0.02);
+    const pJackpot = clampNumber(0.05 + jackpotDelta, 0.03, 0.054);
+    const pGood = clampNumber(0.45 + goodDelta, 0.30, 0.47);
+    const pBad = Math.max(0, 1 - pJackpot - pGood);
+
+    if (rand < pJackpot) {
+      return { variant: v, result: 20, breakdown: null, won: true };
+    }
+    if (rand < pJackpot + pGood) {
+      const result = Math.floor(Math.random() * 9) + 11;
+      return { variant: v, result, breakdown: null, won: result === 20 };
+    }
+    const result = Math.floor(Math.random() * 10) + 1;
+    return { variant: v, result, breakdown: null, won: result === 20 };
+  }
+
+  if (v === "2d6") {
+    const baseJackpot = 1 / 36;
+    const baseOneSix = 10 / 36;
+    const jackpotDelta = clampNumber(effective * 0.003, -0.01, 0.003);
+    const oneSixDelta = clampNumber(effective * 0.03, -0.15, 0.02);
+    const pJackpot = clampNumber(baseJackpot + jackpotDelta, 0.018, 0.031);
+    const pOneSix = clampNumber(baseOneSix + oneSixDelta, 0.13, 0.30);
+    const pNoSix = Math.max(0, 1 - pJackpot - pOneSix);
+    const bucketRoll = Math.random() * (pJackpot + pOneSix + pNoSix);
+
+    if (bucketRoll < pJackpot) {
+      return { variant: v, result: 12, breakdown: [6, 6], won: true };
+    }
+    if (bucketRoll < pJackpot + pOneSix) {
+      const other = Math.floor(Math.random() * 5) + 1;
+      const pickFirst = Math.random() < 0.5;
+      const breakdown = pickFirst ? [6, other] : [other, 6];
+      return { variant: v, result: breakdown[0] + breakdown[1], breakdown, won: false };
+    }
+    const die1 = Math.floor(Math.random() * 5) + 1;
+    const die2 = Math.floor(Math.random() * 5) + 1;
+    return { variant: v, result: die1 + die2, breakdown: [die1, die2], won: false };
+  }
+
+  // d100
+  const delta100 = clampNumber(effective * 0.001, -0.004, 0.001);
+  const delta69 = clampNumber(effective * 0.005, -0.008, 0.005);
+  const p100 = clampNumber(0.01 + delta100, 0.006, 0.011);
+  const p69 = clampNumber(0.01 + delta69, 0.005, 0.015);
+
+  if (rand < p100) {
+    return { variant: v, result: 100, breakdown: null, won: true };
+  }
+  if (rand < p100 + p69) {
+    return { variant: v, result: 69, breakdown: null, won: false };
+  }
+  const pool = [];
+  for (let i = 1; i <= 100; i += 1) {
+    if (i === 69 || i === 100) continue;
+    pool.push(i);
+  }
+  const result = pool[Math.floor(Math.random() * pool.length)];
+  return { variant: v, result, breakdown: null, won: false };
+}
+
+function isLuckWin(variant, result, breakdown) {
+  const v = normalizeDiceVariant(variant) || "d6";
+  const r = Number(result || 0);
+  if (v === "d6") return r === 6;
+  if (v === "d20") return r >= 11 && r <= 20;
+  if (v === "2d6") {
+    const b = Array.isArray(breakdown) ? breakdown.map((n) => Number(n || 0)) : [];
+    return b.includes(6);
+  }
+  return r === 69 || r === 100;
 }
 
 // Reward rules (January 2026):
@@ -93,5 +192,7 @@ module.exports = {
   DICE_VARIANT_LABELS,
   normalizeDiceVariant,
   rollDiceVariant,
+  rollDiceVariantWithLuck,
+  isLuckWin,
   computeDiceReward,
 };

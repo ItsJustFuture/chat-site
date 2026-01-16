@@ -2006,6 +2006,9 @@ const DICE_VARIANT_LABELS = {
   "2d6": "2d6",
   d100: "1–100",
 };
+const LUCK_MIN = -2.0;
+const LUCK_MAX = 0.30;
+const LUCK_BAR_SLOTS = 24;
 const DICE_LUCKY_THRESHOLDS = {
   d6: 6,
   d20: 20,
@@ -2020,6 +2023,14 @@ const diceSessionStats = {
   luckyStreak: 0,
   lastRollAt: 0,
 };
+const luckState = {
+  luck: 0,
+  rollStreak: 0,
+  lastUpdateAt: 0,
+  hasValue: false,
+};
+let lastLuckRequestAt = 0;
+const LUCK_REQUEST_COOLDOWN_MS = 2000;
 
 const THEME_LIST = [
   { name: "Minimal Dark", mode: "Dark" },
@@ -2597,6 +2608,11 @@ const diceVariantMenu = document.getElementById("diceVariantMenu");
 const diceVariantLabel = document.getElementById("diceVariantLabel");
 const diceInfoBtn = document.getElementById("diceInfoBtn");
 const dicePayoutPopover = document.getElementById("dicePayoutPopover");
+const luckMeter = document.getElementById("luckMeter");
+const luckMeterBar = document.getElementById("luckMeterBar");
+const luckMeterBarText = document.getElementById("luckMeterBarText");
+const luckMeterValue = document.getElementById("luckMeterValue");
+const luckMeterStreak = document.getElementById("luckMeterStreak");
 
 let mediaMenuOpen = false;
 let voiceRec = { recorder: null, stream: null, chunks: [], startedAt: 0 };
@@ -2716,6 +2732,38 @@ function setDiceVariant(nextVariant){
       btn.setAttribute("aria-checked", String(isActive));
     });
   }
+}
+
+function clampNumber(value, min, max){
+  const num = Number(value || 0);
+  return Math.max(min, Math.min(max, num));
+}
+
+function formatLuckValue(value){
+  const num = Number(value || 0);
+  const sign = num > 0 ? "+" : num < 0 ? "" : "";
+  return `${sign}${num.toFixed(2)}`;
+}
+
+function renderLuckMeter(){
+  if (!luckMeter || !luckMeterBarText) return;
+  const luck = clampNumber(luckState.luck, LUCK_MIN, LUCK_MAX);
+  const ratio = (luck - LUCK_MIN) / (LUCK_MAX - LUCK_MIN);
+  const idx = Math.round(clampNumber(ratio, 0, 1) * (LUCK_BAR_SLOTS - 1));
+  const slots = Array.from({ length: LUCK_BAR_SLOTS }, () => "-");
+  slots[idx] = "^";
+  luckMeterBarText.textContent = `|${slots.join("")}|`;
+  if (luckMeterValue) luckMeterValue.textContent = formatLuckValue(luck);
+  if (luckMeterStreak) luckMeterStreak.textContent = `Streak ${Number(luckState.rollStreak || 0)}`;
+  luckMeterBar?.setAttribute("aria-valuenow", String(luck));
+}
+
+function requestLuckState(force = false){
+  if (!socket) return;
+  const now = Date.now();
+  if (!force && now - lastLuckRequestAt < LUCK_REQUEST_COOLDOWN_MS) return;
+  lastLuckRequestAt = now;
+  socket.emit("luck:get");
 }
 
 diceInfoBtn?.addEventListener("click", (e)=>{
@@ -8837,6 +8885,10 @@ function setActiveRoom(room){
   if (wasDiceRoom && !nowDiceRoom) {
     resetDiceSessionStats();
   }
+  if (nowDiceRoom) {
+    renderLuckMeter();
+    requestLuckState();
+  }
   document.querySelectorAll(".chan").forEach(el=>{
     el.classList.toggle("active", el.dataset.room === room);
   });
@@ -13731,6 +13783,15 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
       diceCooldownUntil = Date.now() + waitMs;
     }
     addSystem(msg);
+  });
+  socket.on("luck:update", (payload = {}) => {
+    if (payload && typeof payload.luck === "number") {
+      luckState.luck = payload.luck;
+      luckState.rollStreak = Number(payload.rollStreak || 0);
+      luckState.lastUpdateAt = Number(payload.ts || Date.now());
+      luckState.hasValue = true;
+      renderLuckMeter();
+    }
   });
   updateDiceVariantLabel();
 
