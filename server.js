@@ -156,15 +156,20 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
   const httpServer = http.createServer(app);
   const io = new Server(httpServer, {
     // Render uses HTTPS -> allow websocket upgrade
-    cors: {
-      origin: (origin, cb) => {
+    cors: { origin: true, credentials: true },
+
+    // Origin allowlist for Socket.IO handshake
+    allowRequest: (req, cb) => {
+      try {
+        const origin = req.headers.origin;
+        const host = req.headers.host;
         if (!origin) {
-          return cb(!IS_PROD ? null : new Error("Origin required"), !IS_PROD);
+          return cb(null, !IS_PROD);
         }
-        if (isAllowedOrigin(origin, "")) return cb(null, true);
-        return cb(new Error("Origin not allowed"));
-      },
-      credentials: true,
+        return cb(null, isAllowedOrigin(origin, host));
+      } catch {
+        return cb(null, false);
+      }
     },
 
     // More tolerant of mobile/background + Render sleep
@@ -1167,14 +1172,21 @@ function isAllowedOrigin(origin, hostHeader) {
   if (!origin) return false;
   const url = safeParseUrl(origin);
   if (!url) return false;
+
+  // Always allow same-host origins (covers cases where ALLOWED_ORIGINS is set
+  // but the site is accessed via a different deployed host, e.g. Render URL).
+  if (hostHeader && url.host === hostHeader) return true;
+
+  // If an explicit allowlist is provided, prefer it.
   if (ALLOWED_ORIGINS.size) {
     if (ALLOWED_ORIGINS.has(url.origin)) return true;
-  } else if (hostHeader && url.host === hostHeader) {
-    return true;
   }
+
+  // Local dev convenience.
   if (!IS_PROD && isLocalhostOrigin(url.origin)) return true;
   return false;
 }
+
 
 function getClientIp(req) {
   const xfwd = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
@@ -1199,9 +1211,7 @@ app.use((req, res, next) => {
     "Content-Security-Policy",
     [
       "default-src 'self'",
-      "script-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com",
-      "script-src-elem 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com",
-      // Inline style attributes are set by the client JS (e.g. show/hide panels),
+      "script-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM='",      "script-src-elem 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM='",      // Inline style attributes are set by the client JS (e.g. show/hide panels),
       // so allow them alongside our external stylesheet.
       // Also allow Google Fonts stylesheets for optional custom fonts.
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
