@@ -2297,6 +2297,9 @@ const authValidation = document.getElementById("authValidation");
 const loginBtn = document.getElementById("loginBtn");
 const regBtn = document.getElementById("regBtn");
 const togglePassBtn = document.getElementById("togglePassBtn");
+const captchaWrap = document.getElementById("captchaWrap");
+const captchaWidget = document.getElementById("captchaWidget");
+const captchaNote = document.getElementById("captchaNote");
 
 
 // Auth: show/hide password
@@ -10088,10 +10091,76 @@ async function validateSession({ silent = false } = {}){
   }
 }
 
+let captchaConfigLoaded = false;
+let captchaProvider = "none";
+let captchaSiteKey = "";
+let captchaToken = "";
+
+function resetCaptchaToken(){
+  captchaToken = "";
+  if(captchaProvider === "turnstile" && window.turnstile && captchaWidget?.dataset?.captchaId){
+    window.turnstile.reset(captchaWidget.dataset.captchaId);
+  }
+  if(captchaProvider === "hcaptcha" && window.hcaptcha && captchaWidget?.dataset?.captchaId){
+    window.hcaptcha.reset(captchaWidget.dataset.captchaId);
+  }
+}
+
+function renderCaptchaWidget(){
+  if(!captchaWidget || !captchaSiteKey) return;
+  if(captchaProvider === "turnstile" && window.turnstile){
+    const widgetId = window.turnstile.render(captchaWidget, {
+      sitekey: captchaSiteKey,
+      callback: (token)=>{ captchaToken = token || ""; },
+      "expired-callback": ()=>{ captchaToken = ""; },
+    });
+    captchaWidget.dataset.captchaId = String(widgetId);
+  }
+  if(captchaProvider === "hcaptcha" && window.hcaptcha){
+    const widgetId = window.hcaptcha.render(captchaWidget, {
+      sitekey: captchaSiteKey,
+      callback: (token)=>{ captchaToken = token || ""; },
+      "expired-callback": ()=>{ captchaToken = ""; },
+    });
+    captchaWidget.dataset.captchaId = String(widgetId);
+  }
+}
+
+async function initCaptcha(){
+  if(captchaConfigLoaded) return;
+  captchaConfigLoaded = true;
+  if(!captchaWrap || !captchaWidget) return;
+  try{
+    const res = await fetch("/api/captcha-config", { credentials: "include" });
+    const data = await res.json().catch(()=>({}));
+    captchaProvider = String(data?.provider || "none");
+    captchaSiteKey = String(data?.siteKey || "");
+    if(!captchaSiteKey || captchaProvider === "none"){
+      captchaWrap.hidden = true;
+      return;
+    }
+    captchaWrap.hidden = false;
+    if(captchaNote) captchaNote.textContent = captchaProvider === "turnstile"
+      ? "Protected by Cloudflare Turnstile."
+      : "Protected by hCaptcha.";
+    const script = document.createElement("script");
+    script.async = true;
+    script.defer = true;
+    script.src = captchaProvider === "turnstile"
+      ? "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+      : "https://js.hcaptcha.com/1/api.js?render=explicit";
+    script.onload = renderCaptchaWidget;
+    document.head.appendChild(script);
+  }catch(err){
+    captchaWrap.hidden = true;
+  }
+}
+
 function initLoginUI(){
   setView("login");
   setAuthLoading(false, "");
   setAuthValidation("");
+  initCaptcha();
   if(!authHandlersBound){
     authHandlersBound = true;
     authForm?.addEventListener("submit", (e)=>{
@@ -10590,18 +10659,24 @@ async function doLogin(){
     authPass?.focus();
     return;
   }
+  if(captchaProvider !== "none" && !captchaToken){
+    setAuthValidation("Please complete the captcha.");
+    return;
+  }
   setAuthValidation("");
   setAuthLoading(true, "Logging in...");
   const {res,text}=await api("/login",{
     method:"POST", headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({username, password})
+    body:JSON.stringify({username, password, captchaToken})
   });
   if(!res.ok){
     setAuthLoading(false, text||"Login failed.");
+    resetCaptchaToken();
     return;
   }
   await initChatApp();
   setAuthLoading(false, "");
+  resetCaptchaToken();
 }
 
 async function doRegister(){
@@ -10617,17 +10692,23 @@ async function doRegister(){
     authPass?.focus();
     return;
   }
+  if(captchaProvider !== "none" && !captchaToken){
+    setAuthValidation("Please complete the captcha.");
+    return;
+  }
   setAuthValidation("");
   setAuthLoading(true, "Registering...");
   const {res,text}=await api("/register",{
     method:"POST", headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({username, password})
+    body:JSON.stringify({username, password, captchaToken})
   });
   if(!res.ok){
     setAuthLoading(false, text||"Register failed.");
+    resetCaptchaToken();
     return;
   }
   setAuthLoading(false, "Registered! Now click Join chat.");
+  resetCaptchaToken();
 }
 
 async function doLogout(){

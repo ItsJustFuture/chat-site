@@ -89,9 +89,11 @@ setInterval(decayHeat, 60_000).unref?.();
 const path = require("path");
 const fs = require("fs");
 const express = require("express");
+const helmet = require("helmet");
 const session = require("express-session");
 const PgSession = require("connect-pg-simple")(session);
 const bcrypt = require("bcrypt");
+const rateLimit = require("express-rate-limit");
 const multer = require("multer");
 const { Pool } = require("pg");
 const http = require("http");
@@ -118,6 +120,15 @@ const MEMORY_SYSTEM_ALLOWLIST = new Set(
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, "public");
 const UPLOADS_DIR = path.join(__dirname, "uploads");
+const CAPTCHA_PROVIDER = String(process.env.CAPTCHA_PROVIDER || "none").trim().toLowerCase();
+const CAPTCHA_SITE_KEY = String(process.env.CAPTCHA_SITE_KEY || "").trim();
+const CAPTCHA_SECRET_KEY = String(process.env.CAPTCHA_SECRET_KEY || "").trim();
+const ALLOWED_ORIGINS = new Set(
+  String(process.env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
 
 // ---- Startup sanity checks (fail fast in production)
 const IS_PROD = process.env.NODE_ENV === "production";
@@ -144,7 +155,16 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
   const httpServer = http.createServer(app);
   const io = new Server(httpServer, {
     // Render uses HTTPS -> allow websocket upgrade
-    cors: { origin: true, credentials: true },
+    cors: {
+      origin: (origin, cb) => {
+        if (!origin) {
+          return cb(!IS_PROD ? null : new Error("Origin required"), !IS_PROD);
+        }
+        if (isAllowedOrigin(origin, "")) return cb(null, true);
+        return cb(new Error("Origin not allowed"));
+      },
+      credentials: true,
+    },
 
     // More tolerant of mobile/background + Render sleep
     pingInterval: 25_000,  // send pings every 25s
@@ -1126,10 +1146,51 @@ async function dbListFriendsForUser(userId){
   ).catch(()=>[]);
 }
 
+const LOCALHOST_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+function safeParseUrl(input) {
+  try {
+    return new URL(input);
+  } catch {
+    return null;
+  }
+}
+
+function isLocalhostOrigin(origin) {
+  const url = safeParseUrl(origin);
+  if (!url) return false;
+  return LOCALHOST_HOSTS.has(url.hostname);
+}
+
+function isAllowedOrigin(origin, hostHeader) {
+  if (!origin) return false;
+  const url = safeParseUrl(origin);
+  if (!url) return false;
+  if (ALLOWED_ORIGINS.size) {
+    if (ALLOWED_ORIGINS.has(url.origin)) return true;
+  } else if (hostHeader && url.host === hostHeader) {
+    return true;
+  }
+  if (!IS_PROD && isLocalhostOrigin(url.origin)) return true;
+  return false;
+}
+
+function getClientIp(req) {
+  const xfwd = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return xfwd || req.ip || req.connection?.remoteAddress || "";
+}
+
 // ---- Security + parsing
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
+
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  })
+);
 
 // IMPORTANT: CSP that blocks inline JS (good), but allows our external /public/app.js & /public/styles.css
 app.use((req, res, next) => {
@@ -1137,8 +1198,8 @@ app.use((req, res, next) => {
     "Content-Security-Policy",
     [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com",
-      "script-src-elem 'self' 'unsafe-eval' 'unsafe-inline' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com",
+      "script-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com",
+      "script-src-elem 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com",
       // Inline style attributes are set by the client JS (e.g. show/hide panels),
       // so allow them alongside our external stylesheet.
       // Also allow Google Fonts stylesheets for optional custom fonts.
@@ -1149,10 +1210,10 @@ app.use((req, res, next) => {
       "img-src 'self' data: blob: https://i.ytimg.com",
       "media-src 'self' blob:",
       // socket.io
-      "connect-src 'self' ws: wss: https://noembed.com",
+      "connect-src 'self' ws: wss: https://noembed.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com",
       "object-src 'none'",
       "base-uri 'self'",
-      "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com",
+      "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://challenges.cloudflare.com https://hcaptcha.com",
       "frame-ancestors 'none'",
     ].join("; ")
   );
@@ -1182,15 +1243,124 @@ const sessionMiddleware = session({
 
 app.use(sessionMiddleware);
 
+const genericRateLimitHandler = (_req, res) => {
+  res.status(429).json({ message: "Too many requests, please try again later." });
+};
+
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_GLOBAL || 900),
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: genericRateLimitHandler,
+  keyGenerator: (req) => getClientIp(req),
+});
+
+app.use(globalLimiter);
+
+const strictLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_STRICT || 30),
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: genericRateLimitHandler,
+  keyGenerator: (req) => getClientIp(req),
+});
+
+const loginIpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_LOGIN_IP || 20),
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: genericRateLimitHandler,
+  keyGenerator: (req) => getClientIp(req),
+});
+
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_REGISTER_IP || 8),
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: genericRateLimitHandler,
+  keyGenerator: (req) => getClientIp(req),
+});
+
+const uploadLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_UPLOAD_IP || 40),
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: genericRateLimitHandler,
+  keyGenerator: (req) => getClientIp(req),
+});
+
+const uploadUserLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_UPLOAD_USER || 30),
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: genericRateLimitHandler,
+  keyGenerator: (req) => String(req.session?.user?.id || getClientIp(req)),
+});
+
+const dmLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_DM_HTTP || 60),
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: genericRateLimitHandler,
+  keyGenerator: (req) => String(req.session?.user?.id || getClientIp(req)),
+});
+
+const moderationHttpLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_MOD_HTTP || 40),
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: genericRateLimitHandler,
+  keyGenerator: (req) => String(req.session?.user?.id || getClientIp(req)),
+});
+
+const postOriginGuard = (req, res, next) => {
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return next();
+  if (req.path && req.path.startsWith("/socket.io/")) return next();
+  const hostHeader = String(req.headers.host || "");
+  const origin = String(req.headers.origin || "");
+  const referer = String(req.headers.referer || "");
+  const secFetchSite = String(req.headers["sec-fetch-site"] || "").toLowerCase();
+
+  if (origin) {
+    if (isAllowedOrigin(origin, hostHeader)) return next();
+    return res.status(403).json({ message: "Origin not allowed." });
+  }
+
+  if (referer) {
+    const refOrigin = safeParseUrl(referer)?.origin || "";
+    if (refOrigin && isAllowedOrigin(refOrigin, hostHeader)) return next();
+  }
+
+  if (secFetchSite === "same-origin" || secFetchSite === "same-site") return next();
+  return res.status(403).json({ message: "Origin required." });
+};
+
+app.use(postOriginGuard);
+
 // ---- Static
 app.use("/uploads", express.static(UPLOADS_DIR, {
   setHeaders: (res, filePath) => {
     const ext = path.extname(filePath).toLowerCase();
     if (ext === ".mp3") res.setHeader("Content-Type", "audio/mpeg");
     if (ext === ".m4a") res.setHeader("Content-Type", "audio/mp4");
+    if (ext === ".mp4") res.setHeader("Content-Type", "video/mp4");
+    if (ext === ".webm") res.setHeader("Content-Type", "video/webm");
+    res.setHeader("X-Content-Type-Options", "nosniff");
   },
 }));
-app.use("/avatars", express.static(AVATARS_DIR));
+app.use("/avatars", express.static(AVATARS_DIR, {
+  setHeaders: (res) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+  },
+}));
 app.use(express.static(PUBLIC_DIR));
 
 // Serve avatars stored in Postgres
@@ -1212,6 +1382,7 @@ app.get("/avatar/:id", async (req, res) => {
     if (inm === etag || inm === weakEtag) return res.status(304).end();
 
     res.setHeader("Content-Type", row.avatar_mime || "image/png");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Cache-Control", "public, max-age=86400");
     res.setHeader("ETag", etag);
     return res.send(row.avatar_bytes);
@@ -1903,8 +2074,17 @@ const onlineState = new Map(); // userId -> { room, status }
 const socketIdByUserId = new Map(); // userId -> socket.id
 const typingByRoom = new Map(); // room -> Set(username)
 const msgRate = new Map(); // socket.id -> { lastTs, count }
+const socketEventRate = new Map(); // socket.id -> Map(eventKey -> { count, resetAt })
+const socketConnByIp = new Map(); // ip -> { count, lastSeen }
+const loginFailureTracker = new Map(); // key -> { count, resetAt, blockedUntil }
+const securityAuditLimiter = new Map(); // key -> { count, resetAt }
 const onlineXpTrack = new Map(); // userId -> { lastTs, carryMs }
 const xpUpdateLocks = new Map(); // userId -> Promise chain to prevent XP races
+
+const MAX_CHAT_MESSAGE_CHARS = Number(process.env.MAX_CHAT_MESSAGE_CHARS || 2000);
+const MAX_DM_MESSAGE_CHARS = Number(process.env.MAX_DM_MESSAGE_CHARS || 2000);
+const MAX_SOCKET_CONN_PER_IP = Number(process.env.MAX_SOCKET_CONN_PER_IP || 5);
+const SOCKET_CONN_TTL_MS = 15 * 60 * 1000;
 
 // ---- DM read receipts (in-memory; resets on restart)
 const dmReadState = new Map(); // threadId -> Map(userId -> { messageId, ts })
@@ -3794,6 +3974,14 @@ function loadThreadForUser(threadId, userId, cb) {
 }
 
 function logModAction({ actor, action, targetUserId, targetUsername, room, details }) {
+  logSecurityEvent("moderation_action", {
+    actor: actor?.username || null,
+    actorId: actor?.id || null,
+    action,
+    targetUsername: targetUsername || null,
+    targetUserId: targetUserId || null,
+    room: room || null,
+  });
   db.run(
     `INSERT INTO mod_logs (ts, actor_user_id, actor_username, actor_role, action, target_user_id, target_username, room, details)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -3809,6 +3997,82 @@ function logModAction({ actor, action, targetUserId, targetUsername, room, detai
       details || null,
     ]
   );
+}
+
+function shouldLogSecurityEvent(key, limit = 5, windowMs = 60_000) {
+  const now = Date.now();
+  const state = securityAuditLimiter.get(key) || { count: 0, resetAt: now + windowMs };
+  if (now > state.resetAt) {
+    state.count = 0;
+    state.resetAt = now + windowMs;
+  }
+  state.count += 1;
+  securityAuditLimiter.set(key, state);
+  return state.count <= limit;
+}
+
+function logSecurityEvent(type, meta = {}) {
+  try {
+    const safeMeta = {
+      ...meta,
+      type,
+      ts: new Date().toISOString(),
+    };
+    const key = `${type}:${meta.ip || "unknown"}`;
+    if (!shouldLogSecurityEvent(key)) return;
+    fs.appendFile(
+      path.join(__dirname, "security-audit.log"),
+      `${JSON.stringify(safeMeta)}\n`,
+      () => {}
+    );
+  } catch {}
+}
+
+function checkLoginBackoff(key) {
+  const now = Date.now();
+  const state = loginFailureTracker.get(key) || { count: 0, resetAt: now + 15 * 60 * 1000, blockedUntil: 0 };
+  if (now > state.resetAt) {
+    state.count = 0;
+    state.resetAt = now + 15 * 60 * 1000;
+    state.blockedUntil = 0;
+  }
+  if (state.blockedUntil && now < state.blockedUntil) {
+    return { blocked: true, retryAfterMs: state.blockedUntil - now };
+  }
+  return { blocked: false };
+}
+
+function recordLoginFailure(key) {
+  const now = Date.now();
+  const state = loginFailureTracker.get(key) || { count: 0, resetAt: now + 15 * 60 * 1000, blockedUntil: 0 };
+  if (now > state.resetAt) {
+    state.count = 0;
+    state.resetAt = now + 15 * 60 * 1000;
+    state.blockedUntil = 0;
+  }
+  state.count += 1;
+  if (state.count >= 5) {
+    const exponent = Math.min(5, state.count - 4);
+    const delay = Math.min(30 * 60 * 1000, 30_000 * (2 ** exponent));
+    state.blockedUntil = now + delay;
+  }
+  loginFailureTracker.set(key, state);
+}
+
+function clearLoginFailures(key) {
+  loginFailureTracker.delete(key);
+}
+
+async function invalidateSessionsForUserId(userId) {
+  if (!userId || !PG_READY) return;
+  try {
+    await pgPool.query(
+      `DELETE FROM session WHERE (sess->'user'->>'id')::int = $1`,
+      [Number(userId)]
+    );
+  } catch (e) {
+    console.warn("[session] failed to invalidate sessions:", e?.message || e);
+  }
 }
 
 function requireLogin(req, res, next) {
@@ -4467,15 +4731,87 @@ async function faqReactionPayload(questionId, username){
   return rows.find((r)=> String(r.id) === String(questionId)) || null;
 }
 
+const COMMON_PASSWORDS = new Set([
+  "password",
+  "password123",
+  "12345678",
+  "123456789",
+  "qwerty123",
+  "letmein",
+  "welcome",
+  "iloveyou",
+  "admin123",
+]);
+
+function isPasswordTooWeak(password) {
+  const lower = String(password || "").toLowerCase();
+  if (COMMON_PASSWORDS.has(lower)) return true;
+  if (lower.includes("password") && lower.length <= 12) return true;
+  return false;
+}
+
+function captchaEnabled() {
+  return (CAPTCHA_PROVIDER === "turnstile" || CAPTCHA_PROVIDER === "hcaptcha")
+    && CAPTCHA_SECRET_KEY
+    && CAPTCHA_SITE_KEY;
+}
+
+async function verifyCaptcha(token, ip) {
+  if (!captchaEnabled()) return { ok: true };
+  if (!token) return { ok: false, message: "Captcha required." };
+  try {
+    if (CAPTCHA_PROVIDER === "turnstile") {
+      const resp = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          secret: CAPTCHA_SECRET_KEY,
+          response: token,
+          remoteip: ip || "",
+        }),
+      });
+      const data = await resp.json();
+      return data?.success ? { ok: true } : { ok: false, message: "Captcha failed." };
+    }
+    if (CAPTCHA_PROVIDER === "hcaptcha") {
+      const resp = await fetch("https://hcaptcha.com/siteverify", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          secret: CAPTCHA_SECRET_KEY,
+          response: token,
+          remoteip: ip || "",
+        }),
+      });
+      const data = await resp.json();
+      return data?.success ? { ok: true } : { ok: false, message: "Captcha failed." };
+    }
+  } catch (e) {
+    console.warn("[captcha] verify failed:", e?.message || e);
+    return { ok: false, message: "Captcha unavailable." };
+  }
+  return { ok: true };
+}
+
+app.get("/api/captcha-config", (_req, res) => {
+  if (!captchaEnabled()) return res.json({ provider: "none" });
+  return res.json({ provider: CAPTCHA_PROVIDER, siteKey: CAPTCHA_SITE_KEY });
+});
+
 // ---- Auth routes
 // ---- Auth routes
-app.post("/register", async (req, res) => {
+app.post("/register", registerLimiter, async (req, res) => {
   try {
     const username = sanitizeUsername(req.body?.username);
     const password = String(req.body?.password || "");
 
     if (!username || username.length < 2) return res.status(400).send("Invalid username");
-    if (!password || password.length < 6) return res.status(400).send("Password must be 6+ chars");
+    if (!password || password.length < 12) return res.status(400).send("Password must be 12+ chars");
+    if (isPasswordTooWeak(password)) return res.status(400).send("Password is too common");
+
+    const captchaToken = String(req.body?.captchaToken || "");
+    const captcha = await verifyCaptcha(captchaToken, getClientIp(req));
+    if (!captcha.ok) return res.status(400).send(captcha.message || "Captcha failed");
 
     // Prevent duplicates (PG is canonical)
     const existingPg = await pgGetUserByUsername(username);
@@ -4521,26 +4857,27 @@ app.post("/register", async (req, res) => {
       );
     }
 
-    // 3) Create session
-    req.session.user = {
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      theme: sanitizeThemeNameServer(user.theme),
-      avatar: user.avatar || "",
-      avatar_updated: user.avatar_updated ?? null,
-    };
-
-    req.session.save((saveErr) => {
-      if (saveErr) return res.status(500).send("Session save failed");
-      return res.json({ ok: true });
+    req.session.regenerate((regenErr) => {
+      if (regenErr) return res.status(500).send("Session failed");
+      req.session.user = {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        theme: sanitizeThemeNameServer(user.theme),
+        avatar: user.avatar || "",
+        avatar_updated: user.avatar_updated ?? null,
+      };
+      req.session.save((saveErr) => {
+        if (saveErr) return res.status(500).send("Session save failed");
+        return res.json({ ok: true });
+      });
     });
   } catch (e) {
     console.error(e);
     res.status(500).send("Registration failed");
   }
 });
-app.post("/login", async (req, res) => {
+app.post("/login", loginIpLimiter, async (req, res) => {
   try {
     const raw = String(req.body?.username || "").trim().slice(0, 64);
     const cleaned = cleanUsernameForLookup(raw);
@@ -4549,6 +4886,24 @@ app.post("/login", async (req, res) => {
 
     const password = String(req.body?.password || "");
     if (!candidates.length || !password) return res.status(400).send("Missing credentials");
+
+    const ip = getClientIp(req);
+    const usernameKey = normKey(raw || cleaned || legacy || "");
+    const loginKey = `${ip}:${usernameKey || "unknown"}`;
+    const ipKey = `ip:${ip}`;
+    const backoff = checkLoginBackoff(loginKey);
+    const ipBackoff = checkLoginBackoff(ipKey);
+    if (backoff.blocked || ipBackoff.blocked) {
+      return res.status(429).send("Too many attempts. Try again later.");
+    }
+
+    const captchaToken = String(req.body?.captchaToken || "");
+    const captcha = await verifyCaptcha(captchaToken, ip);
+    if (!captcha.ok) {
+      recordLoginFailure(loginKey);
+      recordLoginFailure(ipKey);
+      return res.status(400).send(captcha.message || "Captcha failed");
+    }
 
     // 1) Prefer Postgres users (new registrations land here)
     let pgUser = null;
@@ -4575,7 +4930,12 @@ app.post("/login", async (req, res) => {
         }
       }
 
-      if (!ok) return res.status(401).send("Invalid username or password");
+      if (!ok) {
+        recordLoginFailure(loginKey);
+        recordLoginFailure(ipKey);
+        logSecurityEvent("login_failure", { ip, username: raw, store: "pg" });
+        return res.status(401).send("Invalid username or password");
+      }
 
       const theme = sanitizeThemeNameServer(pgUser.theme || DEFAULT_THEME);
 
@@ -4601,22 +4961,26 @@ app.post("/login", async (req, res) => {
       // IMPORTANT: In Postgres we primarily store avatars in avatar_bytes/avatar_updated.
       // If we only read the legacy "avatar" column here, the session will have an empty avatar
       // and the UI will look like the profile "didn't save" after refresh.
-      req.session.user = {
-        id: pgUser.id,
-        username: pgUser.username,
-        role: pgUser.role,
-        theme,
-        avatar: avatarUrlFromRow(pgUser) || "",
-        avatar_updated: pgUser.avatar_updated ?? pgUser.avatarUpdated ?? null,
-      };
-      await dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", pgUser.id]).catch(() => {});
-
-      initGoldTick(pgUser.id);
-
-      return req.session.save((saveErr) => {
-        if (saveErr) return res.status(500).send("Session save failed");
-        return res.json({ ok: true });
+      req.session.regenerate((regenErr) => {
+        if (regenErr) return res.status(500).send("Session failed");
+        req.session.user = {
+          id: pgUser.id,
+          username: pgUser.username,
+          role: pgUser.role,
+          theme,
+          avatar: avatarUrlFromRow(pgUser) || "",
+          avatar_updated: pgUser.avatar_updated ?? pgUser.avatarUpdated ?? null,
+        };
+        dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", pgUser.id]).catch(() => {});
+        initGoldTick(pgUser.id);
+        clearLoginFailures(loginKey);
+        clearLoginFailures(ipKey);
+        req.session.save((saveErr) => {
+          if (saveErr) return res.status(500).send("Session save failed");
+          return res.json({ ok: true });
+        });
       });
+      return;
     }
 
     // 2) Fallback to SQLite (legacy accounts)
@@ -4628,7 +4992,12 @@ app.post("/login", async (req, res) => {
       ).catch(() => null);
       if (row) break;
     }
-    if (!row) return res.status(401).send("Invalid username or password");
+    if (!row) {
+      recordLoginFailure(loginKey);
+      recordLoginFailure(ipKey);
+      logSecurityEvent("login_failure", { ip, username: raw, store: "sqlite" });
+      return res.status(401).send("Invalid username or password");
+    }
 
     // Handle legacy password column (if present)
     let passwordHash = typeof row.password_hash === "string" ? row.password_hash : "";
@@ -4641,7 +5010,12 @@ app.post("/login", async (req, res) => {
         ? await bcrypt.compare(password, legacyPassword)
         : legacyPassword === password;
 
-      if (!legacyMatches) return res.status(401).send("Invalid username or password");
+      if (!legacyMatches) {
+        recordLoginFailure(loginKey);
+        recordLoginFailure(ipKey);
+        logSecurityEvent("login_failure", { ip, username: raw, store: "sqlite" });
+        return res.status(401).send("Invalid username or password");
+      }
 
       passwordHash = legacyPassword.startsWith("$2") ? legacyPassword : await bcrypt.hash(password, 10);
 
@@ -4666,7 +5040,12 @@ app.post("/login", async (req, res) => {
         }
       }
 
-      if (!ok) return res.status(401).send("Invalid username or password");
+      if (!ok) {
+        recordLoginFailure(loginKey);
+        recordLoginFailure(ipKey);
+        logSecurityEvent("login_failure", { ip, username: raw, store: "sqlite" });
+        return res.status(401).send("Invalid username or password");
+      }
     }
 // Apply your auto-role rules (keep both stores aligned)
     const norm = normKey(row.username);
@@ -4703,17 +5082,21 @@ app.post("/login", async (req, res) => {
       ]
     ).catch((e) => console.error("PG mirror on login failed:", e));
 
-    req.session.user = { id: row.id, username: row.username, role: row.role, theme, avatar: avatarUrlFromRow(row) || "", avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? null };
-
-    await dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]).catch(() => {});
-    await awardLoginXp(row.id, row.role);
-    awardDailyLoginGold(row);
-    initGoldTick(row.id);
-
-    return req.session.save((saveErr) => {
-      if (saveErr) return res.status(500).send("Session save failed");
-      return res.json({ ok: true });
+    req.session.regenerate((regenErr) => {
+      if (regenErr) return res.status(500).send("Session failed");
+      req.session.user = { id: row.id, username: row.username, role: row.role, theme, avatar: avatarUrlFromRow(row) || "", avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? null };
+      dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]).catch(() => {});
+      awardLoginXp(row.id, row.role);
+      awardDailyLoginGold(row);
+      initGoldTick(row.id);
+      clearLoginFailures(loginKey);
+      clearLoginFailures(ipKey);
+      req.session.save((saveErr) => {
+        if (saveErr) return res.status(500).send("Session save failed");
+        return res.json({ ok: true });
+      });
     });
+    return;
   } catch (e) {
     console.error(e);
     return res.status(500).send("Login failed");
@@ -4832,7 +5215,7 @@ app.get("/api/owner/flags", requireOwner, async (_req, res) => {
   }
 });
 
-app.post("/api/owner/flags", requireOwner, express.json({ limit: "64kb" }), async (req, res) => {
+app.post("/api/owner/flags", moderationHttpLimiter, requireOwner, express.json({ limit: "64kb" }), async (req, res) => {
   try {
     const incoming = req.body?.flags;
     if (!incoming || typeof incoming !== "object") return res.status(400).json({ ok: false, error: "bad_flags" });
@@ -5038,7 +5421,7 @@ app.get("/api/challenges/today", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/challenges/claim", requireLogin, express.json({ limit: "32kb" }), async (req, res) => {
+app.post("/api/challenges/claim", strictLimiter, requireLogin, express.json({ limit: "32kb" }), async (req, res) => {
   try {
     const userId = req.session.user.id;
     const dk = dayKeyNow();
@@ -5131,7 +5514,7 @@ app.get("/api/me/gold", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/me/username", requireLogin, async (req, res) => {
+app.post("/api/me/username", strictLimiter, requireLogin, async (req, res) => {
   const userId = req.session.user.id;
   const raw = String(req.body?.username || "").trim();
   const newName = sanitizeUsername(raw);
@@ -5220,7 +5603,7 @@ app.get("/api/me/theme", requireLogin, async (req, res) => {
 });
 
 
-app.post("/api/me/theme", requireLogin, async (req, res) => {
+app.post("/api/me/theme", strictLimiter, requireLogin, async (req, res) => {
   try {
     const theme = sanitizeThemeNameServer(req.body?.theme);
 
@@ -5389,7 +5772,7 @@ app.get("/api/me/prefs", requireLogin, async (req, res) => {
   });
 });
 
-app.post("/api/me/prefs", requireLogin, async (req, res) => {
+app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
   const userId = req.session.user.id;
   const incoming = sanitizePrefsInput(req.body?.prefs ?? req.body);
   const shouldUpdateChatFx = Object.prototype.hasOwnProperty.call(incoming || {}, "chatFx");
@@ -5536,7 +5919,7 @@ async function sendLeaderboard(res) {
 app.get("/api/leaderboard", requireLogin, async (_req, res) => sendLeaderboard(res));
 app.get("/api/leaderboards", requireLogin, async (_req, res) => sendLeaderboard(res));
 
-app.post("/api/me/award-gold", requireLogin, (req, res) => {
+app.post("/api/me/award-gold", strictLimiter, requireLogin, (req, res) => {
   if (process.env.ALLOW_DEV_AWARD_GOLD !== "1") return res.status(404).send("Not found");
   const amount = clamp(req.body?.amount ?? req.body?.gold ?? 0, 1, 100000);
   if (!amount) return res.status(400).send("Invalid amount");
@@ -5558,7 +5941,7 @@ app.get("/rooms", requireLogin, (_req, res) => {
 });
 
 // Co-owner+ can create rooms
-app.post("/rooms", requireLogin, (req, res) => {
+app.post("/rooms", strictLimiter, requireLogin, (req, res) => {
   const actor = req.session.user;
   if (!requireMinRole(actor.role, "Co-owner")) return res.status(403).send("Forbidden");
 
@@ -5599,7 +5982,7 @@ app.get("/api/changelog", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/changelog", requireOwner, async (req, res) => {
+app.post("/api/changelog", strictLimiter, requireOwner, async (req, res) => {
   const cleaned = cleanChangelogInput(req.body?.title, req.body?.body);
   if (cleaned.error) return res.status(400).send(cleaned.error);
 
@@ -5675,7 +6058,7 @@ app.put("/api/changelog/:id", requireOwner, async (req, res) => {
   }
 });
 
-app.delete("/api/changelog/:id", requireOwner, async (req, res) => {
+app.delete("/api/changelog/:id", strictLimiter, requireOwner, async (req, res) => {
   const id = Number(req.params?.id);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).send("Invalid entry id");
 
@@ -5707,7 +6090,7 @@ app.delete("/api/changelog/:id", requireOwner, async (req, res) => {
   }
 });
 
-app.post("/api/changelog/:id/reaction", requireLogin, async (req, res) => {
+app.post("/api/changelog/:id/reaction", strictLimiter, requireLogin, async (req, res) => {
   const entryId = Number(req.params?.id);
   const reaction = normalizeReactionKey(req.body?.reaction);
   if (!Number.isFinite(entryId) || entryId <= 0) return res.status(400).send("Invalid entry id");
@@ -5755,7 +6138,7 @@ app.get("/api/faq", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/faq", requireLogin, async (req, res) => {
+app.post("/api/faq", strictLimiter, requireLogin, async (req, res) => {
   const cleaned = cleanFaqInput(req.body?.title, req.body?.details);
   if(cleaned.error) return res.status(400).send(cleaned.error);
 
@@ -5810,7 +6193,7 @@ app.patch("/api/faq/:id/answer", requireLogin, async (req, res) => {
   }
 });
 
-app.delete("/api/faq/:id", requireLogin, async (req, res) => {
+app.delete("/api/faq/:id", strictLimiter, requireLogin, async (req, res) => {
   const questionId = Number(req.params?.id);
   if(!Number.isFinite(questionId) || questionId <= 0) return res.status(400).send("Invalid question id");
   // Admin, Co-owner, Owner
@@ -5833,7 +6216,7 @@ app.delete("/api/faq/:id", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/faq/:id/react", requireLogin, async (req, res) => {
+app.post("/api/faq/:id/react", strictLimiter, requireLogin, async (req, res) => {
   const questionId = Number(req.params?.id);
   const reaction = normalizeFaqReactionKey(req.body?.reaction);
   if(!Number.isFinite(questionId) || questionId <= 0) return res.status(400).send("Invalid question id");
@@ -6344,7 +6727,7 @@ app.get("/api/memory-settings", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/memory-settings", requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
+app.post("/api/memory-settings", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
   try {
     const user = req.session.user;
     const settings = await getMemorySettingsForUser(user);
@@ -6402,7 +6785,7 @@ app.get("/api/memories", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/memories/:id/pin", requireLogin, async (req, res) => {
+app.post("/api/memories/:id/pin", strictLimiter, requireLogin, async (req, res) => {
   const user = req.session.user;
   const memoryId = Number(req.params.id) || 0;
   if (!memoryId) return res.status(400).json({ ok: false, error: "bad_request" });
@@ -6457,7 +6840,7 @@ app.get("/api/couples/me", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/couples/request", requireLogin, async (req, res) => {
+app.post("/api/couples/request", strictLimiter, requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
     if (!COUPLES_READY) return res.status(503).send("Couples not ready");
@@ -6517,7 +6900,7 @@ app.post("/api/couples/request", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/couples/respond", requireLogin, async (req, res) => {
+app.post("/api/couples/respond", strictLimiter, requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
     if (!COUPLES_READY) return res.status(503).send("Couples not ready");
@@ -6568,7 +6951,7 @@ app.post("/api/couples/respond", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/couples/unlink", requireLogin, async (req, res) => {
+app.post("/api/couples/unlink", strictLimiter, requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
     if (!COUPLES_READY) return res.status(503).send("Couples not ready");
@@ -6591,7 +6974,7 @@ app.post("/api/couples/unlink", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/couples/prefs", requireLogin, async (req, res) => {
+app.post("/api/couples/prefs", strictLimiter, requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
     if (!COUPLES_READY) return res.status(503).send("Couples not ready");
@@ -6614,7 +6997,7 @@ app.post("/api/couples/prefs", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/couples/status", requireLogin, async (req, res) => {
+app.post("/api/couples/status", strictLimiter, requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
     if (!COUPLES_READY) return res.status(503).send("Couples not ready");
@@ -6646,7 +7029,7 @@ app.post("/api/couples/status", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/couples/settings", requireLogin, async (req, res) => {
+app.post("/api/couples/settings", strictLimiter, requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
     if (!COUPLES_READY) return res.status(503).send("Couples not ready");
@@ -6690,7 +7073,7 @@ app.post("/api/couples/settings", requireLogin, async (req, res) => {
 const coupleNudgeCooldownMs = 60_000;
 const coupleNudgeLastByUser = new Map(); // key: `${linkId}:${userId}` -> ts
 
-app.post("/api/couples/nudge", requireLogin, async (req, res) => {
+app.post("/api/couples/nudge", strictLimiter, requireLogin, async (req, res) => {
   try {
     if (!PG_READY) return res.status(503).send("DB not ready");
     if (!COUPLES_READY) return res.status(503).send("Couples not ready");
@@ -6782,7 +7165,7 @@ app.get("/api/friends/list", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/friends/request", requireLogin, async (req, res) => {
+app.post("/api/friends/request", strictLimiter, requireLogin, async (req, res) => {
   try {
     const meId = Number(req.session.user?.id) || 0;
     const toName = String(req.body?.to || '').trim().slice(0, 64);
@@ -6866,7 +7249,7 @@ app.post("/api/friends/request", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/friends/respond", requireLogin, async (req, res) => {
+app.post("/api/friends/respond", strictLimiter, requireLogin, async (req, res) => {
   try {
     const meId = Number(req.session.user?.id) || 0;
     const requestId = Number(req.body?.requestId) || 0;
@@ -6930,7 +7313,7 @@ app.post("/api/friends/respond", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/friends/favorite", requireLogin, async (req, res) => {
+app.post("/api/friends/favorite", strictLimiter, requireLogin, async (req, res) => {
   try {
     const meId = Number(req.session.user?.id) || 0;
     const uname = String(req.body?.username || '').trim().slice(0,64);
@@ -6953,7 +7336,7 @@ app.post("/api/friends/favorite", requireLogin, async (req, res) => {
   }
 });
 
-app.post("/api/friends/remove", requireLogin, async (req, res) => {
+app.post("/api/friends/remove", strictLimiter, requireLogin, async (req, res) => {
   try {
     const meId = Number(req.session.user?.id) || 0;
     const uname = String(req.body?.username || '').trim().slice(0,64);
@@ -6977,7 +7360,7 @@ app.post("/api/friends/remove", requireLogin, async (req, res) => {
 
 
 
-app.post("/profile/:username/like", requireLogin, async (req, res) => {
+app.post("/profile/:username/like", strictLimiter, requireLogin, async (req, res) => {
   const u = sanitizeUsername(req.params.username);
   if (!u) return res.status(400).send("Bad username");
 
@@ -7000,18 +7383,19 @@ app.post("/profile/:username/like", requireLogin, async (req, res) => {
 });
 
 // Avatar upload for profile edits (2MB max, in-memory only)
+const AVATAR_ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const avatarUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const ok = /^image\/(png|jpeg|jpg|webp|gif)$/i.test(file.mimetype || "");
+    const ok = AVATAR_ALLOWED_MIME.has(String(file.mimetype || "").toLowerCase());
     cb(ok ? null : new Error("Invalid avatar type"), ok);
   },
 });
 
 // IMPORTANT: Most of your app now reads profiles from Postgres (when the user exists there).
 // The old version of this route only updated SQLite, so uploads "worked" but never showed up.
-app.post("/profile", requireLogin, (req, res) => {
+app.post("/profile", strictLimiter, requireLogin, (req, res) => {
   avatarUpload.single("avatar")(req, res, async (err) => {
     if (err) {
       const msg =
@@ -7034,6 +7418,12 @@ app.post("/profile", requireLogin, (req, res) => {
     // appear to "revert" on refresh (because /profile reads from Postgres first).
     const vibeTagsJson = JSON.stringify(vibeTags);
     const file = req.file || null;
+    if (file) {
+      const sniffed = sniffImageMime(file.buffer);
+      if (!sniffed || !AVATAR_ALLOWED_MIME.has(sniffed)) {
+        return res.status(400).json({ ok: false, message: "Invalid avatar content." });
+      }
+    }
     const avatarUpdated = file ? Date.now() : null;
     const avatarUrl = file ? `/avatar/${userId}?v=${avatarUpdated}` : null;
 
@@ -7124,7 +7514,7 @@ app.post("/profile", requireLogin, (req, res) => {
 
 
 // Remove avatar (clears avatar field; best-effort deletes local file if present)
-app.delete("/profile/avatar", requireLogin, async (req, res) => {
+app.delete("/profile/avatar", strictLimiter, requireLogin, async (req, res) => {
   const userId = req.session.user.id;
 
   const clearAvatarInLivePresence = () => {
@@ -7185,8 +7575,23 @@ app.delete("/profile/avatar", requireLogin, async (req, res) => {
 const MAX_IMAGE_GIF_BYTES = 25 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
-const AUDIO_UPLOAD_ALLOWED_MIME = new Set(["audio/mpeg", "audio/mp4"]);
-const AUDIO_UPLOAD_ALLOWED_EXT = new Set([".mp3", ".m4a"]);
+const IMAGE_UPLOAD_ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+const AUDIO_UPLOAD_ALLOWED_MIME = new Set(["audio/mpeg", "audio/mp4", "audio/aac"]);
+const VIDEO_UPLOAD_ALLOWED_MIME = new Set(["video/mp4", "video/webm"]);
+const AUDIO_UPLOAD_ALLOWED_EXT = new Set([".mp3", ".m4a", ".aac"]);
+const IMAGE_UPLOAD_ALLOWED_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
+const VIDEO_UPLOAD_ALLOWED_EXT = new Set([".mp4", ".webm"]);
+const SAFE_UPLOAD_EXT_BY_MIME = {
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+  "audio/mpeg": ".mp3",
+  "audio/mp4": ".m4a",
+  "audio/aac": ".aac",
+  "video/mp4": ".mp4",
+  "video/webm": ".webm",
+};
 
 function inferUploadMimeFromName(originalname){
   const name = String(originalname || "").toLowerCase();
@@ -7204,18 +7609,73 @@ function inferUploadMimeFromName(originalname){
   }
 }
 
+function safeUploadExt(mime, originalname) {
+  const ext = path.extname(originalname || "").toLowerCase();
+  if (IMAGE_UPLOAD_ALLOWED_EXT.has(ext) || AUDIO_UPLOAD_ALLOWED_EXT.has(ext) || VIDEO_UPLOAD_ALLOWED_EXT.has(ext)) {
+    return ext;
+  }
+  return SAFE_UPLOAD_EXT_BY_MIME[mime] || "";
+}
+
+function readFileHeader(filePath, length = 32) {
+  try {
+    const fd = fs.openSync(filePath, "r");
+    const buffer = Buffer.alloc(length);
+    fs.readSync(fd, buffer, 0, length, 0);
+    fs.closeSync(fd);
+    return buffer;
+  } catch {
+    return null;
+  }
+}
+
+function sniffImageMime(buffer) {
+  if (!buffer) return "";
+  if (buffer.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))) {
+    return "image/png";
+  }
+  if (buffer.slice(0, 3).equals(Buffer.from([0xFF, 0xD8, 0xFF]))) return "image/jpeg";
+  if (buffer.slice(0, 6).toString("ascii") === "GIF87a" || buffer.slice(0, 6).toString("ascii") === "GIF89a") {
+    return "image/gif";
+  }
+  if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WEBP") {
+    return "image/webp";
+  }
+  return "";
+}
+
+function sniffMp3(buffer) {
+  if (!buffer) return false;
+  if (buffer.slice(0, 3).toString("ascii") === "ID3") return true;
+  return buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0;
+}
+
+function sniffAac(buffer) {
+  if (!buffer) return false;
+  return buffer[0] === 0xff && (buffer[1] & 0xf6) === 0xf0;
+}
+
+function sniffMp4Container(buffer) {
+  if (!buffer) return false;
+  return buffer.slice(4, 8).toString("ascii") === "ftyp";
+}
+
+function sniffWebm(buffer) {
+  if (!buffer) return false;
+  return buffer.slice(0, 4).equals(Buffer.from([0x1A, 0x45, 0xDF, 0xA3]));
+}
 const chatUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
     filename: (_req, file, cb) => {
-      const ext = path.extname(file.originalname || "").slice(0, 12) || "";
+      const ext = safeUploadExt(file.mimetype, file.originalname) || "";
       cb(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`);
     },
   }),
   limits: { fileSize: MAX_VIDEO_BYTES },
 });
 
-app.post("/upload", requireLogin, (req, res) => {
+app.post("/upload", uploadLimiter, uploadUserLimiter, requireLogin, (req, res) => {
   chatUpload.single("file")(req, res, (err) => {
     if (err) {
       if (err.code === "LIMIT_FILE_SIZE") {
@@ -7233,15 +7693,16 @@ app.post("/upload", requireLogin, (req, res) => {
     }
     const role = req.session.user.role;
 
-    const isImage = /^image\//i.test(mime);
-    const isAudio = /^audio\//i.test(mime);
-    const isVideo = /^video\//i.test(mime);
+    const isSvg = mime === "image/svg+xml";
+    const isImage = IMAGE_UPLOAD_ALLOWED_MIME.has(mime);
+    const isAudio = AUDIO_UPLOAD_ALLOWED_MIME.has(mime);
+    const isVideo = VIDEO_UPLOAD_ALLOWED_MIME.has(mime);
 
     const cleanupUpload = () => {
       try { fs.unlinkSync(path.join(UPLOADS_DIR, req.file.filename)); } catch {}
     };
 
-    if (!isImage && !isAudio && !isVideo) {
+    if (isSvg || (!isImage && !isAudio && !isVideo)) {
       cleanupUpload();
       return res.status(400).json({ message: "File type not allowed" });
     }
@@ -7252,7 +7713,41 @@ app.post("/upload", requireLogin, (req, res) => {
       const extAllowed = AUDIO_UPLOAD_ALLOWED_EXT.has(ext);
       if (!mimeAllowed || !extAllowed) {
         cleanupUpload();
-        return res.status(400).json({ message: "Audio upload supports MP3 or M4A only." });
+        return res.status(400).json({ message: "Audio upload supports MP3, M4A, or AAC only." });
+      }
+    }
+
+    if (isImage && !IMAGE_UPLOAD_ALLOWED_EXT.has(path.extname(req.file.originalname || "").toLowerCase())) {
+      cleanupUpload();
+      return res.status(400).json({ message: "Image type not allowed." });
+    }
+
+    const header = readFileHeader(path.join(UPLOADS_DIR, req.file.filename), 32);
+    if (isImage) {
+      const sniffed = sniffImageMime(header);
+      if (!sniffed || !IMAGE_UPLOAD_ALLOWED_MIME.has(sniffed)) {
+        cleanupUpload();
+        return res.status(400).json({ message: "Image content invalid." });
+      }
+      mime = sniffed;
+    }
+
+    if (isAudio) {
+      const isMp3 = sniffMp3(header);
+      const isAac = sniffAac(header);
+      const isMp4 = sniffMp4Container(header);
+      if (!(isMp3 || isAac || isMp4)) {
+        cleanupUpload();
+        return res.status(400).json({ message: "Audio content invalid." });
+      }
+    }
+
+    if (isVideo) {
+      const isMp4 = sniffMp4Container(header);
+      const isW = sniffWebm(header);
+      if (!(isMp4 || isW)) {
+        cleanupUpload();
+        return res.status(400).json({ message: "Video content invalid." });
       }
     }
 
@@ -7300,6 +7795,15 @@ app.post("/upload", requireLogin, (req, res) => {
         }, userHint);
       }
     }
+
+    logSecurityEvent("upload", {
+      ip: getClientIp(req),
+      userId: req.session?.user?.id || null,
+      username: req.session?.user?.username || null,
+      type,
+      mime,
+      size: req.file.size,
+    });
 
     return res.json({
       url,
@@ -7595,10 +8099,10 @@ app.get("/api/dm/thread/:id", requireLogin, (req, res) => {
     }
   }
 
-app.post("/dm/thread", requireLogin, handleCreateDmThread);
-app.post("/api/dm/thread", requireLogin, handleCreateDmThread);
+app.post("/dm/thread", dmLimiter, requireLogin, handleCreateDmThread);
+app.post("/api/dm/thread", dmLimiter, requireLogin, handleCreateDmThread);
 
-app.post("/dm/thread/:id/participants", requireLogin, (req, res) => {
+app.post("/dm/thread/:id/participants", dmLimiter, requireLogin, (req, res) => {
   const tid = Number(req.params.id);
   if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
 
@@ -7673,7 +8177,7 @@ app.post("/dm/thread/:id/participants", requireLogin, (req, res) => {
   });
 });
 
-app.post("/dm/thread/:id/leave", requireLogin, (req, res) => {
+app.post("/dm/thread/:id/leave", dmLimiter, requireLogin, (req, res) => {
   const tid = Number(req.params.id);
   if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
   loadThreadForUser(tid, req.session.user.id, (err, thread) => {
@@ -7691,7 +8195,7 @@ app.post("/dm/thread/:id/leave", requireLogin, (req, res) => {
   });
 });
 
-app.delete("/dm/thread/:id/messages", requireLogin, (req, res) => {
+app.delete("/dm/thread/:id/messages", dmLimiter, requireLogin, (req, res) => {
   const tid = Number(req.params.id);
   if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
 
@@ -8071,8 +8575,60 @@ async function getModerationLogsForUser(username, limit=200){
   }
 }
 
+function getSocketIp(socket) {
+  const xfwd = String(socket.handshake.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return xfwd || socket.handshake.address || "";
+}
+
+function allowSocketEvent(socket, key, limit, windowMs) {
+  const now = Date.now();
+  let perSocket = socketEventRate.get(socket.id);
+  if (!perSocket) {
+    perSocket = new Map();
+    socketEventRate.set(socket.id, perSocket);
+  }
+  const state = perSocket.get(key) || { count: 0, resetAt: now + windowMs };
+  if (now > state.resetAt) {
+    state.count = 0;
+    state.resetAt = now + windowMs;
+  }
+  state.count += 1;
+  perSocket.set(key, state);
+  return state.count <= limit;
+}
+
+function trackSocketConnection(ip) {
+  const now = Date.now();
+  const state = socketConnByIp.get(ip) || { count: 0, lastSeen: now };
+  if (now - state.lastSeen > SOCKET_CONN_TTL_MS) {
+    state.count = 0;
+  }
+  state.count += 1;
+  state.lastSeen = now;
+  socketConnByIp.set(ip, state);
+  return state.count;
+}
+
+function releaseSocketConnection(ip) {
+  const state = socketConnByIp.get(ip);
+  if (!state) return;
+  state.count = Math.max(0, state.count - 1);
+  state.lastSeen = Date.now();
+  if (!state.count) socketConnByIp.delete(ip);
+}
 
 // ---- Socket auth middleware (session)
+io.use((socket, next) => {
+  const origin = String(socket.handshake.headers.origin || "");
+  const hostHeader = String(socket.handshake.headers.host || "");
+  if (!origin) {
+    if (IS_PROD) return next(new Error("Origin required"));
+  } else if (!isAllowedOrigin(origin, hostHeader)) {
+    return next(new Error("Origin not allowed"));
+  }
+  return next();
+});
+
 io.use((socket, next) => {
   const fakeRes = socket.request.res || {
     getHeader: () => undefined,
@@ -8327,6 +8883,16 @@ io.on("connection", async (socket) => {
     return;
   }
 
+  const socketIp = getSocketIp(socket);
+  if (socketIp) {
+    const count = trackSocketConnection(socketIp);
+    if (count > MAX_SOCKET_CONN_PER_IP) {
+      socket.emit("system", "Too many active connections. Try again shortly.");
+      socket.disconnect(true);
+      return;
+    }
+  }
+
   socket.user = {
     id: sessUser.id,
     username: sessUser.username,
@@ -8353,6 +8919,7 @@ io.on("connection", async (socket) => {
       room: null,
       connectedAt: Date.now(),
       userAgent: String(socket.request?.headers?.["user-agent"] || ""),
+      ip: socketIp || "",
       tz: null,
       locale: null,
       platform: null,
@@ -8920,7 +9487,10 @@ if (!room) {
   socket.on("dm message", (payload = {}) => {
     const { threadId, text, replyToId, attachment, tone } = payload || {};
     const tid = Number(threadId);
-    const body = safeString(text, "").trim().slice(0, 800);
+    if (!allowSocketEvent(socket, "dm_message", 12, 4000)) return;
+    const rawBody = safeString(text, "").trim();
+    if (rawBody.length > MAX_DM_MESSAGE_CHARS) return;
+    const body = rawBody.slice(0, MAX_DM_MESSAGE_CHARS);
     const att = attachment && typeof attachment === "object" ? attachment : null;
     const toneKey = sanitizeTone(tone);
 
@@ -9016,7 +9586,8 @@ if (!room) {
   socket.on("dm edit message", (payload = {}) => {
     const tid = Number(payload.threadId);
     const mid = Number(payload.messageId);
-    const body = safeString(payload.text, "").trim().slice(0, 2000);
+    if (!allowSocketEvent(socket, "dm_edit", 8, 5000)) return;
+    const body = safeString(payload.text, "").trim().slice(0, MAX_DM_MESSAGE_CHARS);
     if (!socket.user) return;
     if (!Number.isInteger(tid) || !Number.isInteger(mid) || !body) return;
 
@@ -9109,6 +9680,11 @@ socket.on("status change", ({ status }) => {
       if (!room) return;
     }
 
+    if (!allowSocketEvent(socket, "chat_message", 16, 4000)) {
+      socket.emit("system", "You are sending messages too quickly.");
+      return;
+    }
+
     // basic spam rate limiting
     const now = Date.now();
     const r = msgRate.get(socket.id) || { lastTs: now, count: 0 };
@@ -9125,7 +9701,12 @@ socket.on("status change", ({ status }) => {
       isPunished(socket.user.id, "mute", (muted) => {
         if (muted) return;
 
-        const text = safeString(payload.text, "").slice(0, 800);
+        const rawText = safeString(payload.text, "");
+        if (rawText.length > MAX_CHAT_MESSAGE_CHARS) {
+          socket.emit("system", `Message too long (max ${MAX_CHAT_MESSAGE_CHARS} characters).`);
+          return;
+        }
+        const text = rawText.slice(0, MAX_CHAT_MESSAGE_CHARS);
         if (text.trim().startsWith("/")) {
           executeCommand(socket, text, room);
           return;
@@ -9485,6 +10066,7 @@ socket.on("status change", ({ status }) => {
   
 socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300 } = {}, ack) => {
   const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+  if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
   const room = socket.currentRoom;
   if (!room) return respond({ ok: false, error: "No active room." });
 
@@ -9515,6 +10097,7 @@ socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300 } = 
       io.to(sid).emit("restriction:status", { type: "kick", reason: why, expiresAt, now: Date.now() });
       io.sockets.sockets.get(sid)?.disconnect(true);
     }
+    invalidateSessionsForUserId(target.id);
 
     io.to(room).emit("system", `${username} was kicked.`);
     logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: target.username, room, details: `duration=${dur}s reason=${why}` });
@@ -9524,6 +10107,7 @@ socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300 } = 
 
 socket.on("mod unkick", async ({ username } = {}, ack) => {
   const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+  if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
   const room = socket.currentRoom;
   if (!room) return respond({ ok: false, error: "No active room." });
 
@@ -9559,6 +10143,7 @@ socket.on("mod unkick", async ({ username } = {}, ack) => {
 
   socket.on("mod mute", ({ username, minutes = 10, reason = "" } = {}, ack) => {
     const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
     const room = socket.currentRoom;
     if (!room) return respond({ ok: false, error: "No active room." });
 
@@ -9595,6 +10180,7 @@ socket.on("mod unkick", async ({ username } = {}, ack) => {
 
   socket.on("mod ban", ({ username, minutes = 0, reason = "" } = {}, ack) => {
     const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
     const room = socket.currentRoom;
     if (!room) return respond({ ok: false, error: "No active room." });
 
@@ -9627,6 +10213,7 @@ if (sid) {
   io.to(sid).emit("restriction:status", { type: "ban", reason: why, expiresAt: null, now: Date.now() });
   io.sockets.sockets.get(sid)?.disconnect(true);
 }
+invalidateSessionsForUserId(target.id);
 
           logModAction({
             actor: socket.user,
@@ -9644,6 +10231,7 @@ if (sid) {
 
   socket.on("mod unmute", ({ username, reason = "" } = {}, ack) => {
     const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
     const room = socket.currentRoom;
     if (!room) return respond({ ok: false, error: "No active room." });
     const actorRole = socket.request.session.user.role;
@@ -9671,6 +10259,7 @@ if (sid) {
 
   socket.on("mod unban", ({ username, reason = "" } = {}, ack) => {
     const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
     const room = socket.currentRoom;
     if (!room) return respond({ ok: false, error: "No active room." });
     const actorRole = socket.request.session.user.role;
@@ -9726,6 +10315,9 @@ socket.on("appeal:fetchMine", async (_payload, ack) => {
 
 socket.on("appeal:create", async ({ message } = {}, ack) => {
   const username = socket.user?.username;
+  if (!allowSocketEvent(socket, "appeal_create", 3, 30_000)) {
+    return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
+  }
   const r = await getRestrictionByUsername(username);
   if (!username) return typeof ack === "function" ? ack({ ok: false, error: "Not authenticated" }) : null;
   if (!r?.type || r.type === "none") return typeof ack === "function" ? ack({ ok: false, error: "No active kick/ban." }) : null;
@@ -9745,6 +10337,9 @@ socket.on("appeal:create", async ({ message } = {}, ack) => {
 
 socket.on("appeal:send", async ({ message } = {}, ack) => {
   const username = socket.user?.username;
+  if (!allowSocketEvent(socket, "appeal_send", 5, 30_000)) {
+    return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
+  }
   if (!username) return typeof ack === "function" ? ack({ ok: false, error: "Not authenticated" }) : null;
   const open = await findOpenAppeal(username);
   if (!open?.id) return typeof ack === "function" ? ack({ ok: false, error: "No open appeal." }) : null;
@@ -9830,6 +10425,9 @@ socket.on("appeals:read", async ({ appealId } = {}, ack) => {
 
 socket.on("appeals:reply", async ({ appealId, message } = {}, ack) => {
   const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
+  if (!allowSocketEvent(socket, "appeal_reply", 6, 30_000)) {
+    return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
+  }
   if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
 
   const id = Number(appealId);
@@ -9843,6 +10441,9 @@ socket.on("appeals:reply", async ({ appealId, message } = {}, ack) => {
 
 socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, ack) => {
   const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
+  if (!allowSocketEvent(socket, "appeal_action", 6, 30_000)) {
+    return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
+  }
   if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
 
   const id = Number(appealId);
@@ -9899,6 +10500,9 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
 
   // ---- Referrals ----
   socket.on("referrals:create", async ({ username, reason } = {}, ack) => {
+    if (!allowSocketEvent(socket, "referral_create", 3, 30_000)) {
+      return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
+    }
     try{
       const actor = socket.request?.session?.user || socket.user || {};
       const actorRole = actor.role || "User";
@@ -9925,6 +10529,9 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
   });
 
   socket.on("referrals:resolve", async ({ id } = {}, ack) => {
+    if (!allowSocketEvent(socket, "referral_resolve", 6, 30_000)) {
+      return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
+    }
     try{
       const actor = socket.request?.session?.user || socket.user || {};
       const actorRole = actor.role || "User";
@@ -9940,6 +10547,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
 
   socket.on("mod warn", ({ username, reason = "" }) => {
     const room = socket.currentRoom;
+    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return;
     if (!room) return;
     const actorRole = socket.request.session.user.role;
     if (!requireMinRole(actorRole, "Moderator")) return;
@@ -9963,6 +10571,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
 
   socket.on("mod set role", ({ username, role, reason = "" } = {}, ack) => {
     const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+    if (!allowSocketEvent(socket, "mod_action", 4, 5000)) return respond({ ok: false, error: "Rate limited." });
     const room = socket.currentRoom;
     if (!room) return respond({ ok: false, error: "No active room." });
 
@@ -10048,6 +10657,8 @@ socket.on("disconnect", () => {
 
     // Always clear per-socket rate tracking
     msgRate.delete(socket.id);
+    socketEventRate.delete(socket.id);
+    releaseSocketConnection(getSocketIp(socket));
 
     // Only clear per-user mappings if THIS socket is still the active one
     if (socket.user?.id && socketIdByUserId.get(socket.user.id) === socket.id) {
