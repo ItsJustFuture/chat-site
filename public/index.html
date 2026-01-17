@@ -392,6 +392,57 @@
 </div>
 </div>
 </div>
+<div class="modal" hidden="" id="survivalNewSeasonModal">
+<div class="modalCard survivalModal">
+<div class="modalTop">
+<strong>New Survival Season</strong>
+<button aria-label="Close" class="iconBtn" id="survivalNewSeasonClose" type="button">✕</button>
+</div>
+<div class="modalBody">
+<label class="fieldLabel">Title
+  <input id="survivalSeasonTitleInput" maxlength="120" placeholder="Season — ..." type="text"/>
+</label>
+<div class="survivalPicker">
+  <div class="survivalPickerModes">
+    <label><input checked="" name="survivalPickMode" type="radio" value="online"/> Everyone online</label>
+    <label><input name="survivalPickMode" type="radio" value="select"/> Select users</label>
+  </div>
+  <div class="survivalParticipantList" id="survivalParticipantList"></div>
+</div>
+<div class="survivalOptions">
+  <label><input id="survivalCouplesToggle" type="checkbox"/> Include Couples synergy</label>
+  <label><input id="survivalChaosToggle" type="checkbox"/> Chaotic mode</label>
+</div>
+<div class="modalActions">
+  <button class="btn" id="survivalSeasonStartBtn" type="button">Start</button>
+</div>
+<div class="small muted" id="survivalSeasonMsg"></div>
+</div>
+</div>
+</div>
+<div class="modal" hidden="" id="survivalRosterModal">
+<div class="modalCard survivalModal">
+<div class="modalTop">
+<strong>Survival Roster</strong>
+<button aria-label="Close" class="iconBtn" id="survivalRosterClose" type="button">✕</button>
+</div>
+<div class="modalBody">
+<div class="survivalRosterList" id="survivalRosterList"></div>
+</div>
+</div>
+</div>
+<div class="modal" hidden="" id="survivalLogModal">
+<div class="modalCard survivalModal">
+<div class="modalTop">
+<strong>Survival Log</strong>
+<button aria-label="Close" class="iconBtn" id="survivalLogClose" type="button">✕</button>
+</div>
+<div class="modalBody">
+<button class="btn secondary small" id="survivalLogLoadBtn" type="button">Load older</button>
+<div class="survivalLogList" id="survivalLogModalList"></div>
+</div>
+</div>
+</div>
 <div class="luckMeter" id="luckMeter">
   <div class="luckMeterHeader">
     <span class="luckMeterTitle">🍀 Luck</span>
@@ -401,6 +452,38 @@
   <div aria-label="Luck meter" class="luckMeterBar" id="luckMeterBar" role="meter" aria-valuemin="-2.0" aria-valuemax="0.30" aria-valuenow="0">
     <span class="luckMeterBarText" id="luckMeterBarText">|------------^------------|</span>
   </div>
+</div>
+<div class="survivalPanel" hidden="" id="survivalPanel">
+  <div class="survivalPanelHeader">
+    <div class="survivalPanelTitle">
+      <span class="survivalPanelName">Survival Simulator</span>
+      <span class="survivalPanelSeasonTitle" id="survivalSeasonTitle">No season</span>
+      <span class="survivalPanelStatus" id="survivalStatus">No season</span>
+    </div>
+    <div class="survivalPanelMeta">
+      <span class="survivalPanelPhase" id="survivalDayPhase">Day 1 — Day</span>
+      <span class="survivalPanelAlive" id="survivalAliveCount">Alive: 0</span>
+    </div>
+  </div>
+  <div class="survivalPanelControls">
+    <div class="survivalPanelGroup">
+      <button class="btn secondary small" id="survivalNewSeasonBtn" type="button">New Season</button>
+      <button class="btn secondary small" id="survivalAdvanceBtn" type="button">Advance</button>
+      <button class="btn secondary small" id="survivalAutoRunBtn" type="button">Auto-Run</button>
+      <button class="btn secondary small" id="survivalEndBtn" type="button">Reset/End</button>
+    </div>
+    <div class="survivalPanelGroup">
+      <button class="btn secondary small" id="survivalRosterBtn" type="button">View Roster</button>
+      <button class="btn secondary small" id="survivalLogBtn" type="button">View Log</button>
+      <label class="survivalHistoryLabel">History
+        <select id="survivalHistorySelect"></select>
+      </label>
+    </div>
+  </div>
+</div>
+<div class="survivalLogFeed" hidden="" id="survivalLogFeed">
+  <div class="survivalLogHeader">Recent Log</div>
+  <div class="survivalLogList" id="survivalLogList"></div>
 </div>
 <div class="msgs" id="msgs"></div>
 <div class="typing" id="typing"></div>

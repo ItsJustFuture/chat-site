@@ -39,6 +39,12 @@ const sessionMetaBySocketId = new Map(); // socket.id -> meta
 const sessionByUserId = new Map(); // userId -> Set(socket.id)
 const DICE_ROLL_MIN_INTERVAL_MS = 1000;
 const diceRollRateByUserId = new Map();
+const SURVIVAL_ROOM_ID = "survivalsimulator";
+const SURVIVAL_ROOM_DB_ID = 1;
+const SURVIVAL_SEASON_COOLDOWN_MS = 2 * 60 * 1000;
+const SURVIVAL_ADVANCE_COOLDOWN_MS = 2000;
+const survivalSeasonCooldownByRoom = new Map();
+const survivalAdvanceCooldownBySeason = new Map();
 const qualifyingMsgWindowByUserId = new Map();
 const rollCadenceWindowByUserId = new Map();
 
@@ -176,6 +182,7 @@ const {
   applyWinCut,
   normalizeLuckMessage,
 } = require("./luck-utils");
+const { SURVIVAL_EVENT_TEMPLATES, SURVIVAL_ITEM_POOL } = require("./survival-events");
 
 // ---- Safety nets (prevents silent crashes in prod) ----
 process.on("unhandledRejection", (err) => {
@@ -851,6 +858,66 @@ try {
     console.warn('[pg-init] friends tables failed:', e?.message || e);
   }
 
+  try {
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS survival_seasons (
+        id SERIAL PRIMARY KEY,
+        room_id INTEGER NOT NULL,
+        created_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        day_index INTEGER NOT NULL DEFAULT 1,
+        phase TEXT NOT NULL DEFAULT 'day',
+        rng_seed TEXT,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS survival_participants (
+        id SERIAL PRIMARY KEY,
+        season_id INTEGER NOT NULL REFERENCES survival_seasons(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        display_name TEXT NOT NULL,
+        avatar_url TEXT,
+        alive INTEGER NOT NULL DEFAULT 1,
+        hp INTEGER NOT NULL DEFAULT 100,
+        kills INTEGER NOT NULL DEFAULT 0,
+        alliance_id INTEGER,
+        inventory_json TEXT DEFAULT '[]',
+        traits_json TEXT DEFAULT '{}',
+        last_event_at BIGINT,
+        created_at BIGINT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS survival_alliances (
+        id SERIAL PRIMARY KEY,
+        season_id INTEGER NOT NULL REFERENCES survival_seasons(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        created_at BIGINT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS survival_events (
+        id SERIAL PRIMARY KEY,
+        season_id INTEGER NOT NULL REFERENCES survival_seasons(id) ON DELETE CASCADE,
+        day_index INTEGER NOT NULL,
+        phase TEXT NOT NULL,
+        order_index INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        involved_user_ids_json TEXT DEFAULT '[]',
+        outcome_json TEXT DEFAULT '{}',
+        created_at BIGINT NOT NULL
+      );
+    `);
+
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_seasons_room ON survival_seasons(room_id)`);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_participants_season ON survival_participants(season_id)`);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_alliances_season ON survival_alliances(season_id)`);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_events_season ON survival_events(season_id)`);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_events_day_phase ON survival_events(season_id, day_index, phase)`);
+  } catch (e) {
+    console.warn('[pg-init] survival tables failed:', e?.message || e);
+  }
+
 PG_READY = true;
     PG_INIT_ERROR = null;
     console.log("Postgres tables ready");
@@ -1485,6 +1552,15 @@ const uploadUserLimiter = rateLimit({
 const dmLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
   limit: Number(process.env.RATE_LIMIT_DM_HTTP || 60),
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: genericRateLimitHandler,
+  keyGenerator: (req) => String(req.session?.user?.id || getClientIp(req)),
+});
+
+const survivalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_SURVIVAL_HTTP || 40),
   standardHeaders: "draft-7",
   legacyHeaders: false,
   handler: genericRateLimitHandler,
@@ -4044,12 +4120,563 @@ async function fetchUsersByIds(ids) {
   return rows;
 }
 
+async function fetchSurvivalUserSnapshots(userIds) {
+  const cleaned = Array.from(
+    new Set((userIds || [])
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id) && id > 0))
+  );
+  if (!cleaned.length) return [];
+
+  if (await pgUsersEnabled()) {
+    try {
+      const { rows } = await pgPool.query(
+        `SELECT id, username, avatar, avatar_bytes, avatar_mime, avatar_updated FROM users WHERE id = ANY($1::int[])`,
+        [cleaned]
+      );
+      return (rows || []).map((row) => ({
+        id: row.id,
+        username: row.username,
+        avatar: avatarUrlFromRow(row) || null,
+      }));
+    } catch (e) {
+      console.warn("[survival][pg] snapshot failed, falling back to sqlite:", e?.message || e);
+    }
+  }
+
+  const placeholders = cleaned.map(() => "?").join(",");
+  const rows = await dbAllAsync(
+    `SELECT id, username, avatar, avatar_updated FROM users WHERE id IN (${placeholders})`,
+    cleaned
+  );
+  return (rows || []).map((row) => ({
+    id: row.id,
+    username: row.username,
+    avatar: avatarUrlFromRow(row) || null,
+  }));
+}
+
 function sanitizeRoomName(r) {
   r = String(r || "").trim();
   r = r.replace(/^#+/, "");      // drop leading '#'
   r = r.toLowerCase();
   r = r.replace(/[^a-z0-9_-]/g, "");
   return r.slice(0, 24);
+}
+
+function sanitizeDisplayName(name) {
+  return String(name || "").replace(/[<>"'&]/g, "").trim();
+}
+
+function buildSurvivalSeedPayload(seed, options) {
+  return JSON.stringify({
+    seed: String(seed || ""),
+    options: options && typeof options === "object" ? options : {},
+  });
+}
+
+function parseSurvivalSeedPayload(raw) {
+  if (!raw) return { seed: "", options: {} };
+  const parsed = safeJsonParse(raw, null);
+  if (parsed && typeof parsed === "object" && parsed.seed) {
+    return { seed: String(parsed.seed || ""), options: parsed.options || {} };
+  }
+  return { seed: String(raw || ""), options: {} };
+}
+
+function createSeededRng(seedInput) {
+  const seed = String(seedInput || "");
+  const hash = crypto.createHash("sha256").update(seed || "survival").digest("hex").slice(0, 8);
+  let state = parseInt(hash, 16) || 1;
+  return function rng() {
+    state |= 0;
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function pickWeighted(items, rng) {
+  const total = items.reduce((sum, item) => sum + (item.weight || 0), 0);
+  if (!total) return null;
+  let roll = rng() * total;
+  for (const item of items) {
+    roll -= item.weight || 0;
+    if (roll <= 0) return item;
+  }
+  return items[items.length - 1] || null;
+}
+
+function pickRandom(items, rng) {
+  if (!items?.length) return null;
+  const idx = Math.floor(rng() * items.length);
+  return items[idx];
+}
+
+const ALLIANCE_ADJECTIVES = [
+  "Spark",
+  "Howling",
+  "Glitch",
+  "Rogue",
+  "Midnight",
+  "Fuzzy",
+  "Solar",
+  "Static",
+  "Storm",
+  "Echo",
+  "Velvet",
+  "Hollow",
+  "Brass",
+  "Crimson",
+  "Silver",
+  "Wild",
+  "Cosmic",
+  "Neon",
+];
+const ALLIANCE_NOUNS = [
+  "Crew",
+  "Squad",
+  "Circle",
+  "Pack",
+  "Alliance",
+  "Cabin",
+  "Cartel",
+  "Band",
+  "Collective",
+  "Guild",
+  "Gang",
+  "Crewmates",
+];
+
+function generateAllianceName(existingNames, rng) {
+  const used = new Set((existingNames || []).map((n) => String(n || "").toLowerCase()));
+  for (let i = 0; i < 12; i += 1) {
+    const name = `The ${pickRandom(ALLIANCE_ADJECTIVES, rng)} ${pickRandom(ALLIANCE_NOUNS, rng)}`;
+    if (!used.has(name.toLowerCase())) return name;
+  }
+  return `The ${pickRandom(ALLIANCE_ADJECTIVES, rng)} ${pickRandom(ALLIANCE_NOUNS, rng)}`;
+}
+
+function clamp(val, min, max) {
+  return Math.max(min, Math.min(max, val));
+}
+
+function getSurvivalEventCount(aliveCount) {
+  const base = Math.min(8, Math.max(3, aliveCount));
+  return Math.min(base, Math.max(1, aliveCount));
+}
+
+function normalizeSurvivalParticipantRow(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    season_id: Number(row.season_id),
+    user_id: Number(row.user_id),
+    display_name: row.display_name,
+    avatar_url: row.avatar_url || null,
+    alive: Number(row.alive || 0) === 1,
+    hp: Number(row.hp || 0),
+    kills: Number(row.kills || 0),
+    alliance_id: row.alliance_id == null ? null : Number(row.alliance_id),
+    inventory: Array.isArray(row.inventory) ? row.inventory : safeJsonParse(row.inventory_json || "[]", []),
+    traits: row.traits || safeJsonParse(row.traits_json || "{}", {}),
+    last_event_at: row.last_event_at ? Number(row.last_event_at) : null,
+    created_at: row.created_at ? Number(row.created_at) : null,
+  };
+}
+
+function normalizeSurvivalEventRow(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    season_id: Number(row.season_id),
+    day_index: Number(row.day_index),
+    phase: row.phase,
+    order_index: Number(row.order_index),
+    text: row.text,
+    involved_user_ids: safeJsonParse(row.involved_user_ids_json || "[]", []),
+    outcome: safeJsonParse(row.outcome_json || "{}", {}),
+    created_at: row.created_at ? Number(row.created_at) : null,
+  };
+}
+
+async function fetchSurvivalSeasonById(seasonId) {
+  const sid = Number(seasonId);
+  if (!sid) return null;
+  if (await pgUsersEnabled()) {
+    try {
+      const { rows } = await pgPool.query(`SELECT * FROM survival_seasons WHERE id = $1 LIMIT 1`, [sid]);
+      return rows[0] || null;
+    } catch (e) {
+      console.warn("[survival][pg] fetch season failed:", e?.message || e);
+    }
+  }
+  return await dbGetAsync(`SELECT * FROM survival_seasons WHERE id = ? LIMIT 1`, [sid]).catch(() => null);
+}
+
+async function fetchSurvivalCurrentSeason() {
+  if (await pgUsersEnabled()) {
+    try {
+      const { rows } = await pgPool.query(
+        `SELECT * FROM survival_seasons WHERE room_id = $1 AND status = 'running' ORDER BY id DESC LIMIT 1`,
+        [SURVIVAL_ROOM_DB_ID]
+      );
+      if (rows[0]) return rows[0];
+      const fallback = await pgPool.query(
+        `SELECT * FROM survival_seasons WHERE room_id = $1 ORDER BY updated_at DESC, id DESC LIMIT 1`,
+        [SURVIVAL_ROOM_DB_ID]
+      );
+      return fallback.rows[0] || null;
+    } catch (e) {
+      console.warn("[survival][pg] fetch current failed:", e?.message || e);
+    }
+  }
+
+  const running = await dbGetAsync(
+    `SELECT * FROM survival_seasons WHERE room_id = ? AND status = 'running' ORDER BY id DESC LIMIT 1`,
+    [SURVIVAL_ROOM_DB_ID]
+  ).catch(() => null);
+  if (running) return running;
+  return await dbGetAsync(
+    `SELECT * FROM survival_seasons WHERE room_id = ? ORDER BY updated_at DESC, id DESC LIMIT 1`,
+    [SURVIVAL_ROOM_DB_ID]
+  ).catch(() => null);
+}
+
+async function fetchSurvivalParticipants(seasonId) {
+  const sid = Number(seasonId);
+  if (!sid) return [];
+  if (await pgUsersEnabled()) {
+    try {
+      const { rows } = await pgPool.query(
+        `SELECT * FROM survival_participants WHERE season_id = $1 ORDER BY id ASC`,
+        [sid]
+      );
+      return rows.map(normalizeSurvivalParticipantRow).filter(Boolean);
+    } catch (e) {
+      console.warn("[survival][pg] fetch participants failed:", e?.message || e);
+    }
+  }
+  const rows = await dbAllAsync(
+    `SELECT * FROM survival_participants WHERE season_id = ? ORDER BY id ASC`,
+    [sid]
+  );
+  return rows.map(normalizeSurvivalParticipantRow).filter(Boolean);
+}
+
+async function fetchSurvivalAlliances(seasonId) {
+  const sid = Number(seasonId);
+  if (!sid) return [];
+  if (await pgUsersEnabled()) {
+    try {
+      const { rows } = await pgPool.query(
+        `SELECT * FROM survival_alliances WHERE season_id = $1 ORDER BY id ASC`,
+        [sid]
+      );
+      return rows || [];
+    } catch (e) {
+      console.warn("[survival][pg] fetch alliances failed:", e?.message || e);
+    }
+  }
+  return await dbAllAsync(
+    `SELECT * FROM survival_alliances WHERE season_id = ? ORDER BY id ASC`,
+    [sid]
+  );
+}
+
+async function fetchSurvivalEvents(seasonId, { limit = 200, beforeId = null } = {}) {
+  const sid = Number(seasonId);
+  const lim = clamp(Number(limit) || 200, 1, 500);
+  const before = beforeId ? Number(beforeId) : null;
+  if (!sid) return [];
+
+  if (await pgUsersEnabled()) {
+    try {
+      if (before) {
+        const { rows } = await pgPool.query(
+          `SELECT * FROM survival_events WHERE season_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3`,
+          [sid, before, lim]
+        );
+        return rows.map(normalizeSurvivalEventRow).filter(Boolean).reverse();
+      }
+      const { rows } = await pgPool.query(
+        `SELECT * FROM survival_events WHERE season_id = $1 ORDER BY id DESC LIMIT $2`,
+        [sid, lim]
+      );
+      return rows.map(normalizeSurvivalEventRow).filter(Boolean).reverse();
+    } catch (e) {
+      console.warn("[survival][pg] fetch events failed:", e?.message || e);
+    }
+  }
+
+  if (before) {
+    const rows = await dbAllAsync(
+      `SELECT * FROM survival_events WHERE season_id = ? AND id < ? ORDER BY id DESC LIMIT ?`,
+      [sid, before, lim]
+    );
+    return rows.map(normalizeSurvivalEventRow).filter(Boolean).reverse();
+  }
+  const rows = await dbAllAsync(
+    `SELECT * FROM survival_events WHERE season_id = ? ORDER BY id DESC LIMIT ?`,
+    [sid, lim]
+  );
+  return rows.map(normalizeSurvivalEventRow).filter(Boolean).reverse();
+}
+
+async function fetchSurvivalHistory(limit = 10) {
+  const lim = clamp(Number(limit) || 10, 1, 25);
+  if (await pgUsersEnabled()) {
+    try {
+      const { rows } = await pgPool.query(
+        `SELECT * FROM survival_seasons WHERE room_id = $1 ORDER BY created_at DESC LIMIT $2`,
+        [SURVIVAL_ROOM_DB_ID, lim]
+      );
+      return rows || [];
+    } catch (e) {
+      console.warn("[survival][pg] fetch history failed:", e?.message || e);
+    }
+  }
+  return await dbAllAsync(
+    `SELECT * FROM survival_seasons WHERE room_id = ? ORDER BY created_at DESC LIMIT ?`,
+    [SURVIVAL_ROOM_DB_ID, lim]
+  );
+}
+
+async function fetchSurvivalWinner(seasonId) {
+  const sid = Number(seasonId);
+  if (!sid) return null;
+  if (await pgUsersEnabled()) {
+    try {
+      const { rows } = await pgPool.query(
+        `SELECT display_name FROM survival_participants WHERE season_id = $1 AND alive = 1 LIMIT 1`,
+        [sid]
+      );
+      return rows[0]?.display_name || null;
+    } catch (e) {
+      console.warn("[survival][pg] fetch winner failed:", e?.message || e);
+    }
+  }
+  const row = await dbGetAsync(
+    `SELECT display_name FROM survival_participants WHERE season_id = ? AND alive = 1 LIMIT 1`,
+    [sid]
+  ).catch(() => null);
+  return row?.display_name || null;
+}
+
+function buildSurvivalTraits(rng, chaoticMode) {
+  const bump = chaoticMode ? 0.15 : 0;
+  return {
+    aggression: clamp(rng(), 0, 1),
+    loyalty: clamp(rng() - bump * 0.6, 0, 1),
+    stealth: clamp(rng(), 0, 1),
+    luck: clamp(rng(), 0, 1),
+    chaos: clamp(rng() + bump, 0, 1),
+  };
+}
+
+function hasInventoryTag(participant, tag) {
+  return Array.isArray(participant.inventory) && participant.inventory.includes(tag);
+}
+
+function pickParticipantsForTemplate({
+  template,
+  alive,
+  rng,
+  appearanceCount,
+  couples = [],
+}) {
+  const maxAppearance = 2;
+  const pickWithWeights = (candidates, count) => {
+    const selected = [];
+    const pool = [...candidates];
+    while (selected.length < count && pool.length) {
+      const weighted = pool.map((p) => ({
+        participant: p,
+        weight: 1 / (1 + (appearanceCount.get(p.user_id) || 0)),
+      }));
+      const pick = pickWeighted(weighted.map((w) => ({ ...w.participant, weight: w.weight })), rng);
+      const chosen = pick?.user_id
+        ? pool.find((p) => p.user_id === pick.user_id)
+        : pool[0];
+      if (!chosen) break;
+      selected.push(chosen);
+      const idx = pool.findIndex((p) => p.user_id === chosen.user_id);
+      if (idx >= 0) pool.splice(idx, 1);
+    }
+    return selected;
+  };
+
+  if (template.requiresCouple) {
+    const couplePairs = couples.filter((pair) => pair.length === 2);
+    const available = couplePairs.filter(([a, b]) =>
+      alive.some((p) => p.user_id === a) && alive.some((p) => p.user_id === b)
+    );
+    if (!available.length) return null;
+    const pair = pickRandom(available, rng);
+    return pair
+      ? pair.map((id) => alive.find((p) => p.user_id === id)).filter(Boolean)
+      : null;
+  }
+
+  if (template.requiresAlliance) {
+    const byAlliance = new Map();
+    for (const p of alive) {
+      if (!p.alliance_id) continue;
+      if (!byAlliance.has(p.alliance_id)) byAlliance.set(p.alliance_id, []);
+      byAlliance.get(p.alliance_id).push(p);
+    }
+    const alliances = Array.from(byAlliance.values()).filter((group) => group.length >= template.participants);
+    if (!alliances.length) return null;
+    const group = pickRandom(alliances, rng);
+    return pickWithWeights(group, template.participants);
+  }
+
+  let candidates = alive;
+  if (template.requiresNoAlliance) {
+    candidates = alive.filter((p) => !p.alliance_id);
+  }
+  if (candidates.length < template.participants) return null;
+  return pickWithWeights(candidates, template.participants);
+}
+
+function renderSurvivalEventText(template, participants, rng) {
+  let text = template.text || "";
+  const replace = (token, idx) => {
+    const p = participants[idx];
+    return p ? sanitizeDisplayName(p.display_name) : token;
+  };
+  text = text.replaceAll("{A}", replace("{A}", 0));
+  text = text.replaceAll("{B}", replace("{B}", 1));
+  text = text.replaceAll("{C}", replace("{C}", 2));
+  text = text.replaceAll("{D}", replace("{D}", 3));
+  if (text.includes("{ITEM}") && template.lootTag) {
+    const pool = SURVIVAL_ITEM_POOL[template.lootTag] || ["mystery item"];
+    const item = pickRandom(pool, rng) || "mystery item";
+    text = text.replaceAll("{ITEM}", item);
+  }
+  return text;
+}
+
+function selectSurvivalTemplate({ aliveCount, phase, dayIndex, options }) {
+  const baseDeathFactor = clamp(0.4 + dayIndex * 0.12 + (phase === "night" ? 0.1 : 0), 0.4, 2);
+  const chaosBoost = options?.chaoticMode ? 1.25 : 1;
+  const pool = SURVIVAL_EVENT_TEMPLATES.filter((t) => {
+    if (t.participants > aliveCount) return false;
+    if (t.requiresCouple && !options?.includeCouples) return false;
+    if (Array.isArray(t.phases) && !t.phases.includes(phase)) return false;
+    return true;
+  }).map((t) => {
+    let weight = t.weight || 1;
+    if (t.type === "kill" || t.type === "betray") weight *= baseDeathFactor * chaosBoost;
+    if (t.type === "alliance" && dayIndex < 3) weight *= 1.2;
+    return { ...t, weight };
+  });
+  return pool;
+}
+
+function applySurvivalOutcome({
+  template,
+  participants,
+  rng,
+  pendingAlliances,
+  existingAllianceNames,
+}) {
+  const outcome = { ...(template.outcome || {}) };
+  const resolveTarget = (token) => {
+    const idx = ["A", "B", "C", "D"].indexOf(token);
+    return idx >= 0 ? participants[idx] : null;
+  };
+
+  if (outcome.type === "loot") {
+    const target = resolveTarget(outcome.target || "A");
+    if (target && template.lootTag) {
+      target.inventory = target.inventory || [];
+      if (!target.inventory.includes(template.lootTag)) target.inventory.push(template.lootTag);
+      outcome.itemTag = template.lootTag;
+    }
+  }
+
+  if (outcome.type === "heal") {
+    const target = resolveTarget(outcome.target || "A");
+    const [min, max] = outcome.amount || [10, 25];
+    if (target) {
+      const delta = Math.round(min + rng() * (max - min));
+      target.hp = clamp(target.hp + delta, 1, 100);
+      outcome.deltaHp = delta;
+    }
+  }
+
+  if (outcome.type === "injure") {
+    const target = resolveTarget(outcome.target || "A");
+    const [min, max] = outcome.amount || [10, 25];
+    if (target) {
+      const delta = Math.round(min + rng() * (max - min));
+      target.hp = clamp(target.hp - delta, 1, 100);
+      outcome.deltaHp = -delta;
+    }
+    if (outcome.splashTarget) {
+      const splash = resolveTarget(outcome.splashTarget);
+      const [smin, smax] = outcome.splashAmount || [6, 18];
+      if (splash) {
+        const delta = Math.round(smin + rng() * (smax - smin));
+        splash.hp = clamp(splash.hp - delta, 1, 100);
+      }
+    }
+  }
+
+  if (outcome.type === "protect") {
+    const protectedTarget = resolveTarget(outcome.protected || "B");
+    if (protectedTarget) {
+      protectedTarget.hp = clamp(protectedTarget.hp + 8, 1, 100);
+    }
+  }
+
+  if (outcome.type === "steal") {
+    const thief = resolveTarget(outcome.thief || "A");
+    const victim = resolveTarget(outcome.victim || "B");
+    if (thief && victim && Array.isArray(victim.inventory) && victim.inventory.length) {
+      const stolenTag = pickRandom(victim.inventory, rng);
+      victim.inventory = victim.inventory.filter((tag) => tag !== stolenTag);
+      thief.inventory = thief.inventory || [];
+      thief.inventory.push(stolenTag);
+      outcome.itemTag = stolenTag;
+    } else {
+      outcome.type = "nothing";
+    }
+  }
+
+  if (outcome.type === "kill" || outcome.type === "betray") {
+    const killer = resolveTarget(outcome.killer || "A");
+    const victim = resolveTarget(outcome.victim || "B");
+    if (victim) {
+      victim.alive = false;
+      victim.hp = 0;
+      victim.alliance_id = null;
+    }
+    if (killer) {
+      killer.kills = (killer.kills || 0) + 1;
+      if (outcome.type === "betray") killer.alliance_id = null;
+    }
+  }
+
+  if (outcome.type === "alliance") {
+    const members = (outcome.members || []).map(resolveTarget).filter(Boolean);
+    if (members.length >= 2) {
+      const tempId = -1 * (pendingAlliances.length + 1);
+      const name = generateAllianceName(existingAllianceNames, rng);
+      existingAllianceNames.push(name);
+      pendingAlliances.push({ tempId, name, members });
+      for (const member of members) {
+        member.alliance_id = tempId;
+      }
+      outcome.alliance = { id: tempId, name };
+    } else {
+      outcome.type = "nothing";
+    }
+  }
+
+  return outcome;
 }
 
 const DEFAULT_ROOM_MASTERS = ["Site Rooms", "User Rooms"];
@@ -4472,6 +5099,12 @@ function normalizeReactionKey(reaction){
 function requireOwner(req, res, next) {
   if (!req.session?.user?.id) return res.status(401).send("Not logged in");
   if (!requireMinRole(req.session.user.role, "Owner")) return res.status(403).send("Forbidden");
+  next();
+}
+
+function requireCoOwner(req, res, next) {
+  if (!req.session?.user?.id) return res.status(401).send("Not logged in");
+  if (!requireMinRole(req.session.user.role, "Co-owner")) return res.status(403).send("Forbidden");
   next();
 }
 
@@ -6510,6 +7143,61 @@ app.get("/rooms", requireLogin, async (req, res) => {
   }
 });
 
+async function buildSurvivalHistoryPayload() {
+  const seasons = await fetchSurvivalHistory(10);
+  const result = [];
+  for (const season of seasons || []) {
+    const winner = season.status === "finished" ? await fetchSurvivalWinner(season.id) : null;
+    result.push({
+      id: season.id,
+      title: season.title,
+      status: season.status,
+      created_at: season.created_at,
+      winner,
+    });
+  }
+  return result;
+}
+
+function formatSurvivalSeason(season) {
+  if (!season) return null;
+  const { seed, options } = parseSurvivalSeedPayload(season.rng_seed);
+  return {
+    id: season.id,
+    room_id: season.room_id,
+    created_by_user_id: season.created_by_user_id,
+    title: season.title,
+    status: season.status,
+    day_index: season.day_index,
+    phase: season.phase,
+    rng_seed: seed || null,
+    options: options || {},
+    created_at: season.created_at,
+    updated_at: season.updated_at,
+  };
+}
+
+async function buildSurvivalPayload(season, { beforeId = null, limit = 200 } = {}) {
+  if (!season) {
+    return { season: null, participants: [], alliances: [], events: [], history: await buildSurvivalHistoryPayload() };
+  }
+  const [participants, alliances, events, history, winner] = await Promise.all([
+    fetchSurvivalParticipants(season.id),
+    fetchSurvivalAlliances(season.id),
+    fetchSurvivalEvents(season.id, { limit, beforeId }),
+    buildSurvivalHistoryPayload(),
+    season.status === "finished" ? fetchSurvivalWinner(season.id) : Promise.resolve(null),
+  ]);
+  return {
+    season: formatSurvivalSeason(season),
+    participants,
+    alliances,
+    events,
+    winner,
+    history,
+  };
+}
+
 // Co-owner+ can create rooms
 app.post("/rooms", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
   const actor = req.session.user;
@@ -6562,6 +7250,485 @@ app.post("/rooms", strictLimiter, requireLogin, express.json({ limit: "16kb" }),
     console.warn("[rooms] create failed", e?.message || e);
     return res.status(500).send("Failed to create room");
   }
+});
+
+// ---- Survival Simulator API
+app.get("/api/survival/current", requireLogin, async (_req, res) => {
+  try {
+    const season = await fetchSurvivalCurrentSeason();
+    const payload = await buildSurvivalPayload(season);
+    return res.json(payload);
+  } catch (e) {
+    console.warn("[survival] current failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.get("/api/survival/seasons/:id", requireLogin, async (req, res) => {
+  try {
+    const beforeId = req.query?.before ? Number(req.query.before) : null;
+    const season = await fetchSurvivalSeasonById(req.params.id);
+    if (!season) return res.status(404).send("Not found");
+    const payload = await buildSurvivalPayload(season, { beforeId });
+    return res.json(payload);
+  } catch (e) {
+    console.warn("[survival] fetch season failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json({ limit: "32kb" }), async (req, res) => {
+  const now = Date.now();
+  const lastStart = survivalSeasonCooldownByRoom.get(SURVIVAL_ROOM_DB_ID) || 0;
+  if (now - lastStart < SURVIVAL_SEASON_COOLDOWN_MS) {
+    return res.status(429).json({ message: "Please wait before starting another season." });
+  }
+
+  const running = await fetchSurvivalCurrentSeason();
+  if (running && running.status === "running") {
+    return res.status(409).json({ message: "A season is already running." });
+  }
+
+  const titleRaw = String(req.body?.title || "").trim();
+  const title = titleRaw || `Season — ${new Date(now).toLocaleString()}`;
+  const participantIds = Array.isArray(req.body?.participant_user_ids)
+    ? req.body.participant_user_ids
+    : [];
+  const options = {
+    includeCouples: !!req.body?.options?.includeCouples,
+    chaoticMode: !!req.body?.options?.chaoticMode,
+  };
+  const userSnapshots = await fetchSurvivalUserSnapshots(participantIds);
+  if (userSnapshots.length < 2) {
+    return res.status(400).json({ message: "Select at least two participants." });
+  }
+
+  const seed = crypto.randomBytes(8).toString("hex");
+  const rng = createSeededRng(seed);
+  const seasonPayload = {
+    room_id: SURVIVAL_ROOM_DB_ID,
+    created_by_user_id: req.session.user.id,
+    title: title.slice(0, 120),
+    status: "running",
+    day_index: 1,
+    phase: "day",
+    rng_seed: buildSurvivalSeedPayload(seed, options),
+    created_at: now,
+    updated_at: now,
+  };
+
+  let seasonId = null;
+  try {
+    if (await pgUsersEnabled()) {
+      await pgPool.query("BEGIN");
+      const { rows } = await pgPool.query(
+        `INSERT INTO survival_seasons (room_id, created_by_user_id, title, status, day_index, phase, rng_seed, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         RETURNING id`,
+        [
+          seasonPayload.room_id,
+          seasonPayload.created_by_user_id,
+          seasonPayload.title,
+          seasonPayload.status,
+          seasonPayload.day_index,
+          seasonPayload.phase,
+          seasonPayload.rng_seed,
+          seasonPayload.created_at,
+          seasonPayload.updated_at,
+        ]
+      );
+      seasonId = rows[0]?.id;
+      if (!seasonId) throw new Error("missing season id");
+      for (const user of userSnapshots) {
+        const traits = buildSurvivalTraits(rng, options.chaoticMode);
+        await pgPool.query(
+          `INSERT INTO survival_participants
+           (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, last_event_at, created_at)
+           VALUES ($1,$2,$3,$4,1,100,0,NULL,$5,$6,NULL,$7)`,
+          [
+            seasonId,
+            user.id,
+            user.username,
+            user.avatar || null,
+            JSON.stringify([]),
+            JSON.stringify(traits),
+            now,
+          ]
+        );
+      }
+      await pgPool.query("COMMIT");
+    } else {
+      await dbRunAsync("BEGIN");
+      const result = await dbRunAsync(
+        `INSERT INTO survival_seasons
+         (room_id, created_by_user_id, title, status, day_index, phase, rng_seed, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          seasonPayload.room_id,
+          seasonPayload.created_by_user_id,
+          seasonPayload.title,
+          seasonPayload.status,
+          seasonPayload.day_index,
+          seasonPayload.phase,
+          seasonPayload.rng_seed,
+          seasonPayload.created_at,
+          seasonPayload.updated_at,
+        ]
+      );
+      seasonId = result.lastID;
+      for (const user of userSnapshots) {
+        const traits = buildSurvivalTraits(rng, options.chaoticMode);
+        await dbRunAsync(
+          `INSERT INTO survival_participants
+           (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, last_event_at, created_at)
+           VALUES (?, ?, ?, ?, 1, 100, 0, NULL, ?, ?, NULL, ?)`,
+          [
+            seasonId,
+            user.id,
+            user.username,
+            user.avatar || null,
+            JSON.stringify([]),
+            JSON.stringify(traits),
+            now,
+          ]
+        );
+      }
+      await dbRunAsync("COMMIT");
+    }
+  } catch (e) {
+    try { await dbRunAsync("ROLLBACK"); } catch {}
+    try { if (await pgUsersEnabled()) await pgPool.query("ROLLBACK"); } catch {}
+    console.warn("[survival] create season failed", e?.message || e);
+    return res.status(500).json({ message: "Failed to start season." });
+  }
+
+  survivalSeasonCooldownByRoom.set(SURVIVAL_ROOM_DB_ID, now);
+  const season = await fetchSurvivalSeasonById(seasonId);
+  const payload = await buildSurvivalPayload(season);
+  io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
+  return res.json(payload);
+});
+
+app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, express.json({ limit: "16kb" }), async (req, res) => {
+  const seasonId = Number(req.params.id);
+  if (!seasonId) return res.status(400).json({ message: "Invalid season." });
+  const now = Date.now();
+  const lastAdvance = survivalAdvanceCooldownBySeason.get(seasonId) || 0;
+  if (now - lastAdvance < SURVIVAL_ADVANCE_COOLDOWN_MS) {
+    return res.status(429).json({ message: "Slow down." });
+  }
+  survivalAdvanceCooldownBySeason.set(seasonId, now);
+
+  const season = await fetchSurvivalSeasonById(seasonId);
+  if (!season) return res.status(404).json({ message: "Season not found." });
+  if (season.status !== "running") return res.status(400).json({ message: "Season is not running." });
+
+  const participants = await fetchSurvivalParticipants(seasonId);
+  const alliances = await fetchSurvivalAlliances(seasonId);
+  const alive = participants.filter((p) => p.alive);
+  if (alive.length <= 1) {
+    season.status = "finished";
+  }
+
+  const { seed, options } = parseSurvivalSeedPayload(season.rng_seed);
+  const rng = createSeededRng(`${seed || "survival"}:${season.day_index}:${season.phase}`);
+  const couples = options?.includeCouples
+    ? await (async () => {
+      try {
+        if (await pgUsersEnabled()) {
+          const ids = alive.map((p) => p.user_id);
+          const { rows } = await pgPool.query(
+            `SELECT user1_id, user2_id FROM couple_links WHERE user1_id = ANY($1::int[]) OR user2_id = ANY($1::int[])`,
+            [ids]
+          );
+          return (rows || []).map((row) => [Number(row.user1_id), Number(row.user2_id)]);
+        }
+      } catch (e) {
+        console.warn("[survival] couple lookup failed:", e?.message || e);
+      }
+      const rows = await dbAllAsync(
+        `SELECT user1_id, user2_id FROM couple_links`
+      );
+      return (rows || []).map((row) => [Number(row.user1_id), Number(row.user2_id)]);
+    })()
+    : [];
+
+  const eventCount = getSurvivalEventCount(alive.length);
+  const events = [];
+  const pendingAlliances = [];
+  const appearanceCount = new Map();
+  const existingAllianceNames = alliances.map((a) => a.name);
+  const templatePool = selectSurvivalTemplate({
+    aliveCount: alive.length,
+    phase: season.phase,
+    dayIndex: season.day_index,
+    options,
+  });
+
+  let orderIndex = 0;
+  for (let i = 0; i < eventCount; i += 1) {
+    const currentAlive = participants.filter((p) => p.alive);
+    if (currentAlive.length < 1) break;
+    let selectedTemplate = null;
+    let selectedParticipants = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const template = pickWeighted(templatePool, rng);
+      if (!template) break;
+      const picked = pickParticipantsForTemplate({
+        template,
+        alive: currentAlive,
+        rng,
+        appearanceCount,
+        couples,
+      });
+      if (!picked || picked.length < template.participants) continue;
+      if (picked.some((p) => (appearanceCount.get(p.user_id) || 0) >= 2)) continue;
+      if (template.type === "steal") {
+        const victim = picked[1];
+        if (!victim || !Array.isArray(victim.inventory) || victim.inventory.length === 0) continue;
+      }
+      selectedTemplate = template;
+      selectedParticipants = picked;
+      break;
+    }
+
+    if (!selectedTemplate || !selectedParticipants) {
+      const fallback = SURVIVAL_EVENT_TEMPLATES.find((t) => t.id.startsWith("solo_neutral_"));
+      if (!fallback) break;
+      selectedTemplate = fallback;
+      selectedParticipants = pickParticipantsForTemplate({
+        template: fallback,
+        alive: currentAlive,
+        rng,
+        appearanceCount,
+        couples,
+      }) || [currentAlive[0]];
+    }
+
+    selectedParticipants.forEach((p) => {
+      appearanceCount.set(p.user_id, (appearanceCount.get(p.user_id) || 0) + 1);
+      p.last_event_at = now;
+    });
+
+    const text = renderSurvivalEventText(selectedTemplate, selectedParticipants, rng);
+    const outcome = applySurvivalOutcome({
+      template: selectedTemplate,
+      participants: selectedParticipants,
+      rng,
+      pendingAlliances,
+      existingAllianceNames,
+    });
+
+    orderIndex += 1;
+    events.push({
+      id: null,
+      season_id: seasonId,
+      day_index: season.day_index,
+      phase: season.phase,
+      order_index: orderIndex,
+      text,
+      involved_user_ids: selectedParticipants.map((p) => p.user_id),
+      outcome,
+      created_at: now,
+    });
+  }
+
+  const aliveAfter = participants.filter((p) => p.alive);
+  if (aliveAfter.length <= 1 && season.status !== "finished") {
+    season.status = "finished";
+    const winner = aliveAfter[0];
+    if (winner) {
+      events.push({
+        id: null,
+        season_id: seasonId,
+        day_index: season.day_index,
+        phase: season.phase,
+        order_index: orderIndex + 1,
+        text: `🏆 ${sanitizeDisplayName(winner.display_name)} wins the season!`,
+        involved_user_ids: [winner.user_id],
+        outcome: { type: "winner" },
+        created_at: now,
+      });
+    } else {
+      events.push({
+        id: null,
+        season_id: seasonId,
+        day_index: season.day_index,
+        phase: season.phase,
+        order_index: orderIndex + 1,
+        text: "No one survived the season. Wild.",
+        involved_user_ids: [],
+        outcome: { type: "draw" },
+        created_at: now,
+      });
+    }
+  }
+
+  if (season.status !== "finished") {
+    if (season.phase === "day") {
+      season.phase = "night";
+    } else {
+      season.phase = "day";
+      season.day_index = Number(season.day_index || 1) + 1;
+    }
+  }
+  season.updated_at = now;
+
+  const pendingMap = new Map();
+  try {
+    if (await pgUsersEnabled()) {
+      await pgPool.query("BEGIN");
+      for (const pending of pendingAlliances) {
+        const { rows } = await pgPool.query(
+          `INSERT INTO survival_alliances (season_id, name, created_at) VALUES ($1,$2,$3) RETURNING id`,
+          [seasonId, pending.name, now]
+        );
+        const actualId = rows[0]?.id;
+        pendingMap.set(pending.tempId, actualId);
+      }
+
+      for (const participant of participants) {
+        const allianceId = pendingMap.get(participant.alliance_id) || participant.alliance_id;
+        participant.alliance_id = allianceId && allianceId < 0 ? null : allianceId;
+        await pgPool.query(
+          `UPDATE survival_participants
+           SET alive=$1, hp=$2, kills=$3, alliance_id=$4, inventory_json=$5, traits_json=$6, last_event_at=$7
+           WHERE id=$8`,
+          [
+            participant.alive ? 1 : 0,
+            participant.hp,
+            participant.kills,
+            participant.alliance_id,
+            JSON.stringify(participant.inventory || []),
+            JSON.stringify(participant.traits || {}),
+            participant.last_event_at,
+            participant.id,
+          ]
+        );
+      }
+
+      for (const event of events) {
+        if (event.outcome?.alliance?.id && pendingMap.has(event.outcome.alliance.id)) {
+          event.outcome.alliance.id = pendingMap.get(event.outcome.alliance.id);
+        }
+        const { rows } = await pgPool.query(
+          `INSERT INTO survival_events
+           (season_id, day_index, phase, order_index, text, involved_user_ids_json, outcome_json, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           RETURNING id`,
+          [
+            seasonId,
+            event.day_index,
+            event.phase,
+            event.order_index,
+            event.text,
+            JSON.stringify(event.involved_user_ids || []),
+            JSON.stringify(event.outcome || {}),
+            event.created_at,
+          ]
+        );
+        event.id = rows[0]?.id;
+      }
+
+      await pgPool.query(
+        `UPDATE survival_seasons SET status=$1, day_index=$2, phase=$3, updated_at=$4 WHERE id=$5`,
+        [season.status, season.day_index, season.phase, season.updated_at, seasonId]
+      );
+      await pgPool.query("COMMIT");
+    } else {
+      await dbRunAsync("BEGIN");
+      for (const pending of pendingAlliances) {
+        const result = await dbRunAsync(
+          `INSERT INTO survival_alliances (season_id, name, created_at) VALUES (?, ?, ?)`,
+          [seasonId, pending.name, now]
+        );
+        pendingMap.set(pending.tempId, result.lastID);
+      }
+
+      for (const participant of participants) {
+        const allianceId = pendingMap.get(participant.alliance_id) || participant.alliance_id;
+        participant.alliance_id = allianceId && allianceId < 0 ? null : allianceId;
+        await dbRunAsync(
+          `UPDATE survival_participants
+           SET alive=?, hp=?, kills=?, alliance_id=?, inventory_json=?, traits_json=?, last_event_at=?
+           WHERE id=?`,
+          [
+            participant.alive ? 1 : 0,
+            participant.hp,
+            participant.kills,
+            participant.alliance_id,
+            JSON.stringify(participant.inventory || []),
+            JSON.stringify(participant.traits || {}),
+            participant.last_event_at,
+            participant.id,
+          ]
+        );
+      }
+
+      for (const event of events) {
+        if (event.outcome?.alliance?.id && pendingMap.has(event.outcome.alliance.id)) {
+          event.outcome.alliance.id = pendingMap.get(event.outcome.alliance.id);
+        }
+        const result = await dbRunAsync(
+          `INSERT INTO survival_events
+           (season_id, day_index, phase, order_index, text, involved_user_ids_json, outcome_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            seasonId,
+            event.day_index,
+            event.phase,
+            event.order_index,
+            event.text,
+            JSON.stringify(event.involved_user_ids || []),
+            JSON.stringify(event.outcome || {}),
+            event.created_at,
+          ]
+        );
+        event.id = result.lastID;
+      }
+
+      await dbRunAsync(
+        `UPDATE survival_seasons SET status=?, day_index=?, phase=?, updated_at=? WHERE id=?`,
+        [season.status, season.day_index, season.phase, season.updated_at, seasonId]
+      );
+      await dbRunAsync("COMMIT");
+    }
+  } catch (e) {
+    try { await dbRunAsync("ROLLBACK"); } catch {}
+    try { if (await pgUsersEnabled()) await pgPool.query("ROLLBACK"); } catch {}
+    console.warn("[survival] advance failed", e?.message || e);
+    return res.status(500).json({ message: "Failed to advance." });
+  }
+
+  const payload = await buildSurvivalPayload(await fetchSurvivalSeasonById(seasonId));
+  io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
+  io.to(SURVIVAL_ROOM_ID).emit("survival:events", { seasonId, events });
+  return res.json(payload);
+});
+
+app.post("/api/survival/seasons/:id/end", survivalLimiter, requireCoOwner, express.json({ limit: "8kb" }), async (req, res) => {
+  const seasonId = Number(req.params.id);
+  if (!seasonId) return res.status(400).json({ message: "Invalid season." });
+  const season = await fetchSurvivalSeasonById(seasonId);
+  if (!season) return res.status(404).json({ message: "Season not found." });
+  if (season.status === "finished") {
+    const payload = await buildSurvivalPayload(season);
+    return res.json(payload);
+  }
+  const now = Date.now();
+  try {
+    if (await pgUsersEnabled()) {
+      await pgPool.query(`UPDATE survival_seasons SET status='finished', updated_at=$1 WHERE id=$2`, [now, seasonId]);
+    } else {
+      await dbRunAsync(`UPDATE survival_seasons SET status='finished', updated_at=? WHERE id=?`, [now, seasonId]);
+    }
+  } catch (e) {
+    console.warn("[survival] end failed", e?.message || e);
+    return res.status(500).json({ message: "Failed to end season." });
+  }
+  const payload = await buildSurvivalPayload(await fetchSurvivalSeasonById(seasonId));
+  io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
+  return res.json(payload);
 });
 
 // ---- Room structure management (Owner-only)
