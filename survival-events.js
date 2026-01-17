@@ -210,6 +210,16 @@ const coupleSpecial = [
   "{A} and {B} plan a safe route together.",
 ];
 
+// Extra replayability: more varied events (some mention zones/landmarks — the server prefers same-zone groups).
+const soloWeird = [
+  "{A} hears their name whispered from the distance... but it's just the wind.",
+  "{A} finds a tiny note pinned to a tree: 'RUN.' They don't.",
+  "{A} discovers a cache of glitter bombs and immediately regrets touching it.",
+  "{A} builds a decoy campfire and watches it fool absolutely no one.",
+  "{A} trips a harmless trap and becomes paranoid anyway.",
+  "{A} stares into the fog until the fog stares back.",
+];
+
 function makeTemplates(list, build) {
   return list.map((entry, idx) => build(entry, idx));
 }
@@ -244,6 +254,14 @@ const SURVIVAL_EVENT_TEMPLATES = [
     id: `solo_neutral_${idx + 1}`,
     participants: 1,
     weight: 3,
+    type: "neutral",
+    text,
+    outcome: { type: "nothing" },
+  })),
+  ...makeTemplates(soloWeird, (text, idx) => ({
+    id: `solo_weird_${idx + 1}`,
+    participants: 1,
+    weight: 2,
     type: "neutral",
     text,
     outcome: { type: "nothing" },

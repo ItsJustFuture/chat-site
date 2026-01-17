@@ -204,10 +204,17 @@ async function runSqliteMigrations() {
       day_index INTEGER NOT NULL DEFAULT 1,
       phase TEXT NOT NULL DEFAULT 'day',
       rng_seed TEXT,
+      arena_state_json TEXT,
+      winner_rewarded INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )
   `);
+
+  await ensureColumns("survival_seasons", [
+    ["arena_state_json", "arena_state_json TEXT"],
+    ["winner_rewarded", "winner_rewarded INTEGER NOT NULL DEFAULT 0"],
+  ]);
 
   await run(`
     CREATE TABLE IF NOT EXISTS survival_participants (
@@ -222,11 +229,16 @@ async function runSqliteMigrations() {
       alliance_id INTEGER,
       inventory_json TEXT DEFAULT '[]',
       traits_json TEXT DEFAULT '{}',
+      location TEXT,
       last_event_at INTEGER,
       created_at INTEGER NOT NULL,
       FOREIGN KEY (season_id) REFERENCES survival_seasons(id) ON DELETE CASCADE
     )
   `);
+
+  await ensureColumns("survival_participants", [
+    ["location", "location TEXT"],
+  ]);
   await run(`CREATE INDEX IF NOT EXISTS idx_survival_participants_season ON survival_participants(season_id)`);
 
   await run(`
@@ -256,6 +268,15 @@ async function runSqliteMigrations() {
   `);
   await run(`CREATE INDEX IF NOT EXISTS idx_survival_events_season ON survival_events(season_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_survival_events_day_phase ON survival_events(season_id, day_index, phase)`);
+
+  // Backfill new survival columns safely for older installs
+  await ensureColumns("survival_seasons", [
+    ["arena_state_json", "arena_state_json TEXT"],
+    ["winner_rewarded", "winner_rewarded INTEGER NOT NULL DEFAULT 0"],
+  ]);
+  await ensureColumns("survival_participants", [
+    ["location", "location TEXT"],
+  ]);
 
   const userColumns = [
     ["password_hash", "password_hash TEXT"],

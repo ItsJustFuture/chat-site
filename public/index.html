@@ -412,6 +412,15 @@
 <div class="survivalOptions">
   <label><input id="survivalCouplesToggle" type="checkbox"/> Include Couples synergy</label>
   <label><input id="survivalChaosToggle" type="checkbox"/> Chaotic mode</label>
+  <label><input id="survivalLobbyToggle" type="checkbox"/> Include lobby signups</label>
+  <div class="survivalNpcFields">
+    <label class="small muted">Custom names (one per line... and set fill slots to auto-top-up)</label>
+    <textarea id="survivalNpcNames" placeholder="e.g.\nKat\nPeeta\nRue" rows="4"></textarea>
+    <div class="survivalNpcRow">
+      <label class="small muted">Fill slots (0 = no auto fill)</label>
+      <input id="survivalFillSlots" type="number" min="0" max="48" value="0"/>
+    </div>
+  </div>
 </div>
 <div class="modalActions">
   <button class="btn" id="survivalSeasonStartBtn" type="button">Start</button>
@@ -473,12 +482,22 @@
       <button class="btn secondary small" id="survivalEndBtn" type="button">Reset/End</button>
     </div>
     <div class="survivalPanelGroup">
+      <button class="btn secondary small" id="survivalLobbyBtn" type="button">Opt-in</button>
       <button class="btn secondary small" id="survivalRosterBtn" type="button">View Roster</button>
       <button class="btn secondary small" id="survivalLogBtn" type="button">View Log</button>
+      <button class="btn secondary small" id="survivalArenaBtn" type="button">Arena</button>
       <label class="survivalHistoryLabel">History
         <select id="survivalHistorySelect"></select>
       </label>
     </div>
+  </div>
+
+  <div class="survivalArena" hidden id="survivalArena">
+    <div class="survivalArenaHeader">
+      <span class="survivalArenaTitle">Arena Map</span>
+      <span class="small muted" id="survivalLobbyCount"></span>
+    </div>
+    <div class="survivalArenaGrid" id="survivalArenaGrid"></div>
   </div>
 </div>
 <div class="survivalLogFeed" hidden="" id="survivalLogFeed">
