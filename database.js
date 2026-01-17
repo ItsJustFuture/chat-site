@@ -66,7 +66,7 @@ async function migrateLegacyPasswords() {
 
 async function seedDefaultRooms() {
   const now = Date.now();
-  const seedRooms = ["main", "nsfw", "music", "diceroom"];
+  const seedRooms = ["main", "nsfw", "music", "diceroom", "survivalsimulator"];
   for (const r of seedRooms) {
     await run(`INSERT OR IGNORE INTO rooms (name, created_by, created_at) VALUES (?, NULL, ?)`, [r, now]);
   }
@@ -193,6 +193,69 @@ async function runSqliteMigrations() {
   await ensureRoomHierarchySqlite();
 
   await seedDefaultRooms();
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS survival_seasons (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      room_id INTEGER NOT NULL,
+      created_by_user_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL,
+      day_index INTEGER NOT NULL DEFAULT 1,
+      phase TEXT NOT NULL DEFAULT 'day',
+      rng_seed TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS survival_participants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      season_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      display_name TEXT NOT NULL,
+      avatar_url TEXT,
+      alive INTEGER NOT NULL DEFAULT 1,
+      hp INTEGER NOT NULL DEFAULT 100,
+      kills INTEGER NOT NULL DEFAULT 0,
+      alliance_id INTEGER,
+      inventory_json TEXT DEFAULT '[]',
+      traits_json TEXT DEFAULT '{}',
+      last_event_at INTEGER,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (season_id) REFERENCES survival_seasons(id) ON DELETE CASCADE
+    )
+  `);
+  await run(`CREATE INDEX IF NOT EXISTS idx_survival_participants_season ON survival_participants(season_id)`);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS survival_alliances (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      season_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (season_id) REFERENCES survival_seasons(id) ON DELETE CASCADE
+    )
+  `);
+  await run(`CREATE INDEX IF NOT EXISTS idx_survival_alliances_season ON survival_alliances(season_id)`);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS survival_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      season_id INTEGER NOT NULL,
+      day_index INTEGER NOT NULL,
+      phase TEXT NOT NULL,
+      order_index INTEGER NOT NULL,
+      text TEXT NOT NULL,
+      involved_user_ids_json TEXT DEFAULT '[]',
+      outcome_json TEXT DEFAULT '{}',
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (season_id) REFERENCES survival_seasons(id) ON DELETE CASCADE
+    )
+  `);
+  await run(`CREATE INDEX IF NOT EXISTS idx_survival_events_season ON survival_events(season_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_survival_events_day_phase ON survival_events(season_id, day_index, phase)`);
 
   const userColumns = [
     ["password_hash", "password_hash TEXT"],

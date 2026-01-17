@@ -805,13 +805,24 @@ let roomStructure = { masters: [], categories: [], rooms: [] };
 let roomCollapseState = { master: {}, category: {} };
 const memoryCacheByFilter = new Map();
 const DICE_ROOM_ID = "diceroom";
+const SURVIVAL_ROOM_ID = "survivalsimulator";
 function isDiceRoom(activeRoom){
   const roomName = typeof activeRoom === "string"
     ? activeRoom
     : (activeRoom?.name ?? activeRoom?.id ?? "");
   return String(roomName || "").toLowerCase() === DICE_ROOM_ID;
 }
-function displayRoomName(room){ return isDiceRoom(room) ? "Dice Room" : room; }
+function isSurvivalRoom(activeRoom){
+  const roomName = typeof activeRoom === "string"
+    ? activeRoom
+    : (activeRoom?.name ?? activeRoom?.id ?? "");
+  return String(roomName || "").toLowerCase() === SURVIVAL_ROOM_ID;
+}
+function displayRoomName(room){
+  if (isDiceRoom(room)) return "Dice Room";
+  if (isSurvivalRoom(room)) return "Survival Simulator";
+  return room;
+}
 
 let lastUsers = [];
 let membersViewMode = "room"; // room|friends
@@ -2070,6 +2081,18 @@ const diceSessionStats = {
   luckyStreak: 0,
   lastRollAt: 0,
 };
+let survivalState = {
+  season: null,
+  participants: [],
+  alliances: [],
+  events: [],
+  history: [],
+  selectedSeasonId: null,
+  logBeforeId: null,
+  winner: null,
+};
+let survivalAutoRunTimer = null;
+let survivalAutoRunning = false;
 const luckState = {
   luck: 0,
   rollStreak: 0,
@@ -2685,6 +2708,35 @@ const luckMeterBar = document.getElementById("luckMeterBar");
 const luckMeterBarText = document.getElementById("luckMeterBarText");
 const luckMeterValue = document.getElementById("luckMeterValue");
 const luckMeterStreak = document.getElementById("luckMeterStreak");
+const survivalPanel = document.getElementById("survivalPanel");
+const survivalSeasonTitle = document.getElementById("survivalSeasonTitle");
+const survivalStatus = document.getElementById("survivalStatus");
+const survivalDayPhase = document.getElementById("survivalDayPhase");
+const survivalAliveCount = document.getElementById("survivalAliveCount");
+const survivalNewSeasonBtn = document.getElementById("survivalNewSeasonBtn");
+const survivalAdvanceBtn = document.getElementById("survivalAdvanceBtn");
+const survivalAutoRunBtn = document.getElementById("survivalAutoRunBtn");
+const survivalEndBtn = document.getElementById("survivalEndBtn");
+const survivalRosterBtn = document.getElementById("survivalRosterBtn");
+const survivalLogBtn = document.getElementById("survivalLogBtn");
+const survivalHistorySelect = document.getElementById("survivalHistorySelect");
+const survivalLogFeed = document.getElementById("survivalLogFeed");
+const survivalLogList = document.getElementById("survivalLogList");
+const survivalNewSeasonModal = document.getElementById("survivalNewSeasonModal");
+const survivalNewSeasonClose = document.getElementById("survivalNewSeasonClose");
+const survivalSeasonTitleInput = document.getElementById("survivalSeasonTitleInput");
+const survivalParticipantList = document.getElementById("survivalParticipantList");
+const survivalCouplesToggle = document.getElementById("survivalCouplesToggle");
+const survivalChaosToggle = document.getElementById("survivalChaosToggle");
+const survivalSeasonStartBtn = document.getElementById("survivalSeasonStartBtn");
+const survivalSeasonMsg = document.getElementById("survivalSeasonMsg");
+const survivalRosterModal = document.getElementById("survivalRosterModal");
+const survivalRosterClose = document.getElementById("survivalRosterClose");
+const survivalRosterList = document.getElementById("survivalRosterList");
+const survivalLogModal = document.getElementById("survivalLogModal");
+const survivalLogClose = document.getElementById("survivalLogClose");
+const survivalLogModalList = document.getElementById("survivalLogModalList");
+const survivalLogLoadBtn = document.getElementById("survivalLogLoadBtn");
 
 let mediaMenuOpen = false;
 let voiceRec = { recorder: null, stream: null, chunks: [], startedAt: 0 };
@@ -2695,6 +2747,9 @@ try {
   const nowDiceRoom = isDiceRoom(currentRoom);
   if (diceVariantWrap) diceVariantWrap.style.display = nowDiceRoom ? "" : "none";
   if (luckMeter) luckMeter.style.display = nowDiceRoom ? "" : "none";
+  const nowSurvivalRoom = isSurvivalRoom(currentRoom);
+  if (survivalPanel) survivalPanel.hidden = !nowSurvivalRoom;
+  if (survivalLogFeed) survivalLogFeed.hidden = !nowSurvivalRoom;
 } catch {}
 
 function closeMediaMenu(){
@@ -2845,28 +2900,370 @@ function requestLuckState(force = false){
   socket.emit("luck:get");
 }
 
-diceInfoBtn?.addEventListener("click", (e)=>{
-  e.preventDefault();
-  e.stopPropagation();
-  // Don't stack menus on top of each other
-  if (diceVariantMenuOpen) closeDiceVariantMenu();
-  toggleDicePayout();
-});
+function survivalIsOwner(){
+  return me && roleRank(me.role) >= roleRank("Co-owner");
+}
 
-document.addEventListener("click", (e)=>{
-  if (!dicePayoutOpen) return;
-  const t = e.target;
-  if (t && (dicePayoutPopover?.contains(t) || diceInfoBtn?.contains(t))) return;
-  closeDicePayout();
-}, { passive:true });
+function updateSurvivalHistorySelect() {
+  if (!survivalHistorySelect) return;
+  const history = survivalState.history || [];
+  survivalHistorySelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = history.length ? "Select season" : "No history yet";
+  survivalHistorySelect.appendChild(placeholder);
+  history.forEach((season) => {
+    const opt = document.createElement("option");
+    opt.value = season.id;
+    const winner = season.winner ? ` — Winner: ${season.winner}` : "";
+    opt.textContent = `${season.title}${winner}`;
+    survivalHistorySelect.appendChild(opt);
+  });
+  if (survivalState.selectedSeasonId) {
+    survivalHistorySelect.value = String(survivalState.selectedSeasonId);
+  }
+}
 
-setDiceVariant(diceVariant);
+function getSurvivalAliveCount() {
+  return (survivalState.participants || []).filter((p) => p.alive).length;
+}
 
-function resetDiceSessionStats(){
-  diceSessionStats.consecutiveRolls = 0;
-  diceSessionStats.highestRoll = 0;
-  diceSessionStats.luckyStreak = 0;
-  diceSessionStats.lastRollAt = 0;
+function renderSurvivalPanel() {
+  if (!survivalPanel) return;
+  const season = survivalState.season;
+  const aliveCount = getSurvivalAliveCount();
+  if (survivalSeasonTitle) survivalSeasonTitle.textContent = season ? season.title : "No season";
+  if (survivalStatus) {
+    let statusLabel = season ? season.status : "idle";
+    if (season?.status === "finished" && survivalState.winner) {
+      statusLabel = `finished — ${survivalState.winner}`;
+    }
+    survivalStatus.textContent = statusLabel;
+  }
+  if (survivalDayPhase) {
+    const day = season?.day_index ? `Day ${season.day_index}` : "Day 1";
+    const phase = season?.phase ? capitalize(season.phase) : "Day";
+    survivalDayPhase.textContent = `${day} — ${phase}`;
+  }
+  if (survivalAliveCount) survivalAliveCount.textContent = `Alive: ${aliveCount}`;
+
+  if (survivalNewSeasonBtn) survivalNewSeasonBtn.disabled = !survivalIsOwner();
+  if (survivalAdvanceBtn) survivalAdvanceBtn.disabled = !survivalIsOwner() || !season || season.status !== "running";
+  if (survivalAutoRunBtn) survivalAutoRunBtn.disabled = !survivalIsOwner() || !season || season.status !== "running";
+  if (survivalEndBtn) survivalEndBtn.disabled = !survivalIsOwner() || !season;
+  if (survivalAutoRunBtn) survivalAutoRunBtn.textContent = survivalAutoRunning ? "Stop Auto" : "Auto-Run";
+  updateSurvivalHistorySelect();
+}
+
+function getSurvivalEventIcon(outcome = {}) {
+  const type = outcome?.type;
+  if (type === "kill" || type === "betray") return "☠️";
+  if (type === "alliance") return "🤝";
+  if (type === "injure") return "🩹";
+  if (type === "heal" || type === "protect") return "💚";
+  if (type === "loot" || type === "steal") return "🎒";
+  if (type === "winner") return "🏆";
+  if (type === "draw") return "⚠️";
+  return "✨";
+}
+
+function renderSurvivalLog(targetEl, events) {
+  if (!targetEl) return;
+  targetEl.innerHTML = "";
+  if (!events || !events.length) {
+    const empty = document.createElement("div");
+    empty.className = "survivalLogText";
+    empty.textContent = "No events yet.";
+    targetEl.appendChild(empty);
+    return;
+  }
+  let lastHeader = "";
+  (events || []).forEach((event) => {
+    const header = `Day ${event.day_index} — ${capitalize(event.phase || "day")}`;
+    if (header !== lastHeader) {
+      const divider = document.createElement("div");
+      divider.className = "survivalLogDivider";
+      divider.textContent = header;
+      targetEl.appendChild(divider);
+      lastHeader = header;
+    }
+    const row = document.createElement("div");
+    row.className = "survivalLogItem";
+    const icon = document.createElement("div");
+    icon.className = "survivalLogIcon";
+    icon.textContent = getSurvivalEventIcon(event.outcome || {});
+    const text = document.createElement("div");
+    text.className = "survivalLogText";
+    text.textContent = event.text || "";
+    row.appendChild(icon);
+    row.appendChild(text);
+    targetEl.appendChild(row);
+  });
+}
+
+function renderSurvivalRoster() {
+  if (!survivalRosterList) return;
+  survivalRosterList.innerHTML = "";
+  const alliances = new Map((survivalState.alliances || []).map((a) => [a.id, a.name]));
+  const participants = (survivalState.participants || []).slice().sort((a, b) => Number(b.alive) - Number(a.alive));
+  participants.forEach((p) => {
+    const row = document.createElement("div");
+    row.className = "survivalRosterRow";
+    row.classList.toggle("dead", !p.alive);
+    const avatar = document.createElement("div");
+    avatar.className = "survivalRosterAvatar";
+    if (p.avatar_url) avatar.style.backgroundImage = `url('${p.avatar_url}')`;
+    const meta = document.createElement("div");
+    meta.className = "survivalRosterMeta";
+    const name = document.createElement("div");
+    name.className = "survivalRosterName";
+    name.textContent = p.display_name;
+    const stats = document.createElement("div");
+    stats.className = "survivalRosterStats";
+    const status = document.createElement("span");
+    status.className = `survivalRosterStatus ${p.alive ? "alive" : "dead"}`;
+    status.textContent = p.alive ? "Alive" : "Down";
+    const allianceName = p.alliance_id ? alliances.get(p.alliance_id) : null;
+    stats.textContent = `${status.textContent} • ${p.kills || 0} KOs${allianceName ? ` • ${allianceName}` : ""}`;
+    meta.appendChild(name);
+    meta.appendChild(stats);
+    row.appendChild(avatar);
+    row.appendChild(meta);
+    row.addEventListener("click", () => {
+      if (p.display_name) openMemberProfile(p.display_name);
+    });
+    survivalRosterList.appendChild(row);
+  });
+}
+
+async function loadSurvivalCurrent() {
+  if (!isSurvivalRoom(currentRoom)) return;
+  const { res, text } = await api("/api/survival/current", { method: "GET" });
+  if (!res.ok) return;
+  const payload = safeJsonParse(text, null);
+  if (!payload) return;
+  applySurvivalPayload(payload, { replaceEvents: true });
+}
+
+async function loadSurvivalSeason(seasonId, { beforeId = null } = {}) {
+  if (!seasonId) return null;
+  const url = beforeId ? `/api/survival/seasons/${seasonId}?before=${encodeURIComponent(beforeId)}` : `/api/survival/seasons/${seasonId}`;
+  const { res, text } = await api(url, { method: "GET" });
+  if (!res.ok) return null;
+  const payload = safeJsonParse(text, null);
+  if (!payload) return null;
+  return payload;
+}
+
+function applySurvivalPayload(payload, { replaceEvents = false } = {}) {
+  if (payload.season) survivalState.season = payload.season;
+  if (Array.isArray(payload.participants)) survivalState.participants = payload.participants;
+  if (Array.isArray(payload.alliances)) survivalState.alliances = payload.alliances;
+  if (payload.winner !== undefined) survivalState.winner = payload.winner;
+  if (Array.isArray(payload.history)) survivalState.history = payload.history;
+  if (Array.isArray(payload.events)) {
+    if (replaceEvents) {
+      survivalState.events = payload.events;
+    } else {
+      survivalState.events = [...payload.events];
+    }
+    survivalState.logBeforeId = payload.events?.[0]?.id || survivalState.logBeforeId;
+  }
+  if (!survivalState.selectedSeasonId && payload.season) {
+    survivalState.selectedSeasonId = payload.season.id;
+  }
+  renderSurvivalPanel();
+  renderSurvivalLog(survivalLogList, survivalState.events);
+}
+
+async function openSurvivalNewSeasonModal() {
+  if (!survivalNewSeasonModal) return;
+  if (!survivalIsOwner()) return toast("Only Owner/Co-Owner can start a season.");
+  survivalSeasonMsg.textContent = "";
+  const now = new Date();
+  if (survivalSeasonTitleInput) {
+    survivalSeasonTitleInput.value = `Season — ${now.toLocaleString()}`;
+  }
+  const users = (lastUsers || []).filter((u) => u?.name);
+  survivalParticipantList.innerHTML = "";
+  if (survivalCouplesToggle) survivalCouplesToggle.checked = false;
+  if (survivalChaosToggle) survivalChaosToggle.checked = false;
+  users.forEach((user) => {
+    if (!user?.id) return;
+    const row = document.createElement("label");
+    row.className = "survivalParticipantRow";
+    row.innerHTML = `<input type="checkbox" value="${user.id}"/> ${escapeHtml(user.name)}`;
+    survivalParticipantList.appendChild(row);
+  });
+  survivalNewSeasonModal.hidden = false;
+  survivalNewSeasonModal.style.display = "flex";
+  survivalNewSeasonModal.classList.remove("modal-closing");
+  if (PREFERS_REDUCED_MOTION) {
+    survivalNewSeasonModal.classList.add("modal-visible");
+  } else {
+    requestAnimationFrame(() => survivalNewSeasonModal.classList.add("modal-visible"));
+  }
+}
+
+function closeSurvivalNewSeasonModal() {
+  if (!survivalNewSeasonModal) return;
+  survivalNewSeasonModal.classList.remove("modal-visible");
+  survivalNewSeasonModal.classList.add("modal-closing");
+  setTimeout(() => {
+    survivalNewSeasonModal.style.display = "none";
+    survivalNewSeasonModal.classList.remove("modal-closing");
+    survivalNewSeasonModal.hidden = true;
+  }, 140);
+}
+
+function openSurvivalRosterModal() {
+  if (!survivalRosterModal) return;
+  renderSurvivalRoster();
+  survivalRosterModal.hidden = false;
+  survivalRosterModal.style.display = "flex";
+  survivalRosterModal.classList.remove("modal-closing");
+  if (PREFERS_REDUCED_MOTION) {
+    survivalRosterModal.classList.add("modal-visible");
+  } else {
+    requestAnimationFrame(() => survivalRosterModal.classList.add("modal-visible"));
+  }
+}
+
+function closeSurvivalRosterModal() {
+  if (!survivalRosterModal) return;
+  survivalRosterModal.classList.remove("modal-visible");
+  survivalRosterModal.classList.add("modal-closing");
+  setTimeout(() => {
+    survivalRosterModal.style.display = "none";
+    survivalRosterModal.classList.remove("modal-closing");
+    survivalRosterModal.hidden = true;
+  }, 140);
+}
+
+function openSurvivalLogModal() {
+  if (!survivalLogModal) return;
+  renderSurvivalLog(survivalLogModalList, survivalState.events);
+  survivalLogModal.hidden = false;
+  survivalLogModal.style.display = "flex";
+  survivalLogModal.classList.remove("modal-closing");
+  if (PREFERS_REDUCED_MOTION) {
+    survivalLogModal.classList.add("modal-visible");
+  } else {
+    requestAnimationFrame(() => survivalLogModal.classList.add("modal-visible"));
+  }
+}
+
+function closeSurvivalLogModal() {
+  if (!survivalLogModal) return;
+  survivalLogModal.classList.remove("modal-visible");
+  survivalLogModal.classList.add("modal-closing");
+  setTimeout(() => {
+    survivalLogModal.style.display = "none";
+    survivalLogModal.classList.remove("modal-closing");
+    survivalLogModal.hidden = true;
+  }, 140);
+}
+
+async function startSurvivalSeason() {
+  if (!survivalIsOwner()) return;
+  const mode = document.querySelector("input[name='survivalPickMode']:checked")?.value || "online";
+  const selected = Array.from(
+    survivalParticipantList.querySelectorAll("input[type='checkbox']:checked")
+  ).map((el) => Number(el.value));
+  const onlineIds = (lastUsers || []).map((u) => u?.id).filter((id) => Number.isInteger(id));
+  const participantIds = mode === "select" ? selected : onlineIds;
+  if (participantIds.length < 2) {
+    if (survivalSeasonMsg) survivalSeasonMsg.textContent = "Pick at least two participants.";
+    return;
+  }
+  if (survivalSeasonStartBtn) survivalSeasonStartBtn.disabled = true;
+  if (survivalSeasonMsg) survivalSeasonMsg.textContent = "Starting season...";
+  try {
+    const payload = {
+      title: survivalSeasonTitleInput?.value || "",
+      participant_user_ids: participantIds,
+      options: {
+        includeCouples: !!survivalCouplesToggle?.checked,
+        chaoticMode: !!survivalChaosToggle?.checked,
+      },
+    };
+    const { res, text } = await api("/api/survival/seasons", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(text || "Failed");
+    const data = safeJsonParse(text, null);
+    if (data) applySurvivalPayload(data, { replaceEvents: true });
+    closeSurvivalNewSeasonModal();
+  } catch (err) {
+    if (survivalSeasonMsg) survivalSeasonMsg.textContent = err?.message || "Failed to start season.";
+  } finally {
+    if (survivalSeasonStartBtn) survivalSeasonStartBtn.disabled = false;
+  }
+}
+
+async function advanceSurvivalSeason() {
+  if (!survivalIsOwner()) return;
+  const seasonId = survivalState.season?.id;
+  if (!seasonId) return;
+  try {
+    const { res, text } = await api(`/api/survival/seasons/${seasonId}/advance`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (!res.ok) throw new Error(text || "Failed");
+    const data = safeJsonParse(text, null);
+    if (data) applySurvivalPayload(data, { replaceEvents: true });
+  } catch (err) {
+    toast(err?.message || "Could not advance season.");
+  }
+}
+
+async function endSurvivalSeason() {
+  if (!survivalIsOwner()) return;
+  const seasonId = survivalState.season?.id;
+  if (!seasonId) return;
+  if (!confirm("End this season early?")) return;
+  try {
+    const { res, text } = await api(`/api/survival/seasons/${seasonId}/end`, { method: "POST" });
+    if (!res.ok) throw new Error(text || "Failed");
+    const data = safeJsonParse(text, null);
+    if (data) applySurvivalPayload(data, { replaceEvents: true });
+  } catch (err) {
+    toast(err?.message || "Could not end season.");
+  }
+}
+
+function startSurvivalAutoRun() {
+  if (survivalAutoRunTimer) return;
+  survivalAutoRunning = true;
+  renderSurvivalPanel();
+  survivalAutoRunTimer = setInterval(async () => {
+    if (!survivalState.season || survivalState.season.status !== "running") {
+      stopSurvivalAutoRun();
+      return;
+    }
+    await advanceSurvivalSeason();
+  }, 2200);
+}
+
+function stopSurvivalAutoRun() {
+  if (survivalAutoRunTimer) clearInterval(survivalAutoRunTimer);
+  survivalAutoRunTimer = null;
+  survivalAutoRunning = false;
+  renderSurvivalPanel();
+}
+
+async function loadOlderSurvivalLog() {
+  const seasonId = survivalState.selectedSeasonId || survivalState.season?.id;
+  if (!seasonId || !survivalState.logBeforeId) return;
+  const payload = await loadSurvivalSeason(seasonId, { beforeId: survivalState.logBeforeId });
+  if (!payload || !payload.events?.length) return;
+  survivalState.logBeforeId = payload.events[0]?.id || survivalState.logBeforeId;
+  survivalState.events = [...payload.events, ...survivalState.events];
+  renderSurvivalLog(survivalLogModalList, survivalState.events);
 }
 
 function isHighRoll(variant, result){
@@ -3531,6 +3928,11 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, m => ({
     "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;"
   }[m]));
+}
+
+function capitalize(value){
+  const str = String(value || "");
+  return str ? str.charAt(0).toUpperCase() + str.slice(1) : "";
 }
 
 // Linkify plain-text URLs into safe anchors.
@@ -8970,17 +9372,63 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && roomCreateModal && roomCreateModal.style.display !== "none") {
     closeRoomCreateModal();
   }
+  if (e.key === "Escape" && survivalNewSeasonModal && survivalNewSeasonModal.style.display !== "none") {
+    closeSurvivalNewSeasonModal();
+  }
+  if (e.key === "Escape" && survivalRosterModal && survivalRosterModal.style.display !== "none") {
+    closeSurvivalRosterModal();
+  }
+  if (e.key === "Escape" && survivalLogModal && survivalLogModal.style.display !== "none") {
+    closeSurvivalLogModal();
+  }
 });
 
 closeModalBtn.addEventListener("click", closeModal);
 modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
 
+survivalNewSeasonBtn?.addEventListener("click", openSurvivalNewSeasonModal);
+survivalNewSeasonClose?.addEventListener("click", closeSurvivalNewSeasonModal);
+survivalNewSeasonModal?.addEventListener("click", (e) => {
+  if (e.target === survivalNewSeasonModal) closeSurvivalNewSeasonModal();
+});
+survivalSeasonStartBtn?.addEventListener("click", startSurvivalSeason);
+survivalAdvanceBtn?.addEventListener("click", advanceSurvivalSeason);
+survivalEndBtn?.addEventListener("click", endSurvivalSeason);
+survivalRosterBtn?.addEventListener("click", openSurvivalRosterModal);
+survivalRosterClose?.addEventListener("click", closeSurvivalRosterModal);
+survivalRosterModal?.addEventListener("click", (e) => {
+  if (e.target === survivalRosterModal) closeSurvivalRosterModal();
+});
+survivalLogBtn?.addEventListener("click", openSurvivalLogModal);
+survivalLogClose?.addEventListener("click", closeSurvivalLogModal);
+survivalLogModal?.addEventListener("click", (e) => {
+  if (e.target === survivalLogModal) closeSurvivalLogModal();
+});
+survivalLogLoadBtn?.addEventListener("click", loadOlderSurvivalLog);
+survivalAutoRunBtn?.addEventListener("click", () => {
+  if (!survivalAutoRunning) startSurvivalAutoRun();
+  else stopSurvivalAutoRun();
+});
+survivalHistorySelect?.addEventListener("change", async (e) => {
+  const val = e.target.value;
+  if (!val) return;
+  const payload = await loadSurvivalSeason(val);
+  if (!payload) return;
+  survivalState.selectedSeasonId = payload.season?.id || Number(val);
+  applySurvivalPayload(payload, { replaceEvents: true });
+  renderSurvivalLog(survivalLogModalList, survivalState.events);
+  renderSurvivalRoster();
+});
+
 // rooms
 function setActiveRoom(room){
   const wasDiceRoom = isDiceRoom(currentRoom);
+  const wasSurvivalRoom = isSurvivalRoom(currentRoom);
   currentRoom = room;
   const nowDiceRoom = isDiceRoom(room);
+  const nowSurvivalRoom = isSurvivalRoom(room);
   document.body.classList.toggle("dice-room", nowDiceRoom);
+  document.body.classList.toggle("survival-room", nowSurvivalRoom);
   nowRoom.textContent = displayRoomName(room);
   roomTitle.textContent = displayRoomName(room);
   msgInput.placeholder = `Message ${displayRoomName(room)}`;
@@ -8989,9 +9437,20 @@ function setActiveRoom(room){
   // Ensure room-specific UI doesn't leak into other rooms.
   if (diceVariantWrap) diceVariantWrap.style.display = nowDiceRoom ? "" : "none";
   if (luckMeter) luckMeter.style.display = nowDiceRoom ? "" : "none";
+  if (survivalPanel) survivalPanel.hidden = !nowSurvivalRoom;
+  if (survivalLogFeed) survivalLogFeed.hidden = !nowSurvivalRoom;
   // If a modal is open that is built around room/profile context, close it when switching rooms.
   try {
     if (couplesModal && couplesModal.style.display && couplesModal.style.display !== "none") closeCouplesModal();
+  } catch {}
+  try {
+    if (survivalRosterModal && survivalRosterModal.style.display && survivalRosterModal.style.display !== "none") closeSurvivalRosterModal();
+  } catch {}
+  try {
+    if (survivalLogModal && survivalLogModal.style.display && survivalLogModal.style.display !== "none") closeSurvivalLogModal();
+  } catch {}
+  try {
+    if (survivalNewSeasonModal && survivalNewSeasonModal.style.display && survivalNewSeasonModal.style.display !== "none") closeSurvivalNewSeasonModal();
   } catch {}
 
 
@@ -9014,6 +9473,12 @@ function setActiveRoom(room){
   if (nowDiceRoom) {
     renderLuckMeter();
     requestLuckState();
+  }
+  if (wasSurvivalRoom && !nowSurvivalRoom) {
+    stopSurvivalAutoRun();
+  }
+  if (nowSurvivalRoom) {
+    loadSurvivalCurrent();
   }
   document.querySelectorAll(".chan").forEach(el=>{
     el.classList.toggle("active", el.dataset.room === room);
@@ -14343,6 +14808,23 @@ initAppealsDurationSelect();
     try{
       if(typeof playSound === "function") playSound("mention");
     }catch(_){}
+  });
+
+  socket.on("survival:update", (payload = {}) => {
+    if (!isSurvivalRoom(currentRoom)) return;
+    if (!payload || typeof payload !== "object") return;
+    applySurvivalPayload(payload, { replaceEvents: true });
+  });
+
+  socket.on("survival:events", (payload = {}) => {
+    if (!isSurvivalRoom(currentRoom)) return;
+    if (!payload || payload.seasonId !== survivalState.season?.id) return;
+    if (!Array.isArray(payload.events)) return;
+    survivalState.events = [...survivalState.events, ...payload.events];
+    renderSurvivalLog(survivalLogList, survivalState.events);
+    if (survivalLogModal && survivalLogModal.style.display !== "none") {
+      renderSurvivalLog(survivalLogModalList, survivalState.events);
+    }
   });
 
 socket.on("disconnect", (reason) => {

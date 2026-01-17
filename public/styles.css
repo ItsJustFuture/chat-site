@@ -2634,6 +2634,207 @@ body.dice-room .luckMeter{
 .luckMeterBarText{
   color:var(--text);
 }
+/* Survival Simulator panel */
+.survivalPanel{
+  display:none;
+  position: sticky;
+  top:0;
+  z-index:120;
+  margin:8px 12px 6px;
+  padding:12px 14px;
+  border-radius:16px;
+  border:1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+body.survival-room .survivalPanel{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.survivalPanelHeader{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:space-between;
+  gap:6px 14px;
+}
+.survivalPanelTitle{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-weight:800;
+}
+.survivalPanelName{
+  font-size:14px;
+}
+.survivalPanelSeasonTitle{
+  font-size:12px;
+  color:var(--text);
+}
+.survivalPanelStatus{
+  padding:3px 8px;
+  border-radius:999px;
+  font-size:11px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  color:var(--muted);
+}
+.survivalPanelMeta{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-size:12px;
+  color:var(--muted);
+}
+.survivalPanelControls{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px 12px;
+}
+.survivalPanelGroup{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.survivalHistoryLabel{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:11px;
+  color:var(--muted);
+}
+.survivalHistoryLabel select{
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  border:1px solid var(--border);
+  color:var(--text);
+  border-radius:10px;
+  padding:4px 8px;
+}
+
+.survivalLogFeed{
+  display:none;
+  margin:0 12px 10px;
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 75%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  max-height:220px;
+  overflow:auto;
+}
+body.survival-room .survivalLogFeed{
+  display:block;
+}
+.survivalLogHeader{
+  font-size:11px;
+  letter-spacing:0.6px;
+  text-transform:uppercase;
+  color:var(--muted);
+  margin-bottom:6px;
+}
+.survivalLogList{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.survivalLogItem{
+  display:grid;
+  grid-template-columns:20px 1fr;
+  gap:8px;
+  align-items:start;
+  font-size:13px;
+}
+.survivalLogIcon{
+  font-size:14px;
+}
+.survivalLogText{
+  color:var(--text);
+}
+.survivalLogDivider{
+  margin:6px 0 4px;
+  font-size:11px;
+  color:var(--muted);
+}
+
+.survivalModal .modalBody{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.survivalPickerModes{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  font-size:12px;
+  color:var(--muted);
+}
+.survivalParticipantList{
+  max-height:220px;
+  overflow:auto;
+  border-radius:12px;
+  border:1px solid var(--border);
+  padding:8px;
+}
+.survivalParticipantRow{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:6px 4px;
+  font-size:13px;
+}
+.survivalOptions{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  font-size:12px;
+  color:var(--muted);
+}
+.survivalRosterList{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.survivalRosterRow{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+}
+.survivalRosterRow.dead{
+  opacity:0.7;
+}
+.survivalRosterAvatar{
+  width:34px;
+  height:34px;
+  border-radius:50%;
+  background-size:cover;
+  background-position:center;
+}
+.survivalRosterMeta{
+  display:flex;
+  flex-direction:column;
+}
+.survivalRosterName{
+  font-weight:700;
+}
+.survivalRosterStats{
+  font-size:11px;
+  color:var(--muted);
+}
+.survivalRosterStatus.dead{
+  color:#ff9aa2;
+}
+
+.chan[data-room=\"survivalsimulator\"]::before{
+  content:\"🧭 \";
+}
 /* ---- Main chat message grouping (consecutive messages) ---- */
 .msgGroup{ display:flex; gap:10px; align-items:flex-start; max-width:900px; }
 .msgGroup.self{ align-self:flex-end; flex-direction:row-reverse; }
