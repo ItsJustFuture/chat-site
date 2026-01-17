@@ -2617,7 +2617,8 @@ body.dice-room .luckMeter{
 .dmItem,
 .profileSheetHero{
   --userGlow: transparent;
-  --userGlowRgb: 88 101 242;
+  /* Default to "off" so fallback rgba(var(--userGlowRgb)/...) never shows a ring */
+  --userGlowRgb: 0 0 0;
 }
 .bubble{
   --fx-base: var(--fx-bubble-bg, var(--messageOtherBg));
@@ -2649,6 +2650,37 @@ body.dice-room .luckMeter{
 .bubble,
 .dmBubble{
   position:relative;
+}
+
+/*
+  HARD KILL: "green/blue rectangles" around messages
+  ---------------------------------------------------
+  Some mobile/WebKit combinations can render a rectangular focus/outline ring
+  (outline does NOT respect border-radius) on message wrappers or bubbles.
+  This looks like a reactive green/blue box that changes while typing.
+
+  We explicitly disable outlines on all main-chat message containers and then
+  re-introduce the glow strictly via the bubble ::after shadow (rounded).
+*/
+.msgGroup,
+.msgGroupBody,
+.msgItem,
+.msgMain,
+.bubble{
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* If any wrapper pseudo-elements exist (from past experiments), neutralize them. */
+.msgGroup::before,
+.msgGroup::after,
+.msgItem::before,
+.msgItem::after,
+.msgMain::before,
+.msgMain::after{
+  content: none !important;
+  box-shadow: none !important;
+  border: 0 !important;
 }
 .bubble::after,
 .dmBubble::after{
