@@ -4347,6 +4347,22 @@ function maybeMoveParticipant(p, arena, rng, chaoticMode) {
   }
 }
 
+
+function emitSurvivalSystemLog(roomId, events) {
+  try {
+    if (!roomId || !Array.isArray(events) || !events.length) return;
+    let lastHeader = "";
+    for (const ev of events) {
+      const header = `🗺️ Day ${ev.day_index} — ${capitalize(String(ev.phase || "day"))}`;
+      if (header !== lastHeader) {
+        io.to(roomId).emit("system", header);
+        lastHeader = header;
+      }
+      if (ev?.text) io.to(roomId).emit("system", String(ev.text));
+    }
+  } catch {}
+}
+
 function getSurvivalEventCount(aliveCount) {
   const base = Math.min(8, Math.max(3, aliveCount));
   return Math.min(base, Math.max(1, aliveCount));
@@ -7601,6 +7617,7 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
   const season = await fetchSurvivalSeasonById(seasonId);
   const payload = await buildSurvivalPayload(season);
   io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
+  io.to(SURVIVAL_ROOM_ID).emit("system", `🎬 New Survival season started: ${payload?.season?.title || 'Season'}`);
   return res.json(payload);
 });
 
@@ -7930,6 +7947,8 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
   const payload = await buildSurvivalPayload(await fetchSurvivalSeasonById(seasonId));
   io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
   io.to(SURVIVAL_ROOM_ID).emit("survival:events", { seasonId, events });
+  // Mirror the simulator log into chat as always-visible system messages.
+  emitSurvivalSystemLog(SURVIVAL_ROOM_ID, events);
   return res.json(payload);
 });
 

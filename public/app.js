@@ -2728,7 +2728,11 @@ const survivalHistorySelect = document.getElementById("survivalHistorySelect");
 const survivalLogFeed = document.getElementById("survivalLogFeed");
 const survivalLogList = document.getElementById("survivalLogList");
 const survivalArena = document.getElementById("survivalArena");
-const survivalArenaGrid = document.getElementById("survivalArenaGrid");
+const survivalArenaMap = document.getElementById("survivalArenaMap");
+const survivalArenaDots = document.getElementById("survivalArenaDots");
+const survivalDotTip = document.getElementById("survivalDotTip");
+const survivalFogSelect = document.getElementById("survivalFogSelect");
+const survivalArenaHint = document.getElementById("survivalArenaHint");
 const survivalLobbyCount = document.getElementById("survivalLobbyCount");
 const survivalNewSeasonModal = document.getElementById("survivalNewSeasonModal");
 const survivalNewSeasonClose = document.getElementById("survivalNewSeasonClose");
@@ -2967,7 +2971,7 @@ function renderSurvivalPanel() {
 
   // View toggles
   const nowSurvivalRoom = isSurvivalRoom(currentRoom);
-  if (survivalLogFeed) survivalLogFeed.hidden = !nowSurvivalRoom || survivalState.view !== "log";
+  if (survivalLogFeed) survivalLogFeed.hidden = !nowSurvivalRoom;
   if (survivalArena) survivalArena.hidden = !nowSurvivalRoom || survivalState.view !== "arena";
 }
 
@@ -3018,58 +3022,128 @@ function renderSurvivalLog(targetEl, events) {
 }
 
 const SURVIVAL_ARENA_ZONES = [
-  "Open Field",
-  "Pine Woods",
-  "Rocky Ridge",
+  "Forest",
   "Ruins",
-  "River Bend",
+  "River",
+  "High Ground",
   "Caves",
-  "Swamp",
-  "Cornucopia",
+  "Open Field",
+  "Supply Drop",
+  "Abandoned Camp",
 ];
 
+function hideSurvivalDotTip(){
+  if (survivalDotTip) survivalDotTip.hidden = true;
+}
+
 function renderSurvivalArena() {
-  if (!survivalArenaGrid) return;
-  const participants = survivalState.participants || [];
-  const byZone = new Map();
-  participants.forEach((p) => {
-    const zRaw = (p?.location || "Open Field").toString();
-    const z = SURVIVAL_ARENA_ZONES.find((n) => n.toLowerCase() === zRaw.toLowerCase()) || "Open Field";
-    if (!byZone.has(z)) byZone.set(z, []);
-    byZone.get(z).push(p);
-  });
+  if (!survivalArenaMap || !survivalArenaDots) return;
+  const participants = (survivalState.participants || []).slice();
+  const fog = survivalState.fog || (survivalFogSelect ? survivalFogSelect.value : "exact") || "exact";
+  const seasonId = survivalState.season?.id || 0;
 
-  survivalArenaGrid.innerHTML = "";
-  SURVIVAL_ARENA_ZONES.forEach((zone) => {
-    const list = (byZone.get(zone) || []).slice().sort((a, b) => Number(b.alive) - Number(a.alive));
-    const alive = list.filter((p) => p.alive).length;
-    const danger = Number(survivalState.arena?.dangerLevels?.[zone] || 0);
+  // Zone anchor points (percent coordinates within the map container)
+  const ZONE_POINTS = {
+    "Forest": { x: 18, y: 24 },
+    "Ruins": { x: 50, y: 24 },
+    "High Ground": { x: 82, y: 26 },
+    "Abandoned Camp": { x: 18, y: 74 },
+    "Open Field": { x: 50, y: 74 },
+    "Caves": { x: 82, y: 74 },
+    "River": { x: 50, y: 43 },
+    "Supply Drop": { x: 82, y: 60 },
+  };
 
-    const card = document.createElement("div");
-    card.className = "survivalZone";
-    card.innerHTML = `
-      <div class="survivalZoneTop">
-        <div class="survivalZoneName">${escapeHtml(zone)}</div>
-        <div class="survivalZoneMeta">Alive: ${alive} · Danger: ${danger}</div>
+  // Normalize a location to one of our zone labels.
+  const normZone = (raw) => {
+    const zRaw = String(raw || "Open Field");
+    const found = SURVIVAL_ARENA_ZONES.find((n) => n.toLowerCase() === zRaw.toLowerCase());
+    return found || "Open Field";
+  };
+
+  // Clear dots
+  survivalArenaDots.innerHTML = "";
+  if (survivalDotTip) survivalDotTip.hidden = true;
+
+  // Fog mode can hide dots entirely
+  if (fog === "hidden") {
+    if (survivalArenaHint) survivalArenaHint.textContent = "Fog is thick. Nobody can be spotted.";
+  } else {
+    if (survivalArenaHint) survivalArenaHint.textContent = "Tap a dot to see who it is.";
+  }
+
+  // Deterministic-ish jitter so dots don't stack perfectly
+  const jitterFor = (key, amp=3.2) => {
+    const h = hashString(String(key));
+    const hx = ((h % 997) / 997) * 2 - 1;
+    const hy = (((Math.floor(h / 997)) % 997) / 997) * 2 - 1;
+    return { dx: hx * amp, dy: hy * amp };
+  };
+
+  const approxZoneFor = (p) => {
+    // Stable-ish per season so it doesn't flicker within a season.
+    const base = hashString(`${seasonId}|${p.user_id || 0}|${p.display_name || "?"}`);
+    const idx = base % SURVIVAL_ARENA_ZONES.length;
+    return SURVIVAL_ARENA_ZONES[idx] || "Open Field";
+  };
+
+  const openTip = (dotEl, p, zone) => {
+    if (!survivalDotTip) return;
+    const rect = survivalArenaMap.getBoundingClientRect();
+    const drect = dotEl.getBoundingClientRect();
+    const left = Math.max(8, Math.min((drect.left - rect.left) + 10, rect.width - 220));
+    const top = Math.max(8, Math.min((drect.top - rect.top) + 10, rect.height - 120));
+    const hp = Number(p.hp || 0);
+    const kills = Number(p.kills || 0);
+    const alive = !!p.alive;
+
+    survivalDotTip.style.left = `${left}px`;
+    survivalDotTip.style.top = `${top}px`;
+    survivalDotTip.innerHTML = `
+      <div class="tipName">${escapeHtml(p.display_name || "?")}</div>
+      <div class="tipMeta">
+        <span class="pill ${alive ? "alive" : "dead"}">${alive ? "Alive" : "Down"}</span>
+        <span class="pill">HP: ${isFinite(hp) ? hp : "?"}</span>
+        <span class="pill">KOs: ${isFinite(kills) ? kills : 0}</span>
       </div>
-      <div class="survivalZoneList"></div>
+      <div class="tipZone">${escapeHtml(zone)}</div>
     `;
-    const ul = card.querySelector(".survivalZoneList");
-    const show = list.slice(0, 12);
-    ul.innerHTML = show.map((p) => {
-      const name = p?.display_name || "?";
-      const cls = p?.alive ? "survivalZoneP" : "survivalZoneP dead";
-      return `<span class="${cls}">${escapeHtml(name)}</span>`;
-    }).join("");
-    if (list.length > show.length) {
-      const more = document.createElement("div");
-      more.className = "small muted";
-      more.textContent = `+${list.length - show.length} more`;
-      card.appendChild(more);
-    }
-    survivalArenaGrid.appendChild(card);
-  });
+    survivalDotTip.hidden = false;
+  };
 
+  if (fog !== "hidden") {
+    // Create dots for each participant
+    const ordered = participants.slice().sort((a,b)=>Number(b.alive)-Number(a.alive));
+    for (const p of ordered) {
+      const zone = fog === "approx" ? approxZoneFor(p) : normZone(p.location);
+      const pt = ZONE_POINTS[zone] || ZONE_POINTS["Open Field"];
+      const j = jitterFor(`${seasonId}|${p.user_id}|${p.display_name}|${zone}`, 3.6);
+      const x = pt.x + j.dx;
+      const y = pt.y + j.dy;
+
+      const dot = document.createElement('button');
+      dot.type = 'button';
+      dot.className = 'survivalDot';
+      dot.classList.toggle('dead', !p.alive);
+      dot.style.left = `${x}%`;
+      dot.style.top = `${y}%`;
+      dot.setAttribute('aria-label', `${p.display_name || 'Unknown'} in ${zone}`);
+
+      dot.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openTip(dot, p, zone);
+      });
+
+      survivalArenaDots.appendChild(dot);
+    }
+  }
+
+  // Clicking the map closes the tooltip
+  survivalArenaMap.onclick = () => {
+    if (survivalDotTip) survivalDotTip.hidden = true;
+  };
+
+  // Update lobby UI
   if (survivalLobbyCount) {
     const count = (survivalState.lobbyUserIds || []).length;
     survivalLobbyCount.textContent = count ? `Lobby signups: ${count}` : "";
@@ -9488,7 +9562,8 @@ survivalNewSeasonModal?.addEventListener("click", (e) => {
 survivalSeasonStartBtn?.addEventListener("click", startSurvivalSeason);
 survivalAdvanceBtn?.addEventListener("click", advanceSurvivalSeason);
 survivalEndBtn?.addEventListener("click", endSurvivalSeason);
-survivalRosterBtn?.addEventListener("click", openSurvivalRosterModal);
+
+  survivalRosterBtn?.addEventListener("click", openSurvivalRosterModal);
 survivalRosterClose?.addEventListener("click", closeSurvivalRosterModal);
 survivalRosterModal?.addEventListener("click", (e) => {
   if (e.target === survivalRosterModal) closeSurvivalRosterModal();
@@ -9501,6 +9576,11 @@ survivalLogBtn?.addEventListener("click", (e) => {
 survivalArenaBtn?.addEventListener("click", () => {
   survivalState.view = "arena";
   renderSurvivalPanel();
+  renderSurvivalArena();
+});
+
+survivalFogSelect?.addEventListener("change", () => {
+  survivalState.fog = survivalFogSelect.value || "exact";
   renderSurvivalArena();
 });
 survivalLogClose?.addEventListener("click", closeSurvivalLogModal);

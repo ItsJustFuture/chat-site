@@ -18,8 +18,11 @@
 <div class="loginBrand">
 <div class="loginBadge">Welcome to</div>
 <h1 class="loginLogo">Banter <span class="amp">&amp;</span> Brats</h1>
-<p class="loginTag">18+ community built people, and chaos.</p>
+<p class="loginTag">18+ community chat built for rooms, DMs, and a little chaos.</p>
 <ul class="loginFeatures">
+<li>Pick rooms, hop into DMs, and keep tabs on reactions.</li>
+<li>Track XP, gold, and shout-outs in leaderboards.</li>
+<li>Keep it cozy with themes, vibes, and profile flair.</li>
 </ul>
 </div>
 <div aria-label="Login or register" class="loginCard" role="dialog">
@@ -494,7 +497,55 @@
       <span class="survivalArenaTitle">Arena Map</span>
       <span class="small muted" id="survivalLobbyCount"></span>
     </div>
-    <div class="survivalArenaGrid" id="survivalArenaGrid"></div>
+    <div class="survivalArenaMapWrap">
+      <div class="survivalArenaMapControls">
+        <label class="small muted">Fog
+          <select id="survivalFogSelect">
+            <option value="exact" selected>Exact</option>
+            <option value="approx">Approx</option>
+            <option value="hidden">Hidden</option>
+          </select>
+        </label>
+        <span class="small muted" id="survivalArenaHint">Tap a dot to see who it is.</span>
+      </div>
+      <div class="survivalArenaMap" id="survivalArenaMap">
+        <svg class="survivalArenaSvg" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="arenaGrad" x1="0" x2="1" y1="0" y2="1">
+              <stop offset="0" stop-color="rgba(255,255,255,0.06)"/>
+              <stop offset="1" stop-color="rgba(255,255,255,0.02)"/>
+            </linearGradient>
+          </defs>
+          <rect x="0" y="0" width="1000" height="600" fill="url(#arenaGrad)"/>
+          <!-- Zones (stylized, abstract) -->
+          <path d="M40,90 L310,60 L360,220 L140,260 L40,170 Z" class="arenaZone"/>
+          <text x="150" y="170" class="arenaLabel">Forest</text>
+
+          <path d="M360,70 L640,60 L620,240 L380,230 Z" class="arenaZone"/>
+          <text x="485" y="165" class="arenaLabel">Ruins</text>
+
+          <path d="M680,70 L960,110 L930,260 L700,240 Z" class="arenaZone"/>
+          <text x="820" y="180" class="arenaLabel">High Ground</text>
+
+          <path d="M70,300 L280,300 L260,520 L60,500 Z" class="arenaZone"/>
+          <text x="155" y="420" class="arenaLabel">Abandoned Camp</text>
+
+          <path d="M310,270 L640,280 L630,520 L320,540 Z" class="arenaZone"/>
+          <text x="470" y="420" class="arenaLabel">Open Field</text>
+
+          <path d="M670,280 L950,300 L930,520 L680,540 Z" class="arenaZone"/>
+          <text x="820" y="430" class="arenaLabel">Caves</text>
+
+          <path d="M280,240 C360,260 420,260 480,240 C540,220 600,220 670,250" class="arenaRiver"/>
+          <text x="470" y="250" class="arenaLabel arenaLabelSmall">River</text>
+
+          <circle cx="820" cy="360" r="44" class="arenaSupply"/>
+          <text x="820" y="366" text-anchor="middle" class="arenaLabel arenaLabelSmall">Supply</text>
+        </svg>
+        <div class="survivalDots" id="survivalArenaDots"></div>
+        <div class="survivalDotTip" id="survivalDotTip" hidden></div>
+      </div>
+    </div>
   </div>
 </div>
 <div class="survivalLogFeed" hidden="" id="survivalLogFeed">

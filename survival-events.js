@@ -201,6 +201,71 @@ const quadShowdown = [
   "{A}, {B}, {C}, and {D} throw shade and then bail.",
 ];
 
+
+
+// --- Additional event pools (replayability pack)
+const soloSpicy = [
+  "{A} finds a broken radio and gets static that sounds suspiciously like their own name.",
+  "{A} steals a moment to hype themselves up in the reflection of a puddle.",
+  "{A} follows glitter in the dirt and immediately regrets trusting sparkle.",
+  "{A} discovers a tiny flag planted in the ground. It simply says: 'RUN'.",
+  "{A} finds footprints that match their exact shoe size. Creepy.",
+  "{A} builds a decoy campfire to lure trouble somewhere else.",
+  "{A} pockets a shiny token and swears it's 'for later'.",
+  "{A} practices dramatic victory poses for morale.",
+  "{A} hears distant cheering and decides not to investigate.",
+  "{A} finds a note: 'Trust no one.' They nod like they already knew.",
+];
+
+const soloZoneLoot = [
+  "{A} raids a half-buried crate and pulls out {ITEM}.",
+  "{A} digs up a stash and claims {ITEM} like it was destiny.",
+  "{A} spots {ITEM} wedged under rubble and yoinks it free.",
+  "{A} trades a sock and a promise to the universe for {ITEM}.",
+  "{A} finds {ITEM} and whispers, 'this changes everything'.",
+];
+
+const soloNearMiss = [
+  "{A} trips a trap but escapes with only pride damage.",
+  "{A} narrowly avoids a falling branch. The arena is rude today.",
+  "{A} hears a click underfoot and freezes. Nothing happens. Yet.",
+  "{A} ducks as something whistles past their head. Nope nope nope.",
+];
+
+const duoBanter = [
+  "{A} and {B} share a snack and an awkward silence.",
+  "{A} and {B} argue about directions until they realize they're both lost.",
+  "{A} and {B} make a temporary pact: 'no funny business'.",
+  "{A} and {B} swap tips and pretend it wasn't wholesome.",
+  "{A} and {B} spot each other at the same time and both pretend they didn't.",
+];
+
+const duoAmbush = [
+  "{A} ambushes {B} and leaves them battered.",
+  "{A} charges {B} in a messy clash — both get hurt.",
+  "{A} flanks {B} and lands a brutal hit.",
+  "{A} and {B} fight over a supply crate. It gets ugly.",
+];
+
+const duoTheft = [
+  "{A} distracts {B} and steals their {ITEM}.",
+  "{A} yoinks {ITEM} from {B} and vanishes into the chaos.",
+  "{A} picks {B}'s pocket and scores {ITEM}.",
+];
+
+const trioDisaster = [
+  "{A}, {B}, and {C} trigger a chain reaction and scramble for cover.",
+  "{A}, {B}, and {C} run straight into trouble and barely escape.",
+  "{A}, {B}, and {C} start a plan and immediately abandon it.",
+  "{A}, {B}, and {C} get spooked by a noise and sprint in three different directions.",
+];
+
+const rareMythic = [
+  "A horn blares. The ground trembles. {A} realizes the arena just got meaner.",
+  "A spotlight sweeps the arena — {A} freezes as if the sky is watching.",
+  "A strange calm settles over everything. {A} feels like something big is coming.",
+];
+
 const coupleSpecial = [
   "{A} dives in to protect {B} and takes the hit.",
   "{A} and {B} share supplies and promise to regroup.",
@@ -328,6 +393,72 @@ const SURVIVAL_EVENT_TEMPLATES = [
   ...makeTemplates(quadShowdown, (text, idx) => ({
     id: `quad_showdown_${idx + 1}`,
     participants: 4,
+    weight: 1,
+    type: "neutral",
+    text,
+    outcome: { type: "nothing" },
+  })),
+  ...makeTemplates(soloSpicy, (text, idx) => ({
+    id: `solo_spicy_${idx + 1}`,
+    participants: 1,
+    weight: 2,
+    type: "neutral",
+    text,
+    outcome: { type: "nothing" },
+  })),
+  ...makeTemplates(soloZoneLoot, (text, idx) => ({
+    id: `solo_zone_loot_${idx + 1}`,
+    participants: 1,
+    weight: 2,
+    type: "loot",
+    text,
+    lootTag: (["weapon","food","medkit","trap","map"][idx % 5] || "food"),
+    outcome: { type: "loot", target: "A" },
+  })),
+  ...makeTemplates(soloNearMiss, (text, idx) => ({
+    id: `solo_near_${idx + 1}`,
+    participants: 1,
+    weight: 2,
+    type: "injure",
+    text,
+    outcome: { type: "injure", target: "A", amount: [4, 12] },
+  })),
+  ...makeTemplates(duoBanter, (text, idx) => ({
+    id: `duo_banter_${idx + 1}`,
+    participants: 2,
+    weight: 2,
+    type: "neutral",
+    text,
+    outcome: { type: "nothing" },
+  })),
+  ...makeTemplates(duoAmbush, (text, idx) => ({
+    id: `duo_ambush_${idx + 1}`,
+    participants: 2,
+    weight: 1,
+    type: "injure",
+    text,
+    outcome: { type: "injure", target: "B", amount: [10, 22], splashTarget: "A", splashAmount: [4, 10] },
+  })),
+  ...makeTemplates(duoTheft, (text, idx) => ({
+    id: `duo_theft_${idx + 1}`,
+    participants: 2,
+    weight: 1,
+    type: "steal",
+    text,
+    lootTag: "map",
+    outcome: { type: "steal", thief: "A", victim: "B" },
+  })),
+  ...makeTemplates(trioDisaster, (text, idx) => ({
+    id: `trio_disaster_${idx + 1}`,
+    participants: 3,
+    weight: 2,
+    type: "neutral",
+    text,
+    outcome: { type: "nothing" },
+  })),
+  ...makeTemplates(rareMythic, (text, idx) => ({
+    id: `rare_mythic_${idx + 1}`,
+    participants: 1,
     weight: 1,
     type: "neutral",
     text,

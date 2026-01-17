@@ -2790,6 +2790,88 @@ body.survival-room .survivalArena{
   grid-template-columns:repeat(2, minmax(0, 1fr));
   gap:10px;
 }
+
+.survivalArenaMapWrap{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.survivalArenaMapControls{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+.survivalArenaMapControls select{
+  margin-left:6px;
+  padding:4px 8px;
+  border-radius:10px;
+  border:1px solid var(--border);
+  background:color-mix(in srgb, var(--panel) 88%, transparent);
+  color:var(--text);
+}
+.survivalArenaMap{
+  position:relative;
+  width:100%;
+  aspect-ratio: 1000 / 600;
+  border-radius:16px;
+  border:1px solid var(--border);
+  overflow:hidden;
+  background:color-mix(in srgb, var(--panel) 70%, transparent);
+}
+.survivalArenaSvg{width:100%;height:100%;display:block;}
+.arenaZone{fill:rgba(255,255,255,0.035);stroke:rgba(255,255,255,0.08);stroke-width:2;}
+.arenaRiver{fill:none;stroke:rgba(120,190,255,0.22);stroke-width:10;stroke-linecap:round;}
+.arenaSupply{fill:rgba(255,215,120,0.06);stroke:rgba(255,215,120,0.14);stroke-width:3;}
+.arenaLabel{fill:rgba(255,255,255,0.55);font-size:18px;font-weight:700;letter-spacing:0.4px;}
+.arenaLabelSmall{font-size:14px;font-weight:700;opacity:0.9;}
+.survivalDots{
+  position:absolute;
+  inset:0;
+}
+.survivalDot{
+  position:absolute;
+  width:10px;
+  height:10px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,0.45);
+  background:rgba(255,255,255,0.92);
+  box-shadow:0 0 0 4px rgba(255,255,255,0.08), 0 0 18px rgba(255,255,255,0.18);
+  transform:translate(-50%,-50%);
+  cursor:pointer;
+}
+.survivalDot.dead{
+  opacity:0.28;
+  filter:grayscale(1);
+  box-shadow:none;
+}
+.survivalDot:active{transform:translate(-50%,-50%) scale(0.92);}
+.survivalDotTip{
+  position:absolute;
+  z-index:5;
+  min-width:190px;
+  max-width:240px;
+  padding:10px;
+  border-radius:14px;
+  border:1px solid var(--border);
+  background:color-mix(in srgb, var(--panel) 88%, rgba(0,0,0,0.18));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow:0 10px 28px rgba(0,0,0,0.22);
+}
+.survivalDotTip .tipName{font-weight:800;margin-bottom:6px;}
+.survivalDotTip .tipMeta{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;}
+.survivalDotTip .pill{
+  font-size:11px;
+  padding:4px 8px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  color:var(--text);
+  background:color-mix(in srgb, var(--panel) 86%, transparent);
+}
+.survivalDotTip .pill.alive{opacity:0.95;}
+.survivalDotTip .pill.dead{opacity:0.6;}
+.survivalDotTip .tipZone{font-size:12px;color:var(--muted);}
 .survivalZone{
   border:1px solid var(--border);
   border-radius:14px;
