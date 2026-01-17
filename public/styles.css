@@ -2304,6 +2304,111 @@ body.keyboard-open .menuContent{ padding-bottom: calc(200px + var(--kb, 0px) + e
 .chan:hover{ background:color-mix(in srgb, var(--panel) 80%, transparent); color:var(--text); }
 .chan.active{ background:var(--panel); color:var(--text); border:1px solid var(--border); }
 .hash{ color:var(--muted); }
+.roomMaster,
+.roomCategory{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.roomMasterHeader,
+.roomCategoryHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  width:100%;
+  padding:8px 10px;
+  border-radius:var(--radiusMd);
+  border:1px solid transparent;
+  background:color-mix(in srgb, var(--panel) 85%, transparent);
+  color:var(--text);
+  font-weight:800;
+  cursor:pointer;
+  text-align:left;
+  font:inherit;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.roomCategoryHeader{
+  font-weight:700;
+  background:color-mix(in srgb, var(--panel) 78%, transparent);
+}
+.roomMasterHeader:hover,
+.roomCategoryHeader:hover{
+  border-color:var(--border);
+  background:color-mix(in srgb, var(--panel) 92%, transparent);
+}
+.roomHeaderLabel{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-width:0;
+}
+.roomChevron{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size:12px;
+  transition: transform 0.18s ease;
+  opacity:0.8;
+}
+.roomMaster.collapsed .roomMasterHeader .roomChevron,
+.roomCategory.collapsed .roomCategoryHeader .roomChevron{
+  transform:rotate(-90deg);
+}
+.roomMasterBody,
+.roomCategoryBody{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  margin-left:6px;
+  padding-left:6px;
+  border-left:1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.roomCategoryBody{
+  margin-left:10px;
+}
+.roomMaster.collapsed .roomMasterBody,
+.roomCategory.collapsed .roomCategoryBody{
+  display:none;
+}
+.roomList{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  padding-left:4px;
+}
+.roomManageList{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.roomManageSection{ display:none; flex-direction:column; gap:12px; }
+.roomManageSection.active{ display:flex; }
+.roomManageTabs{ margin-top:0; }
+.roomManageRow{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  background:color-mix(in srgb, var(--panel) 90%, transparent);
+  border:1px solid var(--border);
+  border-radius:var(--radiusMd);
+  padding:8px;
+}
+.roomManageRow .label{
+  font-weight:800;
+  flex:1;
+  min-width:120px;
+}
+.roomManageRow .actions{
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+}
+.roomManageRow .btn{
+  min-height:32px;
+  padding:6px 10px;
+}
 
 .bottomBar{
   background:var(--panel);
@@ -3470,6 +3575,28 @@ body:not(.polish-pack) .tonePicker{
   z-index: 401; /* above main modal */
 }
 #couplesModal.modal-visible{ opacity: 1; }
+.roomModal{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  overflow: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 18px;
+  z-index: 402;
+}
+.roomModal.modal-visible{ opacity: 1; }
+.roomModalCard{
+  width: min(840px, calc(100vw - 36px));
+}
+.roomModalBody{
+  padding: 0 12px 16px;
+}
 .modalCard{
   position: relative;
   display: flex;

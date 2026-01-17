@@ -756,6 +756,8 @@ let memoryEnabled = false;
 let memorySettingsLoaded = false;
 let memoryFilter = "all";
 let memoryLoading = false;
+let roomStructure = { masters: [], categories: [], rooms: [] };
+let roomCollapseState = { master: {}, category: {} };
 const memoryCacheByFilter = new Map();
 const DICE_ROOM_ID = "diceroom";
 function isDiceRoom(activeRoom){
@@ -2212,6 +2214,7 @@ const appealsUnlockBtn = document.getElementById("appealsUnlockBtn");
 
 const app = document.getElementById("app");
 const addRoomBtn = document.getElementById("addRoomBtn");
+const manageRoomsBtn = document.getElementById("manageRoomsBtn");
 const menuToggleBtn = document.getElementById("menuToggleBtn");
 const chanHeaderTitle = document.getElementById("chanHeaderTitle");
 const roomsPanel = document.getElementById("roomsPanel");
@@ -2225,6 +2228,29 @@ const latestUpdateViewBtn = document.getElementById("latestUpdateViewBtn");
 const latestUpdateReactions = document.getElementById("latestUpdateReactions");
 let latestUpdateExpanded = false;
 const changelogList = document.getElementById("changelogList");
+const roomManageModal = document.getElementById("roomManageModal");
+const roomManageCloseBtn = document.getElementById("roomManageCloseBtn");
+const roomMasterCreateInput = document.getElementById("roomMasterCreateInput");
+const roomMasterCreateBtn = document.getElementById("roomMasterCreateBtn");
+const roomMasterList = document.getElementById("roomMasterList");
+const roomMasterMsg = document.getElementById("roomMasterMsg");
+const roomCategoryMasterSelect = document.getElementById("roomCategoryMasterSelect");
+const roomCategoryCreateInput = document.getElementById("roomCategoryCreateInput");
+const roomCategoryCreateBtn = document.getElementById("roomCategoryCreateBtn");
+const roomCategoryList = document.getElementById("roomCategoryList");
+const roomCategoryMsg = document.getElementById("roomCategoryMsg");
+const roomManageMasterSelect = document.getElementById("roomManageMasterSelect");
+const roomManageCategorySelect = document.getElementById("roomManageCategorySelect");
+const roomManageRoomList = document.getElementById("roomManageRoomList");
+const roomManageMsg = document.getElementById("roomManageMsg");
+const roomCreateModal = document.getElementById("roomCreateModal");
+const roomCreateCloseBtn = document.getElementById("roomCreateCloseBtn");
+const roomCreateNameInput = document.getElementById("roomCreateNameInput");
+const roomCreateMasterSelect = document.getElementById("roomCreateMasterSelect");
+const roomCreateCategorySelect = document.getElementById("roomCreateCategorySelect");
+const roomCreateSubmitBtn = document.getElementById("roomCreateSubmitBtn");
+const roomCreateCancelBtn = document.getElementById("roomCreateCancelBtn");
+const roomCreateMsg = document.getElementById("roomCreateMsg");
 
 // Shared date formatter for Changelog + FAQ.
 // IMPORTANT: keep this at top-level so it is in scope everywhere.
@@ -8893,6 +8919,12 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && couplesModal && couplesModal.style.display !== "none") {
     closeCouplesModal();
   }
+  if (e.key === "Escape" && roomManageModal && roomManageModal.style.display !== "none") {
+    closeRoomManageModal();
+  }
+  if (e.key === "Escape" && roomCreateModal && roomCreateModal.style.display !== "none") {
+    closeRoomCreateModal();
+  }
 });
 
 closeModalBtn.addEventListener("click", closeModal);
@@ -8987,6 +9019,30 @@ function joinRoom(room){
   closeDrawers();
 }
 chanList.addEventListener("click", (e)=>{
+  const masterToggle = e.target.closest("[data-room-master-toggle]");
+  if(masterToggle){
+    const masterId = masterToggle.dataset.roomMasterToggle;
+    const wrapper = masterToggle.closest(".roomMaster");
+    if(wrapper){
+      const collapsed = !wrapper.classList.contains("collapsed");
+      wrapper.classList.toggle("collapsed", collapsed);
+      roomCollapseState.master[String(masterId)] = collapsed;
+      persistRoomMasterCollapse(masterId, collapsed);
+    }
+    return;
+  }
+  const categoryToggle = e.target.closest("[data-room-category-toggle]");
+  if(categoryToggle){
+    const categoryId = categoryToggle.dataset.roomCategoryToggle;
+    const wrapper = categoryToggle.closest(".roomCategory");
+    if(wrapper){
+      const collapsed = !wrapper.classList.contains("collapsed");
+      wrapper.classList.toggle("collapsed", collapsed);
+      roomCollapseState.category[String(categoryId)] = collapsed;
+      persistRoomCategoryCollapse(categoryId, collapsed);
+    }
+    return;
+  }
   const el=e.target.closest(".chan");
   if(!el) return;
   const r=el.dataset.room;
@@ -8998,30 +9054,287 @@ function sanitizeRoomClient(r){
   return r;
 }
 
-function renderRoomsList(rooms){
+function normalizeRoomStructurePayload(payload){
+  if(!payload || typeof payload !== "object") return null;
+  const masters = Array.isArray(payload.masters) ? payload.masters : [];
+  const categories = Array.isArray(payload.categories) ? payload.categories : [];
+  const rooms = Array.isArray(payload.rooms) ? payload.rooms : [];
+  const userCollapse = payload.userCollapse && typeof payload.userCollapse === "object" ? payload.userCollapse : null;
+  return { masters, categories, rooms, userCollapse };
+}
+
+function cleanCollapseMap(raw){
+  if(!raw || typeof raw !== "object") return {};
+  const out = {};
+  for(const [key, val] of Object.entries(raw)){
+    out[String(key)] = !!val;
+  }
+  return out;
+}
+
+function setRoomStructure(payload, { updateCollapse = true } = {}){
+  const normalized = normalizeRoomStructurePayload(payload);
+  if(!normalized) return false;
+  roomStructure = {
+    masters: normalized.masters,
+    categories: normalized.categories,
+    rooms: normalized.rooms,
+  };
+  if(updateCollapse && normalized.userCollapse){
+    roomCollapseState = {
+      master: cleanCollapseMap(normalized.userCollapse.master),
+      category: cleanCollapseMap(normalized.userCollapse.category),
+    };
+  }
+  renderRoomsList(roomStructure);
+  if(roomManageModal && roomManageModal.style.display !== "none" && !roomManageModal.hidden){
+    refreshRoomManageUi();
+  }
+  return true;
+}
+
+function sortByOrderThenName(a, b, orderKey){
+  const diff = Number(a?.[orderKey] || 0) - Number(b?.[orderKey] || 0);
+  if(diff !== 0) return diff;
+  return String(a?.name || "").localeCompare(String(b?.name || ""), undefined, { sensitivity: "base" });
+}
+
+function ensureDefaultMasters(masters){
+  const out = [...masters];
+  const byName = new Map(out.map((m) => [String(m.name || ""), m]));
+  if(!byName.has("Site Rooms")){
+    out.push({ id: "temp-site", name: "Site Rooms", sort_order: 0, temporary: true });
+  }
+  if(!byName.has("User Rooms")){
+    out.push({ id: "temp-user", name: "User Rooms", sort_order: 1, temporary: true });
+  }
+  return out;
+}
+
+function ensureUncategorized(categories, masterId){
+  const existing = categories.find((c) => String(c.master_id) === String(masterId) && String(c.name || "") === "Uncategorized");
+  if(existing) return existing;
+  return { id: `temp-uncat-${masterId}`, master_id: masterId, name: "Uncategorized", sort_order: 0, temporary: true };
+}
+
+function getDefaultMasterIds(masters){
+  const site = masters.find((m) => String(m.name || "") === "Site Rooms");
+  const user = masters.find((m) => String(m.name || "") === "User Rooms");
+  return { site: site?.id, user: user?.id };
+}
+
+function renderRoomsList(structureOrRooms){
+  if(Array.isArray(structureOrRooms)){
+    withFlip(chanList, "data-flip-key", () => {
+      chanList.innerHTML = "";
+      for(const r of structureOrRooms || []){
+        const div = document.createElement("div");
+        div.className = "chan" + (r === currentRoom ? " active" : "");
+        div.dataset.room = r;
+        div.dataset.flipKey = `room-${r}`;
+        div.textContent = displayRoomName(r);
+        chanList.appendChild(div);
+      }
+    });
+    return;
+  }
+
+  const payload = normalizeRoomStructurePayload(structureOrRooms) || { masters: [], categories: [], rooms: [] };
+  const masters = ensureDefaultMasters(payload.masters || []);
+  const categories = payload.categories || [];
+  const rooms = payload.rooms || [];
+  const categoriesByMaster = new Map();
+  const categoryById = new Map();
+  for(const cat of categories){
+    if(!cat) continue;
+    const masterId = cat.master_id;
+    if(!categoriesByMaster.has(masterId)) categoriesByMaster.set(masterId, []);
+    categoriesByMaster.get(masterId).push(cat);
+    categoryById.set(String(cat.id), cat);
+  }
+
+  const masterIds = getDefaultMasterIds(masters);
+  const fallbackCategories = new Map();
+  for(const master of masters){
+    const ensured = ensureUncategorized(categories, master.id);
+    fallbackCategories.set(String(master.id), ensured);
+    if(!categoriesByMaster.has(master.id)) categoriesByMaster.set(master.id, []);
+    if(ensured.temporary) categoriesByMaster.get(master.id).push(ensured);
+  }
+
+  const roomsByCategory = new Map();
+  for(const room of rooms){
+    const categoryId = room?.category_id;
+    if(categoryId && categoryById.has(String(categoryId))){
+      if(!roomsByCategory.has(String(categoryId))) roomsByCategory.set(String(categoryId), []);
+      roomsByCategory.get(String(categoryId)).push(room);
+      continue;
+    }
+
+    const isUserRoom = Number(room?.is_user_room || 0) === 1;
+    const fallbackMasterId = isUserRoom ? masterIds.user : masterIds.site;
+    const fallbackCategory = fallbackCategories.get(String(fallbackMasterId));
+    if(!fallbackCategory) continue;
+    const fallbackId = String(fallbackCategory.id);
+    if(!roomsByCategory.has(fallbackId)) roomsByCategory.set(fallbackId, []);
+    roomsByCategory.get(fallbackId).push({ ...room, category_id: fallbackCategory.id });
+  }
+
   withFlip(chanList, "data-flip-key", () => {
     chanList.innerHTML = "";
-    for(const r of rooms || []){
-      const div = document.createElement("div");
-      div.className = "chan" + (r === currentRoom ? " active" : "");
-      div.dataset.room = r;
-      div.dataset.flipKey = `room-${r}`;
-      div.textContent = displayRoomName(r); // no '#'
-      chanList.appendChild(div);
+    const sortedMasters = [...masters].sort((a, b) => sortByOrderThenName(a, b, "sort_order"));
+    for(const master of sortedMasters){
+      const masterId = master.id;
+      const masterWrap = document.createElement("div");
+      masterWrap.className = "roomMaster";
+      masterWrap.dataset.masterId = masterId;
+      if(roomCollapseState.master[String(masterId)]) masterWrap.classList.add("collapsed");
+
+      const masterHeader = document.createElement("button");
+      masterHeader.type = "button";
+      masterHeader.className = "roomMasterHeader";
+      masterHeader.dataset.roomMasterToggle = String(masterId);
+      masterHeader.innerHTML = `
+        <span class="roomHeaderLabel">
+          <span class="roomChevron">▾</span>
+          <span>${escapeHtml(master.name || "Rooms")}</span>
+        </span>
+      `;
+
+      const masterBody = document.createElement("div");
+      masterBody.className = "roomMasterBody";
+
+      const masterCategories = (categoriesByMaster.get(masterId) || [])
+        .sort((a, b) => sortByOrderThenName(a, b, "sort_order"));
+
+      for(const category of masterCategories){
+        const categoryId = category.id;
+        const categoryWrap = document.createElement("div");
+        categoryWrap.className = "roomCategory";
+        categoryWrap.dataset.categoryId = categoryId;
+        if(roomCollapseState.category[String(categoryId)]) categoryWrap.classList.add("collapsed");
+
+        const categoryHeader = document.createElement("button");
+        categoryHeader.type = "button";
+        categoryHeader.className = "roomCategoryHeader";
+        categoryHeader.dataset.roomCategoryToggle = String(categoryId);
+        categoryHeader.innerHTML = `
+          <span class="roomHeaderLabel">
+            <span class="roomChevron">▾</span>
+            <span>${escapeHtml(category.name || "Category")}</span>
+          </span>
+        `;
+
+        const categoryBody = document.createElement("div");
+        categoryBody.className = "roomCategoryBody";
+        const roomList = document.createElement("div");
+        roomList.className = "roomList";
+        const categoryRooms = (roomsByCategory.get(String(categoryId)) || [])
+          .sort((a, b) => sortByOrderThenName(a, b, "room_sort_order"));
+
+        for(const r of categoryRooms){
+          const name = r?.name || r;
+          if(!name) continue;
+          const div = document.createElement("div");
+          div.className = "chan" + (name === currentRoom ? " active" : "");
+          div.dataset.room = name;
+          div.dataset.flipKey = `room-${name}`;
+          div.textContent = displayRoomName(name);
+          roomList.appendChild(div);
+        }
+
+        categoryBody.appendChild(roomList);
+        categoryWrap.appendChild(categoryHeader);
+        categoryWrap.appendChild(categoryBody);
+        masterBody.appendChild(categoryWrap);
+      }
+
+      masterWrap.appendChild(masterHeader);
+      masterWrap.appendChild(masterBody);
+      chanList.appendChild(masterWrap);
     }
   });
 }
 
 async function loadRooms(){
   const {res, text} = await api("/rooms", { method:"GET" });
-  if(!res.ok) return;
+  if(!res.ok){
+    renderRoomsList((roomStructure.rooms || []).map((r) => r?.name || r).filter(Boolean));
+    return;
+  }
   try{
-    const rooms = JSON.parse(text);
-    renderRoomsList(rooms);
-  }catch{}
+    const payload = JSON.parse(text);
+    const applied = setRoomStructure(payload);
+    if(!applied && Array.isArray(payload)) renderRoomsList(payload);
+  }catch{
+    renderRoomsList((roomStructure.rooms || []).map((r) => r?.name || r).filter(Boolean));
+  }
+}
+
+function openRoomCreateModal(){
+  if(!roomCreateModal) return;
+  if(roomCreateMsg) roomCreateMsg.textContent = "";
+  if(roomCreateNameInput) roomCreateNameInput.value = "";
+  populateRoomCreateSelects();
+  roomCreateModal.hidden = false;
+  roomCreateModal.style.display = "flex";
+  roomCreateModal.classList.remove("modal-closing");
+  if(PREFERS_REDUCED_MOTION){
+    roomCreateModal.classList.add("modal-visible");
+  }else{
+    requestAnimationFrame(()=> roomCreateModal.classList.add("modal-visible"));
+  }
+  requestAnimationFrame(()=> roomCreateNameInput?.focus?.());
+}
+
+function closeRoomCreateModal(){
+  if(!roomCreateModal) return;
+  roomCreateModal.classList.remove("modal-visible");
+  if(PREFERS_REDUCED_MOTION){
+    roomCreateModal.style.display = "none";
+    roomCreateModal.hidden = true;
+    return;
+  }
+  roomCreateModal.classList.add("modal-closing");
+  setTimeout(()=>{
+    roomCreateModal.style.display = "none";
+    roomCreateModal.hidden = true;
+    roomCreateModal.classList.remove("modal-closing");
+  }, 140);
+}
+
+async function submitCreateRoom(){
+  const raw = String(roomCreateNameInput?.value || "");
+  const name = sanitizeRoomClient(raw);
+  if(!name){
+    if(roomCreateMsg) roomCreateMsg.textContent = "Invalid room name.";
+    return;
+  }
+  const masterId = roomCreateMasterSelect?.value || "";
+  const categoryId = roomCreateCategorySelect?.value || "";
+  const payload = { name };
+  if(categoryId) payload.category_id = Number(categoryId) || categoryId;
+  if(masterId) payload.master_id = Number(masterId) || masterId;
+
+  const {res, text} = await api("/rooms", {
+    method:"POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(payload),
+  });
+  if(!res.ok){
+    if(roomCreateMsg) roomCreateMsg.textContent = text || "Failed to create room.";
+    return;
+  }
+  closeRoomCreateModal();
+  await loadRooms();
+  joinRoom(name);
 }
 
 async function createRoomFlow(){
+  if(roomCreateModal){
+    openRoomCreateModal();
+    return;
+  }
   const raw = prompt("New room name (letters/numbers/_/-):");
   if(!raw) return;
   const name = sanitizeRoomClient(raw);
@@ -9037,15 +9350,359 @@ async function createRoomFlow(){
     return;
   }
 
-  // rooms will also update via socket event, but we can refresh immediately:
   await loadRooms();
   joinRoom(name);
+}
+
+function getSortedMasters({ includeTemporary = true } = {}){
+  const masters = ensureDefaultMasters(roomStructure.masters || []);
+  const sorted = [...masters].sort((a, b) => sortByOrderThenName(a, b, "sort_order"));
+  if(includeTemporary) return sorted;
+  return sorted.filter((m) => !m.temporary && !String(m.id || "").startsWith("temp-"));
+}
+
+function getSortedCategories(masterId, { includeTemporary = true } = {}){
+  const categories = (roomStructure.categories || []).filter((c) => String(c.master_id) === String(masterId));
+  let list = [...categories].sort((a, b) => sortByOrderThenName(a, b, "sort_order"));
+  const ensured = ensureUncategorized(list, masterId);
+  if(!list.find((c) => String(c.name || "") === "Uncategorized")) list = [...list, ensured];
+  list.sort((a, b) => sortByOrderThenName(a, b, "sort_order"));
+  if(includeTemporary) return list;
+  return list.filter((c) => !c.temporary && !String(c.id || "").startsWith("temp-"));
+}
+
+function getSortedRoomsForCategory(categoryId){
+  const rooms = (roomStructure.rooms || []).filter((r) => String(r.category_id) === String(categoryId));
+  return [...rooms].sort((a, b) => sortByOrderThenName(a, b, "room_sort_order"));
+}
+
+function populateSelect(el, options, selectedValue){
+  if(!el) return;
+  el.innerHTML = "";
+  for(const opt of options){
+    const option = document.createElement("option");
+    option.value = opt.value;
+    option.textContent = opt.label;
+    if(String(opt.value) === String(selectedValue)) option.selected = true;
+    el.appendChild(option);
+  }
+}
+
+function populateRoomCreateSelects(){
+  const masters = getSortedMasters();
+  const defaultMaster = masters.find((m) => m.name === "Site Rooms") || masters[0];
+  const masterId = roomCreateMasterSelect?.value || defaultMaster?.id || "";
+  populateSelect(
+    roomCreateMasterSelect,
+    masters.map((m) => ({ value: m.id, label: m.name })),
+    masterId
+  );
+  const categories = masterId ? getSortedCategories(masterId) : [];
+  const defaultCategory = categories.find((c) => c.name === "Uncategorized") || categories[0];
+  populateSelect(
+    roomCreateCategorySelect,
+    categories.map((c) => ({ value: c.id, label: c.name })),
+    defaultCategory?.id || ""
+  );
+}
+
+function populateManageMasterSelects(){
+  const masters = getSortedMasters({ includeTemporary: false });
+  populateSelect(
+    roomCategoryMasterSelect,
+    masters.map((m) => ({ value: m.id, label: m.name })),
+    roomCategoryMasterSelect?.value || masters[0]?.id || ""
+  );
+  populateSelect(
+    roomManageMasterSelect,
+    masters.map((m) => ({ value: m.id, label: m.name })),
+    roomManageMasterSelect?.value || masters[0]?.id || ""
+  );
+  populateManageCategorySelects();
+}
+
+function populateManageCategorySelects(){
+  const masterId = roomManageMasterSelect?.value || "";
+  const categories = masterId ? getSortedCategories(masterId, { includeTemporary: false }) : [];
+  populateSelect(
+    roomManageCategorySelect,
+    categories.map((c) => ({ value: c.id, label: c.name })),
+    roomManageCategorySelect?.value || categories[0]?.id || ""
+  );
+}
+
+function renderRoomMasterList(){
+  if(!roomMasterList) return;
+  const masters = getSortedMasters({ includeTemporary: false });
+  roomMasterList.innerHTML = "";
+  for(const master of masters){
+    const row = document.createElement("div");
+    row.className = "roomManageRow";
+    const isDefault = master.name === "Site Rooms" || master.name === "User Rooms";
+    row.innerHTML = `
+      <div class="label">${escapeHtml(master.name)}</div>
+      <div class="actions">
+        <button class="btn secondary" data-action="rename">Rename</button>
+        <button class="btn secondary" data-action="up">Up</button>
+        <button class="btn secondary" data-action="down">Down</button>
+        <button class="btn danger" data-action="delete">Delete</button>
+      </div>
+    `;
+    if(isDefault){
+      row.querySelectorAll("[data-action='rename'], [data-action='delete']").forEach((btn) => { btn.disabled = true; });
+    }
+    const actions = row.querySelector(".actions");
+    actions?.addEventListener("click", async (e) => {
+      const btn = e.target.closest("button");
+      if(!btn) return;
+      const action = btn.dataset.action;
+      if(action === "rename"){
+        const next = prompt("Rename master:", master.name);
+        if(!next) return;
+        await api(`/api/room-masters/${master.id}`, {
+          method:"PATCH",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({ name: next })
+        });
+      }
+      if(action === "delete"){
+        if(!confirm(`Delete master "${master.name}"? Rooms will move to Site Rooms.`)) return;
+        await api(`/api/room-masters/${master.id}`, { method:"DELETE" });
+      }
+      if(action === "up" || action === "down"){
+        const index = masters.findIndex((m) => String(m.id) === String(master.id));
+        const swapWith = action === "up" ? index - 1 : index + 1;
+        if(swapWith < 0 || swapWith >= masters.length) return;
+        const orderedIds = [...masters].map((m) => m.id);
+        [orderedIds[index], orderedIds[swapWith]] = [orderedIds[swapWith], orderedIds[index]];
+        await api("/api/room-masters/reorder", {
+          method:"PATCH",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({ orderedIds })
+        });
+      }
+      await loadRooms();
+    });
+    roomMasterList.appendChild(row);
+  }
+}
+
+function renderRoomCategoryList(){
+  if(!roomCategoryList) return;
+  const masterId = roomCategoryMasterSelect?.value || "";
+  const masters = getSortedMasters({ includeTemporary: false });
+  const categories = masterId ? getSortedCategories(masterId, { includeTemporary: false }) : [];
+  roomCategoryList.innerHTML = "";
+  for(const category of categories){
+    const row = document.createElement("div");
+    row.className = "roomManageRow";
+    const isDefault = String(category.name || "") === "Uncategorized";
+    const masterOptions = masters.map((m) => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join("");
+    row.innerHTML = `
+      <div class="label">${escapeHtml(category.name)}</div>
+      <select class="roomManageMoveSelect">${masterOptions}</select>
+      <div class="actions">
+        <button class="btn secondary" data-action="rename">Rename</button>
+        <button class="btn secondary" data-action="up">Up</button>
+        <button class="btn secondary" data-action="down">Down</button>
+        <button class="btn secondary" data-action="move">Move</button>
+        <button class="btn danger" data-action="delete">Delete</button>
+      </div>
+    `;
+    const moveSelect = row.querySelector(".roomManageMoveSelect");
+    if(moveSelect) moveSelect.value = masterId;
+    if(isDefault && moveSelect) moveSelect.disabled = true;
+    if(isDefault){
+      row.querySelectorAll("[data-action='rename'], [data-action='delete'], [data-action='move']")
+        .forEach((btn) => { btn.disabled = true; });
+    }
+    const actions = row.querySelector(".actions");
+    actions?.addEventListener("click", async (e) => {
+      const btn = e.target.closest("button");
+      if(!btn) return;
+      const action = btn.dataset.action;
+      if(action === "rename"){
+        const next = prompt("Rename subcategory:", category.name);
+        if(!next) return;
+        await api(`/api/room-categories/${category.id}`, {
+          method:"PATCH",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({ name: next })
+        });
+      }
+      if(action === "delete"){
+        if(!confirm(`Delete subcategory "${category.name}"?`)) return;
+        await api(`/api/room-categories/${category.id}`, { method:"DELETE" });
+      }
+      if(action === "move"){
+        const targetMaster = moveSelect?.value || "";
+        if(!targetMaster || targetMaster === String(masterId)) return;
+        await api(`/api/room-categories/${category.id}`, {
+          method:"PATCH",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({ master_id: Number(targetMaster) || targetMaster })
+        });
+      }
+      if(action === "up" || action === "down"){
+        const index = categories.findIndex((c) => String(c.id) === String(category.id));
+        const swapWith = action === "up" ? index - 1 : index + 1;
+        if(swapWith < 0 || swapWith >= categories.length) return;
+        const orderedIds = [...categories].map((c) => c.id);
+        [orderedIds[index], orderedIds[swapWith]] = [orderedIds[swapWith], orderedIds[index]];
+        await api("/api/room-categories/reorder", {
+          method:"PATCH",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({ master_id: Number(masterId) || masterId, orderedIds })
+        });
+      }
+      await loadRooms();
+    });
+    roomCategoryList.appendChild(row);
+  }
+}
+
+function renderRoomManageRoomsList(){
+  if(!roomManageRoomList) return;
+  const masterId = roomManageMasterSelect?.value || "";
+  const categoryId = roomManageCategorySelect?.value || "";
+  const categories = masterId ? getSortedCategories(masterId) : [];
+  const rooms = categoryId ? getSortedRoomsForCategory(categoryId) : [];
+  const masterOptions = getSortedMasters().map((m) => ({
+    master: m,
+    categories: getSortedCategories(m.id),
+  }));
+  const moveOptions = masterOptions
+    .flatMap((entry) => entry.categories.map((c) => ({
+      value: c.id,
+      label: `${entry.master.name} / ${c.name}`,
+    })));
+  roomManageRoomList.innerHTML = "";
+  for(const room of rooms){
+    const row = document.createElement("div");
+    row.className = "roomManageRow";
+    const optionsMarkup = moveOptions.map((opt) => `<option value="${opt.value}">${escapeHtml(opt.label)}</option>`).join("");
+    row.innerHTML = `
+      <div class="label">${escapeHtml(displayRoomName(room.name))}</div>
+      <select class="roomManageMoveSelect">${optionsMarkup}</select>
+      <div class="actions">
+        <button class="btn secondary" data-action="up">Up</button>
+        <button class="btn secondary" data-action="down">Down</button>
+        <button class="btn secondary" data-action="move">Move</button>
+      </div>
+    `;
+    const moveSelect = row.querySelector(".roomManageMoveSelect");
+    if(moveSelect) moveSelect.value = categoryId;
+    const actions = row.querySelector(".actions");
+    actions?.addEventListener("click", async (e) => {
+      const btn = e.target.closest("button");
+      if(!btn) return;
+      const action = btn.dataset.action;
+      if(action === "move"){
+        const target = moveSelect?.value || "";
+        if(!target || target === String(categoryId)) return;
+        await api(`/api/rooms/${encodeURIComponent(room.name)}/move`, {
+          method:"PATCH",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({ category_id: Number(target) || target })
+        });
+      }
+      if(action === "up" || action === "down"){
+        const index = rooms.findIndex((r) => r.name === room.name);
+        const swapWith = action === "up" ? index - 1 : index + 1;
+        if(swapWith < 0 || swapWith >= rooms.length) return;
+        const orderedIds = [...rooms].map((r) => r.name);
+        [orderedIds[index], orderedIds[swapWith]] = [orderedIds[swapWith], orderedIds[index]];
+        await api("/api/rooms/reorder", {
+          method:"PATCH",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({ category_id: Number(categoryId) || categoryId, orderedIds })
+        });
+      }
+      await loadRooms();
+    });
+    roomManageRoomList.appendChild(row);
+  }
+}
+
+function refreshRoomManageUi(){
+  populateManageMasterSelects();
+  renderRoomMasterList();
+  renderRoomCategoryList();
+  renderRoomManageRoomsList();
+}
+
+function openRoomManageModal(){
+  if(!roomManageModal) return;
+  if(!me || roleRank(me.role) < roleRank("Owner")) return;
+  if(roomMasterMsg) roomMasterMsg.textContent = "";
+  if(roomCategoryMsg) roomCategoryMsg.textContent = "";
+  if(roomManageMsg) roomManageMsg.textContent = "";
+  const activeTab = document.querySelector("[data-room-manage-tab].active")?.dataset?.roomManageTab || "masters";
+  setRoomManageTab(activeTab);
+  roomManageModal.hidden = false;
+  roomManageModal.style.display = "flex";
+  roomManageModal.classList.remove("modal-closing");
+  if(PREFERS_REDUCED_MOTION){
+    roomManageModal.classList.add("modal-visible");
+  }else{
+    requestAnimationFrame(()=> roomManageModal.classList.add("modal-visible"));
+  }
+}
+
+function closeRoomManageModal(){
+  if(!roomManageModal) return;
+  roomManageModal.classList.remove("modal-visible");
+  if(PREFERS_REDUCED_MOTION){
+    roomManageModal.style.display = "none";
+    roomManageModal.hidden = true;
+    return;
+  }
+  roomManageModal.classList.add("modal-closing");
+  setTimeout(()=>{
+    roomManageModal.style.display = "none";
+    roomManageModal.hidden = true;
+    roomManageModal.classList.remove("modal-closing");
+  }, 140);
+}
+
+function setRoomManageTab(tab){
+  const next = tab || "masters";
+  document.querySelectorAll("[data-room-manage-tab]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.roomManageTab === next);
+  });
+  document.querySelectorAll("[data-room-manage-section]").forEach((section) => {
+    section.classList.toggle("active", section.dataset.roomManageSection === next);
+  });
+  refreshRoomManageUi();
+}
+
+async function persistRoomMasterCollapse(masterId, collapsed){
+  if(!masterId || !Number.isFinite(Number(masterId))) return;
+  await api("/api/users/me/room-master-collapsed", {
+    method:"PATCH",
+    headers: { "Content-Type":"application/json" },
+    body: JSON.stringify({ master_id: masterId, collapsed }),
+  });
+}
+
+async function persistRoomCategoryCollapse(categoryId, collapsed){
+  if(!categoryId || !Number.isFinite(Number(categoryId))) return;
+  await api("/api/users/me/room-category-collapsed", {
+    method:"PATCH",
+    headers: { "Content-Type":"application/json" },
+    body: JSON.stringify({ category_id: categoryId, collapsed }),
+  });
 }
 
 function updateRoomControlsVisibility(){
   if(addRoomBtn){
     const canCreate = me && roleRank(me.role) >= roleRank("Co-owner");
     addRoomBtn.style.display = rightPanelMode === "rooms" && canCreate ? "inline-flex" : "none";
+  }
+  if(manageRoomsBtn){
+    const isOwner = me && roleRank(me.role) >= roleRank("Owner");
+    manageRoomsBtn.style.display = rightPanelMode === "rooms" && isOwner ? "inline-flex" : "none";
+    if(!isOwner) closeRoomManageModal();
   }
 }
 
@@ -13667,6 +14324,7 @@ window.addEventListener("online", () => {
     try{ socket.connect(); }catch(_){}
   }
 });
+socket.on("roomStructure:update", (payload)=>setRoomStructure(payload, { updateCollapse: false }));
 socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   socket.on("changelog updated", ()=>{
     changelogDirty = true;
@@ -13697,6 +14355,56 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   if(addRoomBtn){
     addRoomBtn.addEventListener("click", createRoomFlow);
   }
+  if(manageRoomsBtn){
+    manageRoomsBtn.addEventListener("click", openRoomManageModal);
+  }
+  roomManageCloseBtn?.addEventListener("click", closeRoomManageModal);
+  roomManageModal?.addEventListener("click", (e)=>{ if(e.target === roomManageModal) closeRoomManageModal(); });
+  roomCreateCloseBtn?.addEventListener("click", closeRoomCreateModal);
+  roomCreateCancelBtn?.addEventListener("click", closeRoomCreateModal);
+  roomCreateModal?.addEventListener("click", (e)=>{ if(e.target === roomCreateModal) closeRoomCreateModal(); });
+  roomCreateSubmitBtn?.addEventListener("click", submitCreateRoom);
+  roomCreateMasterSelect?.addEventListener("change", populateRoomCreateSelects);
+  roomCategoryMasterSelect?.addEventListener("change", renderRoomCategoryList);
+  roomManageMasterSelect?.addEventListener("change", () => {
+    populateManageCategorySelects();
+    renderRoomManageRoomsList();
+  });
+  roomManageCategorySelect?.addEventListener("change", renderRoomManageRoomsList);
+  document.querySelectorAll("[data-room-manage-tab]").forEach((btn)=>{
+    btn.addEventListener("click", ()=> setRoomManageTab(btn.dataset.roomManageTab));
+  });
+  roomMasterCreateBtn?.addEventListener("click", async () => {
+    const name = String(roomMasterCreateInput?.value || "").trim();
+    if(roomMasterMsg) roomMasterMsg.textContent = "";
+    if(!name){
+      if(roomMasterMsg) roomMasterMsg.textContent = "Enter a master name.";
+      return;
+    }
+    await api("/api/room-masters", {
+      method:"POST",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify({ name })
+    });
+    if(roomMasterCreateInput) roomMasterCreateInput.value = "";
+    await loadRooms();
+  });
+  roomCategoryCreateBtn?.addEventListener("click", async () => {
+    const masterId = roomCategoryMasterSelect?.value || "";
+    const name = String(roomCategoryCreateInput?.value || "").trim();
+    if(roomCategoryMsg) roomCategoryMsg.textContent = "";
+    if(!masterId || !name){
+      if(roomCategoryMsg) roomCategoryMsg.textContent = "Select a master and name.";
+      return;
+    }
+    await api("/api/room-categories", {
+      method:"POST",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify({ master_id: Number(masterId) || masterId, name })
+    });
+    if(roomCategoryCreateInput) roomCategoryCreateInput.value = "";
+    await loadRooms();
+  });
   updateRoomControlsVisibility();
 
   socket.on("system", (text) => {
