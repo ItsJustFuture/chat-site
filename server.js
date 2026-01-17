@@ -353,6 +353,8 @@ const pgInitPromise = (async () => {
         last_status TEXT,
         theme TEXT NOT NULL DEFAULT 'Minimal Dark',
         prefs_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        room_master_collapsed TEXT NOT NULL DEFAULT '{}',
+        room_category_collapsed TEXT NOT NULL DEFAULT '{}',
         gold INTEGER NOT NULL DEFAULT 0,
         xp INTEGER NOT NULL DEFAULT 0,
         lastMessageXpAt BIGINT,
@@ -374,6 +376,79 @@ const pgInitPromise = (async () => {
         expire TIMESTAMP NOT NULL
       );
     `);
+
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS room_master_categories (
+        id SERIAL PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at BIGINT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS room_categories (
+        id SERIAL PRIMARY KEY,
+        master_id INTEGER NOT NULL REFERENCES room_master_categories(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at BIGINT NOT NULL,
+        UNIQUE(master_id, name)
+      );
+      CREATE TABLE IF NOT EXISTS rooms (
+        name TEXT PRIMARY KEY,
+        created_by INTEGER,
+        created_at BIGINT NOT NULL,
+        slowmode_seconds INTEGER NOT NULL DEFAULT 0,
+        is_locked INTEGER NOT NULL DEFAULT 0,
+        pinned_message_ids TEXT,
+        maintenance_mode INTEGER NOT NULL DEFAULT 0,
+        category_id INTEGER REFERENCES room_categories(id) ON DELETE SET NULL,
+        room_sort_order INTEGER NOT NULL DEFAULT 0,
+        created_by_user_id INTEGER,
+        is_user_room INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+
+    const roomCols = [
+      `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS slowmode_seconds INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_locked INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS pinned_message_ids TEXT`,
+      `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS maintenance_mode INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS category_id INTEGER`,
+      `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS room_sort_order INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER`,
+      `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_user_room INTEGER NOT NULL DEFAULT 0`,
+    ];
+    for (const q of roomCols) {
+      try { await pgPool.query(q); } catch (_) {}
+    }
+
+    try {
+      const now = Date.now();
+      await pgPool.query(
+        `INSERT INTO room_master_categories (name, sort_order, created_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (name) DO NOTHING`,
+        ["Site Rooms", 0, now]
+      );
+      await pgPool.query(
+        `INSERT INTO room_master_categories (name, sort_order, created_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (name) DO NOTHING`,
+        ["User Rooms", 1, now]
+      );
+      const { rows: masterRows } = await pgPool.query(
+        `SELECT id, name FROM room_master_categories WHERE name IN ('Site Rooms', 'User Rooms')`
+      );
+      for (const master of masterRows || []) {
+        await pgPool.query(
+          `INSERT INTO room_categories (master_id, name, sort_order, created_at)
+           VALUES ($1, 'Uncategorized', 0, $2)
+           ON CONFLICT (master_id, name) DO NOTHING`,
+          [master.id, now]
+        );
+      }
+    } catch (e) {
+      console.warn("[pg-init] room hierarchy seed failed:", e?.message || e);
+    }
 
     // Changelog tables (Postgres) — ensures changelog persists across restarts
     await pgPool.query(`
@@ -530,6 +605,8 @@ try {
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_status TEXT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT 'Minimal Dark'`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS prefs_json JSONB NOT NULL DEFAULT '{}'::jsonb`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS room_master_collapsed TEXT NOT NULL DEFAULT '{}'`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS room_category_collapsed TEXT NOT NULL DEFAULT '{}'`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS gold INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS xp INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS "lastMessageXpAt" BIGINT`,
@@ -2913,8 +2990,20 @@ const commandRegistry = {
     handler: async ({ args, room, actor }) => {
       const name = sanitizeRoomName(args[0] || "");
       if (!name) return { ok: false, message: "Invalid room" };
-      await dbRunAsync(`INSERT OR IGNORE INTO rooms (name, created_by, created_at) VALUES (?, ?, ?)`, [name, actor.id, Date.now()]);
-      io.emit("rooms update", (await dbAllAsync(`SELECT name FROM rooms ORDER BY name ASC`)).map((r) => r.name));
+      const resolved = await resolveRoomCategoryId({ isUserRoom: false });
+      const categoryId = resolved?.categoryId ?? null;
+      const nextSort = categoryId
+        ? await dbGetAsync(`SELECT COALESCE(MAX(room_sort_order), 0) as maxSort FROM rooms WHERE category_id = ?`, [
+          categoryId,
+        ])
+        : { maxSort: 0 };
+      const sortOrder = Number(nextSort?.maxSort || 0) + 1;
+      await dbRunAsync(
+        `INSERT OR IGNORE INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room)
+         VALUES (?, ?, ?, ?, ?, ?, 0)`,
+        [name, actor.id, Date.now(), categoryId, sortOrder, actor.id]
+      );
+      await emitRoomStructureUpdate();
       return { ok: true, message: `Created room #${name}` };
     },
   },
@@ -2928,7 +3017,7 @@ const commandRegistry = {
       if (!name) return { ok: false, message: "Invalid room" };
       await dbRunAsync(`DELETE FROM rooms WHERE name=?`, [name]);
       await dbRunAsync(`DELETE FROM messages WHERE room=?`, [name]);
-      io.emit("rooms update", (await dbAllAsync(`SELECT name FROM rooms ORDER BY name ASC`)).map((r) => r.name));
+      await emitRoomStructureUpdate();
       return { ok: true, message: `Deleted room #${name}` };
     },
   },
@@ -3961,6 +4050,131 @@ function sanitizeRoomName(r) {
   r = r.toLowerCase();
   r = r.replace(/[^a-z0-9_-]/g, "");
   return r.slice(0, 24);
+}
+
+const DEFAULT_ROOM_MASTERS = ["Site Rooms", "User Rooms"];
+const DEFAULT_ROOM_CATEGORY = "Uncategorized";
+
+function sanitizeRoomGroupName(name) {
+  const clean = String(name || "").trim().replace(/\s+/g, " ");
+  return clean.slice(0, 40);
+}
+
+function normalizeRoomGroupName(name) {
+  return String(name || "").trim().toLowerCase();
+}
+
+async function getUserRoomCollapseState(userId) {
+  const fallback = { master: {}, category: {} };
+  if (!userId) return fallback;
+  let row = null;
+  try {
+    const { rows } = await pgPool.query(
+      `SELECT room_master_collapsed, room_category_collapsed FROM users WHERE id = $1 LIMIT 1`,
+      [userId]
+    );
+    row = rows[0] || null;
+  } catch {}
+
+  if (!row) {
+    try {
+      row = await dbGetAsync(
+        "SELECT room_master_collapsed, room_category_collapsed FROM users WHERE id = ?",
+        [userId]
+      );
+    } catch {}
+  }
+
+  const master = safeJsonParse(row?.room_master_collapsed || "{}", {});
+  const category = safeJsonParse(row?.room_category_collapsed || "{}", {});
+  return {
+    master: master && typeof master === "object" ? master : {},
+    category: category && typeof category === "object" ? category : {},
+  };
+}
+
+async function buildRoomStructure() {
+  const masters = await dbAllAsync(
+    `SELECT id, name, sort_order FROM room_master_categories ORDER BY sort_order ASC, name ASC`
+  );
+  const categories = await dbAllAsync(
+    `SELECT id, master_id, name, sort_order FROM room_categories ORDER BY sort_order ASC, name ASC`
+  );
+  const rooms = await dbAllAsync(
+    `SELECT name, category_id, room_sort_order, slowmode_seconds, is_locked, maintenance_mode,
+            created_by, created_by_user_id, is_user_room
+       FROM rooms
+      ORDER BY room_sort_order ASC, name ASC`
+  );
+  return {
+    masters,
+    categories,
+    rooms: (rooms || []).map((r) => ({
+      id: r.name,
+      name: r.name,
+      category_id: r.category_id,
+      room_sort_order: Number(r.room_sort_order || 0),
+      slowmode_seconds: Number(r.slowmode_seconds || 0),
+      is_locked: Number(r.is_locked || 0),
+      maintenance_mode: Number(r.maintenance_mode || 0),
+      created_by: r.created_by ?? null,
+      created_by_user_id: r.created_by_user_id ?? null,
+      is_user_room: Number(r.is_user_room || 0),
+    })),
+  };
+}
+
+async function buildRoomStructurePayload(userId) {
+  const base = await buildRoomStructure();
+  const userCollapse = await getUserRoomCollapseState(userId);
+  return { ...base, userCollapse };
+}
+
+async function emitRoomStructureUpdate() {
+  const payload = await buildRoomStructure();
+  io.emit("roomStructure:update", payload);
+  io.emit("rooms update", (payload.rooms || []).map((r) => r.name));
+}
+
+async function getDefaultMasterIds() {
+  const rows = await dbAllAsync(
+    `SELECT id, name FROM room_master_categories WHERE name IN (?, ?)`,
+    DEFAULT_ROOM_MASTERS
+  );
+  const map = new Map(rows.map((row) => [row.name, row.id]));
+  return {
+    site: map.get("Site Rooms") || null,
+    user: map.get("User Rooms") || null,
+  };
+}
+
+async function getUncategorizedCategoryId(masterId) {
+  if (!masterId) return null;
+  const row = await dbGetAsync(
+    `SELECT id FROM room_categories WHERE master_id = ? AND lower(name) = lower(?) LIMIT 1`,
+    [masterId, DEFAULT_ROOM_CATEGORY]
+  );
+  return row?.id ?? null;
+}
+
+async function resolveRoomCategoryId({ categoryId, masterId, isUserRoom }) {
+  let categoryRow = null;
+  if (categoryId) {
+    categoryRow = await dbGetAsync(
+      `SELECT id, master_id FROM room_categories WHERE id = ? LIMIT 1`,
+      [categoryId]
+    );
+  }
+  if (!categoryRow && masterId) {
+    const fallbackId = await getUncategorizedCategoryId(masterId);
+    if (fallbackId) return { categoryId: fallbackId, masterId };
+  }
+  if (categoryRow) return { categoryId: categoryRow.id, masterId: categoryRow.master_id };
+
+  const defaults = await getDefaultMasterIds();
+  const fallbackMasterId = isUserRoom ? defaults.user : defaults.site;
+  const fallbackCategoryId = await getUncategorizedCategoryId(fallbackMasterId);
+  return { categoryId: fallbackCategoryId, masterId: fallbackMasterId };
 }
 function normalizeDmPair(a, b) {
   const aId = Number(a);
@@ -6286,42 +6500,437 @@ app.post("/api/me/award-gold", strictLimiter, requireLogin, (req, res) => {
   });
 });
 // ---- Rooms API
-app.get("/rooms", requireLogin, (_req, res) => {
-  db.all(`SELECT name FROM rooms ORDER BY name ASC`, [], (err, rows) => {
-    if (err) return res.status(500).send("Failed");
-    return res.json((rows || []).map(r => r.name));
-  });
+app.get("/rooms", requireLogin, async (req, res) => {
+  try {
+    const payload = await buildRoomStructurePayload(req.session?.user?.id);
+    return res.json(payload);
+  } catch (e) {
+    console.warn("[rooms] failed to load room structure", e?.message || e);
+    return res.status(500).send("Failed");
+  }
 });
 
 // Co-owner+ can create rooms
-app.post("/rooms", strictLimiter, requireLogin, (req, res) => {
+app.post("/rooms", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
   const actor = req.session.user;
   if (!requireMinRole(actor.role, "Co-owner")) return res.status(403).send("Forbidden");
 
   const name = sanitizeRoomName(req.body?.name || req.body?.room || "");
   if (!name) return res.status(400).send("Invalid room name");
 
-  db.get(`SELECT name FROM rooms WHERE name=?`, [name], (err, row) => {
-    if (err) return res.status(500).send("Failed");
+  try {
+    const row = await dbGetAsync(`SELECT name FROM rooms WHERE name=?`, [name]);
     if (row) return res.status(409).send("Room already exists");
 
-    db.run(
-      `INSERT INTO rooms (name, created_by, created_at) VALUES (?, ?, ?)`,
-      [name, actor.id, Date.now()],
-      (insErr) => {
-        if (insErr) return res.status(500).send("Failed to create room");
+    const requestedCategoryId = Number(req.body?.category_id) || null;
+    const requestedMasterId = Number(req.body?.master_id) || null;
+    const requestedUserRoom = req.body?.is_user_room ? true : false;
+    const resolved = await resolveRoomCategoryId({
+      categoryId: requestedCategoryId,
+      masterId: requestedMasterId,
+      isUserRoom: requestedUserRoom,
+    });
+    const categoryId = resolved?.categoryId ?? null;
+    const categoryRow = categoryId
+      ? await dbGetAsync(
+        `SELECT c.id, c.master_id, m.name as master_name
+           FROM room_categories c
+           JOIN room_master_categories m ON m.id = c.master_id
+          WHERE c.id = ? LIMIT 1`,
+        [categoryId]
+      )
+      : null;
+    const isUserRoom = categoryRow?.master_name === "User Rooms" ? 1 : 0;
+    const nextSort = categoryId
+      ? await dbGetAsync(`SELECT COALESCE(MAX(room_sort_order), 0) as maxSort FROM rooms WHERE category_id = ?`, [
+        categoryId,
+      ])
+      : { maxSort: 0 };
+    const sortOrder = Number(nextSort?.maxSort || 0) + 1;
 
-        logModAction({ actor, action: "room.create", room: name, details: null });
-
-        db.all(`SELECT name FROM rooms ORDER BY name ASC`, [], (_e2, rows2) => {
-          io.emit("rooms update", (rows2 || []).map(r => r.name));
-        });
-
-        return res.json({ ok: true, name });
-      }
+    await dbRunAsync(
+      `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [name, actor.id, Date.now(), categoryId, sortOrder, actor.id, isUserRoom]
     );
-  });
+
+    logModAction({ actor, action: "room.create", room: name, details: null });
+    await emitRoomStructureUpdate();
+
+    return res.json({ ok: true, name });
+  } catch (e) {
+    console.warn("[rooms] create failed", e?.message || e);
+    return res.status(500).send("Failed to create room");
+  }
 });
+
+// ---- Room structure management (Owner-only)
+app.post("/api/room-masters", strictLimiter, requireOwner, express.json({ limit: "16kb" }), async (req, res) => {
+  const name = sanitizeRoomGroupName(req.body?.name || "");
+  if (!name) return res.status(400).send("Invalid name");
+  try {
+    const existing = await dbGetAsync(`SELECT id FROM room_master_categories WHERE lower(name) = lower(?)`, [name]);
+    if (existing) return res.status(409).send("Master exists");
+    const maxRow = await dbGetAsync(`SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_master_categories`);
+    const sortOrder = Number(maxRow?.maxSort || 0) + 1;
+    const now = Date.now();
+    const ins = await dbRunAsync(
+      `INSERT INTO room_master_categories (name, sort_order, created_at) VALUES (?, ?, ?)`,
+      [name, sortOrder, now]
+    );
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true, id: ins?.lastID || null, name, sort_order: sortOrder });
+  } catch (e) {
+    console.warn("[room-masters] create failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.patch("/api/room-masters/reorder", strictLimiter, requireOwner, express.json({ limit: "32kb" }), async (req, res) => {
+  const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
+  if (!orderedIds?.length) return res.status(400).send("Missing order");
+  try {
+    for (let i = 0; i < orderedIds.length; i += 1) {
+      const id = Number(orderedIds[i]);
+      if (!id) continue;
+      await dbRunAsync(`UPDATE room_master_categories SET sort_order = ? WHERE id = ?`, [i, id]);
+    }
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn("[room-masters] reorder failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.patch("/api/room-masters/:id", strictLimiter, requireOwner, express.json({ limit: "16kb" }), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).send("Invalid master");
+  try {
+    const row = await dbGetAsync(`SELECT id, name FROM room_master_categories WHERE id = ?`, [id]);
+    if (!row) return res.status(404).send("Not found");
+    const updates = [];
+    const params = [];
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "name")) {
+      const name = sanitizeRoomGroupName(req.body?.name || "");
+      if (!name) return res.status(400).send("Invalid name");
+      if (DEFAULT_ROOM_MASTERS.includes(row.name) && name !== row.name) {
+        return res.status(400).send("Cannot rename default master");
+      }
+      const existing = await dbGetAsync(
+        `SELECT id FROM room_master_categories WHERE lower(name) = lower(?) AND id != ?`,
+        [name, id]
+      );
+      if (existing) return res.status(409).send("Name exists");
+      updates.push("name = ?");
+      params.push(name);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "sort_order")) {
+      const sortOrder = Number(req.body?.sort_order);
+      if (Number.isFinite(sortOrder)) {
+        updates.push("sort_order = ?");
+        params.push(sortOrder);
+      }
+    }
+    if (!updates.length) return res.json({ ok: true });
+    params.push(id);
+    await dbRunAsync(`UPDATE room_master_categories SET ${updates.join(", ")} WHERE id = ?`, params);
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn("[room-masters] patch failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.delete("/api/room-masters/:id", strictLimiter, requireOwner, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).send("Invalid master");
+  try {
+    const row = await dbGetAsync(`SELECT id, name FROM room_master_categories WHERE id = ?`, [id]);
+    if (!row) return res.status(404).send("Not found");
+    if (DEFAULT_ROOM_MASTERS.includes(row.name)) {
+      return res.status(400).send("Cannot delete default master");
+    }
+    const defaults = await getDefaultMasterIds();
+    const fallbackCategoryId = await getUncategorizedCategoryId(defaults.site);
+    const categories = await dbAllAsync(`SELECT id FROM room_categories WHERE master_id = ?`, [id]);
+    const categoryIds = categories.map((c) => c.id).filter(Boolean);
+    if (categoryIds.length && fallbackCategoryId) {
+      const placeholders = categoryIds.map(() => "?").join(",");
+      await dbRunAsync(
+        `UPDATE rooms SET category_id = ? WHERE category_id IN (${placeholders})`,
+        [fallbackCategoryId, ...categoryIds]
+      );
+    }
+    await dbRunAsync(`DELETE FROM room_categories WHERE master_id = ?`, [id]);
+    await dbRunAsync(`DELETE FROM room_master_categories WHERE id = ?`, [id]);
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn("[room-masters] delete failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.post("/api/room-categories", strictLimiter, requireOwner, express.json({ limit: "16kb" }), async (req, res) => {
+  const masterId = Number(req.body?.master_id);
+  const name = sanitizeRoomGroupName(req.body?.name || "");
+  if (!masterId) return res.status(400).send("Invalid master");
+  if (!name) return res.status(400).send("Invalid name");
+  try {
+    const master = await dbGetAsync(`SELECT id FROM room_master_categories WHERE id = ?`, [masterId]);
+    if (!master) return res.status(404).send("Master not found");
+    const existing = await dbGetAsync(
+      `SELECT id FROM room_categories WHERE master_id = ? AND lower(name) = lower(?)`,
+      [masterId, name]
+    );
+    if (existing) return res.status(409).send("Category exists");
+    const maxRow = await dbGetAsync(
+      `SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_categories WHERE master_id = ?`,
+      [masterId]
+    );
+    const sortOrder = Number(maxRow?.maxSort || 0) + 1;
+    const now = Date.now();
+    const ins = await dbRunAsync(
+      `INSERT INTO room_categories (master_id, name, sort_order, created_at) VALUES (?, ?, ?, ?)`,
+      [masterId, name, sortOrder, now]
+    );
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true, id: ins?.lastID || null, master_id: masterId, name });
+  } catch (e) {
+    console.warn("[room-categories] create failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.patch("/api/room-categories/reorder", strictLimiter, requireOwner, express.json({ limit: "32kb" }), async (req, res) => {
+  const masterId = Number(req.body?.master_id);
+  const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
+  if (!masterId || !orderedIds?.length) return res.status(400).send("Invalid order");
+  try {
+    for (let i = 0; i < orderedIds.length; i += 1) {
+      const id = Number(orderedIds[i]);
+      if (!id) continue;
+      await dbRunAsync(
+        `UPDATE room_categories SET sort_order = ? WHERE id = ? AND master_id = ?`,
+        [i, id, masterId]
+      );
+    }
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn("[room-categories] reorder failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.patch("/api/room-categories/:id", strictLimiter, requireOwner, express.json({ limit: "16kb" }), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).send("Invalid category");
+  try {
+    const row = await dbGetAsync(`SELECT id, name, master_id FROM room_categories WHERE id = ?`, [id]);
+    if (!row) return res.status(404).send("Not found");
+    const updates = [];
+    const params = [];
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "name")) {
+      const name = sanitizeRoomGroupName(req.body?.name || "");
+      if (!name) return res.status(400).send("Invalid name");
+      if (normalizeRoomGroupName(row.name) === normalizeRoomGroupName(DEFAULT_ROOM_CATEGORY) && name !== row.name) {
+        return res.status(400).send("Cannot rename Uncategorized");
+      }
+      const targetMaster = Number(req.body?.master_id) || row.master_id;
+      const existing = await dbGetAsync(
+        `SELECT id FROM room_categories WHERE master_id = ? AND lower(name) = lower(?) AND id != ?`,
+        [targetMaster, name, id]
+      );
+      if (existing) return res.status(409).send("Name exists");
+      updates.push("name = ?");
+      params.push(name);
+    }
+
+    let nextMasterId = row.master_id;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "master_id")) {
+      const masterId = Number(req.body?.master_id);
+      if (!masterId) return res.status(400).send("Invalid master");
+      if (normalizeRoomGroupName(row.name) === normalizeRoomGroupName(DEFAULT_ROOM_CATEGORY) && masterId !== row.master_id) {
+        return res.status(400).send("Cannot move Uncategorized");
+      }
+      const masterRow = await dbGetAsync(`SELECT id FROM room_master_categories WHERE id = ?`, [masterId]);
+      if (!masterRow) return res.status(404).send("Master not found");
+      nextMasterId = masterId;
+      updates.push("master_id = ?");
+      params.push(masterId);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "sort_order")) {
+      const sortOrder = Number(req.body?.sort_order);
+      if (Number.isFinite(sortOrder)) {
+        updates.push("sort_order = ?");
+        params.push(sortOrder);
+      }
+    }
+
+    if (!updates.length) return res.json({ ok: true });
+
+    if (nextMasterId !== row.master_id && !Object.prototype.hasOwnProperty.call(req.body || {}, "sort_order")) {
+      const maxRow = await dbGetAsync(
+        `SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_categories WHERE master_id = ?`,
+        [nextMasterId]
+      );
+      const sortOrder = Number(maxRow?.maxSort || 0) + 1;
+      updates.push("sort_order = ?");
+      params.push(sortOrder);
+    }
+
+    params.push(id);
+    await dbRunAsync(`UPDATE room_categories SET ${updates.join(", ")} WHERE id = ?`, params);
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn("[room-categories] patch failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.delete("/api/room-categories/:id", strictLimiter, requireOwner, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).send("Invalid category");
+  try {
+    const row = await dbGetAsync(`SELECT id, name, master_id FROM room_categories WHERE id = ?`, [id]);
+    if (!row) return res.status(404).send("Not found");
+    if (normalizeRoomGroupName(row.name) === normalizeRoomGroupName(DEFAULT_ROOM_CATEGORY)) {
+      return res.status(400).send("Cannot delete Uncategorized");
+    }
+    const fallbackCategoryId = await getUncategorizedCategoryId(row.master_id);
+    if (fallbackCategoryId) {
+      await dbRunAsync(`UPDATE rooms SET category_id = ? WHERE category_id = ?`, [fallbackCategoryId, id]);
+    }
+    await dbRunAsync(`DELETE FROM room_categories WHERE id = ?`, [id]);
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn("[room-categories] delete failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.patch("/api/rooms/:id/move", strictLimiter, requireOwner, express.json({ limit: "16kb" }), async (req, res) => {
+  const roomName = sanitizeRoomName(req.params.id || "");
+  if (!roomName) return res.status(400).send("Invalid room");
+  try {
+    const roomRow = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
+    if (!roomRow) return res.status(404).send("Not found");
+    const requestedCategoryId = Number(req.body?.category_id) || null;
+    const resolved = await resolveRoomCategoryId({ categoryId: requestedCategoryId, isUserRoom: false });
+    const categoryId = resolved?.categoryId ?? null;
+    const categoryRow = categoryId
+      ? await dbGetAsync(
+        `SELECT c.id, m.name as master_name
+           FROM room_categories c
+           JOIN room_master_categories m ON m.id = c.master_id
+          WHERE c.id = ? LIMIT 1`,
+        [categoryId]
+      )
+      : null;
+    const isUserRoom = categoryRow?.master_name === "User Rooms" ? 1 : 0;
+    let sortOrder = Number(req.body?.room_sort_order);
+    if (!Number.isFinite(sortOrder)) {
+      const maxRow = categoryId
+        ? await dbGetAsync(`SELECT COALESCE(MAX(room_sort_order), 0) as maxSort FROM rooms WHERE category_id = ?`, [
+          categoryId,
+        ])
+        : { maxSort: 0 };
+      sortOrder = Number(maxRow?.maxSort || 0) + 1;
+    }
+    await dbRunAsync(
+      `UPDATE rooms SET category_id = ?, room_sort_order = ?, is_user_room = ? WHERE name = ?`,
+      [categoryId, sortOrder, isUserRoom, roomName]
+    );
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn("[rooms] move failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.patch("/api/rooms/reorder", strictLimiter, requireOwner, express.json({ limit: "32kb" }), async (req, res) => {
+  const categoryId = Number(req.body?.category_id);
+  const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
+  if (!categoryId || !orderedIds?.length) return res.status(400).send("Invalid order");
+  try {
+    for (let i = 0; i < orderedIds.length; i += 1) {
+      const roomName = sanitizeRoomName(orderedIds[i] || "");
+      if (!roomName) continue;
+      await dbRunAsync(
+        `UPDATE rooms SET room_sort_order = ? WHERE name = ? AND category_id = ?`,
+        [i, roomName, categoryId]
+      );
+    }
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn("[rooms] reorder failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+// ---- Room collapse persistence
+app.patch(
+  "/api/users/me/room-master-collapsed",
+  strictLimiter,
+  requireLogin,
+  express.json({ limit: "8kb" }),
+  async (req, res) => {
+    const userId = req.session?.user?.id;
+    const masterId = String(req.body?.master_id || "").trim();
+    const collapsed = !!req.body?.collapsed;
+    if (!masterId) return res.status(400).send("Invalid master");
+    try {
+      const current = await getUserRoomCollapseState(userId);
+      const next = { ...(current.master || {}) };
+      next[masterId] = collapsed;
+      const serialized = JSON.stringify(next);
+      await dbRunAsync(`UPDATE users SET room_master_collapsed = ? WHERE id = ?`, [serialized, userId]);
+      try {
+        await pgPool.query(`UPDATE users SET room_master_collapsed = $1 WHERE id = $2`, [serialized, userId]);
+      } catch {}
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[rooms] master collapse failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  }
+);
+
+app.patch(
+  "/api/users/me/room-category-collapsed",
+  strictLimiter,
+  requireLogin,
+  express.json({ limit: "8kb" }),
+  async (req, res) => {
+    const userId = req.session?.user?.id;
+    const categoryId = String(req.body?.category_id || "").trim();
+    const collapsed = !!req.body?.collapsed;
+    if (!categoryId) return res.status(400).send("Invalid category");
+    try {
+      const current = await getUserRoomCollapseState(userId);
+      const next = { ...(current.category || {}) };
+      next[categoryId] = collapsed;
+      const serialized = JSON.stringify(next);
+      await dbRunAsync(`UPDATE users SET room_category_collapsed = ? WHERE id = ?`, [serialized, userId]);
+      try {
+        await pgPool.query(`UPDATE users SET room_category_collapsed = $1 WHERE id = $2`, [serialized, userId]);
+      } catch {}
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[rooms] category collapse failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  }
+);
 
 // ---- Changelog API
 app.get("/api/changelog", requireLogin, async (req, res) => {

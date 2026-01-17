@@ -72,6 +72,90 @@ async function seedDefaultRooms() {
   }
 }
 
+async function ensureRoomHierarchySqlite() {
+  const now = Date.now();
+  await run(`
+    CREATE TABLE IF NOT EXISTS room_master_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS room_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      master_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      UNIQUE(master_id, name)
+    )
+  `);
+
+  await run(`CREATE INDEX IF NOT EXISTS idx_room_categories_master ON room_categories(master_id)`);
+
+  await ensureColumns("rooms", [
+    ["category_id", "category_id INTEGER"],
+    ["room_sort_order", "room_sort_order INTEGER NOT NULL DEFAULT 0"],
+    ["created_by_user_id", "created_by_user_id INTEGER"],
+    ["is_user_room", "is_user_room INTEGER NOT NULL DEFAULT 0"],
+  ]);
+
+  await ensureColumns("users", [
+    ["room_master_collapsed", "room_master_collapsed TEXT NOT NULL DEFAULT '{}'"],
+    ["room_category_collapsed", "room_category_collapsed TEXT NOT NULL DEFAULT '{}'"],
+  ]);
+
+  const masterSeed = [
+    { name: "Site Rooms", sort_order: 0 },
+    { name: "User Rooms", sort_order: 1 },
+  ];
+
+  for (const m of masterSeed) {
+    await run(
+      `INSERT OR IGNORE INTO room_master_categories (name, sort_order, created_at) VALUES (?, ?, ?)`,
+      [m.name, m.sort_order, now]
+    );
+  }
+
+  const masters = await all(`SELECT id, name FROM room_master_categories`);
+  const masterByName = new Map(masters.map((m) => [m.name, m.id]));
+
+  for (const master of masters) {
+    await run(
+      `INSERT OR IGNORE INTO room_categories (master_id, name, sort_order, created_at) VALUES (?, 'Uncategorized', 0, ?)`,
+      [master.id, now]
+    );
+  }
+
+  const categories = await all(
+    `SELECT id, master_id, name FROM room_categories WHERE lower(name) = 'uncategorized'`
+  );
+  const uncategorizedByMasterId = new Map(categories.map((c) => [c.master_id, c.id]));
+
+  const rooms = await all(
+    `SELECT name, category_id, created_by, created_by_user_id, is_user_room FROM rooms`
+  );
+
+  for (const room of rooms) {
+    if (room.category_id != null) continue;
+    const createdBy = room.created_by_user_id ?? room.created_by ?? null;
+    const isUserRoom = Number(room.is_user_room || 0) === 1 || createdBy != null;
+    const masterName = isUserRoom ? "User Rooms" : "Site Rooms";
+    const masterId = masterByName.get(masterName);
+    const categoryId = masterId ? uncategorizedByMasterId.get(masterId) : null;
+    if (!categoryId) continue;
+    await run(`UPDATE rooms SET category_id=?, room_sort_order=COALESCE(room_sort_order, 0) WHERE name=?`, [
+      categoryId,
+      room.name,
+    ]);
+  }
+
+  await run(`UPDATE rooms SET room_sort_order=0 WHERE room_sort_order IS NULL`);
+}
+
 async function runSqliteMigrations() {
   await run(`
     CREATE TABLE IF NOT EXISTS users (
@@ -105,6 +189,8 @@ async function runSqliteMigrations() {
     ["pinned_message_ids", "pinned_message_ids TEXT"],
     ["maintenance_mode", "maintenance_mode INTEGER NOT NULL DEFAULT 0"],
   ]);
+
+  await ensureRoomHierarchySqlite();
 
   await seedDefaultRooms();
 
