@@ -128,6 +128,51 @@ function showToast(message, { actionLabel, actionFn, durationMs = 4200 } = {}){
 }
 const toast = showToast;
 
+// ---- Rooms: Site/User mode (pill switcher under Latest update)
+let activeRoomMode = (localStorage.getItem("roomMode") || "site").toLowerCase();
+if(activeRoomMode !== "site" && activeRoomMode !== "user") activeRoomMode = "site";
+
+function getRoomModeMasterName(){
+  return activeRoomMode === "user" ? "User Rooms" : "Site Rooms";
+}
+
+function ensureRoomModeSwitch(){
+  const latestUpdate = document.getElementById("latestUpdate");
+  const roomsPanel = document.getElementById("roomsPanel");
+  if(!latestUpdate || !roomsPanel) return;
+  if(document.getElementById("roomModeSwitch")) return;
+
+  const wrap = document.createElement("div");
+  wrap.className = "roomModeSwitch";
+  wrap.id = "roomModeSwitch";
+  wrap.innerHTML = `
+    <button type="button" data-room-mode="site">Site Rooms</button>
+    <button type="button" data-room-mode="user">User Rooms</button>
+  `;
+
+  latestUpdate.insertAdjacentElement("afterend", wrap);
+
+  const sync = () => {
+    wrap.querySelectorAll("button").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.roomMode === activeRoomMode);
+    });
+  };
+  sync();
+
+  wrap.addEventListener("click", (e) => {
+    const btn = e.target?.closest?.("button[data-room-mode]");
+    if(!btn) return;
+    const next = btn.dataset.roomMode;
+    if(next !== "site" && next !== "user") return;
+    if(next === activeRoomMode) return;
+    activeRoomMode = next;
+    try{ localStorage.setItem("roomMode", activeRoomMode); }catch(_){ /* ignore */ }
+    sync();
+    // Re-render the room list with the new mode.
+    renderRoomsList(roomStructure || []);
+  });
+}
+
 // ---- Scroll pinning scheduler (hoisted)
 // This function is referenced early (e.g. visualViewport listeners inside initLayoutMetrics).
 // It must be hoisted to avoid TDZ/ReferenceError when app.js is evaluated.
@@ -9183,7 +9228,10 @@ function renderRoomsList(structureOrRooms){
   withFlip(chanList, "data-flip-key", () => {
     chanList.innerHTML = "";
     const sortedMasters = [...masters].sort((a, b) => sortByOrderThenName(a, b, "sort_order"));
+    const activeMasterName = getRoomModeMasterName();
     for(const master of sortedMasters){
+      // Only show the active master (Site Rooms vs User Rooms) via the pill switcher.
+      if(String(master?.name || "") !== String(activeMasterName)) continue;
       const masterId = master.id;
       const masterWrap = document.createElement("div");
       masterWrap.className = "roomMaster";
@@ -9249,7 +9297,9 @@ function renderRoomsList(structureOrRooms){
         masterBody.appendChild(categoryWrap);
       }
 
-      masterWrap.appendChild(masterHeader);
+      // With the pill switcher we only ever show one master at a time,
+      // so we render its categories directly without a redundant master dropdown header.
+      masterWrap.classList.add("roomMasterSingle");
       masterWrap.appendChild(masterBody);
       chanList.appendChild(masterWrap);
     }
@@ -9633,7 +9683,14 @@ function refreshRoomManageUi(){
 
 function openRoomManageModal(){
   if(!roomManageModal) return;
-  if(!me || roleRank(me.role) < roleRank("Owner")) return;
+  if(!me){
+    toast("Loading your profile — try again in a second.");
+    return;
+  }
+  if(roleRank(me.role) < roleRank("Owner")){
+    toast("Room management is Owner-only.");
+    return;
+  }
   if(roomMasterMsg) roomMasterMsg.textContent = "";
   if(roomCategoryMsg) roomCategoryMsg.textContent = "";
   if(roomManageMsg) roomManageMsg.textContent = "";
@@ -14349,6 +14406,8 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   });
   await loadRooms();
   await loadLatestUpdateSnippet();
+  // Insert the Site/User pill switcher under the Latest update card.
+  ensureRoomModeSwitch();
   await loadDmThreads();
 
   // show Create Room button only for Co-owner+

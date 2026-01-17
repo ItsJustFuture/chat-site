@@ -1996,6 +1996,37 @@ main.chat{
   flex:1;
   overflow:auto;
 }
+
+/* === Rooms: Site/User pill switcher (below Latest update) === */
+.roomModeSwitch{
+  display:flex;
+  gap:4px;
+  margin:8px 10px 10px;
+  padding:3px;
+  border-radius:999px;
+  background: rgba(255,255,255,0.06);
+  backdrop-filter: blur(8px);
+}
+.roomModeSwitch button{
+  flex:1;
+  height:28px;
+  border:0;
+  border-radius:999px;
+  background: transparent;
+  color: rgba(255,255,255,0.72);
+  font-size:12px;
+  letter-spacing:0.2px;
+  cursor:pointer;
+  user-select:none;
+}
+.roomModeSwitch button.active{
+  background: rgba(255,255,255,0.12);
+  color:#fff;
+  box-shadow: 0 0 8px rgba(180,140,255,0.35);
+}
+.roomModeSwitch button:active{
+  transform: translateY(0.5px);
+}
 .roomsPanel, .menuPanel{
   display:flex;
   flex-direction:column;
