@@ -2090,11 +2090,9 @@ let survivalState = {
   selectedSeasonId: null,
   logBeforeId: null,
   winner: null,
-  // Client-only: track which survival events we've injected into the main chat feed
-  // as system lines, so refresh/season switching doesn't spam duplicates.
-  injectedSeasonId: null,
-  injectedEventIds: new Set(),
-  lastInjectedHeaderKey: "",
+  arena: {},
+  lobbyUserIds: [],
+  view: "none",
 };
 let survivalAutoRunTimer = null;
 let survivalAutoRunning = false;
@@ -2724,15 +2722,26 @@ const survivalAutoRunBtn = document.getElementById("survivalAutoRunBtn");
 const survivalEndBtn = document.getElementById("survivalEndBtn");
 const survivalRosterBtn = document.getElementById("survivalRosterBtn");
 const survivalLogBtn = document.getElementById("survivalLogBtn");
+const survivalHideViewBtn = document.getElementById("survivalHideViewBtn");
+const survivalCollapseBtn = document.getElementById("survivalCollapseBtn");
+const survivalMiniBtn = document.getElementById("survivalMiniBtn");
+const survivalArenaBtn = document.getElementById("survivalArenaBtn");
+const survivalLobbyBtn = document.getElementById("survivalLobbyBtn");
 const survivalHistorySelect = document.getElementById("survivalHistorySelect");
 const survivalLogFeed = document.getElementById("survivalLogFeed");
 const survivalLogList = document.getElementById("survivalLogList");
+const survivalArena = document.getElementById("survivalArena");
+const survivalArenaGrid = document.getElementById("survivalArenaGrid");
+const survivalLobbyCount = document.getElementById("survivalLobbyCount");
 const survivalNewSeasonModal = document.getElementById("survivalNewSeasonModal");
 const survivalNewSeasonClose = document.getElementById("survivalNewSeasonClose");
 const survivalSeasonTitleInput = document.getElementById("survivalSeasonTitleInput");
 const survivalParticipantList = document.getElementById("survivalParticipantList");
 const survivalCouplesToggle = document.getElementById("survivalCouplesToggle");
 const survivalChaosToggle = document.getElementById("survivalChaosToggle");
+const survivalLobbyToggle = document.getElementById("survivalLobbyToggle");
+const survivalNpcNames = document.getElementById("survivalNpcNames");
+const survivalFillSlots = document.getElementById("survivalFillSlots");
 const survivalSeasonStartBtn = document.getElementById("survivalSeasonStartBtn");
 const survivalSeasonMsg = document.getElementById("survivalSeasonMsg");
 const survivalRosterModal = document.getElementById("survivalRosterModal");
@@ -2743,60 +2752,31 @@ const survivalLogClose = document.getElementById("survivalLogClose");
 const survivalLogModalList = document.getElementById("survivalLogModalList");
 const survivalLogLoadBtn = document.getElementById("survivalLogLoadBtn");
 
-// Arena UI (visual map)
-const survivalArenaBtn = document.getElementById("survivalArenaBtn");
-const survivalArena = document.getElementById("survivalArena");
-const survivalArenaClose = document.getElementById("survivalArenaClose");
-const survivalArenaOverlay = document.getElementById("survivalArenaOverlay");
-const survivalArenaPopover = document.getElementById("survivalArenaPopover");
-const survivalArenaLegend = document.getElementById("survivalArenaLegend");
-const survivalFogMode = document.getElementById("survivalFogMode");
-
-const SURVIVAL_ARENA_ZONES = [
-  // Coordinates are percentages aligned to /arena/arena_map.png.
-  { key: "pine", label: "Pine Woods", x: 22, y: 18 },
-  { key: "ruins", label: "Old Ruins", x: 52, y: 18 },
-  { key: "ridge", label: "Ridge", x: 83, y: 20 },
-  { key: "lake", label: "Shimmer Lake", x: 18, y: 52 },
-  { key: "plaza", label: "Central Plaza", x: 50, y: 52 },
-  { key: "cave", label: "Cave Mouth", x: 76, y: 56 },
-  { key: "swamp", label: "Mossy Swamp", x: 26, y: 78 },
-  { key: "drop", label: "Supply Drop Zone", x: 55, y: 82 },
-];
-
-function survivalHash32(str) {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-function survivalZoneForParticipant(p, season, fogModeValue) {
-  const base = `${season?.id || "0"}:${season?.day_index || 0}:${season?.phase || "day"}`;
-  const idPart = String(p?.user_id ?? p?.userId ?? p?.id ?? p?.display_name ?? "x");
-  const h = survivalHash32(`${base}:${idPart}`);
-  let idx = h % SURVIVAL_ARENA_ZONES.length;
-  if (fogModeValue === "approx") {
-    // Stable-ish scrambling per season so it stays coherent but not exact.
-    const s = survivalHash32(String(season?.rng_seed || season?.rngSeed || season?.title || "seed"));
-    idx = (idx + (s % SURVIVAL_ARENA_ZONES.length)) % SURVIVAL_ARENA_ZONES.length;
-  }
-  return SURVIVAL_ARENA_ZONES[idx];
-}
-
-function survivalJitterPx(p, season) {
-  const base = `${season?.id || "0"}:${p?.user_id ?? p?.userId ?? p?.id ?? "x"}`;
-  const h = survivalHash32(base);
-  const dx = ((h % 17) - 8);
-  const dy = (((h >>> 5) % 17) - 8);
-  return { dx, dy };
-}
-
 let mediaMenuOpen = false;
 let voiceRec = { recorder: null, stream: null, chunks: [], startedAt: 0 };
 let dicePayoutOpen = false;
+
+
+// Survival UI can be collapsed to a small button (spectators can rely on system messages).
+let survivalUiCollapsed = false;
+try { survivalUiCollapsed = localStorage.getItem("survivalUiCollapsed") === "1"; } catch {}
+
+function setSurvivalUiCollapsed(collapsed) {
+  survivalUiCollapsed = !!collapsed;
+  try { localStorage.setItem("survivalUiCollapsed", survivalUiCollapsed ? "1" : "0"); } catch {}
+  const inRoom = isSurvivalRoom(currentRoom);
+  if (survivalPanel) survivalPanel.hidden = !inRoom || survivalUiCollapsed;
+  if (survivalMiniBtn) survivalMiniBtn.hidden = !inRoom || !survivalUiCollapsed;
+  // When collapsed, close expanded views; system messages remain visible in chat.
+  if (survivalUiCollapsed) {
+    survivalState.view = "none";
+  }
+  renderSurvivalPanel();
+}
+
+// Wire collapse/expand controls
+survivalCollapseBtn?.addEventListener("click", () => setSurvivalUiCollapsed(!survivalUiCollapsed));
+survivalMiniBtn?.addEventListener("click", () => setSurvivalUiCollapsed(false));
 
 // On boot, hide dice-only UI unless we are already in the Dice Room.
 try {
@@ -2804,11 +2784,11 @@ try {
   if (diceVariantWrap) diceVariantWrap.style.display = nowDiceRoom ? "" : "none";
   if (luckMeter) luckMeter.style.display = nowDiceRoom ? "" : "none";
   const nowSurvivalRoom = isSurvivalRoom(currentRoom);
-  if (survivalPanel) survivalPanel.hidden = !nowSurvivalRoom;
-  if (survivalLogFeed) survivalLogFeed.hidden = !nowSurvivalRoom;
-  if (!nowSurvivalRoom) {
-    try { closeSurvivalArena(); } catch {}
-  }
+  if (survivalPanel) survivalPanel.hidden = !nowSurvivalRoom || survivalUiCollapsed;
+  if (survivalMiniBtn) survivalMiniBtn.hidden = !nowSurvivalRoom || !survivalUiCollapsed;
+  // Expanded log/map views are optional; spectators can rely on system messages in chat.
+  if (survivalLogFeed) survivalLogFeed.hidden = !nowSurvivalRoom || survivalUiCollapsed || survivalState.view !== "log";
+  if (survivalArena) survivalArena.hidden = !nowSurvivalRoom || survivalUiCollapsed || survivalState.view !== "arena";
 } catch {}
 
 function closeMediaMenu(){
@@ -3006,12 +2986,25 @@ function renderSurvivalPanel() {
   }
   if (survivalAliveCount) survivalAliveCount.textContent = `Alive: ${aliveCount}`;
 
+  if (survivalCollapseBtn) {
+    survivalCollapseBtn.textContent = survivalUiCollapsed ? '▸' : '▾';
+    survivalCollapseBtn.setAttribute('aria-expanded', survivalUiCollapsed ? 'false' : 'true');
+  }
+
   if (survivalNewSeasonBtn) survivalNewSeasonBtn.disabled = !survivalIsOwner();
   if (survivalAdvanceBtn) survivalAdvanceBtn.disabled = !survivalIsOwner() || !season || season.status !== "running";
   if (survivalAutoRunBtn) survivalAutoRunBtn.disabled = !survivalIsOwner() || !season || season.status !== "running";
   if (survivalEndBtn) survivalEndBtn.disabled = !survivalIsOwner() || !season;
   if (survivalAutoRunBtn) survivalAutoRunBtn.textContent = survivalAutoRunning ? "Stop Auto" : "Auto-Run";
   updateSurvivalHistorySelect();
+
+  // View toggles
+  const nowSurvivalRoom = isSurvivalRoom(currentRoom);
+  const collapsed = !!survivalUiCollapsed;
+  if (survivalPanel) survivalPanel.hidden = !nowSurvivalRoom || collapsed;
+  if (survivalMiniBtn) survivalMiniBtn.hidden = !nowSurvivalRoom || !collapsed;
+  if (survivalLogFeed) survivalLogFeed.hidden = !nowSurvivalRoom || collapsed || survivalState.view !== "log";
+  if (survivalArena) survivalArena.hidden = !nowSurvivalRoom || collapsed || survivalState.view !== "arena";
 }
 
 function getSurvivalEventIcon(outcome = {}) {
@@ -3053,53 +3046,73 @@ function renderSurvivalLog(targetEl, events) {
     icon.textContent = getSurvivalEventIcon(event.outcome || {});
     const text = document.createElement("div");
     text.className = "survivalLogText";
-    text.innerHTML = applyMentions(String(event.text || ""));
-    try{
-      if (hasMention(event.text, me?.username)) row.classList.add("survivalMentionMe");
-    }catch(_){ }
+    text.textContent = event.text || "";
     row.appendChild(icon);
     row.appendChild(text);
     targetEl.appendChild(row);
   });
 }
 
-function injectSurvivalEventsIntoChat(events, season) {
-  if (!isSurvivalRoom(currentRoom)) return;
-  if (!events || !events.length) return;
-  const sid = season?.id || survivalState.season?.id;
-  if (!sid) return;
+const SURVIVAL_ARENA_ZONES = [
+  "Open Field",
+  "Pine Woods",
+  "Rocky Ridge",
+  "Ruins",
+  "River Bend",
+  "Caves",
+  "Swamp",
+  "Cornucopia",
+];
 
-  // New season selected/loaded: reset de-dup state.
-  if (survivalState.injectedSeasonId !== sid) {
-    survivalState.injectedSeasonId = sid;
-    survivalState.injectedEventIds = new Set();
-    survivalState.lastInjectedHeaderKey = "";
-    const title = season?.title || "Survival";
-    addSystem(`📜 Loaded season log: ${title}`);
-  }
-
-  // Ensure ascending order for narrative.
-  const ordered = [...events].sort((a, b) => {
-    const ai = Number(a?.id || 0);
-    const bi = Number(b?.id || 0);
-    if (ai && bi && ai !== bi) return ai - bi;
-    return Number(a?.order_index || 0) - Number(b?.order_index || 0);
+function renderSurvivalArena() {
+  if (!survivalArenaGrid) return;
+  const participants = survivalState.participants || [];
+  const byZone = new Map();
+  participants.forEach((p) => {
+    const zRaw = (p?.location || "Open Field").toString();
+    const z = SURVIVAL_ARENA_ZONES.find((n) => n.toLowerCase() === zRaw.toLowerCase()) || "Open Field";
+    if (!byZone.has(z)) byZone.set(z, []);
+    byZone.get(z).push(p);
   });
 
-  for (const ev of ordered) {
-    const evId = ev?.id ? String(ev.id) : null;
-    if (evId && survivalState.injectedEventIds.has(evId)) continue;
+  survivalArenaGrid.innerHTML = "";
+  SURVIVAL_ARENA_ZONES.forEach((zone) => {
+    const list = (byZone.get(zone) || []).slice().sort((a, b) => Number(b.alive) - Number(a.alive));
+    const alive = list.filter((p) => p.alive).length;
+    const danger = Number(survivalState.arena?.dangerLevels?.[zone] || 0);
 
-    const headerKey = `${ev?.day_index || ""}:${String(ev?.phase || "").toLowerCase()}`;
-    if (headerKey && headerKey !== survivalState.lastInjectedHeaderKey) {
-      survivalState.lastInjectedHeaderKey = headerKey;
-      const d = ev?.day_index ? `Day ${ev.day_index}` : "Day";
-      const ph = capitalize(ev?.phase || "day");
-      addSystem(`🗺️ ${d} — ${ph}`);
+    const card = document.createElement("div");
+    card.className = "survivalZone";
+    card.innerHTML = `
+      <div class="survivalZoneTop">
+        <div class="survivalZoneName">${escapeHtml(zone)}</div>
+        <div class="survivalZoneMeta">Alive: ${alive} · Danger: ${danger}</div>
+      </div>
+      <div class="survivalZoneList"></div>
+    `;
+    const ul = card.querySelector(".survivalZoneList");
+    const show = list.slice(0, 12);
+    ul.innerHTML = show.map((p) => {
+      const name = p?.display_name || "?";
+      const cls = p?.alive ? "survivalZoneP" : "survivalZoneP dead";
+      return `<span class="${cls}">${escapeHtml(name)}</span>`;
+    }).join("");
+    if (list.length > show.length) {
+      const more = document.createElement("div");
+      more.className = "small muted";
+      more.textContent = `+${list.length - show.length} more`;
+      card.appendChild(more);
     }
+    survivalArenaGrid.appendChild(card);
+  });
 
-    if (ev?.text) addSystem(String(ev.text));
-    if (evId) survivalState.injectedEventIds.add(evId);
+  if (survivalLobbyCount) {
+    const count = (survivalState.lobbyUserIds || []).length;
+    survivalLobbyCount.textContent = count ? `Lobby signups: ${count}` : "";
+  }
+  if (survivalLobbyBtn) {
+    const isIn = !!me?.id && (survivalState.lobbyUserIds || []).includes(Number(me.id));
+    survivalLobbyBtn.textContent = isIn ? "Opt-out" : "Opt-in";
   }
 }
 
@@ -3138,112 +3151,6 @@ function renderSurvivalRoster() {
   });
 }
 
-function closeSurvivalArenaPopover() {
-  if (!survivalArenaPopover) return;
-  survivalArenaPopover.hidden = true;
-  survivalArenaPopover.innerHTML = "";
-}
-
-function renderSurvivalArena() {
-  if (!survivalArenaOverlay || !survivalArenaLegend) return;
-  const season = survivalState.season;
-  const participants = survivalState.participants || [];
-  const fog = survivalFogMode ? survivalFogMode.value : "exact";
-
-  survivalArenaOverlay.innerHTML = "";
-  survivalArenaLegend.innerHTML = "";
-  closeSurvivalArenaPopover();
-
-  if (!season || !participants.length) {
-    survivalArenaLegend.textContent = "No season.";
-    return;
-  }
-
-  const zoneCounts = new Map();
-  const tokens = [];
-  for (const p of participants) {
-    if (fog === "hidden") continue;
-    const zone = survivalZoneForParticipant(p, season, fog);
-    const jitter = survivalJitterPx(p, season);
-    zoneCounts.set(zone.key, (zoneCounts.get(zone.key) || 0) + 1);
-    tokens.push({ p, zone, jitter });
-  }
-
-  // Legend (zone list + counts)
-  for (const z of SURVIVAL_ARENA_ZONES) {
-    const row = document.createElement("div");
-    row.className = "survivalArenaLegendRow";
-    const name = document.createElement("span");
-    name.className = "survivalArenaLegendName";
-    name.textContent = z.label;
-    const count = document.createElement("span");
-    count.className = "survivalArenaLegendCount";
-    count.textContent = String(zoneCounts.get(z.key) || 0);
-    row.appendChild(name);
-    row.appendChild(count);
-    survivalArenaLegend.appendChild(row);
-  }
-
-  // Tokens
-  tokens.forEach(({ p, zone, jitter }) => {
-    const token = document.createElement("button");
-    token.type = "button";
-    token.className = "survivalToken";
-    token.classList.toggle("dead", !p.alive);
-    token.style.left = `calc(${zone.x}% + ${jitter.dx}px)`;
-    token.style.top = `calc(${zone.y}% + ${jitter.dy}px)`;
-    token.title = p.display_name;
-
-    const isNpc = !p.user_id || Number(p.user_id) <= 0 || !p.avatar_url;
-    if (isNpc) {
-      const dot = document.createElement("span");
-      dot.className = "survivalTokenDot";
-      token.appendChild(dot);
-    } else {
-      const img = document.createElement("img");
-      img.className = "survivalTokenAvatar";
-      img.alt = p.display_name;
-      img.src = p.avatar_url;
-      img.loading = "lazy";
-      img.decoding = "async";
-      token.appendChild(img);
-    }
-
-    token.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (!survivalArenaPopover) return;
-      const rect = token.getBoundingClientRect();
-      const rootRect = document.documentElement.getBoundingClientRect();
-      const hp = Number(p.hp || 0);
-      const status = p.alive ? "Alive" : "Down";
-      const ko = Number(p.kills || 0);
-
-      survivalArenaPopover.innerHTML = `
-        <div class="survivalPopName">${escapeHtml(p.display_name || "")}</div>
-        <div class="survivalPopMeta">${status} • HP ${hp} • ${ko} KOs</div>
-        <div class="survivalPopZone">${escapeHtml(zone.label)}</div>
-      `;
-      survivalArenaPopover.style.left = `${rect.left - rootRect.left + rect.width + 8}px`;
-      survivalArenaPopover.style.top = `${rect.top - rootRect.top - 6}px`;
-      survivalArenaPopover.hidden = false;
-    });
-
-    survivalArenaOverlay.appendChild(token);
-  });
-}
-
-function openSurvivalArena() {
-  if (!survivalArena) return;
-  survivalArena.hidden = false;
-  renderSurvivalArena();
-}
-
-function closeSurvivalArena() {
-  if (!survivalArena) return;
-  survivalArena.hidden = true;
-  closeSurvivalArenaPopover();
-}
-
 async function loadSurvivalCurrent() {
   if (!isSurvivalRoom(currentRoom)) return;
   const { res, text } = await api("/api/survival/current", { method: "GET" });
@@ -3277,17 +3184,15 @@ function applySurvivalPayload(payload, { replaceEvents = false } = {}) {
     }
     survivalState.logBeforeId = payload.events?.[0]?.id || survivalState.logBeforeId;
   }
+  if (payload.arena && typeof payload.arena === "object") {
+    survivalState.arena = payload.arena;
+  }
   if (!survivalState.selectedSeasonId && payload.season) {
     survivalState.selectedSeasonId = payload.season.id;
   }
   renderSurvivalPanel();
   renderSurvivalLog(survivalLogList, survivalState.events);
-  // Make the narrative permanent in the Survival room by also echoing it into
-  // the main chat stream as system lines (with client-side de-dup on refresh).
-  injectSurvivalEventsIntoChat(survivalState.events, survivalState.season);
-  if (survivalArena && !survivalArena.hidden) {
-    renderSurvivalArena();
-  }
+  renderSurvivalArena();
 }
 
 async function openSurvivalNewSeasonModal() {
@@ -3302,6 +3207,9 @@ async function openSurvivalNewSeasonModal() {
   survivalParticipantList.innerHTML = "";
   if (survivalCouplesToggle) survivalCouplesToggle.checked = false;
   if (survivalChaosToggle) survivalChaosToggle.checked = false;
+  if (survivalLobbyToggle) survivalLobbyToggle.checked = false;
+  if (survivalNpcNames) survivalNpcNames.value = "";
+  if (survivalFillSlots) survivalFillSlots.value = "0";
   users.forEach((user) => {
     if (!user?.id) return;
     const row = document.createElement("label");
@@ -3386,8 +3294,13 @@ async function startSurvivalSeason() {
   ).map((el) => Number(el.value));
   const onlineIds = (lastUsers || []).map((u) => u?.id).filter((id) => Number.isInteger(id));
   const participantIds = mode === "select" ? selected : onlineIds;
-  if (participantIds.length < 2) {
-    if (survivalSeasonMsg) survivalSeasonMsg.textContent = "Pick at least two participants.";
+  const npcRaw = (survivalNpcNames?.value || "").trim();
+  const fillSlots = Number(survivalFillSlots?.value || 0) || 0;
+  const npcCount = npcRaw ? npcRaw.split(/[\n,]/g).map((s) => s.trim()).filter(Boolean).length : 0;
+  const baseCount = participantIds.length + npcCount;
+  const desiredCount = fillSlots > 0 ? Math.max(fillSlots, baseCount) : baseCount;
+  if (desiredCount < 2) {
+    if (survivalSeasonMsg) survivalSeasonMsg.textContent = "Add at least two total participants (users or custom names).";
     return;
   }
   if (survivalSeasonStartBtn) survivalSeasonStartBtn.disabled = true;
@@ -3396,6 +3309,9 @@ async function startSurvivalSeason() {
     const payload = {
       title: survivalSeasonTitleInput?.value || "",
       participant_user_ids: participantIds,
+      include_lobby: !!survivalLobbyToggle?.checked,
+      npc_names: npcRaw,
+      fill_slots: fillSlots,
       options: {
         includeCouples: !!survivalCouplesToggle?.checked,
         chaoticMode: !!survivalChaosToggle?.checked,
@@ -5305,9 +5221,6 @@ function addSystem(text, options = {}){
   const div=document.createElement("div");
   div.className="sys";
   if (options.className) div.classList.add(options.className);
-  try{
-    if (hasMention(text, me?.username)) div.classList.add("sysMentionMe");
-  }catch(_){ }
 
   // Dice Room: make system messages larger, and make dice faces much more visible
   if(currentRoom === "diceroom"){
@@ -5316,7 +5229,7 @@ function addSystem(text, options = {}){
     const withFaces = safe.replace(/[⚀⚁⚂⚃⚄⚅]/g, (m)=>`<span class="diceFace">${m}</span>`);
     div.innerHTML = withFaces;
   }else{
-    div.innerHTML = applyMentions(String(text ?? ""));
+    div.textContent = text;
   }
 
   msgs.appendChild(div);
@@ -5365,13 +5278,7 @@ function applyMentions(text, { linkifyText = false } = {}){
   if (list.length) {
     const pattern = list.map(escapeRegex).join("|");
     const re = new RegExp(`@(${pattern})(?=$|[^\\S]|[.,!?:;])`, "gi");
-    const myName = String(me?.username || "").trim().toLowerCase();
-    output = safe.replace(re, (_m, name)=>{
-      const cls = (myName && String(name || "").toLowerCase() === myName)
-        ? "mention mentionMe"
-        : "mention";
-      return `<span class="${cls}">@${escapeHtml(name)}</span>`;
-    });
+    output = safe.replace(re, (m)=>`<span class="mention">${m}</span>`);
   }
   return linkifyText ? linkify(output) : output;
 }
@@ -9622,12 +9529,37 @@ survivalRosterClose?.addEventListener("click", closeSurvivalRosterModal);
 survivalRosterModal?.addEventListener("click", (e) => {
   if (e.target === survivalRosterModal) closeSurvivalRosterModal();
 });
-survivalLogBtn?.addEventListener("click", openSurvivalLogModal);
+survivalLogBtn?.addEventListener("click", (e) => {
+  survivalState.view = "log";
+  renderSurvivalPanel();
+  if (e?.shiftKey) openSurvivalLogModal();
+});
+survivalArenaBtn?.addEventListener("click", () => {
+  survivalState.view = "arena";
+  renderSurvivalPanel();
+  renderSurvivalArena();
+});
 survivalLogClose?.addEventListener("click", closeSurvivalLogModal);
 survivalLogModal?.addEventListener("click", (e) => {
   if (e.target === survivalLogModal) closeSurvivalLogModal();
 });
 survivalLogLoadBtn?.addEventListener("click", loadOlderSurvivalLog);
+survivalLobbyBtn?.addEventListener("click", async () => {
+  if (!me?.id) return;
+  const isIn = (survivalState.lobbyUserIds || []).includes(Number(me.id));
+  const endpoint = isIn ? "/api/survival/lobby/leave" : "/api/survival/lobby/join";
+  try {
+    await api(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const { res, text } = await api("/api/survival/lobby", { method: "GET" });
+    if (res.ok) {
+      const data = safeJsonParse(text, null);
+      if (data && Array.isArray(data.user_ids)) {
+        survivalState.lobbyUserIds = data.user_ids.map((x) => Number(x)).filter((x) => x > 0);
+      }
+    }
+  } catch {}
+  renderSurvivalArena();
+});
 survivalAutoRunBtn?.addEventListener("click", () => {
   if (!survivalAutoRunning) startSurvivalAutoRun();
   else stopSurvivalAutoRun();
@@ -9642,19 +9574,12 @@ survivalHistorySelect?.addEventListener("change", async (e) => {
   renderSurvivalLog(survivalLogModalList, survivalState.events);
   renderSurvivalRoster();
 });
+// Allow viewers to close the expanded log/map UI (system messages remain in chat).
+survivalHideViewBtn?.addEventListener("click", () => {
+  survivalState.view = "none";
+  renderSurvivalPanel();
+});
 
-// Arena (visual map)
-survivalArenaBtn?.addEventListener("click", () => {
-  if (!isSurvivalRoom(currentRoom)) return;
-  openSurvivalArena();
-});
-survivalArenaClose?.addEventListener("click", closeSurvivalArena);
-survivalFogMode?.addEventListener("change", () => {
-  if (survivalArena && !survivalArena.hidden) renderSurvivalArena();
-});
-document.getElementById("survivalArenaMap")?.addEventListener("click", () => {
-  closeSurvivalArenaPopover();
-});
 
 // rooms
 function setActiveRoom(room){
@@ -9673,8 +9598,10 @@ function setActiveRoom(room){
   // Ensure room-specific UI doesn't leak into other rooms.
   if (diceVariantWrap) diceVariantWrap.style.display = nowDiceRoom ? "" : "none";
   if (luckMeter) luckMeter.style.display = nowDiceRoom ? "" : "none";
-  if (survivalPanel) survivalPanel.hidden = !nowSurvivalRoom;
-  if (survivalLogFeed) survivalLogFeed.hidden = !nowSurvivalRoom;
+  if (survivalPanel) survivalPanel.hidden = !nowSurvivalRoom || survivalUiCollapsed;
+  if (survivalMiniBtn) survivalMiniBtn.hidden = !nowSurvivalRoom || !survivalUiCollapsed;
+  if (survivalLogFeed) survivalLogFeed.hidden = !nowSurvivalRoom || survivalUiCollapsed || survivalState.view !== "log";
+  if (survivalArena) survivalArena.hidden = !nowSurvivalRoom || survivalUiCollapsed || survivalState.view !== "arena";
   // If a modal is open that is built around room/profile context, close it when switching rooms.
   try {
     if (couplesModal && couplesModal.style.display && couplesModal.style.display !== "none") closeCouplesModal();
@@ -15058,10 +14985,16 @@ initAppealsDurationSelect();
     if (!Array.isArray(payload.events)) return;
     survivalState.events = [...survivalState.events, ...payload.events];
     renderSurvivalLog(survivalLogList, survivalState.events);
-    injectSurvivalEventsIntoChat(payload.events, survivalState.season);
     if (survivalLogModal && survivalLogModal.style.display !== "none") {
       renderSurvivalLog(survivalLogModalList, survivalState.events);
     }
+  });
+
+  socket.on("survival:lobby", (payload = {}) => {
+    if (!isSurvivalRoom(currentRoom)) return;
+    const ids = Array.isArray(payload.user_ids) ? payload.user_ids : [];
+    survivalState.lobbyUserIds = ids.map((x) => Number(x)).filter((x) => x > 0);
+    renderSurvivalArena();
   });
 
 socket.on("disconnect", (reason) => {

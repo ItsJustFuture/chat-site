@@ -2694,6 +2694,26 @@ body.survival-room .survivalPanel{
   justify-content:space-between;
   gap:8px 12px;
 }
+
+.survivalCollapseBtn{ margin-left:auto; }
+
+/* Mini collapsed button shown at the very top when survival UI is collapsed */
+.survivalMiniBtn{
+  position:fixed;
+  top:8px;
+  left:50%;
+  transform:translateX(-50%);
+  z-index:140;
+  width:auto;
+  border-radius:14px;
+  border:1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  color:var(--text);
+  padding:8px 10px;
+  font-weight:800;
+  box-shadow: 0 10px 26px rgba(0,0,0,0.25);
+}
+
 .survivalPanelGroup{
   display:flex;
   flex-wrap:wrap;
@@ -2712,134 +2732,6 @@ body.survival-room .survivalPanel{
   color:var(--text);
   border-radius:10px;
   padding:4px 8px;
-}
-
-/* Survival Arena (visual map) */
-.survivalArena{
-  margin:0 12px 10px;
-  border-radius:16px;
-  border:1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 80%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  overflow:hidden;
-}
-.survivalArenaHeader{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  padding:10px 12px;
-  border-bottom:1px solid var(--border);
-}
-.survivalArenaTitle{
-  font-weight:900;
-  font-size:13px;
-}
-.survivalArenaControls{
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-.survivalFogLabel{
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  font-size:11px;
-  color:var(--muted);
-}
-.survivalFogLabel select{
-  background: color-mix(in srgb, var(--panel) 80%, transparent);
-  border:1px solid var(--border);
-  color:var(--text);
-  border-radius:10px;
-  padding:4px 8px;
-}
-.survivalArenaMap{
-  position:relative;
-  width:100%;
-  aspect-ratio: 4 / 3;
-  background: color-mix(in srgb, var(--panel) 70%, transparent);
-}
-.survivalArenaBase{
-  position:absolute;
-  inset:0;
-  width:100%;
-  height:100%;
-  object-fit:cover;
-  user-select:none;
-  pointer-events:none;
-}
-.survivalArenaOverlay{
-  position:absolute;
-  inset:0;
-}
-.survivalToken{
-  position:absolute;
-  width:22px;
-  height:22px;
-  border-radius:999px;
-  border:2px solid rgba(255,255,255,0.85);
-  background: rgba(0,0,0,0.25);
-  transform: translate(-50%, -50%);
-  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
-  padding:0;
-  display:grid;
-  place-items:center;
-}
-.survivalToken.dead{
-  opacity:0.45;
-  filter:grayscale(1);
-}
-.survivalTokenDot{
-  width:10px;
-  height:10px;
-  border-radius:999px;
-  background: rgba(255,255,255,0.9);
-  box-shadow: 0 0 0 3px rgba(0,0,0,0.2);
-}
-.survivalTokenAvatar{
-  width:100%;
-  height:100%;
-  border-radius:999px;
-  object-fit:cover;
-  display:block;
-}
-.survivalArenaPopover{
-  position:absolute;
-  min-width:150px;
-  max-width:220px;
-  padding:8px 10px;
-  border-radius:12px;
-  border:1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  box-shadow: 0 16px 40px rgba(0,0,0,0.45);
-  z-index:5;
-}
-.survivalPopName{ font-weight:900; font-size:13px; }
-.survivalPopMeta{ font-size:11px; color:var(--muted); margin-top:2px; }
-.survivalPopZone{ font-size:11px; margin-top:6px; }
-
-.survivalArenaLegend{
-  display:grid;
-  grid-template-columns: 1fr 34px;
-  gap:6px 8px;
-  padding:10px 12px;
-  border-top:1px solid var(--border);
-  font-size:11px;
-  color:var(--muted);
-}
-.survivalArenaLegendRow{
-  display:contents;
-}
-.survivalArenaLegendName{
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-}
-.survivalArenaLegendCount{
-  text-align:right;
-  font-variant-numeric: tabular-nums;
 }
 
 .survivalLogFeed{
@@ -2888,6 +2780,67 @@ body.survival-room .survivalLogFeed{
   color:var(--muted);
 }
 
+.survivalArena{
+  display:none;
+  margin:0 12px 10px;
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 75%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+body.survival-room .survivalArena{
+  display:block;
+}
+.survivalArenaHeader{
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  margin-bottom:6px;
+}
+.survivalArenaTitle{
+  font-size:11px;
+  letter-spacing:0.6px;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+.survivalArenaGrid{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:10px;
+}
+.survivalZone{
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:10px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+}
+.survivalZoneTop{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:center;
+  margin-bottom:8px;
+}
+.survivalZoneName{font-weight:700;font-size:13px;}
+.survivalZoneDanger{font-size:11px;color:var(--muted);}
+.survivalZoneBadges{display:flex;flex-wrap:wrap;gap:6px;}
+.survivalBadge{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:5px 8px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  font-size:12px;
+}
+.survivalBadge .dot{width:8px;height:8px;border-radius:999px;background:var(--accent);opacity:0.9;}
+
+@media (max-width: 420px){
+  .survivalArenaGrid{grid-template-columns:1fr;}
+}
+
 .survivalModal .modalBody{
   display:flex;
   flex-direction:column;
@@ -2920,6 +2873,29 @@ body.survival-room .survivalLogFeed{
   gap:6px;
   font-size:12px;
   color:var(--muted);
+}
+
+.survivalNpcFields{
+  margin-top:8px;
+  padding:10px;
+  border-radius:14px;
+  border:1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+}
+.survivalNpcFields textarea{
+  width:100%;
+  margin-top:6px;
+  border-radius:12px;
+}
+.survivalNpcRow{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-top:8px;
+}
+.survivalNpcRow input[type="number"]{
+  width:120px;
 }
 .survivalRosterList{
   display:flex;
@@ -3355,11 +3331,6 @@ body.survival-room .survivalLogFeed{
   -webkit-text-fill-color: transparent;
 }
 .mention{ background:var(--mentionBg); color:var(--mentionText); border:1px solid var(--border); padding:0 4px; border-radius:6px; }
-.mention.mentionMe{ background:color-mix(in srgb, var(--accent) 25%, var(--mentionBg)); border-color:color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow:0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent); }
-
-.sys.sysMentionMe{ border:1px solid color-mix(in srgb, var(--accent) 55%, var(--border)); background:color-mix(in srgb, var(--accent) 10%, var(--panel)); box-shadow:0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent); }
-
-.survivalLogItem.survivalMentionMe{ border:1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); background:color-mix(in srgb, var(--accent) 8%, transparent); border-radius:10px; padding:6px 8px; }
 /* ===== Message actions (horizontal bar below message) =====
    Actions live inside .msgMain and are collapsed by default so they reserve
    ZERO space. When opened (tap/hover), they expand downward.
@@ -8552,3 +8523,8 @@ body.ambientfx.ambient-nsfw{ }
 @media (min-width: 720px){
   .voice-rec-modal{ align-items:center; }
 }
+
+
+/* Survival: prevent panels from running off-screen */
+body.survival-room .survivalLogFeed{ max-height: calc(100vh - 220px); overflow:auto; }
+body.survival-room .survivalArena{ max-height: calc(100vh - 160px); overflow:auto; }
