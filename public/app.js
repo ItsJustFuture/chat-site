@@ -2203,6 +2203,12 @@ const IRIS_LOLA_THEME = "Iris & Lola Neon";
 const IRIS_LOLA_ALLOWED_USERNAMES = ["Iri", "Lola Henderson"];
 const IRIS_LOLA_ALLOWED_USER_IDS = [];
 let onlineUsers = [];
+const IRIS_LOLA_SHARED_WINDOW_MS = 5000;
+const IRIS_LOLA_SHARED_COOLDOWN_MS = 4 * 60 * 1000;
+let irisLolaSharedMomentTs = 0;
+let irisLolaLastPartnerMsgTs = 0;
+let irisLolaLastSelfMsgTs = 0;
+let irisLolaStarfieldReady = false;
 
 function normalizeUserKey(value) {
   return String(value || "").trim().toLowerCase();
@@ -2221,14 +2227,149 @@ function isIrisLolaAllowedUser(user) {
 function isIrisLolaAllowed() {
   return isIrisLolaAllowedUser(me);
 }
-function bothIrisAndLolaOnline() {
+function isIrisLolaThemeActive(themeName) {
+  const active = themeName || document.body?.getAttribute("data-theme") || "";
+  return active === IRIS_LOLA_THEME;
+}
+function getPartnerId(coupleState, myUserId) {
+  const activeId = Number(coupleState?.active?.partnerId) || 0;
+  if (activeId) return activeId;
+  const couple = coupleState?.couple || coupleState?.active?.couple;
+  const uid = Number(myUserId) || 0;
+  if (!couple || !uid) return null;
+  const a = Number(couple.user_a_id ?? couple.user1_id ?? couple.userAId ?? couple.user1Id ?? 0) || 0;
+  const b = Number(couple.user_b_id ?? couple.user2_id ?? couple.userBId ?? couple.user2Id ?? 0) || 0;
+  if (!a || !b) return null;
+  if (uid === a) return b;
+  if (uid === b) return a;
+  return null;
+}
+function getPartnerUsername(coupleState, myUserId) {
+  const activeName = safeString(coupleState?.active?.partner || "");
+  if (activeName) return activeName;
+  const partner = coupleState?.partner;
+  if (partner?.username) return String(partner.username);
+  const couple = coupleState?.couple || coupleState?.active?.couple;
+  if (!couple) return "";
+  const uid = Number(myUserId) || 0;
+  if (!uid) return "";
+  const a = Number(couple.user_a_id ?? couple.user1_id ?? couple.userAId ?? couple.user1Id ?? 0) || 0;
+  const b = Number(couple.user_b_id ?? couple.user2_id ?? couple.userBId ?? couple.user2Id ?? 0) || 0;
+  if (!a || !b) return "";
+  if (uid === a) return safeString(couple.user_b_name || couple.user2_name || "");
+  if (uid === b) return safeString(couple.user_a_name || couple.user1_name || "");
+  return "";
+}
+function shouldShowTogetherGlow(themeActive, coupleActive, partnerOnline) {
+  return !!(themeActive && coupleActive && partnerOnline);
+}
+function shouldShowSharedMoment(now, lastEventTs, cooldownMs) {
+  const last = Number(lastEventTs) || 0;
+  return !last || (now - last) >= Number(cooldownMs || 0);
+}
+function shouldAnimateAmbientEffects(prefersReducedMotion) {
+  return !prefersReducedMotion;
+}
+// Iris & Lola Couples Theme Enhancement
+// Example usage:
+// isIrisLolaThemeActive("Iris & Lola Neon") -> true
+// getPartnerId({ active: { partnerId: 42 } }, 7) -> 42
+// shouldShowTogetherGlow(true, true, true) -> true
+// shouldShowSharedMoment(Date.now(), Date.now() - 240000, 240000) -> true
+// shouldAnimateAmbientEffects(true) -> false
+function isCoupleActiveState(coupleState) {
+  const active = coupleState?.active;
+  if (!active || !active.partner) return false;
+  const prefs = active.prefs || {};
+  const partnerPrefs = active.partnerPrefs || {};
+  if (prefs.enabled === false || partnerPrefs.enabled === false) return false;
+  return true;
+}
+function isUserOnlineByName(name) {
+  if (!name) return false;
   const set = new Set((onlineUsers || []).map((n) => normalizeUserKey(n)));
-  return IRIS_LOLA_ALLOWED_USERNAMES.every((n) => set.has(normalizeUserKey(n)));
+  return set.has(normalizeUserKey(name));
+}
+function ensureIrisLolaStarfield() {
+  if (irisLolaStarfieldReady) return;
+  const existing = document.getElementById("irisLolaStarfield");
+  if (existing) {
+    irisLolaStarfieldReady = true;
+    return;
+  }
+  const field = document.createElement("div");
+  field.id = "irisLolaStarfield";
+  field.className = "irisLolaStarfield";
+  field.setAttribute("aria-hidden", "true");
+  const stars = [
+    { x: "8%", y: "18%", size: "1px", dur: "26s", delay: "-4s" },
+    { x: "22%", y: "64%", size: "2px", dur: "32s", delay: "-12s" },
+    { x: "38%", y: "32%", size: "1px", dur: "28s", delay: "-8s" },
+    { x: "54%", y: "12%", size: "1px", dur: "36s", delay: "-18s" },
+    { x: "66%", y: "58%", size: "2px", dur: "30s", delay: "-6s" },
+    { x: "74%", y: "28%", size: "1px", dur: "24s", delay: "-10s" },
+    { x: "82%", y: "72%", size: "1px", dur: "34s", delay: "-20s" },
+    { x: "92%", y: "40%", size: "2px", dur: "40s", delay: "-16s" },
+    { x: "14%", y: "82%", size: "1px", dur: "38s", delay: "-22s" },
+    { x: "46%", y: "78%", size: "1px", dur: "27s", delay: "-14s" },
+  ];
+  stars.forEach((star) => {
+    const node = document.createElement("span");
+    node.className = "irisLolaStar";
+    node.style.setProperty("--x", star.x);
+    node.style.setProperty("--y", star.y);
+    node.style.setProperty("--size", star.size);
+    node.style.setProperty("--dur", star.dur);
+    node.style.setProperty("--delay", star.delay);
+    field.appendChild(node);
+  });
+  document.body?.appendChild(field);
+  irisLolaStarfieldReady = true;
 }
 function updateIrisLolaTogetherClass() {
-  const active = document.body?.getAttribute("data-theme") || "";
-  const on = active === IRIS_LOLA_THEME && isIrisLolaAllowed() && bothIrisAndLolaOnline();
+  const themeActive = isIrisLolaThemeActive();
+  const coupleActive = isCoupleActiveState(couplesState);
+  const partnerName = getPartnerUsername(couplesState, getUserId(me));
+  const bothOnline = !!(partnerName && isUserOnlineByName(partnerName) && isUserOnlineByName(me?.username));
+  const on = shouldShowTogetherGlow(themeActive, coupleActive, bothOnline);
   document.body?.classList.toggle("irisLolaTogether", !!on);
+  document.body?.classList.toggle("irisLolaCoupleActive", !!(themeActive && coupleActive));
+  updateIrisLolaAvatarGlows({ themeActive, coupleActive, bothOnline, partnerName });
+  ensureIrisLolaStarfield();
+}
+function updateIrisLolaAvatarGlows({ themeActive, coupleActive, bothOnline, partnerName } = {}) {
+  const allow = shouldShowTogetherGlow(themeActive, coupleActive, bothOnline);
+  const partnerKey = normalizeUserKey(partnerName || "");
+  const meKey = normalizeUserKey(me?.username || "");
+  if (memberList) {
+    memberList.querySelectorAll(".mItem").forEach((row) => {
+      const uname = normalizeUserKey(row.dataset.username || "");
+      const target = row.querySelector(".mAvatar");
+      if (!target) return;
+      const isPair = allow && (uname === partnerKey || uname === meKey);
+      target.classList.toggle("irisLolaTogetherGlow", !!isPair);
+    });
+  }
+  if (profileSheetAvatar && profileSheetHero) {
+    const profileName = normalizeUserKey(profileSheetHero.dataset.username || "");
+    const isPair = allow && (profileName === partnerKey || profileName === meKey);
+    profileSheetAvatar.classList.toggle("irisLolaTogetherGlow", !!isPair);
+  }
+}
+function formatIrisLolaStatusLabel(statusLabel, username) {
+  if (!statusLabel || statusLabel !== "Online") return statusLabel;
+  if (!isIrisLolaThemeActive() || !isCoupleActiveState(couplesState)) return statusLabel;
+  const partnerName = getPartnerUsername(couplesState, getUserId(me));
+  if (!partnerName) return statusLabel;
+  return normalizeUserKey(username) === normalizeUserKey(partnerName) ? "Here together" : statusLabel;
+}
+function isPartnerName(username) {
+  const partnerName = getPartnerUsername(couplesState, getUserId(me));
+  if (!partnerName) return false;
+  return normalizeUserKey(username) === normalizeUserKey(partnerName);
+}
+function shouldUseIrisLolaCoupleUi() {
+  return isIrisLolaThemeActive() && isCoupleActiveState(couplesState);
 }
 const DEFAULT_THEME = "Minimal Dark";
 let currentTheme = document.body?.getAttribute("data-theme") || DEFAULT_THEME;
@@ -5900,6 +6041,7 @@ function applyTheme(themeName, { persist=true, silent=false, storeLocal=persist 
     themeMsg.textContent = `Theme applied: ${safe}`;
     setTimeout(() => { if(themeMsg.textContent.startsWith("Theme applied")) themeMsg.textContent = ""; }, 2400);
   }
+  updateIrisLolaTogetherClass();
 }
 function createThemeThumbnail(themeName){
   const wrap = document.createElement("div");
@@ -6750,6 +6892,27 @@ function renderAttachmentNode({ url, mime, type } = {}) {
   return att;
 }
 
+// Iris & Lola Couples Theme Enhancement
+function maybeShowIrisLolaSharedMoment({ isSelf, isPartner, messageTs, container, anchorItem }) {
+  if (!shouldUseIrisLolaCoupleUi()) return;
+  if (!isSelf && !isPartner) return;
+  const now = Number(messageTs) || Date.now();
+  if (isSelf) irisLolaLastSelfMsgTs = now;
+  if (isPartner) irisLolaLastPartnerMsgTs = now;
+  const otherTs = isSelf ? irisLolaLastPartnerMsgTs : irisLolaLastSelfMsgTs;
+  if (!otherTs || Math.abs(now - otherTs) > IRIS_LOLA_SHARED_WINDOW_MS) return;
+  if (!shouldShowSharedMoment(now, irisLolaSharedMomentTs, IRIS_LOLA_SHARED_COOLDOWN_MS)) return;
+  irisLolaSharedMomentTs = now;
+  const badge = document.createElement("div");
+  badge.className = "irisLolaSharedMoment";
+  if (!shouldAnimateAmbientEffects(PREFERS_REDUCED_MOTION)) badge.classList.add("no-motion");
+  badge.textContent = "💖";
+  if (container && anchorItem) {
+    container.insertBefore(badge, anchorItem);
+    setTimeout(() => badge.remove(), 1200);
+  }
+}
+
 function addMessage(m){
   // --- Main chat grouping: consecutive messages from same user are visually grouped ---
   const shouldStick = isNearBottom(msgs, 160);
@@ -6823,11 +6986,22 @@ try{
     isSelf
   });
   item.dataset.username = normKey(senderName || "");
+  const isPartner = isPartnerName(senderName);
+  if (shouldUseIrisLolaCoupleUi() && !isSelf && isPartner) {
+    item.classList.add("couple-partner-msg");
+  }
 
   const bubbleEl = item.querySelector(".bubble");
   applyChatFxToBubble(bubbleEl, resolvedFx, { groupBody: body });
   applyIdentityGlow(item, { username: senderName, role: senderRole, vibe_tags: m?.vibe_tags, couple: m?.couple });
   body.appendChild(item);
+  maybeShowIrisLolaSharedMoment({
+    isSelf,
+    isPartner,
+    messageTs: m?.ts,
+    container: body,
+    anchorItem: item
+  });
   queueContrastReinforcement(bubbleEl);
 
   if (m.__fresh && !isSelf && hasMention(rawText, me?.username)) {
@@ -7518,6 +7692,26 @@ function reorderCouplesInMembers(list){
   return (out.length === users.length) ? out : users;
 }
 
+function ensureIrisLolaPartnerAdjacency(list){
+  if (!isIrisLolaThemeActive() || !isCoupleActiveState(couplesState)) return list;
+  const meName = me?.username || "";
+  const partnerName = getPartnerUsername(couplesState, getUserId(me));
+  if (!meName || !partnerName) return list;
+  const users = Array.isArray(list) ? list.slice() : [];
+  let selfIdx = users.findIndex((u) => normalizeUserKey(u?.name) === normalizeUserKey(meName));
+  let partnerIdx = users.findIndex((u) => normalizeUserKey(u?.name) === normalizeUserKey(partnerName));
+  if (selfIdx === -1 || partnerIdx === -1) return list;
+  const selfUser = users[selfIdx];
+  const partnerUser = users[partnerIdx];
+  if (!selfUser || !partnerUser) return list;
+  if (roleRank(selfUser.role) !== roleRank(partnerUser.role)) return list;
+  if (partnerIdx === selfIdx + 1) return users;
+  const [partner] = users.splice(partnerIdx, 1);
+  if (partnerIdx < selfIdx) selfIdx -= 1;
+  users.splice(selfIdx + 1, 0, partner);
+  return users;
+}
+
 function fmtDaysSince(ts){
   const t = Number(ts)||0;
   if (!t) return "";
@@ -7526,30 +7720,44 @@ function fmtDaysSince(ts){
 }
 
 function renderMembers(users){
-  lastUsers = reorderCouplesInMembers(users || []);
+  lastUsers = ensureIrisLolaPartnerAdjacency(reorderCouplesInMembers(users || []));
   cleanupRecentDiceRolls();
   refreshModTargetOptions(lastUsers);
   withFlip(memberList, "data-flip-key", () => {
     memberList.innerHTML="";
     const presentNames = new Set((lastUsers||[]).map(u=>u?.name).filter(Boolean));
-    lastUsers.forEach(u=>{
+    const themeActive = isIrisLolaThemeActive();
+    const coupleActive = isCoupleActiveState(couplesState);
+    const partnerName = getPartnerUsername(couplesState, getUserId(me));
+    const showCoupleUi = themeActive && coupleActive && partnerName;
+    const partnerKey = normalizeUserKey(partnerName || "");
+    const meKey = normalizeUserKey(me?.username || "");
+    const bothOnline = showCoupleUi && isUserOnlineByName(partnerName) && isUserOnlineByName(me?.username);
+    const showTogetherGlow = shouldShowTogetherGlow(themeActive, coupleActive, bothOnline);
+    let insertedMarker = false;
+    lastUsers.forEach((u, idx)=>{
       updateRoleCache(u.username || u.name, u.role);
       if (u?.chatFx) updateUserFxMap(u.name, u.chatFx);
       const row=document.createElement("div");
       row.className="mItem";
       row.dataset.username = u.name;
       row.dataset.flipKey = u.name;
+      const userKey = normalizeUserKey(u?.name || "");
 
       const av=document.createElement("div");
       av.className="mAvatar";
       applyAvatarMeta(av, { username: u.name, role: u.role, status: u.status });
       const partnerPresent = !!(u?.couple?.partner && presentNames.has(u.couple.partner));
       if (u?.couple?.aura && partnerPresent) av.classList.add("coupleAura");
+      if (showTogetherGlow && (userKey === meKey || userKey === partnerKey)) {
+        av.classList.add("irisLolaTogetherGlow");
+      }
       av.appendChild(avatarNode(u.avatar, u.name, u.role));
 
       const dot=document.createElement("div");
       dot.className="dot";
       const statusLabel = normalizeStatusLabel(u.status, "Online");
+      const statusDisplay = showCoupleUi ? formatIrisLolaStatusLabel(statusLabel, u?.name) : statusLabel;
       dot.style.background=statusDotColor(statusLabel);
 
       const meta=document.createElement("div");
@@ -7576,7 +7784,11 @@ function renderMembers(users){
 
       const sub=document.createElement("div");
       sub.className="mSub";
-      sub.textContent=`${u.role} • ${statusLabel}${u.mood?(" • "+u.mood):""}`;
+      sub.textContent=`${u.role} • ${statusDisplay}${u.mood?(" • "+u.mood):""}`;
+
+      if (showCoupleUi && userKey === partnerKey) {
+        row.classList.add("irisLolaPartnerRow");
+      }
 
       meta.appendChild(name);
       meta.appendChild(sub);
@@ -7611,6 +7823,16 @@ function renderMembers(users){
         openMemberMenu(u, row);
       };
       memberList.appendChild(row);
+      if (!insertedMarker && showCoupleUi && userKey === meKey) {
+        const nextUser = lastUsers[idx + 1];
+        if (nextUser && normalizeUserKey(nextUser?.name) === partnerKey) {
+          const marker = document.createElement("div");
+          marker.className = "irisLolaCoupleMarker";
+          marker.textContent = "💞";
+          memberList.appendChild(marker);
+          insertedMarker = true;
+        }
+      }
     });
   });
   updatePresenceAuras();
@@ -8436,6 +8658,10 @@ function renderDmMessages(threadId){
     row.dataset.dmMid = m.messageId || m.id;
     row.dataset.username = normKey(authorName || "");
     applyIdentityGlow(row, { username: authorName, role: m.role || roleForUser(authorName), vibe_tags: m?.vibe_tags, couple: m?.couple });
+    const isPartner = isPartnerName(authorName);
+    if (shouldUseIrisLolaCoupleUi() && !isSelf && isPartner) {
+      row.classList.add("couple-partner-msg");
+    }
 
 // Avatar column (non-self). Keep spacing consistent for grouped messages.
 const threadMeta = dmThreads.find(t => String(t.id) === String(threadId));
@@ -13494,9 +13720,10 @@ function fillProfileUI(p, isSelf){
   if (infoLastSeen) infoLastSeen.textContent = formatLastSeen(p.last_seen);
   if (infoRoom) infoRoom.textContent = p.current_room ? `#${p.current_room}` : (p.last_room ? `#${p.last_room}` : "—");
   const statusLabel = normalizeStatusLabel(p.last_status, "");
-  if (infoStatus) infoStatus.textContent = statusLabel || "—";
+  const statusDisplay = formatIrisLolaStatusLabel(statusLabel, p.username);
+  if (infoStatus) infoStatus.textContent = statusDisplay || "—";
   if (profileMoodValue) profileMoodValue.textContent = p.mood ? p.mood : "—";
-  if (profileStatusValue) profileStatusValue.textContent = statusLabel || "—";
+  if (profileStatusValue) profileStatusValue.textContent = statusDisplay || "—";
 
   bioRender.innerHTML = p.bio ? renderBBCode(p.bio) : "(no bio)";
   renderLevelProgress(p, isSelf);
@@ -13525,6 +13752,7 @@ function fillProfileSheetHeader(p, isSelf){
   currentProfileHeaderRole = p?.role || "";
   applyProfileHeaderGradient(p?.header_grad_a, p?.header_grad_b, currentProfileHeaderRole);
   applyIdentityGlow(profileSheetHero, p);
+  profileSheetHero.dataset.username = p?.username || "";
 
   // Avatar
   if (profileSheetAvatar){
@@ -13579,10 +13807,12 @@ function fillProfileSheetHeader(p, isSelf){
   const mood = p.mood ? `Mood: ${p.mood}` : "Mood: (none)";
   const room = p.current_room ? `• In #${p.current_room}` : (p.last_room ? `• Last: #${p.last_room}` : "");
   const statusLabel = normalizeStatusLabel(p.last_status, "");
-  const status = statusLabel ? `• ${statusLabel}` : "";
+  const statusDisplay = formatIrisLolaStatusLabel(statusLabel, p.username);
+  const status = statusDisplay ? `• ${statusDisplay}` : "";
   if (profileSheetSub) profileSheetSub.textContent = `${mood} ${status} ${room}`.trim();
   updateProfilePresenceDot(statusLabel);
   renderVibeChips(profileSheetVibes, p.vibe_tags);
+  updateIrisLolaTogetherClass();
 
   // Stats (likes are real; stars show level)
   if (profileSheetStats){
@@ -15290,6 +15520,7 @@ initAppealsDurationSelect();
   await loadThemePreference();
 
   await loadMyProfile();
+  try { refreshCouplesUI(); } catch {}
   await loadUserPrefs();
   await loadProgression();
   renderLevelProgress(progression, true);
@@ -15708,7 +15939,11 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
     typingUsers = new Set((names || []).map(normKey));
     const others=(names||[]).filter(n=>normKey(n)!==normKey(me.username));
     let text="";
-    if(others.length===1) text = typingPhraseFor(others[0]);
+    if(others.length===1) {
+      const only = others[0];
+      if (shouldUseIrisLolaCoupleUi() && isPartnerName(only)) text = "Typing with you…";
+      else text = typingPhraseFor(only);
+    }
     else if(others.length>1){
       const parts = others.slice(0,2).map(typingPhraseFor);
       text = parts.join(" • ");
@@ -16339,6 +16574,7 @@ async function refreshCouplesUI(){
     if (couplesNudgeBtn) couplesNudgeBtn.disabled = true;
     if (couplesV2Status) couplesV2Status.textContent = "";
   }
+  updateIrisLolaTogetherClass();
 }
 
 function emitLocalMembersRefresh(){
