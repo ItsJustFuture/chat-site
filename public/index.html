@@ -1313,12 +1313,13 @@
 </div>
 <div class="field" data-customize-item="" data-search="themes">
 <div class="sectionTitle">Themes</div>
-<div class="themeFilters">
-<button class="pillBtn active" data-theme-filter="all" type="button">All</button>
-<button class="pillBtn" data-theme-filter="dark" type="button">Dark</button>
-<button class="pillBtn" data-theme-filter="light" type="button">Light</button>
+<div class="themeLaunchRow">
+<div class="themeLaunchMeta">
+<div class="themeLaunchLabel">Current theme</div>
+<div class="themeLaunchValue" id="currentThemeLabel">—</div>
 </div>
-<div class="themeGrid" id="themeGrid"></div>
+<button class="btn" id="openThemesModalBtn" type="button">Browse themes</button>
+</div>
 <div class="msgline" id="themeMsg"></div>
 </div>
 </div>
@@ -2108,6 +2109,97 @@
   <button id="mediaSheetCancel" class="media-sheet-cancel" type="button">
     Cancel
   </button>
+</div>
+
+
+<!-- === Themes Modal v2 === -->
+<div id="themesModal" class="themesModal" aria-hidden="true">
+  <div class="themesModalCard" role="dialog" aria-modal="true" aria-label="Themes">
+    <div class="themesModalSticky">
+      <div class="themesModalHeader">
+        <div class="themesModalTitle">Themes</div>
+        <button class="iconBtn" id="themesModalClose" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="themesModalSearchRow">
+        <input id="themesModalSearch" type="search" placeholder="Search themes" autocomplete="off" />
+        <button class="btn secondary" id="themesFiltersBtn" type="button">Filters</button>
+        <select id="themesModalSort">
+          <option value="recommended">Recommended</option>
+          <option value="newest">Newest</option>
+          <option value="az">A–Z</option>
+          <option value="favorites">Favorites first</option>
+          <option value="pinned">Pinned first</option>
+        </select>
+      </div>
+      <div class="themesModalFilters" id="themesModalFilters"></div>
+    </div>
+    <div class="themesModalBody" id="themesModalBody">
+      <div class="themesListPane">
+        <div class="themesSection" id="themesPinnedSection">
+          <div class="themesSectionHeader">Pinned</div>
+          <div class="themesGrid" id="themesPinnedGrid"></div>
+        </div>
+        <div class="themesSection">
+          <div class="themesSectionHeader">All themes</div>
+          <div class="themesGrid" id="themesAllGrid"></div>
+          <div class="themesEmpty" id="themesEmptyState">No themes match your filters.</div>
+        </div>
+      </div>
+      <div class="themesPreviewPane">
+        <div class="themesPreviewCard">
+          <div class="themesPreviewHeader">
+            <div class="themesPreviewTitle">Preview</div>
+            <div class="themesPreviewName" id="themesPreviewName">—</div>
+          </div>
+          <div class="themesPreviewFrame" id="themesPreviewFrame" data-theme="">
+            <div class="themesPreviewTopbar">Banter &amp; Brats</div>
+            <div class="themesPreviewChat">
+              <div class="themesPreviewMsg">
+                <div class="themesPreviewAvatar"></div>
+                <div class="themesPreviewBubble">Hey! Ready for a new vibe?</div>
+              </div>
+              <div class="themesPreviewMsg self">
+                <div class="themesPreviewAvatar"></div>
+                <div class="themesPreviewBubble">Absolutely. Let’s roll.</div>
+              </div>
+              <div class="themesPreviewMsg">
+                <div class="themesPreviewAvatar"></div>
+                <div class="themesPreviewBubble">Preview looks clean ✨</div>
+              </div>
+            </div>
+            <div class="themesPreviewComposer">
+              <div class="themesPreviewInput">Type a message…</div>
+              <button class="themesPreviewSend" type="button">Send</button>
+            </div>
+          </div>
+          <div class="themesPreviewActions">
+            <button class="btn btnPrimary" id="themesApplyBtn" type="button">Apply theme</button>
+            <button class="btn secondary" id="themesBuyBtn" type="button">Buy for 0 Gold</button>
+          </div>
+          <div class="themesPreviewHint small muted" id="themesPreviewHint">Select a theme to preview it here.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="themesFiltersSheet" id="themesFiltersSheet" aria-hidden="true">
+    <div class="themesFiltersSheetCard">
+      <div class="themesFiltersSheetHeader">
+        <div class="themesFiltersSheetTitle">Filters</div>
+        <button class="iconBtn" id="themesFiltersSheetClose" type="button" aria-label="Close filters">✕</button>
+      </div>
+      <div class="themesFiltersSheetBody" id="themesFiltersSheetBody"></div>
+    </div>
+  </div>
+  <div class="themesActionSheet" id="themesActionSheet" aria-hidden="true">
+    <div class="themesActionSheetCard">
+      <div class="themesActionSheetTitle" id="themesActionSheetTitle">Theme actions</div>
+      <button class="btn secondary" id="themesActionPinBtn" type="button">Pin theme</button>
+      <button class="btn secondary" id="themesActionFavoriteBtn" type="button">Favorite</button>
+      <button class="btn secondary" id="themesActionApplyBtn" type="button">Apply</button>
+      <button class="btn secondary" id="themesActionBuyBtn" type="button">Buy for 0 Gold</button>
+      <button class="btn" id="themesActionCloseBtn" type="button">Close</button>
+    </div>
+  </div>
 </div>
 
 

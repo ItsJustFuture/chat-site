@@ -2322,6 +2322,43 @@ const ALLOWED_THEMES = [
   "Obsidian Aurora",
   "Iris & Lola Neon",
 ];
+const PUBLIC_THEME_NAMES = new Set([
+  "Minimal Light",
+  "Minimal Dark",
+  "Minimal Light (High Contrast)",
+  "Minimal Dark (High Contrast)",
+  "Paper / Parchment",
+  "Sky Light",
+  "Fantasy Tavern",
+  "Fantasy Tavern (Ember)",
+  "Desert Dusk",
+]);
+const GOLD_THEME_PRICES = Object.freeze({
+  "prismatic-pearl": 2800,
+  "neon-abyss": 4200,
+  "velvet-galaxy": 4500,
+});
+function themeIdFromName(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+const THEME_CATALOG = ALLOWED_THEMES.map((name) => {
+  const id = themeIdFromName(name);
+  const goldPrice = GOLD_THEME_PRICES[id] || null;
+  const access = PUBLIC_THEME_NAMES.has(name) ? "public" : goldPrice ? "gold" : "vip";
+  return {
+    id,
+    name,
+    access,
+    isPurchasable: Boolean(goldPrice),
+    goldPrice,
+  };
+});
+const THEME_BY_ID = new Map(THEME_CATALOG.map((theme) => [theme.id, theme]));
+const THEME_ID_SET = new Set(THEME_CATALOG.map((theme) => theme.id));
 
 // Passive gold accrues slowly over time. 5s ticks were far too fast.
 // 1 gold per minute = 60 gold/hour.
@@ -6830,6 +6867,91 @@ app.post("/api/me/theme", strictLimiter, requireLogin, async (req, res) => {
   }
 });
 
+app.post("/api/themes/purchase", strictLimiter, requireLogin, express.json({ limit: "8kb" }), async (req, res) => {
+  const userId = req.session.user.id;
+  const themeId = String(req.body?.themeId || "").trim();
+  const theme = THEME_BY_ID.get(themeId);
+  if (!theme) return res.status(404).json({ ok: false, error: "theme_not_found" });
+  if (!theme.isPurchasable || !theme.goldPrice) {
+    return res.status(400).json({ ok: false, error: "theme_not_purchasable" });
+  }
+
+  try {
+    if (await pgUserExists(userId)) {
+      const client = await pgPool.connect();
+      try {
+        await client.query("BEGIN");
+        const { rows } = await client.query(
+          "SELECT gold, prefs_json FROM users WHERE id = $1 LIMIT 1 FOR UPDATE",
+          [userId]
+        );
+        const row = rows?.[0];
+        if (!row) {
+          await client.query("ROLLBACK");
+          return res.status(404).json({ ok: false, error: "user_not_found" });
+        }
+        const gold = Number(row.gold || 0);
+        const prefs = normalizePrefs(safeJsonParse(row.prefs_json, {}));
+        const owned = new Set(normalizeThemeIdList(prefs.ownedThemeIds));
+        if (owned.has(themeId)) {
+          await client.query("COMMIT");
+          return res.json({ ok: true, gold, ownedThemeIds: Array.from(owned) });
+        }
+        if (gold < theme.goldPrice) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ ok: false, error: "insufficient_gold", gold });
+        }
+        const nextGold = gold - theme.goldPrice;
+        owned.add(themeId);
+        const nextPrefs = normalizePrefs({ ...prefs, ownedThemeIds: Array.from(owned) });
+        await client.query("UPDATE users SET gold = $1, prefs_json = $2::jsonb WHERE id = $3", [
+          nextGold,
+          JSON.stringify(nextPrefs),
+          userId,
+        ]);
+        await client.query("COMMIT");
+        db.run("UPDATE users SET gold = ?, prefs_json = ? WHERE id = ?", [
+          nextGold,
+          JSON.stringify(nextPrefs),
+          userId,
+        ]);
+        return res.json({ ok: true, gold: nextGold, ownedThemeIds: nextPrefs.ownedThemeIds });
+      } catch (e) {
+        await client.query("ROLLBACK");
+        throw e;
+      } finally {
+        client.release();
+      }
+    }
+  } catch (e) {
+    console.warn("[themes][purchase][pg] failed, falling back to sqlite:", e?.message || e);
+  }
+
+  db.get("SELECT gold, prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
+    if (!row) return res.status(404).json({ ok: false, error: "user_not_found" });
+    const gold = Number(row.gold || 0);
+    const prefs = normalizePrefs(safeJsonParse(row.prefs_json, {}));
+    const owned = new Set(normalizeThemeIdList(prefs.ownedThemeIds));
+    if (owned.has(themeId)) {
+      return res.json({ ok: true, gold, ownedThemeIds: Array.from(owned) });
+    }
+    if (gold < theme.goldPrice) {
+      return res.status(400).json({ ok: false, error: "insufficient_gold", gold });
+    }
+    const nextGold = gold - theme.goldPrice;
+    owned.add(themeId);
+    const nextPrefs = normalizePrefs({ ...prefs, ownedThemeIds: Array.from(owned) });
+    db.run(
+      "UPDATE users SET gold = ?, prefs_json = ? WHERE id = ?",
+      [nextGold, JSON.stringify(nextPrefs), userId],
+      (err2) => {
+        if (err2) return res.status(500).json({ ok: false, error: "purchase_failed" });
+        return res.json({ ok: true, gold: nextGold, ownedThemeIds: nextPrefs.ownedThemeIds });
+      }
+    );
+  });
+});
+
 // ---- User prefs (badge colors, DM theme, etc)
 function safeJsonParse(raw, fallback) {
   try {
@@ -6852,6 +6974,9 @@ function safeNumber(value, fallback = 0) {
 const PREFS_DEFAULTS = Object.freeze({
   dmBadgePrefs: { direct: "#ed4245", group: "#5865f2" },
   dmThemePrefs: { background: "#1e1f22" },
+  pinnedThemeIds: [],
+  favoriteThemeIds: [],
+  ownedThemeIds: [],
   sound: {
     enabled: false,
     room: true,
@@ -6870,6 +6995,23 @@ function normalizeSoundPrefs(raw) {
   }
   return base;
 }
+function normalizeThemeIdList(raw) {
+  if (!Array.isArray(raw)) return [];
+  const unique = [];
+  const seen = new Set();
+  for (const id of raw) {
+    const key = String(id || "");
+    if (!THEME_ID_SET.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(key);
+  }
+  return unique;
+}
+function enforcePinnedLimit(prefs, role) {
+  const maxPins = roleRank(role || "User") >= roleRank("VIP") ? 5 : 2;
+  prefs.pinnedThemeIds = normalizeThemeIdList(prefs.pinnedThemeIds).slice(0, maxPins);
+  return prefs;
+}
 function normalizePrefs(raw) {
   const prefs = raw && typeof raw === "object" ? raw : {};
   const dmBadgePrefs = { ...PREFS_DEFAULTS.dmBadgePrefs };
@@ -6883,6 +7025,9 @@ function normalizePrefs(raw) {
   }
   return {
     ...prefs,
+    pinnedThemeIds: normalizeThemeIdList(prefs.pinnedThemeIds),
+    favoriteThemeIds: normalizeThemeIdList(prefs.favoriteThemeIds),
+    ownedThemeIds: normalizeThemeIdList(prefs.ownedThemeIds),
     dmBadgePrefs,
     dmThemePrefs,
     sound: normalizeSoundPrefs(prefs.sound),
@@ -6894,6 +7039,8 @@ function sanitizePrefsInput(p) {
   if (p && typeof p === "object") {
     if (p.dmBadgePrefs && typeof p.dmBadgePrefs === "object") out.dmBadgePrefs = p.dmBadgePrefs;
     if (p.dmThemePrefs && typeof p.dmThemePrefs === "object") out.dmThemePrefs = p.dmThemePrefs;
+    if (Array.isArray(p.pinnedThemeIds)) out.pinnedThemeIds = normalizeThemeIdList(p.pinnedThemeIds);
+    if (Array.isArray(p.favoriteThemeIds)) out.favoriteThemeIds = normalizeThemeIdList(p.favoriteThemeIds);
     if (p.chatFx && typeof p.chatFx === "object") out.chatFx = sanitizeChatFx(p.chatFx);
     if (p.sound && typeof p.sound === "object") {
       const sound = {};
@@ -6984,7 +7131,10 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
     if (await pgUserExists(userId)) {
       const { rows } = await pgPool.query("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
       const current = safeJsonParse(rows?.[0]?.prefs_json, {});
-      const merged = normalizePrefs({ ...(current || {}), ...(incoming || {}) });
+      const merged = enforcePinnedLimit(
+        normalizePrefs({ ...(current || {}), ...(incoming || {}) }),
+        req.session.user.role
+      );
       // IMPORTANT: node-postgres does not reliably serialize plain JS objects to JSON/JSONB.
       // Always stringify and cast to jsonb to ensure prefs are actually persisted.
       await pgPool.query("UPDATE users SET prefs_json = $1::jsonb WHERE id = $2", [JSON.stringify(merged), userId]);
@@ -7004,7 +7154,10 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
   // SQLite fallback
   db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
     const current = safeJsonParse(row?.prefs_json, {});
-    const merged = normalizePrefs({ ...(current || {}), ...(incoming || {}) });
+    const merged = enforcePinnedLimit(
+      normalizePrefs({ ...(current || {}), ...(incoming || {}) }),
+      req.session.user.role
+    );
     db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId], (err2) => {
       if (err2) return res.status(500).send("Failed");
       if (shouldUpdateChatFx) {
