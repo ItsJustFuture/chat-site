@@ -2634,24 +2634,65 @@ body.dice-room .luckMeter{
 .luckMeterBarText{
   color:var(--text);
 }
-/* Survival Simulator panel */
+/* Survival Simulator pop-out panel (modal) */
+#survivalPanelModal .survivalPanelModalCard{
+  width: min(980px, calc(100vw - 24px));
+  max-height: 85vh;
+  overflow:hidden;
+}
+#survivalPanelModal .survivalPanelModalBody{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  max-height: calc(85vh - 54px);
+  overflow:hidden;
+}
+.survivalTabs{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.survivalTabBtn{
+  border:1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  color:var(--text);
+  border-radius:999px;
+  padding:6px 10px;
+  font-size:12px;
+  font-weight:800;
+}
+.survivalTabBtn[aria-selected="true"]{
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--border) 55%, transparent);
+}
+
 .survivalPanel{
-  display:none;
-  position: sticky;
-  top:0;
-  z-index:120;
-  margin:8px 12px 6px;
+  display:flex;
+  position: static;
+  z-index:auto;
+  margin:0;
   padding:12px 14px;
   border-radius:16px;
   border:1px solid var(--border);
   background: color-mix(in srgb, var(--panel) 88%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-}
-body.survival-room .survivalPanel{
-  display:flex;
   flex-direction:column;
   gap:10px;
+  overflow:auto;
+}
+
+@media (max-width: 720px){
+  #survivalPanelModal{ align-items:flex-end; }
+  #survivalPanelModal .survivalPanelModalCard{
+    width: 100%;
+    margin: 0;
+    border-radius: 18px 18px 0 0;
+    max-height: 85vh;
+  }
+  #survivalPanelModal .survivalPanelModalBody{
+    max-height: calc(85vh - 54px);
+  }
 }
 .survivalPanelHeader{
   display:flex;
@@ -2715,7 +2756,7 @@ body.survival-room .survivalPanel{
 }
 
 .survivalLogFeed{
-  display:none;
+  display:block;
   margin:0 12px 10px;
   padding:10px 12px;
   border-radius:14px;
@@ -2726,8 +2767,19 @@ body.survival-room .survivalPanel{
   max-height:220px;
   overflow:auto;
 }
-body.survival-room .survivalLogFeed{
-  display:block;
+
+.survivalRosterPane, .survivalLogPane{
+  border-top:1px solid var(--border);
+  padding-top:10px;
+}
+
+/* Highlight mentions inside Survival simulator system logs */
+.sys .simMention{
+  background: color-mix(in srgb, var(--accent, #7aa2ff) 16%, transparent);
+  border:1px solid color-mix(in srgb, var(--accent, #7aa2ff) 28%, transparent);
+  border-radius:8px;
+  padding:0 6px;
+  font-weight:800;
 }
 
 .survivalArenaSplit .survivalLogFeed{
