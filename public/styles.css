@@ -2694,28 +2694,6 @@ body.survival-room .survivalPanel{
   justify-content:space-between;
   gap:8px 12px;
 }
-
-/* Allow users to minimize survival controls into a tiny button */
-.survivalPanelToggle{
-  margin-left:auto;
-}
-.survivalPanel.minimized .survivalPanelControls{
-  display:none;
-}
-.survivalMiniBtn{
-  position:sticky;
-  top:8px;
-  z-index:40;
-  margin:0 12px 10px;
-  width:auto;
-  border-radius:14px;
-  border:1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 80%, transparent);
-  color:var(--text);
-  padding:8px 10px;
-  font-weight:800;
-  box-shadow: 0 10px 26px rgba(0,0,0,0.25);
-}
 .survivalPanelGroup{
   display:flex;
   flex-wrap:wrap;
@@ -2777,47 +2755,18 @@ body.survival-room .survivalPanel{
   border-radius:10px;
   padding:4px 8px;
 }
-.survivalArenaBody{
-  display:grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(240px, 1fr);
-  gap:10px;
-  padding:10px 12px 12px;
-}
-.survivalArenaSide{
-  display:flex;
-  flex-direction:column;
-  min-height:0;
-}
-.survivalArenaSideHeader{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:8px;
-  padding:0 0 8px;
-}
-.survivalArenaSideTitle{
-  font-weight:900;
-  font-size:12px;
-}
-.btn.tiny{
-  padding:4px 8px;
-  border-radius:10px;
-  font-size:11px;
-}
 .survivalArenaMap{
   position:relative;
   width:100%;
-  aspect-ratio: 1 / 1;
+  aspect-ratio: 4 / 3;
   background: color-mix(in srgb, var(--panel) 70%, transparent);
-  border-radius:14px;
-  overflow:hidden;
 }
 .survivalArenaBase{
   position:absolute;
   inset:0;
   width:100%;
   height:100%;
-  object-fit:contain;
+  object-fit:cover;
   user-select:none;
   pointer-events:none;
 }
@@ -2871,23 +2820,12 @@ body.survival-room .survivalPanel{
 .survivalPopMeta{ font-size:11px; color:var(--muted); margin-top:2px; }
 .survivalPopZone{ font-size:11px; margin-top:6px; }
 
-.survivalArenaLogList{
-  border:1px solid var(--border);
-  border-radius:14px;
-  background: color-mix(in srgb, var(--panel) 78%, transparent);
-  padding:8px;
-  overflow:auto;
-  min-height:0;
-  max-height:360px;
-}
-.survivalArenaLogList .survivalLogEntry{
-  margin-bottom:8px;
-}
 .survivalArenaLegend{
   display:grid;
   grid-template-columns: 1fr 34px;
   gap:6px 8px;
-  padding:10px 8px 0;
+  padding:10px 12px;
+  border-top:1px solid var(--border);
   font-size:11px;
   color:var(--muted);
 }
@@ -2915,25 +2853,6 @@ body.survival-room .survivalPanel{
   -webkit-backdrop-filter: blur(10px);
   max-height:220px;
   overflow:auto;
-}
-
-/* Modal cards should never extend past the viewport */
-.modalCard{
-  max-height: calc(100vh - 80px);
-  overflow:hidden;
-}
-.modalBody{
-  overflow:auto;
-  max-height: calc(100vh - 160px);
-}
-
-@media (max-width: 820px){
-  .survivalArenaBody{
-    grid-template-columns: 1fr;
-  }
-  .survivalArenaLogList{
-    max-height:260px;
-  }
 }
 body.survival-room .survivalLogFeed{
   display:block;
@@ -3436,6 +3355,11 @@ body.survival-room .survivalLogFeed{
   -webkit-text-fill-color: transparent;
 }
 .mention{ background:var(--mentionBg); color:var(--mentionText); border:1px solid var(--border); padding:0 4px; border-radius:6px; }
+.mention.mentionMe{ background:color-mix(in srgb, var(--accent) 25%, var(--mentionBg)); border-color:color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow:0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent); }
+
+.sys.sysMentionMe{ border:1px solid color-mix(in srgb, var(--accent) 55%, var(--border)); background:color-mix(in srgb, var(--accent) 10%, var(--panel)); box-shadow:0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent); }
+
+.survivalLogItem.survivalMentionMe{ border:1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); background:color-mix(in srgb, var(--accent) 8%, transparent); border-radius:10px; padding:6px 8px; }
 /* ===== Message actions (horizontal bar below message) =====
    Actions live inside .msgMain and are collapsed by default so they reserve
    ZERO space. When opened (tap/hover), they expand downward.
