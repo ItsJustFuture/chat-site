@@ -6729,10 +6729,28 @@ body[data-theme="Iris & Lola Neon"] .irisLolaStarfield {
 
 @keyframes irisLolaStarDrift {
   0% { opacity: 0; transform: translate3d(0, 0, 0) rotate(-28deg); }
-  8% { opacity: 0.12; }
-  42% { opacity: 0.1; }
+  8% { opacity: 0.22; }
+  42% { opacity: 0.18; }
   72% { opacity: 0; }
   100% { opacity: 0; transform: translate3d(120px, 90px, 0) rotate(-28deg); }
+}
+
+/* Iris & Lola Neon — keep it SPACEY (disable older heart/text overlays)
+   The theme already has a nebula backdrop + starfield. Over time, extra
+   experiments added big heart/text overlays that can drown the space vibe.
+   This block force-disables those overlays so the intended starry backdrop
+   always shows.
+*/
+body[data-theme="Iris & Lola Neon"]::before,
+body[data-theme="Iris & Lola Neon"]::after,
+body[data-theme="Iris & Lola Neon"] .chat::before,
+body[data-theme="Iris & Lola Neon"] .chat::after,
+body[data-theme="Iris & Lola Neon"] #roomsPanel::before,
+body[data-theme="Iris & Lola Neon"] #roomsPanel::after,
+body[data-theme="Iris & Lola Neon"] #membersPane::before,
+body[data-theme="Iris & Lola Neon"] #membersPane::after {
+  content: none !important;
+  display: none !important;
 }
 
 /* Iris & Lola Couples Theme Enhancement */
