@@ -2090,9 +2090,6 @@ let survivalState = {
   selectedSeasonId: null,
   logBeforeId: null,
   winner: null,
-  arena: {},
-  lobbyUserIds: [],
-  view: "log",
 };
 let survivalAutoRunTimer = null;
 let survivalAutoRunning = false;
@@ -2722,27 +2719,15 @@ const survivalAutoRunBtn = document.getElementById("survivalAutoRunBtn");
 const survivalEndBtn = document.getElementById("survivalEndBtn");
 const survivalRosterBtn = document.getElementById("survivalRosterBtn");
 const survivalLogBtn = document.getElementById("survivalLogBtn");
-const survivalArenaBtn = document.getElementById("survivalArenaBtn");
-const survivalLobbyBtn = document.getElementById("survivalLobbyBtn");
 const survivalHistorySelect = document.getElementById("survivalHistorySelect");
 const survivalLogFeed = document.getElementById("survivalLogFeed");
 const survivalLogList = document.getElementById("survivalLogList");
-const survivalArena = document.getElementById("survivalArena");
-const survivalArenaMap = document.getElementById("survivalArenaMap");
-const survivalArenaDots = document.getElementById("survivalArenaDots");
-const survivalDotTip = document.getElementById("survivalDotTip");
-const survivalFogSelect = document.getElementById("survivalFogSelect");
-const survivalArenaHint = document.getElementById("survivalArenaHint");
-const survivalLobbyCount = document.getElementById("survivalLobbyCount");
 const survivalNewSeasonModal = document.getElementById("survivalNewSeasonModal");
 const survivalNewSeasonClose = document.getElementById("survivalNewSeasonClose");
 const survivalSeasonTitleInput = document.getElementById("survivalSeasonTitleInput");
 const survivalParticipantList = document.getElementById("survivalParticipantList");
 const survivalCouplesToggle = document.getElementById("survivalCouplesToggle");
 const survivalChaosToggle = document.getElementById("survivalChaosToggle");
-const survivalLobbyToggle = document.getElementById("survivalLobbyToggle");
-const survivalNpcNames = document.getElementById("survivalNpcNames");
-const survivalFillSlots = document.getElementById("survivalFillSlots");
 const survivalSeasonStartBtn = document.getElementById("survivalSeasonStartBtn");
 const survivalSeasonMsg = document.getElementById("survivalSeasonMsg");
 const survivalRosterModal = document.getElementById("survivalRosterModal");
@@ -2752,6 +2737,57 @@ const survivalLogModal = document.getElementById("survivalLogModal");
 const survivalLogClose = document.getElementById("survivalLogClose");
 const survivalLogModalList = document.getElementById("survivalLogModalList");
 const survivalLogLoadBtn = document.getElementById("survivalLogLoadBtn");
+
+// Arena UI (visual map)
+const survivalArenaBtn = document.getElementById("survivalArenaBtn");
+const survivalArena = document.getElementById("survivalArena");
+const survivalArenaClose = document.getElementById("survivalArenaClose");
+const survivalArenaOverlay = document.getElementById("survivalArenaOverlay");
+const survivalArenaPopover = document.getElementById("survivalArenaPopover");
+const survivalArenaLegend = document.getElementById("survivalArenaLegend");
+const survivalFogMode = document.getElementById("survivalFogMode");
+
+const SURVIVAL_ARENA_ZONES = [
+  // Coordinates are percentages aligned to /arena/arena_map.png.
+  { key: "pine", label: "Pine Woods", x: 22, y: 18 },
+  { key: "ruins", label: "Old Ruins", x: 52, y: 18 },
+  { key: "ridge", label: "Ridge", x: 83, y: 20 },
+  { key: "lake", label: "Shimmer Lake", x: 18, y: 52 },
+  { key: "plaza", label: "Central Plaza", x: 50, y: 52 },
+  { key: "cave", label: "Cave Mouth", x: 76, y: 56 },
+  { key: "swamp", label: "Mossy Swamp", x: 26, y: 78 },
+  { key: "drop", label: "Supply Drop Zone", x: 55, y: 82 },
+];
+
+function survivalHash32(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function survivalZoneForParticipant(p, season, fogModeValue) {
+  const base = `${season?.id || "0"}:${season?.day_index || 0}:${season?.phase || "day"}`;
+  const idPart = String(p?.user_id ?? p?.userId ?? p?.id ?? p?.display_name ?? "x");
+  const h = survivalHash32(`${base}:${idPart}`);
+  let idx = h % SURVIVAL_ARENA_ZONES.length;
+  if (fogModeValue === "approx") {
+    // Stable-ish scrambling per season so it stays coherent but not exact.
+    const s = survivalHash32(String(season?.rng_seed || season?.rngSeed || season?.title || "seed"));
+    idx = (idx + (s % SURVIVAL_ARENA_ZONES.length)) % SURVIVAL_ARENA_ZONES.length;
+  }
+  return SURVIVAL_ARENA_ZONES[idx];
+}
+
+function survivalJitterPx(p, season) {
+  const base = `${season?.id || "0"}:${p?.user_id ?? p?.userId ?? p?.id ?? "x"}`;
+  const h = survivalHash32(base);
+  const dx = ((h % 17) - 8);
+  const dy = (((h >>> 5) % 17) - 8);
+  return { dx, dy };
+}
 
 let mediaMenuOpen = false;
 let voiceRec = { recorder: null, stream: null, chunks: [], startedAt: 0 };
@@ -2765,6 +2801,9 @@ try {
   const nowSurvivalRoom = isSurvivalRoom(currentRoom);
   if (survivalPanel) survivalPanel.hidden = !nowSurvivalRoom;
   if (survivalLogFeed) survivalLogFeed.hidden = !nowSurvivalRoom;
+  if (!nowSurvivalRoom) {
+    try { closeSurvivalArena(); } catch {}
+  }
 } catch {}
 
 function closeMediaMenu(){
@@ -2968,11 +3007,6 @@ function renderSurvivalPanel() {
   if (survivalEndBtn) survivalEndBtn.disabled = !survivalIsOwner() || !season;
   if (survivalAutoRunBtn) survivalAutoRunBtn.textContent = survivalAutoRunning ? "Stop Auto" : "Auto-Run";
   updateSurvivalHistorySelect();
-
-  // View toggles
-  const nowSurvivalRoom = isSurvivalRoom(currentRoom);
-  if (survivalLogFeed) survivalLogFeed.hidden = !nowSurvivalRoom;
-  if (survivalArena) survivalArena.hidden = !nowSurvivalRoom || survivalState.view !== "arena";
 }
 
 function getSurvivalEventIcon(outcome = {}) {
@@ -3021,139 +3055,6 @@ function renderSurvivalLog(targetEl, events) {
   });
 }
 
-const SURVIVAL_ARENA_ZONES = [
-  "Forest",
-  "Ruins",
-  "River",
-  "High Ground",
-  "Caves",
-  "Open Field",
-  "Supply Drop",
-  "Abandoned Camp",
-];
-
-function hideSurvivalDotTip(){
-  if (survivalDotTip) survivalDotTip.hidden = true;
-}
-
-function renderSurvivalArena() {
-  if (!survivalArenaMap || !survivalArenaDots) return;
-  const participants = (survivalState.participants || []).slice();
-  const fog = survivalState.fog || (survivalFogSelect ? survivalFogSelect.value : "exact") || "exact";
-  const seasonId = survivalState.season?.id || 0;
-
-  // Zone anchor points (percent coordinates within the map container)
-  const ZONE_POINTS = {
-    "Forest": { x: 18, y: 24 },
-    "Ruins": { x: 50, y: 24 },
-    "High Ground": { x: 82, y: 26 },
-    "Abandoned Camp": { x: 18, y: 74 },
-    "Open Field": { x: 50, y: 74 },
-    "Caves": { x: 82, y: 74 },
-    "River": { x: 50, y: 43 },
-    "Supply Drop": { x: 82, y: 60 },
-  };
-
-  // Normalize a location to one of our zone labels.
-  const normZone = (raw) => {
-    const zRaw = String(raw || "Open Field");
-    const found = SURVIVAL_ARENA_ZONES.find((n) => n.toLowerCase() === zRaw.toLowerCase());
-    return found || "Open Field";
-  };
-
-  // Clear dots
-  survivalArenaDots.innerHTML = "";
-  if (survivalDotTip) survivalDotTip.hidden = true;
-
-  // Fog mode can hide dots entirely
-  if (fog === "hidden") {
-    if (survivalArenaHint) survivalArenaHint.textContent = "Fog is thick. Nobody can be spotted.";
-  } else {
-    if (survivalArenaHint) survivalArenaHint.textContent = "Tap a dot to see who it is.";
-  }
-
-  // Deterministic-ish jitter so dots don't stack perfectly
-  const jitterFor = (key, amp=3.2) => {
-    const h = hashString(String(key));
-    const hx = ((h % 997) / 997) * 2 - 1;
-    const hy = (((Math.floor(h / 997)) % 997) / 997) * 2 - 1;
-    return { dx: hx * amp, dy: hy * amp };
-  };
-
-  const approxZoneFor = (p) => {
-    // Stable-ish per season so it doesn't flicker within a season.
-    const base = hashString(`${seasonId}|${p.user_id || 0}|${p.display_name || "?"}`);
-    const idx = base % SURVIVAL_ARENA_ZONES.length;
-    return SURVIVAL_ARENA_ZONES[idx] || "Open Field";
-  };
-
-  const openTip = (dotEl, p, zone) => {
-    if (!survivalDotTip) return;
-    const rect = survivalArenaMap.getBoundingClientRect();
-    const drect = dotEl.getBoundingClientRect();
-    const left = Math.max(8, Math.min((drect.left - rect.left) + 10, rect.width - 220));
-    const top = Math.max(8, Math.min((drect.top - rect.top) + 10, rect.height - 120));
-    const hp = Number(p.hp || 0);
-    const kills = Number(p.kills || 0);
-    const alive = !!p.alive;
-
-    survivalDotTip.style.left = `${left}px`;
-    survivalDotTip.style.top = `${top}px`;
-    survivalDotTip.innerHTML = `
-      <div class="tipName">${escapeHtml(p.display_name || "?")}</div>
-      <div class="tipMeta">
-        <span class="pill ${alive ? "alive" : "dead"}">${alive ? "Alive" : "Down"}</span>
-        <span class="pill">HP: ${isFinite(hp) ? hp : "?"}</span>
-        <span class="pill">KOs: ${isFinite(kills) ? kills : 0}</span>
-      </div>
-      <div class="tipZone">${escapeHtml(zone)}</div>
-    `;
-    survivalDotTip.hidden = false;
-  };
-
-  if (fog !== "hidden") {
-    // Create dots for each participant
-    const ordered = participants.slice().sort((a,b)=>Number(b.alive)-Number(a.alive));
-    for (const p of ordered) {
-      const zone = fog === "approx" ? approxZoneFor(p) : normZone(p.location);
-      const pt = ZONE_POINTS[zone] || ZONE_POINTS["Open Field"];
-      const j = jitterFor(`${seasonId}|${p.user_id}|${p.display_name}|${zone}`, 3.6);
-      const x = pt.x + j.dx;
-      const y = pt.y + j.dy;
-
-      const dot = document.createElement('button');
-      dot.type = 'button';
-      dot.className = 'survivalDot';
-      dot.classList.toggle('dead', !p.alive);
-      dot.style.left = `${x}%`;
-      dot.style.top = `${y}%`;
-      dot.setAttribute('aria-label', `${p.display_name || 'Unknown'} in ${zone}`);
-
-      dot.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openTip(dot, p, zone);
-      });
-
-      survivalArenaDots.appendChild(dot);
-    }
-  }
-
-  // Clicking the map closes the tooltip
-  survivalArenaMap.onclick = () => {
-    if (survivalDotTip) survivalDotTip.hidden = true;
-  };
-
-  // Update lobby UI
-  if (survivalLobbyCount) {
-    const count = (survivalState.lobbyUserIds || []).length;
-    survivalLobbyCount.textContent = count ? `Lobby signups: ${count}` : "";
-  }
-  if (survivalLobbyBtn) {
-    const isIn = !!me?.id && (survivalState.lobbyUserIds || []).includes(Number(me.id));
-    survivalLobbyBtn.textContent = isIn ? "Opt-out" : "Opt-in";
-  }
-}
-
 function renderSurvivalRoster() {
   if (!survivalRosterList) return;
   survivalRosterList.innerHTML = "";
@@ -3189,6 +3090,112 @@ function renderSurvivalRoster() {
   });
 }
 
+function closeSurvivalArenaPopover() {
+  if (!survivalArenaPopover) return;
+  survivalArenaPopover.hidden = true;
+  survivalArenaPopover.innerHTML = "";
+}
+
+function renderSurvivalArena() {
+  if (!survivalArenaOverlay || !survivalArenaLegend) return;
+  const season = survivalState.season;
+  const participants = survivalState.participants || [];
+  const fog = survivalFogMode ? survivalFogMode.value : "exact";
+
+  survivalArenaOverlay.innerHTML = "";
+  survivalArenaLegend.innerHTML = "";
+  closeSurvivalArenaPopover();
+
+  if (!season || !participants.length) {
+    survivalArenaLegend.textContent = "No season.";
+    return;
+  }
+
+  const zoneCounts = new Map();
+  const tokens = [];
+  for (const p of participants) {
+    if (fog === "hidden") continue;
+    const zone = survivalZoneForParticipant(p, season, fog);
+    const jitter = survivalJitterPx(p, season);
+    zoneCounts.set(zone.key, (zoneCounts.get(zone.key) || 0) + 1);
+    tokens.push({ p, zone, jitter });
+  }
+
+  // Legend (zone list + counts)
+  for (const z of SURVIVAL_ARENA_ZONES) {
+    const row = document.createElement("div");
+    row.className = "survivalArenaLegendRow";
+    const name = document.createElement("span");
+    name.className = "survivalArenaLegendName";
+    name.textContent = z.label;
+    const count = document.createElement("span");
+    count.className = "survivalArenaLegendCount";
+    count.textContent = String(zoneCounts.get(z.key) || 0);
+    row.appendChild(name);
+    row.appendChild(count);
+    survivalArenaLegend.appendChild(row);
+  }
+
+  // Tokens
+  tokens.forEach(({ p, zone, jitter }) => {
+    const token = document.createElement("button");
+    token.type = "button";
+    token.className = "survivalToken";
+    token.classList.toggle("dead", !p.alive);
+    token.style.left = `calc(${zone.x}% + ${jitter.dx}px)`;
+    token.style.top = `calc(${zone.y}% + ${jitter.dy}px)`;
+    token.title = p.display_name;
+
+    const isNpc = !p.user_id || Number(p.user_id) <= 0 || !p.avatar_url;
+    if (isNpc) {
+      const dot = document.createElement("span");
+      dot.className = "survivalTokenDot";
+      token.appendChild(dot);
+    } else {
+      const img = document.createElement("img");
+      img.className = "survivalTokenAvatar";
+      img.alt = p.display_name;
+      img.src = p.avatar_url;
+      img.loading = "lazy";
+      img.decoding = "async";
+      token.appendChild(img);
+    }
+
+    token.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!survivalArenaPopover) return;
+      const rect = token.getBoundingClientRect();
+      const rootRect = document.documentElement.getBoundingClientRect();
+      const hp = Number(p.hp || 0);
+      const status = p.alive ? "Alive" : "Down";
+      const ko = Number(p.kills || 0);
+
+      survivalArenaPopover.innerHTML = `
+        <div class="survivalPopName">${escapeHtml(p.display_name || "")}</div>
+        <div class="survivalPopMeta">${status} • HP ${hp} • ${ko} KOs</div>
+        <div class="survivalPopZone">${escapeHtml(zone.label)}</div>
+      `;
+      survivalArenaPopover.style.left = `${rect.left - rootRect.left + rect.width + 8}px`;
+      survivalArenaPopover.style.top = `${rect.top - rootRect.top - 6}px`;
+      survivalArenaPopover.hidden = false;
+    });
+
+    survivalArenaOverlay.appendChild(token);
+  });
+}
+
+function openSurvivalArena() {
+  if (!survivalArena) return;
+  survivalArena.hidden = false;
+  renderSurvivalArena();
+}
+
+function closeSurvivalArena() {
+  if (!survivalArena) return;
+  survivalArena.hidden = true;
+  closeSurvivalArenaPopover();
+}
+
 async function loadSurvivalCurrent() {
   if (!isSurvivalRoom(currentRoom)) return;
   const { res, text } = await api("/api/survival/current", { method: "GET" });
@@ -3222,15 +3229,14 @@ function applySurvivalPayload(payload, { replaceEvents = false } = {}) {
     }
     survivalState.logBeforeId = payload.events?.[0]?.id || survivalState.logBeforeId;
   }
-  if (payload.arena && typeof payload.arena === "object") {
-    survivalState.arena = payload.arena;
-  }
   if (!survivalState.selectedSeasonId && payload.season) {
     survivalState.selectedSeasonId = payload.season.id;
   }
   renderSurvivalPanel();
   renderSurvivalLog(survivalLogList, survivalState.events);
-  renderSurvivalArena();
+  if (survivalArena && !survivalArena.hidden) {
+    renderSurvivalArena();
+  }
 }
 
 async function openSurvivalNewSeasonModal() {
@@ -3245,9 +3251,6 @@ async function openSurvivalNewSeasonModal() {
   survivalParticipantList.innerHTML = "";
   if (survivalCouplesToggle) survivalCouplesToggle.checked = false;
   if (survivalChaosToggle) survivalChaosToggle.checked = false;
-  if (survivalLobbyToggle) survivalLobbyToggle.checked = false;
-  if (survivalNpcNames) survivalNpcNames.value = "";
-  if (survivalFillSlots) survivalFillSlots.value = "0";
   users.forEach((user) => {
     if (!user?.id) return;
     const row = document.createElement("label");
@@ -3332,13 +3335,8 @@ async function startSurvivalSeason() {
   ).map((el) => Number(el.value));
   const onlineIds = (lastUsers || []).map((u) => u?.id).filter((id) => Number.isInteger(id));
   const participantIds = mode === "select" ? selected : onlineIds;
-  const npcRaw = (survivalNpcNames?.value || "").trim();
-  const fillSlots = Number(survivalFillSlots?.value || 0) || 0;
-  const npcCount = npcRaw ? npcRaw.split(/[\n,]/g).map((s) => s.trim()).filter(Boolean).length : 0;
-  const baseCount = participantIds.length + npcCount;
-  const desiredCount = fillSlots > 0 ? Math.max(fillSlots, baseCount) : baseCount;
-  if (desiredCount < 2) {
-    if (survivalSeasonMsg) survivalSeasonMsg.textContent = "Add at least two total participants (users or custom names).";
+  if (participantIds.length < 2) {
+    if (survivalSeasonMsg) survivalSeasonMsg.textContent = "Pick at least two participants.";
     return;
   }
   if (survivalSeasonStartBtn) survivalSeasonStartBtn.disabled = true;
@@ -3347,9 +3345,6 @@ async function startSurvivalSeason() {
     const payload = {
       title: survivalSeasonTitleInput?.value || "",
       participant_user_ids: participantIds,
-      include_lobby: !!survivalLobbyToggle?.checked,
-      npc_names: npcRaw,
-      fill_slots: fillSlots,
       options: {
         includeCouples: !!survivalCouplesToggle?.checked,
         chaoticMode: !!survivalChaosToggle?.checked,
@@ -9562,48 +9557,17 @@ survivalNewSeasonModal?.addEventListener("click", (e) => {
 survivalSeasonStartBtn?.addEventListener("click", startSurvivalSeason);
 survivalAdvanceBtn?.addEventListener("click", advanceSurvivalSeason);
 survivalEndBtn?.addEventListener("click", endSurvivalSeason);
-
-  survivalRosterBtn?.addEventListener("click", openSurvivalRosterModal);
+survivalRosterBtn?.addEventListener("click", openSurvivalRosterModal);
 survivalRosterClose?.addEventListener("click", closeSurvivalRosterModal);
 survivalRosterModal?.addEventListener("click", (e) => {
   if (e.target === survivalRosterModal) closeSurvivalRosterModal();
 });
-survivalLogBtn?.addEventListener("click", (e) => {
-  survivalState.view = "log";
-  renderSurvivalPanel();
-  if (e?.shiftKey) openSurvivalLogModal();
-});
-survivalArenaBtn?.addEventListener("click", () => {
-  survivalState.view = "arena";
-  renderSurvivalPanel();
-  renderSurvivalArena();
-});
-
-survivalFogSelect?.addEventListener("change", () => {
-  survivalState.fog = survivalFogSelect.value || "exact";
-  renderSurvivalArena();
-});
+survivalLogBtn?.addEventListener("click", openSurvivalLogModal);
 survivalLogClose?.addEventListener("click", closeSurvivalLogModal);
 survivalLogModal?.addEventListener("click", (e) => {
   if (e.target === survivalLogModal) closeSurvivalLogModal();
 });
 survivalLogLoadBtn?.addEventListener("click", loadOlderSurvivalLog);
-survivalLobbyBtn?.addEventListener("click", async () => {
-  if (!me?.id) return;
-  const isIn = (survivalState.lobbyUserIds || []).includes(Number(me.id));
-  const endpoint = isIn ? "/api/survival/lobby/leave" : "/api/survival/lobby/join";
-  try {
-    await api(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    const { res, text } = await api("/api/survival/lobby", { method: "GET" });
-    if (res.ok) {
-      const data = safeJsonParse(text, null);
-      if (data && Array.isArray(data.user_ids)) {
-        survivalState.lobbyUserIds = data.user_ids.map((x) => Number(x)).filter((x) => x > 0);
-      }
-    }
-  } catch {}
-  renderSurvivalArena();
-});
 survivalAutoRunBtn?.addEventListener("click", () => {
   if (!survivalAutoRunning) startSurvivalAutoRun();
   else stopSurvivalAutoRun();
@@ -9617,6 +9581,19 @@ survivalHistorySelect?.addEventListener("change", async (e) => {
   applySurvivalPayload(payload, { replaceEvents: true });
   renderSurvivalLog(survivalLogModalList, survivalState.events);
   renderSurvivalRoster();
+});
+
+// Arena (visual map)
+survivalArenaBtn?.addEventListener("click", () => {
+  if (!isSurvivalRoom(currentRoom)) return;
+  openSurvivalArena();
+});
+survivalArenaClose?.addEventListener("click", closeSurvivalArena);
+survivalFogMode?.addEventListener("change", () => {
+  if (survivalArena && !survivalArena.hidden) renderSurvivalArena();
+});
+document.getElementById("survivalArenaMap")?.addEventListener("click", () => {
+  closeSurvivalArenaPopover();
 });
 
 // rooms
@@ -15024,13 +15001,6 @@ initAppealsDurationSelect();
     if (survivalLogModal && survivalLogModal.style.display !== "none") {
       renderSurvivalLog(survivalLogModalList, survivalState.events);
     }
-  });
-
-  socket.on("survival:lobby", (payload = {}) => {
-    if (!isSurvivalRoom(currentRoom)) return;
-    const ids = Array.isArray(payload.user_ids) ? payload.user_ids : [];
-    survivalState.lobbyUserIds = ids.map((x) => Number(x)).filter((x) => x > 0);
-    renderSurvivalArena();
   });
 
 socket.on("disconnect", (reason) => {

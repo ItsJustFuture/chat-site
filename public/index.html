@@ -412,15 +412,6 @@
 <div class="survivalOptions">
   <label><input id="survivalCouplesToggle" type="checkbox"/> Include Couples synergy</label>
   <label><input id="survivalChaosToggle" type="checkbox"/> Chaotic mode</label>
-  <label><input id="survivalLobbyToggle" type="checkbox"/> Include lobby signups</label>
-  <div class="survivalNpcFields">
-    <label class="small muted">Custom names (one per line... and set fill slots to auto-top-up)</label>
-    <textarea id="survivalNpcNames" placeholder="e.g.\nKat\nPeeta\nRue" rows="4"></textarea>
-    <div class="survivalNpcRow">
-      <label class="small muted">Fill slots (0 = no auto fill)</label>
-      <input id="survivalFillSlots" type="number" min="0" max="48" value="0"/>
-    </div>
-  </div>
 </div>
 <div class="modalActions">
   <button class="btn" id="survivalSeasonStartBtn" type="button">Start</button>
@@ -482,7 +473,6 @@
       <button class="btn secondary small" id="survivalEndBtn" type="button">Reset/End</button>
     </div>
     <div class="survivalPanelGroup">
-      <button class="btn secondary small" id="survivalLobbyBtn" type="button">Opt-in</button>
       <button class="btn secondary small" id="survivalRosterBtn" type="button">View Roster</button>
       <button class="btn secondary small" id="survivalLogBtn" type="button">View Log</button>
       <button class="btn secondary small" id="survivalArenaBtn" type="button">Arena</button>
@@ -491,62 +481,28 @@
       </label>
     </div>
   </div>
+</div>
 
-  <div class="survivalArena" hidden id="survivalArena">
-    <div class="survivalArenaHeader">
-      <span class="survivalArenaTitle">Arena Map</span>
-      <span class="small muted" id="survivalLobbyCount"></span>
-    </div>
-    <div class="survivalArenaMapWrap">
-      <div class="survivalArenaMapControls">
-        <label class="small muted">Fog
-          <select id="survivalFogSelect">
-            <option value="exact" selected>Exact</option>
-            <option value="approx">Approx</option>
-            <option value="hidden">Hidden</option>
-          </select>
-        </label>
-        <span class="small muted" id="survivalArenaHint">Tap a dot to see who it is.</span>
-      </div>
-      <div class="survivalArenaMap" id="survivalArenaMap">
-        <svg class="survivalArenaSvg" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true">
-          <defs>
-            <linearGradient id="arenaGrad" x1="0" x2="1" y1="0" y2="1">
-              <stop offset="0" stop-color="rgba(255,255,255,0.06)"/>
-              <stop offset="1" stop-color="rgba(255,255,255,0.02)"/>
-            </linearGradient>
-          </defs>
-          <rect x="0" y="0" width="1000" height="600" fill="url(#arenaGrad)"/>
-          <!-- Zones (stylized, abstract) -->
-          <path d="M40,90 L310,60 L360,220 L140,260 L40,170 Z" class="arenaZone"/>
-          <text x="150" y="170" class="arenaLabel">Forest</text>
-
-          <path d="M360,70 L640,60 L620,240 L380,230 Z" class="arenaZone"/>
-          <text x="485" y="165" class="arenaLabel">Ruins</text>
-
-          <path d="M680,70 L960,110 L930,260 L700,240 Z" class="arenaZone"/>
-          <text x="820" y="180" class="arenaLabel">High Ground</text>
-
-          <path d="M70,300 L280,300 L260,520 L60,500 Z" class="arenaZone"/>
-          <text x="155" y="420" class="arenaLabel">Abandoned Camp</text>
-
-          <path d="M310,270 L640,280 L630,520 L320,540 Z" class="arenaZone"/>
-          <text x="470" y="420" class="arenaLabel">Open Field</text>
-
-          <path d="M670,280 L950,300 L930,520 L680,540 Z" class="arenaZone"/>
-          <text x="820" y="430" class="arenaLabel">Caves</text>
-
-          <path d="M280,240 C360,260 420,260 480,240 C540,220 600,220 670,250" class="arenaRiver"/>
-          <text x="470" y="250" class="arenaLabel arenaLabelSmall">River</text>
-
-          <circle cx="820" cy="360" r="44" class="arenaSupply"/>
-          <text x="820" y="366" text-anchor="middle" class="arenaLabel arenaLabelSmall">Supply</text>
-        </svg>
-        <div class="survivalDots" id="survivalArenaDots"></div>
-        <div class="survivalDotTip" id="survivalDotTip" hidden></div>
-      </div>
+<div class="survivalArena" hidden id="survivalArena">
+  <div class="survivalArenaHeader">
+    <div class="survivalArenaTitle">Arena Map</div>
+    <div class="survivalArenaControls">
+      <label class="survivalFogLabel">Fog
+        <select id="survivalFogMode">
+          <option value="exact" selected>Exact</option>
+          <option value="approx">Approx</option>
+          <option value="hidden">Hidden</option>
+        </select>
+      </label>
+      <button class="btn secondary small" id="survivalArenaClose" type="button">Close</button>
     </div>
   </div>
+  <div class="survivalArenaMap" id="survivalArenaMap" role="application" aria-label="Arena map">
+    <img class="survivalArenaBase" src="/arena/arena_map.png" alt="Arena" draggable="false"/>
+    <div class="survivalArenaOverlay" id="survivalArenaOverlay"></div>
+    <div class="survivalArenaPopover" id="survivalArenaPopover" hidden></div>
+  </div>
+  <div class="survivalArenaLegend" id="survivalArenaLegend"></div>
 </div>
 <div class="survivalLogFeed" hidden="" id="survivalLogFeed">
   <div class="survivalLogHeader">Recent Log</div>

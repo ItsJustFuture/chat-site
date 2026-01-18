@@ -45,32 +45,6 @@ const SURVIVAL_SEASON_COOLDOWN_MS = 2 * 60 * 1000;
 const SURVIVAL_ADVANCE_COOLDOWN_MS = 2000;
 const survivalSeasonCooldownByRoom = new Map();
 const survivalAdvanceCooldownBySeason = new Map();
-
-// Survival lobby signups (in-memory). Users can opt-in for the next season.
-const survivalLobbyUserIds = new Set();
-
-// Arena zones (zone-based map). Keep this stable for replayability.
-const SURVIVAL_ARENA_ZONES = [
-  "Forest",
-  "Ruins",
-  "River",
-  "High Ground",
-  "Caves",
-  "Open Field",
-  "Supply Drop",
-  "Abandoned Camp",
-];
-
-const SURVIVAL_ARENA_ADJ = {
-  "Forest": ["Ruins", "River", "Abandoned Camp"],
-  "Ruins": ["Forest", "High Ground", "Open Field"],
-  "River": ["Forest", "Caves", "Open Field"],
-  "High Ground": ["Ruins", "Open Field", "Supply Drop"],
-  "Caves": ["River", "Abandoned Camp", "Open Field"],
-  "Open Field": ["Ruins", "River", "High Ground", "Caves", "Supply Drop"],
-  "Supply Drop": ["Open Field", "High Ground"],
-  "Abandoned Camp": ["Forest", "Caves"],
-};
 const qualifyingMsgWindowByUserId = new Map();
 const rollCadenceWindowByUserId = new Map();
 
@@ -895,8 +869,6 @@ try {
         day_index INTEGER NOT NULL DEFAULT 1,
         phase TEXT NOT NULL DEFAULT 'day',
         rng_seed TEXT,
-        arena_state_json TEXT,
-        winner_rewarded INTEGER NOT NULL DEFAULT 0,
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL
       );
@@ -904,7 +876,7 @@ try {
       CREATE TABLE IF NOT EXISTS survival_participants (
         id SERIAL PRIMARY KEY,
         season_id INTEGER NOT NULL REFERENCES survival_seasons(id) ON DELETE CASCADE,
-        user_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         display_name TEXT NOT NULL,
         avatar_url TEXT,
         alive INTEGER NOT NULL DEFAULT 1,
@@ -913,7 +885,6 @@ try {
         alliance_id INTEGER,
         inventory_json TEXT DEFAULT '[]',
         traits_json TEXT DEFAULT '{}',
-        location TEXT,
         last_event_at BIGINT,
         created_at BIGINT NOT NULL
       );
@@ -943,14 +914,6 @@ try {
     await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_alliances_season ON survival_alliances(season_id)`);
     await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_events_season ON survival_events(season_id)`);
     await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_events_day_phase ON survival_events(season_id, day_index, phase)`);
-
-    // Allow NPC/custom-name participants by removing the FK on user_id if it exists.
-    // Default PG constraint name for the original schema.
-    try { await pgPool.query(`ALTER TABLE survival_participants DROP CONSTRAINT IF EXISTS survival_participants_user_id_fkey`); } catch {}
-    // Ensure new columns exist (safe on repeated deploys).
-    try { await pgPool.query(`ALTER TABLE survival_seasons ADD COLUMN IF NOT EXISTS arena_state_json TEXT`); } catch {}
-    try { await pgPool.query(`ALTER TABLE survival_seasons ADD COLUMN IF NOT EXISTS winner_rewarded INTEGER NOT NULL DEFAULT 0`); } catch {}
-    try { await pgPool.query(`ALTER TABLE survival_participants ADD COLUMN IF NOT EXISTS location TEXT`); } catch {}
   } catch (e) {
     console.warn('[pg-init] survival tables failed:', e?.message || e);
   }
@@ -4205,17 +4168,6 @@ function sanitizeDisplayName(name) {
   return String(name || "").replace(/[<>"'&]/g, "").trim();
 }
 
-function parseCustomNames(input) {
-  if (!input) return [];
-  const raw = Array.isArray(input) ? input.join("\n") : String(input);
-  return raw
-    .split(/[\n,]/g)
-    .map((s) => sanitizeDisplayName(s))
-    .map((s) => s.replace(/\s+/g, " ").trim())
-    .filter((s) => s.length >= 2)
-    .slice(0, 80);
-}
-
 function buildSurvivalSeedPayload(seed, options) {
   return JSON.stringify({
     seed: String(seed || ""),
@@ -4310,59 +4262,6 @@ function clamp(val, min, max) {
   return Math.max(min, Math.min(max, val));
 }
 
-function normalizeZoneName(zone) {
-  const z = String(zone || "").trim();
-  const match = SURVIVAL_ARENA_ZONES.find((name) => name.toLowerCase() === z.toLowerCase());
-  return match || null;
-}
-
-function buildDefaultArenaState(rng) {
-  const dangerLevels = {};
-  for (const z of SURVIVAL_ARENA_ZONES) dangerLevels[z] = 0;
-  // tiny random spice so seasons don't feel identical
-  const spicy = pickRandom(SURVIVAL_ARENA_ZONES.filter((z) => z !== "Supply Drop"), rng);
-  if (spicy) dangerLevels[spicy] = 1;
-  return {
-    zones: [...SURVIVAL_ARENA_ZONES],
-    dangerLevels,
-    lastCombatZone: null,
-  };
-}
-
-function maybeMoveParticipant(p, arena, rng, chaoticMode) {
-  if (!p || !p.alive) return;
-  const current = normalizeZoneName(p.location) || pickRandom(SURVIVAL_ARENA_ZONES, rng);
-  p.location = current;
-  const traits = p.traits || {};
-  const chaos = clamp(Number(traits.chaos ?? 0.5), 0, 1);
-  const stealth = clamp(Number(traits.stealth ?? 0.5), 0, 1);
-  const moveChance = clamp(0.35 + chaos * 0.25 + (chaoticMode ? 0.15 : 0) - stealth * 0.1, 0.1, 0.85);
-  if (rng() > moveChance) return;
-  const opts = SURVIVAL_ARENA_ADJ[current] || SURVIVAL_ARENA_ZONES;
-  const next = pickRandom(opts, rng) || current;
-  p.location = next;
-  // mild escalation: zones get more dangerous over time where movement clusters
-  if (arena?.dangerLevels && typeof arena.dangerLevels[next] === "number") {
-    arena.dangerLevels[next] = clamp(Number(arena.dangerLevels[next] || 0) + (chaoticMode ? 1 : 0.5), 0, 10);
-  }
-}
-
-
-function emitSurvivalSystemLog(roomId, events) {
-  try {
-    if (!roomId || !Array.isArray(events) || !events.length) return;
-    let lastHeader = "";
-    for (const ev of events) {
-      const header = `🗺️ Day ${ev.day_index} — ${capitalize(String(ev.phase || "day"))}`;
-      if (header !== lastHeader) {
-        io.to(roomId).emit("system", header);
-        lastHeader = header;
-      }
-      if (ev?.text) io.to(roomId).emit("system", String(ev.text));
-    }
-  } catch {}
-}
-
 function getSurvivalEventCount(aliveCount) {
   const base = Math.min(8, Math.max(3, aliveCount));
   return Math.min(base, Math.max(1, aliveCount));
@@ -4382,7 +4281,6 @@ function normalizeSurvivalParticipantRow(row) {
     alliance_id: row.alliance_id == null ? null : Number(row.alliance_id),
     inventory: Array.isArray(row.inventory) ? row.inventory : safeJsonParse(row.inventory_json || "[]", []),
     traits: row.traits || safeJsonParse(row.traits_json || "{}", {}),
-    location: row.location || null,
     last_event_at: row.last_event_at ? Number(row.last_event_at) : null,
     created_at: row.created_at ? Number(row.created_at) : null,
   };
@@ -4587,7 +4485,6 @@ function pickParticipantsForTemplate({
   rng,
   appearanceCount,
   couples = [],
-  arena = null,
 }) {
   const maxAppearance = 2;
   const pickWithWeights = (candidates, count) => {
@@ -4636,28 +4533,6 @@ function pickParticipantsForTemplate({
   }
 
   let candidates = alive;
-
-  // Location bias: for multi-participant events, prefer people in the same zone so the arena view feels coherent.
-  if (template.participants >= 2) {
-    const byZone = new Map();
-    for (const p of alive) {
-      const z = normalizeZoneName(p.location) || "Open Field";
-      if (!byZone.has(z)) byZone.set(z, []);
-      byZone.get(z).push(p);
-    }
-    const viableZones = Array.from(byZone.entries())
-      .filter(([, list]) => list.length >= template.participants)
-      .map(([zone, list]) => {
-        const danger = Number(arena?.dangerLevels?.[zone] || 0);
-        // Slightly prefer hotter zones for chaos.
-        const weight = 1 + danger * 0.08;
-        return { zone, list, weight };
-      });
-    if (viableZones.length) {
-      const pickedZone = pickWeighted(viableZones, rng);
-      if (pickedZone?.list) candidates = pickedZone.list;
-    }
-  }
   if (template.requiresNoAlliance) {
     candidates = alive.filter((p) => !p.alliance_id);
   }
@@ -7315,7 +7190,6 @@ async function buildSurvivalPayload(season, { beforeId = null, limit = 200 } = {
   ]);
   return {
     season: formatSurvivalSeason(season),
-    arena: safeJsonParse(season.arena_state_json || "{}", {}),
     participants,
     alliances,
     events,
@@ -7390,29 +7264,6 @@ app.get("/api/survival/current", requireLogin, async (_req, res) => {
   }
 });
 
-app.get("/api/survival/lobby", requireLogin, async (_req, res) => {
-  try {
-    const ids = Array.from(survivalLobbyUserIds).map((i) => Number(i)).filter((i) => i > 0);
-    return res.json({ ok: true, user_ids: ids });
-  } catch {
-    return res.json({ ok: true, user_ids: [] });
-  }
-});
-
-app.post("/api/survival/lobby/join", strictLimiter, requireLogin, async (req, res) => {
-  const uid = req.session.user.id;
-  survivalLobbyUserIds.add(uid);
-  io.to(SURVIVAL_ROOM_ID).emit("survival:lobby", { user_ids: Array.from(survivalLobbyUserIds) });
-  return res.json({ ok: true });
-});
-
-app.post("/api/survival/lobby/leave", strictLimiter, requireLogin, async (req, res) => {
-  const uid = req.session.user.id;
-  survivalLobbyUserIds.delete(uid);
-  io.to(SURVIVAL_ROOM_ID).emit("survival:lobby", { user_ids: Array.from(survivalLobbyUserIds) });
-  return res.json({ ok: true });
-});
-
 app.get("/api/survival/seasons/:id", requireLogin, async (req, res) => {
   try {
     const beforeId = req.query?.before ? Number(req.query.before) : null;
@@ -7443,42 +7294,17 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
   const participantIds = Array.isArray(req.body?.participant_user_ids)
     ? req.body.participant_user_ids
     : [];
-  const includeLobby = !!req.body?.include_lobby;
-  const lobbyIds = includeLobby ? Array.from(survivalLobbyUserIds) : [];
-  const npcNames = parseCustomNames(req.body?.npc_names);
-  const fillSlots = clamp(Number(req.body?.fill_slots || 0), 0, 48);
   const options = {
     includeCouples: !!req.body?.options?.includeCouples,
     chaoticMode: !!req.body?.options?.chaoticMode,
   };
-  const mergedUserIds = Array.from(new Set([...participantIds, ...lobbyIds]));
-  const userSnapshots = await fetchSurvivalUserSnapshots(mergedUserIds);
-  const baseCount = userSnapshots.length + npcNames.length;
-  const totalDesired = fillSlots > 0 ? Math.max(fillSlots, baseCount) : baseCount;
-  if (totalDesired < 2) {
+  const userSnapshots = await fetchSurvivalUserSnapshots(participantIds);
+  if (userSnapshots.length < 2) {
     return res.status(400).json({ message: "Select at least two participants." });
   }
 
   const seed = crypto.randomBytes(8).toString("hex");
   const rng = createSeededRng(seed);
-  const arenaState = buildDefaultArenaState(rng);
-  const usedNames = new Set(userSnapshots.map((u) => String(u.username || "").toLowerCase()));
-  const finalNpcNames = [];
-  for (const n of npcNames) {
-    const key = String(n || "").toLowerCase();
-    if (!key || usedNames.has(key)) continue;
-    usedNames.add(key);
-    finalNpcNames.push(n);
-  }
-  let counter = 1;
-  while (userSnapshots.length + finalNpcNames.length < totalDesired) {
-    const name = `Tribute ${counter}`;
-    const key = name.toLowerCase();
-    counter += 1;
-    if (usedNames.has(key)) continue;
-    usedNames.add(key);
-    finalNpcNames.push(name);
-  }
   const seasonPayload = {
     room_id: SURVIVAL_ROOM_DB_ID,
     created_by_user_id: req.session.user.id,
@@ -7487,8 +7313,6 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
     day_index: 1,
     phase: "day",
     rng_seed: buildSurvivalSeedPayload(seed, options),
-    arena_state_json: JSON.stringify(arenaState),
-    winner_rewarded: 0,
     created_at: now,
     updated_at: now,
   };
@@ -7498,8 +7322,8 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
     if (await pgUsersEnabled()) {
       await pgPool.query("BEGIN");
       const { rows } = await pgPool.query(
-        `INSERT INTO survival_seasons (room_id, created_by_user_id, title, status, day_index, phase, rng_seed, arena_state_json, winner_rewarded, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        `INSERT INTO survival_seasons (room_id, created_by_user_id, title, status, day_index, phase, rng_seed, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          RETURNING id`,
         [
           seasonPayload.room_id,
@@ -7509,8 +7333,6 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
           seasonPayload.day_index,
           seasonPayload.phase,
           seasonPayload.rng_seed,
-          seasonPayload.arena_state_json,
-          seasonPayload.winner_rewarded,
           seasonPayload.created_at,
           seasonPayload.updated_at,
         ]
@@ -7519,11 +7341,10 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
       if (!seasonId) throw new Error("missing season id");
       for (const user of userSnapshots) {
         const traits = buildSurvivalTraits(rng, options.chaoticMode);
-        const location = pickRandom(SURVIVAL_ARENA_ZONES, rng) || "Open Field";
         await pgPool.query(
           `INSERT INTO survival_participants
-           (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
-           VALUES ($1,$2,$3,$4,1,100,0,NULL,$5,$6,$7,NULL,$8)`,
+           (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, last_event_at, created_at)
+           VALUES ($1,$2,$3,$4,1,100,0,NULL,$5,$6,NULL,$7)`,
           [
             seasonId,
             user.id,
@@ -7531,23 +7352,8 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
             user.avatar || null,
             JSON.stringify([]),
             JSON.stringify(traits),
-            location,
             now,
           ]
-        );
-      }
-
-      // NPC / custom-name participants (negative user_id, no FK).
-      let npcIdx = 0;
-      for (const name of finalNpcNames) {
-        npcIdx += 1;
-        const traits = buildSurvivalTraits(rng, options.chaoticMode);
-        const location = pickRandom(SURVIVAL_ARENA_ZONES, rng) || "Open Field";
-        await pgPool.query(
-          `INSERT INTO survival_participants
-           (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
-           VALUES ($1,$2,$3,NULL,1,100,0,NULL,$4,$5,$6,NULL,$7)`,
-          [seasonId, -1 * (seasonId * 1000 + npcIdx), name.slice(0, 32), JSON.stringify([]), JSON.stringify(traits), location, now]
         );
       }
       await pgPool.query("COMMIT");
@@ -7555,8 +7361,8 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
       await dbRunAsync("BEGIN");
       const result = await dbRunAsync(
         `INSERT INTO survival_seasons
-         (room_id, created_by_user_id, title, status, day_index, phase, rng_seed, arena_state_json, winner_rewarded, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (room_id, created_by_user_id, title, status, day_index, phase, rng_seed, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           seasonPayload.room_id,
           seasonPayload.created_by_user_id,
@@ -7565,8 +7371,6 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
           seasonPayload.day_index,
           seasonPayload.phase,
           seasonPayload.rng_seed,
-          seasonPayload.arena_state_json,
-          seasonPayload.winner_rewarded,
           seasonPayload.created_at,
           seasonPayload.updated_at,
         ]
@@ -7574,11 +7378,10 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
       seasonId = result.lastID;
       for (const user of userSnapshots) {
         const traits = buildSurvivalTraits(rng, options.chaoticMode);
-        const location = pickRandom(SURVIVAL_ARENA_ZONES, rng) || "Open Field";
         await dbRunAsync(
           `INSERT INTO survival_participants
-           (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
-           VALUES (?, ?, ?, ?, 1, 100, 0, NULL, ?, ?, ?, NULL, ?)`,
+           (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, last_event_at, created_at)
+           VALUES (?, ?, ?, ?, 1, 100, 0, NULL, ?, ?, NULL, ?)`,
           [
             seasonId,
             user.id,
@@ -7586,22 +7389,8 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
             user.avatar || null,
             JSON.stringify([]),
             JSON.stringify(traits),
-            location,
             now,
           ]
-        );
-      }
-
-      let npcIdx = 0;
-      for (const name of finalNpcNames) {
-        npcIdx += 1;
-        const traits = buildSurvivalTraits(rng, options.chaoticMode);
-        const location = pickRandom(SURVIVAL_ARENA_ZONES, rng) || "Open Field";
-        await dbRunAsync(
-          `INSERT INTO survival_participants
-           (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
-           VALUES (?, ?, ?, NULL, 1, 100, 0, NULL, ?, ?, ?, NULL, ?)`,
-          [seasonId, -1 * (seasonId * 1000 + npcIdx), name.slice(0, 32), JSON.stringify([]), JSON.stringify(traits), location, now]
         );
       }
       await dbRunAsync("COMMIT");
@@ -7617,7 +7406,11 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
   const season = await fetchSurvivalSeasonById(seasonId);
   const payload = await buildSurvivalPayload(season);
   io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
-  io.to(SURVIVAL_ROOM_ID).emit("system", `🎬 New Survival season started: ${payload?.season?.title || 'Season'}`);
+  // Mirror the narrative into the room as system messages.
+  try {
+    io.to(SURVIVAL_ROOM_ID).emit("system", `🏟️ Survival season started: ${payload?.season?.title || title}`);
+    io.to(SURVIVAL_ROOM_ID).emit("system", `Day ${payload?.season?.day_index || 1} — ${String(payload?.season?.phase || "day").toUpperCase()}`);
+  } catch {}
   return res.json(payload);
 });
 
@@ -7644,11 +7437,6 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
 
   const { seed, options } = parseSurvivalSeedPayload(season.rng_seed);
   const rng = createSeededRng(`${seed || "survival"}:${season.day_index}:${season.phase}`);
-  const arena = safeJsonParse(season.arena_state_json || "{}", {});
-  // Move everyone a bit each tick so the arena map feels alive.
-  for (const p of participants) {
-    maybeMoveParticipant(p, arena, rng, !!options?.chaoticMode);
-  }
   const couples = options?.includeCouples
     ? await (async () => {
       try {
@@ -7697,7 +7485,6 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
         rng,
         appearanceCount,
         couples,
-        arena,
       });
       if (!picked || picked.length < template.participants) continue;
       if (picked.some((p) => (appearanceCount.get(p.user_id) || 0) >= 2)) continue;
@@ -7720,7 +7507,6 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
         rng,
         appearanceCount,
         couples,
-        arena,
       }) || [currentAlive[0]];
     }
 
@@ -7757,7 +7543,6 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
     season.status = "finished";
     const winner = aliveAfter[0];
     if (winner) {
-      arena.lastCombatZone = normalizeZoneName(winner.location) || arena.lastCombatZone || null;
       events.push({
         id: null,
         season_id: seasonId,
@@ -7769,25 +7554,6 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
         outcome: { type: "winner" },
         created_at: now,
       });
-
-      // Reward gold only for real site users (not NPC/custom-name slots), once per season.
-      if (!season.winner_rewarded && Number(winner.user_id) > 0) {
-        const credited = await creditGold(Number(winner.user_id), 2000, "survival_win");
-        if (credited) {
-          season.winner_rewarded = 1;
-          events.push({
-            id: null,
-            season_id: seasonId,
-            day_index: season.day_index,
-            phase: season.phase,
-            order_index: orderIndex + 2,
-            text: `+2000 gold awarded to ${sanitizeDisplayName(winner.display_name)} for winning!`,
-            involved_user_ids: [winner.user_id],
-            outcome: { type: "gold", amount: 2000 },
-            created_at: now,
-          });
-        }
-      }
     } else {
       events.push({
         id: null,
@@ -7813,9 +7579,6 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
   }
   season.updated_at = now;
 
-  // Persist arena state changes.
-  season.arena_state_json = JSON.stringify(arena || {});
-
   const pendingMap = new Map();
   try {
     if (await pgUsersEnabled()) {
@@ -7834,8 +7597,8 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
         participant.alliance_id = allianceId && allianceId < 0 ? null : allianceId;
         await pgPool.query(
           `UPDATE survival_participants
-           SET alive=$1, hp=$2, kills=$3, alliance_id=$4, inventory_json=$5, traits_json=$6, location=$7, last_event_at=$8
-           WHERE id=$9`,
+           SET alive=$1, hp=$2, kills=$3, alliance_id=$4, inventory_json=$5, traits_json=$6, last_event_at=$7
+           WHERE id=$8`,
           [
             participant.alive ? 1 : 0,
             participant.hp,
@@ -7843,7 +7606,6 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
             participant.alliance_id,
             JSON.stringify(participant.inventory || []),
             JSON.stringify(participant.traits || {}),
-            participant.location || null,
             participant.last_event_at,
             participant.id,
           ]
@@ -7874,8 +7636,8 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
       }
 
       await pgPool.query(
-        `UPDATE survival_seasons SET status=$1, day_index=$2, phase=$3, arena_state_json=$4, winner_rewarded=$5, updated_at=$6 WHERE id=$7`,
-        [season.status, season.day_index, season.phase, JSON.stringify(arena || {}), season.winner_rewarded || 0, season.updated_at, seasonId]
+        `UPDATE survival_seasons SET status=$1, day_index=$2, phase=$3, updated_at=$4 WHERE id=$5`,
+        [season.status, season.day_index, season.phase, season.updated_at, seasonId]
       );
       await pgPool.query("COMMIT");
     } else {
@@ -7893,7 +7655,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
         participant.alliance_id = allianceId && allianceId < 0 ? null : allianceId;
         await dbRunAsync(
           `UPDATE survival_participants
-           SET alive=?, hp=?, kills=?, alliance_id=?, inventory_json=?, traits_json=?, location=?, last_event_at=?
+           SET alive=?, hp=?, kills=?, alliance_id=?, inventory_json=?, traits_json=?, last_event_at=?
            WHERE id=?`,
           [
             participant.alive ? 1 : 0,
@@ -7902,7 +7664,6 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
             participant.alliance_id,
             JSON.stringify(participant.inventory || []),
             JSON.stringify(participant.traits || {}),
-            participant.location || null,
             participant.last_event_at,
             participant.id,
           ]
@@ -7932,8 +7693,8 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
       }
 
       await dbRunAsync(
-        `UPDATE survival_seasons SET status=?, day_index=?, phase=?, arena_state_json=?, winner_rewarded=?, updated_at=? WHERE id=?`,
-        [season.status, season.day_index, season.phase, JSON.stringify(arena || {}), season.winner_rewarded || 0, season.updated_at, seasonId]
+        `UPDATE survival_seasons SET status=?, day_index=?, phase=?, updated_at=? WHERE id=?`,
+        [season.status, season.day_index, season.phase, season.updated_at, seasonId]
       );
       await dbRunAsync("COMMIT");
     }
@@ -7947,8 +7708,17 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
   const payload = await buildSurvivalPayload(await fetchSurvivalSeasonById(seasonId));
   io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
   io.to(SURVIVAL_ROOM_ID).emit("survival:events", { seasonId, events });
-  // Mirror the simulator log into chat as always-visible system messages.
-  emitSurvivalSystemLog(SURVIVAL_ROOM_ID, events);
+  // Mirror the narrative into the room as system messages.
+  try {
+    if (events && events.length) {
+      const d = events[0].day_index;
+      const ph = String(events[0].phase || "day").toUpperCase();
+      io.to(SURVIVAL_ROOM_ID).emit("system", `🗺️ Day ${d} — ${ph}`);
+      for (const ev of events) {
+        if (ev?.text) io.to(SURVIVAL_ROOM_ID).emit("system", String(ev.text));
+      }
+    }
+  } catch {}
   return res.json(payload);
 });
 
