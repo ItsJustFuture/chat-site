@@ -2105,52 +2105,97 @@ const luckState = {
 let lastLuckRequestAt = 0;
 const LUCK_REQUEST_COOLDOWN_MS = 2000;
 
+function themeIdFromName(name){
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+const THEME_TAG_KEYWORDS = [
+  { match: /minimal/i, tag: "Minimal" },
+  { match: /neon|cyberpunk/i, tag: "Neon" },
+  { match: /fantasy|tavern/i, tag: "Fantasy" },
+  { match: /space|nebula|galaxy/i, tag: "Space" },
+  { match: /pastel|sorbet|cotton|pearl|glacier/i, tag: "Pastel" },
+  { match: /forest|mint|aurora|lavender/i, tag: "Nature" },
+  { match: /ocean|mist/i, tag: "Ocean" },
+  { match: /desert|sand/i, tag: "Desert" },
+  { match: /retro|terminal/i, tag: "Retro" },
+  { match: /cherry|rose|blossom/i, tag: "Floral" },
+  { match: /crimson|noir|obsidian|midnight/i, tag: "Moody" },
+];
+function inferThemeTags(name, mode, extra = []){
+  const tags = new Set(extra.filter(Boolean));
+  tags.add(mode === "Dark" ? "Dark" : "Light");
+  for(const rule of THEME_TAG_KEYWORDS){
+    if(rule.match.test(name)) tags.add(rule.tag);
+  }
+  return Array.from(tags);
+}
+function createTheme(name, mode, options = {}){
+  const id = options.id || themeIdFromName(name);
+  const access = options.access || "vip";
+  const goldPrice = Number(options.goldPrice || 0);
+  const isPurchasable = Boolean(options.isPurchasable || goldPrice);
+  return {
+    id,
+    name,
+    mode,
+    access,
+    isPurchasable,
+    goldPrice: goldPrice || null,
+    isNew: Boolean(options.isNew),
+    tags: inferThemeTags(name, mode, options.tags || []),
+  };
+}
+// Theme registry: add new themes here (metadata drives filtering, pinning, and gold unlocks).
 const THEME_LIST = [
-  { name: "Minimal Dark", mode: "Dark" },
-  { name: "Minimal Dark (High Contrast)", mode: "Dark" },
-  { name: "Cyberpunk Neon", mode: "Dark" },
-  { name: "Cyberpunk Neon (Midnight)", mode: "Dark" },
-  { name: "Fantasy Tavern", mode: "Dark" },
-  { name: "Fantasy Tavern (Ember)", mode: "Dark" },
-  { name: "Space Explorer", mode: "Dark" },
-  { name: "Space Explorer (Nebula)", mode: "Dark" },
-  { name: "Minimal Light", mode: "Light" },
-  { name: "Minimal Light (High Contrast)", mode: "Light" },
-  { name: "Pastel Light", mode: "Light" },
-  { name: "Paper / Parchment", mode: "Light" },
-  { name: "Sky Light", mode: "Light" },
-  { name: "Cherry Blossom (Dark)", mode: "Dark" },
-  { name: "Cherry Blossom (Light)", mode: "Light" },
-  { name: "420 Friendly (Light)", mode: "Light" },
-  { name: "420 Friendly (Dark)", mode: "Dark" },
-  { name: "Aurora Night", mode: "Dark" },
-  { name: "Mint Soda", mode: "Light" },
-  { name: "Lavender Fog", mode: "Light" },
-  { name: "Crimson Noir", mode: "Dark" },
-  { name: "Ocean Mist", mode: "Light" },
-  { name: "Deep Ocean", mode: "Dark" },
-  { name: "Sunlit Sand", mode: "Light" },
-  { name: "Graphite", mode: "Dark" },
-  { name: "Forest Night", mode: "Dark" },
-  { name: "Retro Terminal", mode: "Dark" },
-  { name: "Desert Dusk", mode: "Dark" },
-  { name: "Arctic Light", mode: "Light" },
-  { name: "Rose Quartz", mode: "Light" },
-  { name: "Lemonade", mode: "Light" },
+  createTheme("Minimal Dark", "Dark", { access: "public", tags: ["Minimal"] }),
+  createTheme("Minimal Dark (High Contrast)", "Dark", { access: "public", tags: ["Minimal"] }),
+  createTheme("Cyberpunk Neon", "Dark", { tags: ["Neon"] }),
+  createTheme("Cyberpunk Neon (Midnight)", "Dark", { tags: ["Neon"] }),
+  createTheme("Fantasy Tavern", "Dark", { access: "public", tags: ["Fantasy"] }),
+  createTheme("Fantasy Tavern (Ember)", "Dark", { access: "public", tags: ["Fantasy"] }),
+  createTheme("Space Explorer", "Dark", { tags: ["Space"] }),
+  createTheme("Space Explorer (Nebula)", "Dark", { tags: ["Space"] }),
+  createTheme("Minimal Light", "Light", { access: "public", tags: ["Minimal"] }),
+  createTheme("Minimal Light (High Contrast)", "Light", { access: "public", tags: ["Minimal"] }),
+  createTheme("Pastel Light", "Light", { tags: ["Pastel"] }),
+  createTheme("Paper / Parchment", "Light", { access: "public", tags: ["Minimal"] }),
+  createTheme("Sky Light", "Light", { access: "public" }),
+  createTheme("Cherry Blossom (Dark)", "Dark", { tags: ["Floral"] }),
+  createTheme("Cherry Blossom (Light)", "Light", { tags: ["Floral"] }),
+  createTheme("420 Friendly (Light)", "Light", { tags: ["Nature"] }),
+  createTheme("420 Friendly (Dark)", "Dark", { tags: ["Nature"] }),
+  createTheme("Aurora Night", "Dark", { tags: ["Nature", "Moody"] }),
+  createTheme("Mint Soda", "Light", { tags: ["Nature"] }),
+  createTheme("Lavender Fog", "Light", { tags: ["Nature"] }),
+  createTheme("Crimson Noir", "Dark", { tags: ["Moody"] }),
+  createTheme("Ocean Mist", "Light", { tags: ["Ocean"] }),
+  createTheme("Deep Ocean", "Dark", { tags: ["Ocean", "Moody"] }),
+  createTheme("Sunlit Sand", "Light", { tags: ["Desert"] }),
+  createTheme("Graphite", "Dark", { tags: ["Minimal"] }),
+  createTheme("Forest Night", "Dark", { tags: ["Nature"] }),
+  createTheme("Retro Terminal", "Dark", { tags: ["Retro"] }),
+  createTheme("Desert Dusk", "Dark", { access: "public", tags: ["Desert"] }),
+  createTheme("Arctic Light", "Light", { tags: ["Minimal"] }),
+  createTheme("Rose Quartz", "Light", { tags: ["Floral"] }),
+  createTheme("Lemonade", "Light", { tags: ["Pastel"] }),
 
-  // --- VIP gradient pack (locked behind VIP)
-  { name: "Sunrise Sorbet", mode: "Light" },
-  { name: "Cotton Candy Sky", mode: "Light" },
-  { name: "Prismatic Pearl", mode: "Light" },
-  { name: "Citrus Splash", mode: "Light" },
-  { name: "Glacier Bloom", mode: "Light" },
-  { name: "Aurora Pastel", mode: "Light" },
+  // --- VIP + Gold unlock pack
+  createTheme("Sunrise Sorbet", "Light", { tags: ["Pastel"], isNew: true }),
+  createTheme("Cotton Candy Sky", "Light", { tags: ["Pastel"] }),
+  createTheme("Prismatic Pearl", "Light", { access: "gold", goldPrice: 2800, tags: ["Pastel"] }),
+  createTheme("Citrus Splash", "Light", { tags: ["Pastel"] }),
+  createTheme("Glacier Bloom", "Light", { tags: ["Pastel"] }),
+  createTheme("Aurora Pastel", "Light", { tags: ["Pastel", "Nature"] }),
 
-  { name: "Midnight Mirage", mode: "Dark" },
-  { name: "Neon Abyss", mode: "Dark" },
-  { name: "Velvet Galaxy", mode: "Dark" },
-  { name: "Obsidian Aurora", mode: "Dark" },
-  { name: "Iris & Lola Neon", mode: "Dark" },
+  createTheme("Midnight Mirage", "Dark", { tags: ["Moody"] }),
+  createTheme("Neon Abyss", "Dark", { access: "gold", goldPrice: 4200, tags: ["Neon"] }),
+  createTheme("Velvet Galaxy", "Dark", { access: "gold", goldPrice: 4500, tags: ["Space", "Moody"] }),
+  createTheme("Obsidian Aurora", "Dark", { tags: ["Moody"] }),
+  createTheme("Iris & Lola Neon", "Dark", { tags: ["Neon"] }),
 
 ];
 
@@ -2187,7 +2232,16 @@ function updateIrisLolaTogetherClass() {
 }
 const DEFAULT_THEME = "Minimal Dark";
 let currentTheme = document.body?.getAttribute("data-theme") || DEFAULT_THEME;
-let themeFilter = "all";
+let themeActiveFilter = "all";
+let themeSortMode = "recommended";
+let themeSearchQuery = "";
+let themePinnedIds = [];
+let themeFavoriteIds = [];
+let themeOwnedIds = [];
+let themeRecents = [];
+let themePreviewId = themeIdFromName(currentTheme);
+let themeSelectedId = themePreviewId;
+let themeActionThemeId = "";
 const MAX_IMAGE_GIF_BYTES = 25 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
@@ -3686,9 +3740,34 @@ const dmInfoAddBtn = document.getElementById("dmInfoAddBtn");
 const dmLeaveBtn = document.getElementById("dmLeaveBtn");
 
 const customNav = document.getElementById("customNav");
-const themeGrid = document.getElementById("themeGrid");
 const themeMsg = document.getElementById("themeMsg");
-const themeFilterButtons = Array.from(document.querySelectorAll("[data-theme-filter]"));
+const currentThemeLabel = document.getElementById("currentThemeLabel");
+const openThemesModalBtn = document.getElementById("openThemesModalBtn");
+const themesModal = document.getElementById("themesModal");
+const themesModalCloseBtn = document.getElementById("themesModalClose");
+const themesModalSearch = document.getElementById("themesModalSearch");
+const themesModalFilters = document.getElementById("themesModalFilters");
+const themesModalSort = document.getElementById("themesModalSort");
+const themesFiltersBtn = document.getElementById("themesFiltersBtn");
+const themesFiltersSheet = document.getElementById("themesFiltersSheet");
+const themesFiltersSheetBody = document.getElementById("themesFiltersSheetBody");
+const themesFiltersSheetClose = document.getElementById("themesFiltersSheetClose");
+const themesPinnedSection = document.getElementById("themesPinnedSection");
+const themesPinnedGrid = document.getElementById("themesPinnedGrid");
+const themesAllGrid = document.getElementById("themesAllGrid");
+const themesEmptyState = document.getElementById("themesEmptyState");
+const themesPreviewFrame = document.getElementById("themesPreviewFrame");
+const themesPreviewName = document.getElementById("themesPreviewName");
+const themesApplyBtn = document.getElementById("themesApplyBtn");
+const themesBuyBtn = document.getElementById("themesBuyBtn");
+const themesPreviewHint = document.getElementById("themesPreviewHint");
+const themesActionSheet = document.getElementById("themesActionSheet");
+const themesActionSheetTitle = document.getElementById("themesActionSheetTitle");
+const themesActionPinBtn = document.getElementById("themesActionPinBtn");
+const themesActionFavoriteBtn = document.getElementById("themesActionFavoriteBtn");
+const themesActionApplyBtn = document.getElementById("themesActionApplyBtn");
+const themesActionBuyBtn = document.getElementById("themesActionBuyBtn");
+const themesActionCloseBtn = document.getElementById("themesActionCloseBtn");
 const customNavButtons = Array.from(document.querySelectorAll(".customNavBtn"));
 
 // drawers
@@ -4655,13 +4734,29 @@ function normalizeRole(role){
 }
 
 
-const PUBLIC_THEME_NAMES = new Set(["Minimal Light", "Minimal Dark", "Minimal Light (High Contrast)", "Minimal Dark (High Contrast)", "Paper / Parchment", "Sky Light", "Fantasy Tavern", "Fantasy Tavern (Ember)", "Desert Dusk"]);
+const THEME_BY_ID = new Map(THEME_LIST.map((theme) => [theme.id, theme]));
+const THEME_BY_NAME = new Map(THEME_LIST.map((theme) => [theme.name, theme]));
+const THEME_TAGS = Array.from(
+  new Set(
+    THEME_LIST.flatMap((theme) => theme.tags || [])
+  )
+).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+function canApplyThemeForUser(theme, role, ownedIds = []){
+  if (!theme) return false;
+  if (theme.name === IRIS_LOLA_THEME) return isIrisLolaAllowed();
+  const userRole = role || "User";
+  if (theme.access === "vip" && roleRank(userRole) < roleRank("VIP")) return false;
+  if (theme.access === "gold") {
+    const owned = ownedIds.includes(theme.id);
+    if (!owned && roleRank(userRole) < roleRank("VIP")) return false;
+  }
+  return true;
+}
 function canUseThemeName(themeName){
-  // Public themes always allowed
-  if(PUBLIC_THEME_NAMES.has(themeName)) return true;
-  // VIP and above can use all themes
+  const theme = THEME_BY_NAME.get(themeName);
+  if (!theme) return false;
   const role = (typeof me !== "undefined" && me && me.role) ? me.role : "User";
-  return roleRank(role) >= roleRank("VIP");
+  return canApplyThemeForUser(theme, role, themeOwnedIds);
 }
 
 function roleRank(role){ const norm = normalizeRole(role); const i = ROLES.findIndex(r=>r.toLowerCase()===String(norm).toLowerCase()); return i===-1?1:i; }
@@ -5763,6 +5858,15 @@ async function loadUserPrefs(){
       applyDmThemePrefs();
       saveDmThemePrefsToStorage();
     }
+    if (Array.isArray(prefs.pinnedThemeIds)) {
+      themePinnedIds = normalizeThemeIdList(prefs.pinnedThemeIds);
+    }
+    if (Array.isArray(prefs.favoriteThemeIds)) {
+      themeFavoriteIds = normalizeThemeIdList(prefs.favoriteThemeIds);
+    }
+    if (Array.isArray(prefs.ownedThemeIds)) {
+      themeOwnedIds = normalizeThemeIdList(prefs.ownedThemeIds);
+    }
     if (prefs.sound && typeof prefs.sound === "object") {
       Sound.importPrefs(prefs.sound);
       syncSoundPrefsUI(false);
@@ -5784,10 +5888,14 @@ async function loadUserPrefs(){
 function applyTheme(themeName, { persist=true, silent=false, storeLocal=persist } = {}){
   const safe = sanitizeThemeName(themeName || DEFAULT_THEME);
   currentTheme = safe;
+  themeSelectedId = themeIdFromName(safe);
+  themePreviewId = themeSelectedId;
   document.body?.setAttribute("data-theme", safe);
   if(storeLocal) setStoredTheme(safe);
   if(persist) persistThemePreference(safe);
-  renderThemeGrid();
+  updateCurrentThemeLabel();
+  recordThemeRecent(themeSelectedId);
+  renderThemeCatalog();
   if(themeMsg && !silent){
     themeMsg.textContent = `Theme applied: ${safe}`;
     setTimeout(() => { if(themeMsg.textContent.startsWith("Theme applied")) themeMsg.textContent = ""; }, 2400);
@@ -5819,99 +5927,362 @@ function createThemeThumbnail(themeName){
   `;
   return wrap;
 }
-function renderThemeGrid(){
-  if(!themeGrid) return;
-
-  // Split view: Light themes on the left, Dark themes on the right.
-  themeGrid.innerHTML = "";
-  themeGrid.classList.toggle("oneColumn", themeFilter !== "all");
-  themeGrid.classList.toggle("onlyLight", themeFilter === "light");
-  themeGrid.classList.toggle("onlyDark", themeFilter === "dark");
-
-    const visibleThemes = THEME_LIST.filter((t) => t.name !== IRIS_LOLA_THEME || isIrisLolaAllowed());
-  const lightThemes = visibleThemes.filter((t) => t.mode === "Light");
-    const darkThemes  = visibleThemes.filter((t) => t.mode === "Dark");
-
-  const makeColumn = (title, mode, items) => {
-    const col = document.createElement("div");
-    col.className = `themeColumn ${mode.toLowerCase()}`;
-
-    const header = document.createElement("div");
-    header.className = "themeColumnHeader";
-    header.innerHTML = `<div class="themeColumnTitle">${escapeHtml(title)}</div>
-                        <div class="themeColumnHint">${escapeHtml(mode)}</div>`;
-
-    const body = document.createElement("div");
-    body.className = "themeColumnBody";
-
-    for(const theme of items){
-      const card = document.createElement("button");
-      card.type = "button";
-      card.className = `themeCard compact${currentTheme === theme.name ? " selected" : ""}`;
-      card.dataset.themeName = theme.name;
-      card.innerHTML = `
-        <div class="themeCardHeader">
-          <div>
-            <div class="themeLabel">${escapeHtml(theme.name)}</div>
-          </div>
-          <div class="themeCheck">✓</div>
-        </div>
-      `;
-      card.appendChild(createThemeThumbnail(theme.name));
-      if (canUseThemeName(theme.name)) {
-        card.addEventListener("click", () => applyTheme(theme.name, { persist:true }));
-      } else {
-        card.classList.add("locked");
-        // VIP ONLY badge (keep full colors visible)
-        const vipTag = document.createElement("div");
-        vipTag.className = "vipOnlyTag";
-        vipTag.textContent = "VIP ONLY";
-        card.appendChild(vipTag);
-
-        // Preview button (10s) + card click preview
-        const previewBtn = document.createElement("button");
-        previewBtn.type = "button";
-        previewBtn.className = "previewBtn";
-        previewBtn.textContent = "Preview (10s)";
-        previewBtn.addEventListener("click", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          previewTheme(theme.name, 10);
-        });
-        card.appendChild(previewBtn);
-
-        card.addEventListener("click", (e) => {
-          e.preventDefault();
-          previewTheme(theme.name, 10);
-        });
-      }
-      body.appendChild(card);
-    }
-
-    col.appendChild(header);
-    col.appendChild(body);
-    return col;
-  };
-
-  if(themeFilter === "light"){
-    themeGrid.appendChild(makeColumn("Light themes", "Light", lightThemes));
-    return;
-  }
-  if(themeFilter === "dark"){
-    themeGrid.appendChild(makeColumn("Dark themes", "Dark", darkThemes));
-    return;
-  }
-
-  themeGrid.appendChild(makeColumn("Light themes", "Light", lightThemes));
-  themeGrid.appendChild(makeColumn("Dark themes", "Dark", darkThemes));
+function updateCurrentThemeLabel(){
+  if (currentThemeLabel) currentThemeLabel.textContent = currentTheme || DEFAULT_THEME;
 }
-
-function setThemeFilter(filter){
-  themeFilter = filter;
-  themeFilterButtons.forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.themeFilter === filter);
+function normalizeThemeIdList(list){
+  const ids = Array.isArray(list) ? list.map((id) => String(id)) : [];
+  const unique = [];
+  const seen = new Set();
+  for (const id of ids) {
+    if (!THEME_BY_ID.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    unique.push(id);
+  }
+  return unique;
+}
+const THEME_RECENTS_KEY = "themeRecents";
+function loadThemeRecents(){
+  try {
+    const raw = localStorage.getItem(THEME_RECENTS_KEY);
+    return normalizeThemeIdList(raw ? JSON.parse(raw) : []);
+  } catch {
+    return [];
+  }
+}
+function saveThemeRecents(){
+  try { localStorage.setItem(THEME_RECENTS_KEY, JSON.stringify(themeRecents)); } catch {}
+}
+function recordThemeRecent(themeId){
+  if (!themeId) return;
+  const next = [themeId, ...themeRecents.filter((id) => id !== themeId)];
+  themeRecents = next.slice(0, 12);
+  saveThemeRecents();
+}
+function getPinnedLimit(role){
+  return roleRank(role || "User") >= roleRank("VIP") ? 5 : 2;
+}
+function canPinTheme(role, pinnedCount){
+  return pinnedCount < getPinnedLimit(role);
+}
+function isThemeOwned(themeId){
+  return themeOwnedIds.includes(themeId);
+}
+function isThemeLockedForUser(theme){
+  const role = me?.role || "User";
+  if (!theme) return true;
+  if (theme.name === IRIS_LOLA_THEME && !isIrisLolaAllowed()) return true;
+  if (theme.access === "vip" && roleRank(role) < roleRank("VIP")) return true;
+  if (theme.access === "gold" && !isThemeOwned(theme.id) && roleRank(role) < roleRank("VIP")) return true;
+  return false;
+}
+function updateThemePreview(themeId){
+  const theme = THEME_BY_ID.get(themeId) || THEME_BY_NAME.get(currentTheme);
+  if (!theme) return;
+  themePreviewId = theme.id;
+  if (themesPreviewFrame) themesPreviewFrame.setAttribute("data-theme", theme.name);
+  if (themesPreviewName) themesPreviewName.textContent = theme.name;
+  if (themesPreviewHint) themesPreviewHint.textContent = "Preview only — apply when you’re ready.";
+  updateThemeActionButtons();
+}
+function updateThemeActionButtons(){
+  const theme = THEME_BY_ID.get(themeSelectedId);
+  if (!themesApplyBtn || !theme) return;
+  const locked = isThemeLockedForUser(theme);
+  themesApplyBtn.disabled = locked || theme.name === currentTheme;
+  const showBuy = theme.access === "gold" && !isThemeOwned(theme.id) && roleRank(me?.role || "User") < roleRank("VIP");
+  if (themesBuyBtn) {
+    themesBuyBtn.style.display = showBuy ? "inline-flex" : "none";
+    themesBuyBtn.textContent = showBuy ? `Buy for ${theme.goldPrice} Gold` : "Buy for 0 Gold";
+  }
+}
+function createThemeCard(theme){
+  const isPinned = themePinnedIds.includes(theme.id);
+  const isFavorite = themeFavoriteIds.includes(theme.id);
+  const owned = isThemeOwned(theme.id);
+  const locked = isThemeLockedForUser(theme);
+  const card = document.createElement("button");
+  card.type = "button";
+  card.className = `themeCardV2${themeSelectedId === theme.id ? " selected" : ""}`;
+  card.dataset.themeId = theme.id;
+  card.innerHTML = `
+    <div class="themeCardTop">
+      <div class="themeCardName">${escapeHtml(theme.name)}</div>
+      <div class="themeCardActions">
+        <button class="themeCardAction themePinBtn${isPinned ? " active" : ""}" type="button" aria-label="Pin theme">📌</button>
+        <button class="themeCardAction themeFavBtn${isFavorite ? " active" : ""}" type="button" aria-label="Favorite theme">★</button>
+      </div>
+    </div>
+  `;
+  card.appendChild(createThemeThumbnail(theme.name));
+  const badges = document.createElement("div");
+  badges.className = "themeCardBadges";
+  if (theme.access === "vip") {
+    const badge = document.createElement("span");
+    badge.className = "themeBadge vip";
+    badge.textContent = "VIP";
+    badges.appendChild(badge);
+  }
+  if (theme.access === "gold" && !owned) {
+    const badge = document.createElement("span");
+    badge.className = "themeBadge gold";
+    badge.textContent = `${theme.goldPrice} Gold`;
+    badges.appendChild(badge);
+  }
+  if (owned) {
+    const badge = document.createElement("span");
+    badge.className = "themeBadge owned";
+    badge.textContent = "Owned";
+    badges.appendChild(badge);
+  }
+  if (locked) {
+    const badge = document.createElement("span");
+    badge.className = "themeBadge locked";
+    badge.textContent = theme.access === "vip" ? "Locked" : "Locked";
+    badges.appendChild(badge);
+  }
+  card.appendChild(badges);
+  const pinBtn = card.querySelector(".themePinBtn");
+  const favBtn = card.querySelector(".themeFavBtn");
+  pinBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleThemePin(theme.id);
   });
-  renderThemeGrid();
+  favBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleThemeFavorite(theme.id);
+  });
+  card.addEventListener("click", () => {
+    themeSelectedId = theme.id;
+    updateThemePreview(theme.id);
+    renderThemeCatalog();
+  });
+  card.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    openThemeActionSheet(theme.id);
+  });
+  let pressTimer = null;
+  card.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch") return;
+    pressTimer = setTimeout(() => openThemeActionSheet(theme.id), 500);
+  });
+  card.addEventListener("pointerup", () => {
+    if (pressTimer) clearTimeout(pressTimer);
+  });
+  card.addEventListener("pointerleave", () => {
+    if (pressTimer) clearTimeout(pressTimer);
+  });
+  return card;
+}
+function buildFilterList(){
+  const base = [
+    { id: "all", label: "All" },
+    { id: "pinned", label: "Pinned" },
+    { id: "favorites", label: "Favorites" },
+    { id: "recents", label: "Recents" },
+    { id: "unlocked", label: "Unlocked" },
+    { id: "vip", label: "VIP" },
+  ];
+  const tags = THEME_TAGS.map((tag) => ({ id: tag.toLowerCase(), label: tag }));
+  return [...base, ...tags];
+}
+function renderFilterPills(container){
+  if (!container) return;
+  container.innerHTML = "";
+  for (const filter of buildFilterList()){
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `pillBtn${themeActiveFilter === filter.id ? " active" : ""}`;
+    btn.textContent = filter.label;
+    btn.addEventListener("click", () => {
+      themeActiveFilter = filter.id;
+      renderThemeCatalog();
+      renderFilterPills(themesModalFilters);
+      renderFilterPills(themesFiltersSheetBody);
+    });
+    container.appendChild(btn);
+  }
+}
+function applyThemeFilters(themes){
+  const role = me?.role || "User";
+  let results = themes.filter((theme) => theme.name !== IRIS_LOLA_THEME || isIrisLolaAllowed());
+  if (themeSearchQuery) {
+    const query = themeSearchQuery.toLowerCase();
+    results = results.filter((theme) => theme.name.toLowerCase().includes(query));
+  }
+  switch (themeActiveFilter) {
+    case "pinned":
+      results = results.filter((theme) => themePinnedIds.includes(theme.id));
+      break;
+    case "favorites":
+      results = results.filter((theme) => themeFavoriteIds.includes(theme.id));
+      break;
+    case "recents":
+      results = results.filter((theme) => themeRecents.includes(theme.id));
+      break;
+    case "unlocked":
+      results = results.filter((theme) => canApplyThemeForUser(theme, role, themeOwnedIds));
+      break;
+    case "vip":
+      results = results.filter((theme) => theme.access === "vip");
+      break;
+    default:
+      if (themeActiveFilter !== "all") {
+        results = results.filter((theme) => (theme.tags || []).map((t) => t.toLowerCase()).includes(themeActiveFilter));
+      }
+      break;
+  }
+  return results;
+}
+function sortThemes(themes){
+  const base = [...themes];
+  const rankMap = new Map(themeRecents.map((id, idx) => [id, idx]));
+  const favoriteSet = new Set(themeFavoriteIds);
+  const pinnedSet = new Set(themePinnedIds);
+  switch (themeSortMode) {
+    case "newest":
+      return base.sort((a, b) => (b.isNew === a.isNew ? 0 : b.isNew ? 1 : -1));
+    case "az":
+      return base.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+    case "favorites":
+      return base.sort((a, b) => {
+        const favDiff = Number(favoriteSet.has(b.id)) - Number(favoriteSet.has(a.id));
+        if (favDiff !== 0) return favDiff;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      });
+    case "pinned":
+      return base.sort((a, b) => {
+        const pinDiff = Number(pinnedSet.has(b.id)) - Number(pinnedSet.has(a.id));
+        if (pinDiff !== 0) return pinDiff;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      });
+    default:
+      return base.sort((a, b) => {
+        const rA = rankMap.has(a.id) ? rankMap.get(a.id) : Number.MAX_SAFE_INTEGER;
+        const rB = rankMap.has(b.id) ? rankMap.get(b.id) : Number.MAX_SAFE_INTEGER;
+        if (rA !== rB) return rA - rB;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      });
+  }
+}
+function renderThemeCatalog(){
+  if (!themesAllGrid || !themesPinnedGrid) return;
+  renderFilterPills(themesModalFilters);
+  renderFilterPills(themesFiltersSheetBody);
+  const filtered = sortThemes(applyThemeFilters(THEME_LIST));
+  const pinnedThemes = themePinnedIds.map((id) => THEME_BY_ID.get(id)).filter(Boolean);
+  const shouldShowPinned = themeActiveFilter === "all" && pinnedThemes.length > 0;
+  if (themesPinnedSection) themesPinnedSection.style.display = shouldShowPinned ? "block" : "none";
+  themesPinnedGrid.innerHTML = "";
+  if (shouldShowPinned) {
+    pinnedThemes.forEach((theme) => themesPinnedGrid.appendChild(createThemeCard(theme)));
+  }
+  themesAllGrid.innerHTML = "";
+  filtered.forEach((theme) => themesAllGrid.appendChild(createThemeCard(theme)));
+  if (themesEmptyState) themesEmptyState.classList.toggle("show", filtered.length === 0);
+  updateThemePreview(themeSelectedId);
+}
+function toggleThemePin(themeId){
+  const isPinned = themePinnedIds.includes(themeId);
+  if (isPinned) {
+    themePinnedIds = themePinnedIds.filter((id) => id !== themeId);
+  } else {
+    const role = me?.role || "User";
+    if (!canPinTheme(role, themePinnedIds.length)) {
+      toast(`Pin limit reached. VIP can pin up to ${getPinnedLimit("VIP")} themes.`);
+      return;
+    }
+    themePinnedIds = [themeId, ...themePinnedIds];
+  }
+  queuePersistPrefs({ pinnedThemeIds: themePinnedIds });
+  renderThemeCatalog();
+}
+function toggleThemeFavorite(themeId){
+  if (themeFavoriteIds.includes(themeId)) {
+    themeFavoriteIds = themeFavoriteIds.filter((id) => id !== themeId);
+  } else {
+    themeFavoriteIds = [themeId, ...themeFavoriteIds];
+  }
+  queuePersistPrefs({ favoriteThemeIds: themeFavoriteIds });
+  renderThemeCatalog();
+}
+async function purchaseTheme(themeId){
+  const theme = THEME_BY_ID.get(themeId);
+  if (!theme || theme.access !== "gold") return;
+  if (isThemeOwned(themeId)) {
+    toast("You already own this theme.");
+    return;
+  }
+  try {
+    const res = await fetch("/api/themes/purchase", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ themeId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (data?.error === "insufficient_gold") {
+        toast("Not enough gold.");
+        return;
+      }
+      toast(data?.error || "Purchase failed.");
+      return;
+    }
+    if (Array.isArray(data.ownedThemeIds)) {
+      themeOwnedIds = normalizeThemeIdList(data.ownedThemeIds);
+    }
+    if (data.gold != null) {
+      applyProgressionPayload({ gold: data.gold });
+    }
+    toast(`Purchased ${theme.name}!`);
+    renderThemeCatalog();
+  } catch {
+    toast("Purchase failed.");
+  }
+}
+function openThemesModal(){
+  if (!themesModal) return;
+  themeRecents = loadThemeRecents();
+  themeSelectedId = themeIdFromName(currentTheme);
+  updateThemePreview(themeSelectedId);
+  renderThemeCatalog();
+  themesModal.classList.add("show");
+  themesModal.setAttribute("aria-hidden", "false");
+}
+function closeThemesModal(){
+  themesModal?.classList.remove("show");
+  themesModal?.setAttribute("aria-hidden", "true");
+  closeThemeActionSheet();
+  closeThemesFiltersSheet();
+}
+function openThemesFiltersSheet(){
+  themesFiltersSheet?.classList.add("show");
+  themesFiltersSheet?.setAttribute("aria-hidden", "false");
+}
+function closeThemesFiltersSheet(){
+  themesFiltersSheet?.classList.remove("show");
+  themesFiltersSheet?.setAttribute("aria-hidden", "true");
+}
+function openThemeActionSheet(themeId){
+  const theme = THEME_BY_ID.get(themeId);
+  if (!theme || !themesActionSheet) return;
+  themeActionThemeId = themeId;
+  if (themesActionSheetTitle) themesActionSheetTitle.textContent = theme.name;
+  if (themesActionPinBtn) themesActionPinBtn.textContent = themePinnedIds.includes(themeId) ? "Unpin theme" : "Pin theme";
+  if (themesActionFavoriteBtn) themesActionFavoriteBtn.textContent = themeFavoriteIds.includes(themeId) ? "Unfavorite" : "Favorite";
+  if (themesActionApplyBtn) themesActionApplyBtn.disabled = isThemeLockedForUser(theme) || theme.name === currentTheme;
+  const showBuy = theme.access === "gold" && !isThemeOwned(theme.id) && roleRank(me?.role || "User") < roleRank("VIP");
+  if (themesActionBuyBtn) {
+    themesActionBuyBtn.style.display = showBuy ? "inline-flex" : "none";
+    themesActionBuyBtn.textContent = showBuy ? `Buy for ${theme.goldPrice} Gold` : "Buy for 0 Gold";
+  }
+  themesActionSheet.classList.add("show");
+  themesActionSheet.setAttribute("aria-hidden", "false");
+}
+function closeThemeActionSheet(){
+  themesActionSheet?.classList.remove("show");
+  themesActionSheet?.setAttribute("aria-hidden", "true");
+  themeActionThemeId = "";
 }
 function switchCustomizationSection(section){
   customNavButtons.forEach((btn) => {
@@ -5926,10 +6297,63 @@ function initCustomizationUi(){
   customNavButtons.forEach((btn) => {
     btn.addEventListener("click", () => switchCustomizationSection(btn.dataset.section));
   });
-  themeFilterButtons.forEach((btn) => {
-    btn.addEventListener("click", () => setThemeFilter(btn.dataset.themeFilter));
+  openThemesModalBtn?.addEventListener("click", openThemesModal);
+  themesModalCloseBtn?.addEventListener("click", closeThemesModal);
+  themesModal?.addEventListener("click", (e) => {
+    if (e.target === themesModal) closeThemesModal();
   });
-  renderThemeGrid();
+  themesModalSearch?.addEventListener("input", (e) => {
+    themeSearchQuery = e.target.value.trim();
+    renderThemeCatalog();
+  });
+  themesModalSort?.addEventListener("change", (e) => {
+    themeSortMode = e.target.value;
+    renderThemeCatalog();
+  });
+  themesFiltersBtn?.addEventListener("click", openThemesFiltersSheet);
+  themesFiltersSheetClose?.addEventListener("click", closeThemesFiltersSheet);
+  themesFiltersSheet?.addEventListener("click", (e) => {
+    if (e.target === themesFiltersSheet) closeThemesFiltersSheet();
+  });
+  themesApplyBtn?.addEventListener("click", () => {
+    const theme = THEME_BY_ID.get(themeSelectedId);
+    if (!theme) return;
+    if (isThemeLockedForUser(theme)) {
+      toast("This theme is locked.");
+      return;
+    }
+    applyTheme(theme.name, { persist: true });
+  });
+  themesBuyBtn?.addEventListener("click", () => {
+    purchaseTheme(themeSelectedId);
+  });
+  themesActionPinBtn?.addEventListener("click", () => {
+    if (themeActionThemeId) toggleThemePin(themeActionThemeId);
+    closeThemeActionSheet();
+  });
+  themesActionFavoriteBtn?.addEventListener("click", () => {
+    if (themeActionThemeId) toggleThemeFavorite(themeActionThemeId);
+    closeThemeActionSheet();
+  });
+  themesActionApplyBtn?.addEventListener("click", () => {
+    const theme = THEME_BY_ID.get(themeActionThemeId);
+    if (theme && !isThemeLockedForUser(theme)) applyTheme(theme.name, { persist: true });
+    closeThemeActionSheet();
+  });
+  themesActionBuyBtn?.addEventListener("click", () => {
+    purchaseTheme(themeActionThemeId);
+    closeThemeActionSheet();
+  });
+  themesActionCloseBtn?.addEventListener("click", closeThemeActionSheet);
+  themesActionSheet?.addEventListener("click", (e) => {
+    if (e.target === themesActionSheet) closeThemeActionSheet();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeThemesModal();
+  });
+  themeRecents = loadThemeRecents();
+  updateCurrentThemeLabel();
+  renderThemeCatalog();
 }
 async function loadThemePreference(){
   let desired = sanitizeThemeName(getStoredTheme() || currentTheme || DEFAULT_THEME);
