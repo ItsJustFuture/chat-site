@@ -9993,6 +9993,10 @@ function filterCustomize(query){
 customizeCards.forEach((card) => {
   card.addEventListener("click", () => {
     if (!currentProfileIsSelf) return;
+    if (card.dataset.category === "themes") {
+      openThemesModal();
+      return;
+    }
     setCustomizePage(card.dataset.category || null);
   });
 });
