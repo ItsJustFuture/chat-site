@@ -6660,35 +6660,152 @@ body[data-theme="Iris & Lola Neon"] .chatInputWrap {
   }
 }
 
-/* ===== Iris & Lola Neon: MOBILE-SAFE (no pseudo-elements, no masks, no filter on body) ===== */
+/* Iris & Lola Space Backdrop */
 body[data-theme="Iris & Lola Neon"] {
-  /* Keep the site dark purple always */
-  background-color: #120018;
-
-  /* Layer 1: center heart+text SVG, Layer 2: dark purple + green glow gradient */
+  background-color: #06010c;
   background-image:
-    url("data:image/svg+xml,%3Csvg%20xmlns=%22http:%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox=%220%200%20600%20520%22%3E%20%20%3Cdefs%3E%20%20%20%20%3CradialGradient%20id=%22rg%22%20cx=%2250%%22%20cy=%2246%%22%20r=%2262%%22%3E%20%20%20%20%20%20%3Cstop%20offset=%220%%22%20stop-color=%22#00ff77%22%20stop-opacity=%220.50%22%2F%3E%20%20%20%20%20%20%3Cstop%20offset=%2218%%22%20stop-color=%22#00ff77%22%20stop-opacity=%220.18%22%2F%3E%20%20%20%20%20%20%3Cstop%20offset=%2242%%22%20stop-color=%22#b55dff%22%20stop-opacity=%220.10%22%2F%3E%20%20%20%20%20%20%3Cstop%20offset=%2270%%22%20stop-color=%22#120018%22%20stop-opacity=%220%22%2F%3E%20%20%20%20%3C%2FradialGradient%3E%20%20%20%20%3Cfilter%20id=%22blur%22%20x=%22-30%%22%20y=%22-30%%22%20width=%22160%%22%20height=%22160%%22%3E%20%20%20%20%20%20%3CfeGaussianBlur%20stdDeviation=%2218%22%2F%3E%20%20%20%20%3C%2Ffilter%3E%20%20%3C%2Fdefs%3E%20%20%3Cpath%20filter=%22url(#blur)%22%20d=%22M300%20460%20C140%20350%2080%20250%20105%20165%20C125%2095%20205%2082%20250%20120%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20C275%20145%20292%20175%20300%20205%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20C308%20175%20325%20145%20350%20120%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20C395%2082%20475%2095%20495%20165%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20C520%20250%20460%20350%20300%20460%20Z%22%20%20%20%20%20%20%20%20fill=%22url(#rg)%22%2F%3E%20%20%3Ctext%20x=%22300%22%20y=%22270%22%20text-anchor=%22middle%22%20%20%20%20%20%20%20%20font-family=%22ui-rounded,%20system-ui,%20-apple-system,%20Segoe%20UI,%20Roboto,%20Arial,%20sans-serif%22%20%20%20%20%20%20%20%20font-weight=%22900%22%20font-size=%2272%22%20letter-spacing=%222%22%20%20%20%20%20%20%20%20fill=%22rgba(194,110,255,0.95)%22%3EI%20Love%20You%3C%2Ftext%3E%3C%2Fsvg%3E"),
-    radial-gradient(circle at 50% 46%,
-      rgba(0, 255, 119, 0.20) 0%,
-      rgba(0, 255, 119, 0.10) 16%,
-      rgba(181, 93, 255, 0.08) 36%,
-      rgba(18, 0, 24, 0.0) 68%),
-    linear-gradient(180deg, #2a003a 0%, #120018 100%);
-
-  background-repeat: no-repeat, no-repeat, no-repeat;
-  background-position: center 44%, center 44%, center center;
-  background-size: min(86vmin, 520px) auto, 140vmax 140vmax, cover;
-
-  /* Animate ONLY background-size (no filter -> avoids iOS click bugs) */
-  animation: irisLolaBgPulseSafe 5.6s ease-in-out infinite;
+    radial-gradient(circle at 18% 22%,
+      rgba(0, 255, 180, 0.12) 0%,
+      rgba(0, 255, 180, 0.06) 22%,
+      rgba(6, 1, 12, 0) 60%),
+    radial-gradient(circle at 78% 28%,
+      rgba(181, 93, 255, 0.12) 0%,
+      rgba(181, 93, 255, 0.05) 26%,
+      rgba(6, 1, 12, 0) 62%),
+    radial-gradient(circle at 48% 78%,
+      rgba(120, 200, 255, 0.06) 0%,
+      rgba(6, 1, 12, 0) 58%),
+    linear-gradient(180deg, #120018 0%, #06010c 100%);
+  background-repeat: no-repeat;
+  background-size: 160vmax 160vmax, 150vmax 150vmax, 140vmax 140vmax, cover;
+  background-position: 18% 22%, 78% 28%, 48% 78%, center;
 }
 
-@keyframes irisLolaBgPulseSafe {
+body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive {
+  animation: irisLolaNebulaPulse 32s ease-in-out infinite;
+}
+
+@keyframes irisLolaNebulaPulse {
   0%, 100% {
-    background-size: min(84vmin, 500px) auto, 140vmax 140vmax, cover;
+    background-size: 156vmax 156vmax, 148vmax 148vmax, 136vmax 136vmax, cover;
   }
   50% {
-    background-size: min(88vmin, 540px) auto, 148vmax 148vmax, cover;
+    background-size: 168vmax 168vmax, 158vmax 158vmax, 146vmax 146vmax, cover;
+  }
+}
+
+/* Iris & Lola Space Backdrop */
+body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive #app {
+  position: relative;
+  z-index: 1;
+}
+
+.irisLolaStarfield {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transition: opacity 900ms ease;
+}
+
+body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .irisLolaStarfield {
+  opacity: 1;
+}
+
+.irisLolaStar {
+  position: absolute;
+  top: var(--y);
+  left: var(--x);
+  width: calc(12px + var(--size));
+  height: var(--size);
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(180, 255, 220, 0), rgba(180, 255, 220, 0.12), rgba(181, 93, 255, 0.08));
+  opacity: 0;
+  transform: translate3d(0, 0, 0) rotate(-28deg);
+  animation: irisLolaStarDrift var(--dur) linear infinite;
+  animation-delay: var(--delay);
+}
+
+@keyframes irisLolaStarDrift {
+  0% { opacity: 0; transform: translate3d(0, 0, 0) rotate(-28deg); }
+  8% { opacity: 0.12; }
+  42% { opacity: 0.1; }
+  72% { opacity: 0; }
+  100% { opacity: 0; transform: translate3d(120px, 90px, 0) rotate(-28deg); }
+}
+
+/* Iris & Lola Couples Theme Enhancement */
+body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .irisLolaTogetherGlow {
+  box-shadow:
+    0 0 8px rgba(0, 255, 180, 0.12),
+    0 0 16px rgba(181, 93, 255, 0.12);
+  animation: irisLolaTogetherPulse 24s ease-in-out infinite;
+}
+
+@keyframes irisLolaTogetherPulse {
+  0%, 100% {
+    box-shadow:
+      0 0 6px rgba(0, 255, 180, 0.10),
+      0 0 12px rgba(181, 93, 255, 0.10);
+  }
+  50% {
+    box-shadow:
+      0 0 10px rgba(0, 255, 180, 0.14),
+      0 0 20px rgba(181, 93, 255, 0.14);
+  }
+}
+
+body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .mItem.irisLolaPartnerRow {
+  background: rgba(181, 93, 255, 0.08);
+  border-radius: 12px;
+}
+
+body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .irisLolaCoupleMarker {
+  text-align: center;
+  font-size: 11px;
+  opacity: 0.14;
+  margin: 2px 0 6px;
+  letter-spacing: 0.08em;
+}
+
+body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .msgItem.couple-partner-msg .bubble,
+body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .dmRow.couple-partner-msg .dmBubble {
+  box-shadow:
+    0 0 0 1px rgba(0, 255, 180, 0.12),
+    0 0 10px rgba(181, 93, 255, 0.08);
+}
+
+body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .irisLolaSharedMoment {
+  margin: 6px auto;
+  width: fit-content;
+  font-size: 12px;
+  opacity: 0;
+  animation: irisLolaSharedMoment 1.1s ease-out forwards;
+}
+
+body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .irisLolaSharedMoment.no-motion {
+  animation: none;
+  opacity: 0.12;
+}
+
+@keyframes irisLolaSharedMoment {
+  0% { opacity: 0; transform: translateY(6px) scale(0.9); }
+  35% { opacity: 0.12; }
+  100% { opacity: 0; transform: translateY(-6px) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive {
+    animation: none;
+  }
+  body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .irisLolaTogetherGlow,
+  body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .irisLolaSharedMoment {
+    animation: none;
+  }
+  body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .irisLolaStar {
+    animation: none;
+    opacity: 0.08;
   }
 }
 
@@ -6703,7 +6820,7 @@ body[data-theme="Iris & Lola Neon"] .topbar {
 /* Side-panel watermark using background-image (safe on mobile). */
 body[data-theme="Iris & Lola Neon"] #roomsPanel,
 body[data-theme="Iris & Lola Neon"] #membersPane {
-  background-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http:%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox=%220%200%20600%20240%22%3E%20%20%3Ctext%20x=%22300%22%20y=%2275%22%20text-anchor=%22middle%22%20%20%20%20%20%20%20%20font-size=%22140%22%20fill=%22rgba(0,255,119,0.22)%22%3E%F0%9F%92%9A%3C%2Ftext%3E%20%20%3Ctext%20x=%22300%22%20y=%22155%22%20text-anchor=%22middle%22%20%20%20%20%20%20%20%20font-family=%22ui-rounded,%20system-ui,%20-apple-system,%20Segoe%20UI,%20Roboto,%20Arial,%20sans-serif%22%20%20%20%20%20%20%20%20font-weight=%22900%22%20font-size=%2264%22%20letter-spacing=%222%22%20%20%20%20%20%20%20%20fill=%22rgba(0,255,119,0.85)%22%3EIris%20&amp%3B%20Lola%3C%2Ftext%3E%3C%2Fsvg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http:%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox=%220%200%20600%20240%22%3E%20%20%3Ctext%20x=%22300%22%20y=%2275%22%20text-anchor=%22middle%22%20%20%20%20%20%20%20%20font-size=%22140%22%20fill=%22rgba(0,255,180,0.12)%22%3E%E2%9C%A8%3C%2Ftext%3E%20%20%3Ctext%20x=%22300%22%20y=%22155%22%20text-anchor=%22middle%22%20%20%20%20%20%20%20%20font-family=%22ui-rounded,%20system-ui,%20-apple-system,%20Segoe%20UI,%20Roboto,%20Arial,%20sans-serif%22%20%20%20%20%20%20%20%20font-weight=%22900%22%20font-size=%2264%22%20letter-spacing=%222%22%20%20%20%20%20%20%20%20fill=%22rgba(181,93,255,0.12)%22%3EIris%20%26%20Lola%3C%2Ftext%3E%3C%2Fsvg%3E");
   background-repeat: no-repeat;
   background-position: center 72%;
   background-size: 120% auto;
@@ -6711,7 +6828,7 @@ body[data-theme="Iris & Lola Neon"] #membersPane {
 
 /* Together-online subtle effect (safe). */
 body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
-  animation: irisLolaTogetherBar 6s ease-in-out infinite;
+  animation: irisLolaTogetherBar 24s ease-in-out infinite;
 }
 @keyframes irisLolaTogetherBar {
   0%,100% { box-shadow: 0 0 0 rgba(0,0,0,0); }
@@ -6720,23 +6837,19 @@ body[data-theme="Iris & Lola Neon"].irisLolaTogether .topbar {
 
 @media (max-width: 720px) {
   body[data-theme="Iris & Lola Neon"] {
-    background-size: min(92vmin, 420px) auto, 140vmax 140vmax, cover;
-    animation-duration: 6.4s;
+    background-size: 150vmax 150vmax, 140vmax 140vmax, 130vmax 130vmax, cover;
   }
 }
 @media (max-width: 520px) {
   body[data-theme="Iris & Lola Neon"] {
-    /* Keep the purple gradient; remove SVG & watermark for maximum stability */
     background-image:
-      radial-gradient(circle at 50% 46%,
-        rgba(0, 255, 119, 0.14) 0%,
-        rgba(0, 255, 119, 0.06) 18%,
-        rgba(181, 93, 255, 0.06) 40%,
-        rgba(18, 0, 24, 0.0) 70%),
-      linear-gradient(180deg, #2a003a 0%, #120018 100%);
+      radial-gradient(circle at 50% 40%,
+        rgba(0, 255, 180, 0.10) 0%,
+        rgba(181, 93, 255, 0.08) 32%,
+        rgba(6, 1, 12, 0) 70%),
+      linear-gradient(180deg, #120018 0%, #06010c 100%);
     background-size: 140vmax 140vmax, cover;
     background-position: center 44%, center center;
-    animation: none;
   }
   body[data-theme="Iris & Lola Neon"] #roomsPanel,
   body[data-theme="Iris & Lola Neon"] #membersPane {
