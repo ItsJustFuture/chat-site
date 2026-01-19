@@ -5471,26 +5471,39 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
   }
 
 /* If members panel is hidden (mobile/tablet), don't reserve space on the right */
-@media (max-width: 980px){
   .dmPanel{ right:0; bottom:0; }
+
+  /* (DM width safety + typing indicator rules are declared below as separate blocks
+     to avoid invalid nested @media parsing on mobile browsers.) */
+
+  /* iOS Safari: prefer the small viewport unit when available */
+  @supports (height: 100svh){
+    .dmPanel{ height: 100svh; }
+  }
+  .channels.open{ transform:translateX(0); }
+
+  .members.drawer{
+  display:block;
+  position:fixed; top: var(--headerH, 54px); right:0; height: calc(var(--vvhPx) - var(--headerH, 54px));
+  width:min(86vw, 320px);
+  transform:translateX(105%);
+  transition:transform .18s ease;
+  z-index:160;
+  box-shadow: -12px 0 30px rgba(0,0,0,.55);
+}
+  .members.drawer.open{ transform:translateX(0); }
+
+  input, textarea, select{ font-size:16px; }
+  .uploadPreview{ margin: 6px 10px; padding: 8px 10px; gap: 10px; }
 }
 
 /* --- DM width safety: keep bubbles/meta/typing inside frame --- */
 :root{
   --dmActionsW: 104px; /* estimated width of 3 small action buttons + gaps */
 }
-.dmRow{
-  min-width:0;
-  box-sizing:border-box;
-}
-.dmBubbleWrap{
-  flex:0 1 auto;
-  min-width:0;
-  max-width:66%;
-}
-.dmMetaRow{
-  max-width:100%;
-}
+.dmRow{ min-width:0; box-sizing:border-box; }
+.dmBubbleWrap{ flex:0 1 auto; min-width:0; max-width:66%; }
+.dmMetaRow{ max-width:100%; }
 .dmMetaUser, .dmMetaTime{
   max-width:100%;
   overflow:hidden;
@@ -5507,10 +5520,9 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
 @media (max-width: 520px){
   :root{ --dmActionsW: 92px; }
 }
+
 /* --- DM actions rail: smaller and hug bubbles more closely --- */
-.dmActionsRail{
-  gap:4px;
-}
+.dmActionsRail{ gap:4px; }
 .dmActionsRail .iconBtn.smallIcon{
   width:28px;
   height:28px;
@@ -5535,27 +5547,6 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
     z-index:180;
   }
   .typing:not(:empty){ display:flex; }
-}
-
-/* iOS Safari: prefer the small viewport unit when available */
-@supports (height: 100svh){
-  .dmPanel{ height: 100svh; }
-}
-  .channels.open{ transform:translateX(0); }
-
-  .members.drawer{
-  display:block;
-  position:fixed; top: var(--headerH, 54px); right:0; height: calc(var(--vvhPx) - var(--headerH, 54px));
-  width:min(86vw, 320px);
-  transform:translateX(105%);
-  transition:transform .18s ease;
-  z-index:160;
-  box-shadow: -12px 0 30px rgba(0,0,0,.55);
-}
-  .members.drawer.open{ transform:translateX(0); }
-
-  input, textarea, select{ font-size:16px; }
-  .uploadPreview{ margin: 6px 10px; padding: 8px 10px; gap: 10px; }
 }
 /* Rooms header */
 .chanHeader{
@@ -10446,202 +10437,4 @@ body[data-theme="Iris & Lola Neon"] #membersPane > *{
   body[data-theme="Iris & Lola Neon"] #membersPane::after{
     animation:none !important;
   }
-}
-
-/* =====================================================================
-   IRIS & LOLA NEON — V4 REBUILD (mobile-safe, starry, green/purple)
-   Fixes:
-   - Stars/shooting-stars invisible on mobile (mount starfield inside .chat)
-   - Mobile stacking/layout issues from older heart/mask overlays
-   Notes:
-   - app.js injects #irisLolaStarfield. We style it for both mount points:
-     1) inside .chat (preferred)  2) directly under body (fallback)
-   - This block is intentionally LAST so it overrides older Iris/Lola rules.
-   ===================================================================== */
-
-body[data-theme="Iris & Lola Neon"]{
-  background:
-    radial-gradient(1200px 800px at 18% 8%, rgba(0,255,170,.16), rgba(0,255,170,0) 62%),
-    radial-gradient(980px 720px at 86% 22%, rgba(171,85,255,.18), rgba(171,85,255,0) 66%),
-    radial-gradient(900px 700px at 50% 92%, rgba(90,140,255,.10), rgba(90,140,255,0) 64%),
-    linear-gradient(180deg, #0a0212 0%, #090115 52%, #080015 100%) !important;
-  background-attachment: scroll !important;
-  overflow-x: hidden;
-}
-
-/* Never use body pseudos for this theme (keeps iOS + mobile stable) */
-body[data-theme="Iris & Lola Neon"]::before,
-body[data-theme="Iris & Lola Neon"]::after{ content:none !important; display:none !important; }
-
-/* Let the global backdrop show through */
-body[data-theme="Iris & Lola Neon"] #app{ background: transparent !important; }
-
-/* ---------------- Starfield (injected by app.js) ---------------- */
-.irisLolaStarfield{
-  pointer-events:none;
-  opacity:0;
-  transition: opacity 600ms ease;
-  overflow:hidden;
-}
-
-/* If app.js mounts it in body, keep it fixed behind UI */
-body[data-theme="Iris & Lola Neon"] > .irisLolaStarfield{
-  position:fixed;
-  inset:0;
-  z-index:0;
-  opacity:1;
-}
-
-/* If app.js mounts it inside chat, make it chat-local (preferred) */
-body[data-theme="Iris & Lola Neon"] .chat .irisLolaStarfield{
-  position:absolute;
-  inset:0;
-  z-index:0;
-  opacity:1;
-}
-
-/* Shooting stars / streaks */
-body[data-theme="Iris & Lola Neon"] .irisLolaStar{
-  position:absolute;
-  top: var(--y);
-  left: var(--x);
-  width: calc(34px + (var(--size) * 14));
-  height: max(1px, var(--size));
-  border-radius:999px;
-  transform: translate3d(0,0,0) rotate(-28deg);
-  opacity:0;
-  background: linear-gradient(90deg,
-    rgba(0,0,0,0),
-    rgba(255,255,255,.10),
-    rgba(0,255,170,.26),
-    rgba(171,85,255,.18),
-    rgba(0,0,0,0));
-  filter: drop-shadow(0 0 8px rgba(0,255,170,.14)) drop-shadow(0 0 10px rgba(171,85,255,.10));
-  animation: irisLolaShootV4 var(--dur) linear infinite;
-  animation-delay: var(--delay);
-}
-
-@keyframes irisLolaShootV4{
-  0%   { opacity:0; transform: translate3d(0,0,0) rotate(-28deg); }
-  6%   { opacity:.30; }
-  18%  { opacity:.18; }
-  32%  { opacity:0; }
-  100% { opacity:0; transform: translate3d(160px, 120px, 0) rotate(-28deg); }
-}
-
-@media (prefers-reduced-motion: reduce){
-  body[data-theme="Iris & Lola Neon"] .irisLolaStar{ animation:none; opacity:.14; transform:none; width:2px; }
-}
-
-/* ---------------- Chat pane (glassy, spacey, stable) ---------------- */
-body[data-theme="Iris & Lola Neon"] .chat{
-  position:relative;
-  isolation:isolate;
-  overflow:hidden;
-  background: rgba(10,2,18,.32) !important;
-  border: 1px solid rgba(171,85,255,.16) !important;
-  border-radius: 22px;
-  box-shadow:
-    0 0 0 1px rgba(0,255,170,.10),
-    0 0 18px rgba(0,255,170,.08),
-    0 0 28px rgba(171,85,255,.10);
-}
-
-/* Remove older heart/mask implementations that can break mobile stacking */
-body[data-theme="Iris & Lola Neon"] .chat::before{
-  -webkit-mask-image:none !important;
-  mask-image:none !important;
-  background-image:none !important;
-}
-
-/* Nebula wash + subtle speckles behind messages */
-body[data-theme="Iris & Lola Neon"] .chat::before{
-  content:"" !important;
-  display:block !important;
-  position:absolute;
-  inset:-16px;
-  pointer-events:none;
-  z-index:0;
-  opacity:.92;
-  background:
-    radial-gradient(560px 420px at 18% 18%, rgba(0,255,170,.14), rgba(0,255,170,0) 62%),
-    radial-gradient(620px 460px at 84% 26%, rgba(171,85,255,.16), rgba(171,85,255,0) 64%),
-    radial-gradient(520px 420px at 52% 88%, rgba(120,200,255,.08), rgba(120,200,255,0) 62%),
-    radial-gradient(2px 2px at 10% 24%, rgba(255,255,255,.14), rgba(255,255,255,0) 70%),
-    radial-gradient(1.5px 1.5px at 28% 62%, rgba(255,255,255,.10), rgba(255,255,255,0) 70%),
-    radial-gradient(2px 2px at 70% 34%, rgba(0,255,170,.10), rgba(0,255,170,0) 72%),
-    radial-gradient(1.5px 1.5px at 86% 78%, rgba(171,85,255,.10), rgba(171,85,255,0) 72%);
-  animation: irisLolaNebulaV4 28s ease-in-out infinite;
-}
-
-@keyframes irisLolaNebulaV4{
-  0%,100%{ transform: translate3d(0,0,0) scale(1.02); }
-  50%{ transform: translate3d(10px,-8px,0) scale(1.06); }
-}
-
-/* Centered “I love you” (green glow) */
-body[data-theme="Iris & Lola Neon"] .chat::after{
-  content:"I love you" !important;
-  display:block !important;
-  position:absolute;
-  left:50%;
-  top:46%;
-  transform:translate(-50%,-50%);
-  pointer-events:none;
-  z-index:0;
-  font-family:"Segoe Script","Bradley Hand","Snell Roundhand","Apple Chancery","Lucida Handwriting",cursive;
-  font-weight:650;
-  letter-spacing:.02em;
-  font-size:clamp(26px,7vw,56px);
-  color:rgba(0,255,170,.92);
-  text-shadow:
-    0 0 10px rgba(0,255,170,.58),
-    0 0 22px rgba(0,255,170,.28),
-    0 0 40px rgba(171,85,255,.18);
-  opacity:.78;
-  animation: irisLolaLoveV4 3.2s ease-in-out infinite;
-}
-
-@keyframes irisLolaLoveV4{
-  0%,100%{ opacity:.62; transform:translate(-50%,-50%) scale(.99); }
-  50%{ opacity:.90; transform:translate(-50%,-50%) scale(1.03); }
-}
-
-/* Keep real UI above decorative layers */
-body[data-theme="Iris & Lola Neon"] .topbar,
-body[data-theme="Iris & Lola Neon"] .msgs,
-body[data-theme="Iris & Lola Neon"] .composer,
-body[data-theme="Iris & Lola Neon"] .chatInputWrap{ position:relative; z-index:1; }
-
-/* ---------------- Drawers: cute but stable ---------------- */
-body[data-theme="Iris & Lola Neon"] #roomsPanel,
-body[data-theme="Iris & Lola Neon"] #membersPane{
-  position:relative;
-  background: rgba(8,2,16,.66) !important;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 0 0 1px rgba(0,255,170,.10), 0 0 18px rgba(171,85,255,.10);
-}
-
-body[data-theme="Iris & Lola Neon"] #roomsPanel::before,
-body[data-theme="Iris & Lola Neon"] #membersPane::before{
-  content:"" !important;
-  display:block !important;
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  z-index:0;
-  opacity:.44;
-  background:
-    radial-gradient(2px 2px at 12% 18%, rgba(255,255,255,.18), rgba(255,255,255,0) 70%),
-    radial-gradient(1.5px 1.5px at 38% 62%, rgba(0,255,170,.12), rgba(0,255,170,0) 72%),
-    radial-gradient(2px 2px at 72% 26%, rgba(171,85,255,.14), rgba(171,85,255,0) 72%),
-    radial-gradient(1.5px 1.5px at 86% 78%, rgba(255,255,255,.14), rgba(255,255,255,0) 72%);
-}
-
-body[data-theme="Iris & Lola Neon"] #roomsPanel > *,
-body[data-theme="Iris & Lola Neon"] #membersPane > *{ position:relative; z-index:1; }
-
-@media (max-width:520px){
-  body[data-theme="Iris & Lola Neon"] .chat{ border-radius:18px; }
-  body[data-theme="Iris & Lola Neon"] .chat::after{ top:44%; opacity:.86; }
 }
