@@ -2376,7 +2376,7 @@ function setIrisLolaSkyTintVars(){
 }
 
 function spawnIrisLolaShootingStar(){
-  if (!shouldUseIrisLolaCoupleUi()) return;
+  if (!shouldUseIrisLolaAmbient()) return;
   const field = document.getElementById('irisLolaStarfield');
   if (!field) return;
   if (!shouldAnimateAmbientEffects(PREFERS_REDUCED_MOTION)) return;
@@ -2398,7 +2398,7 @@ function spawnIrisLolaShootingStar(){
 
 function scheduleIrisLolaShootingStar(){
   try{ if (irisLolaShootingStarTimer) clearTimeout(irisLolaShootingStarTimer); }catch{}
-  if (!shouldUseIrisLolaCoupleUi() || !shouldAnimateAmbientEffects(PREFERS_REDUCED_MOTION)) return;
+  if (!shouldUseIrisLolaAmbient() || !shouldAnimateAmbientEffects(PREFERS_REDUCED_MOTION)) return;
   const delay = 2000 + Math.random() * 5200; // 2s-7.2s
   irisLolaShootingStarTimer = setTimeout(()=>{
     spawnIrisLolaShootingStar();
@@ -2407,7 +2407,7 @@ function scheduleIrisLolaShootingStar(){
 }
 
 function spawnIrisLolaConstellationWhisper(){
-  if (!shouldUseIrisLolaCoupleUi()) return;
+  if (!shouldUseIrisLolaAmbient()) return;
   const field = document.getElementById('irisLolaStarfield');
   if (!field) return;
   if (!shouldAnimateAmbientEffects(PREFERS_REDUCED_MOTION)) return;
@@ -2454,7 +2454,7 @@ function spawnIrisLolaConstellationWhisper(){
 
 function ensureIrisLolaAmbientLoops(){
   if (irisLolaAmbientLoopsReady) return;
-  if (!shouldUseIrisLolaCoupleUi()) { clearIrisLolaAmbientLoops(); return; }
+  if (!shouldUseIrisLolaAmbient()) { clearIrisLolaAmbientLoops(); return; }
   ensureIrisLolaStarfield();
 
   // Time-based tint updates.
@@ -2481,7 +2481,7 @@ function updateIrisLolaTogetherClass() {
   document.body?.classList.toggle("irisLolaCoupleActive", !!(themeActive && coupleActive));
   updateIrisLolaAvatarGlows({ themeActive, coupleActive, bothOnline, partnerName });
   // Ambient layer: subtle starfield + shooting stars + rare constellation whispers.
-  if (themeActive && coupleActive) ensureIrisLolaAmbientLoops();
+  if (themeActive) ensureIrisLolaAmbientLoops();
   else clearIrisLolaAmbientLoops();
 }
 function updateIrisLolaAvatarGlows({ themeActive, coupleActive, bothOnline, partnerName } = {}) {
@@ -2518,6 +2518,9 @@ function isPartnerName(username) {
 function shouldUseIrisLolaCoupleUi() {
   return isIrisLolaThemeActive() && isCoupleActiveState(couplesState);
 }
+function shouldUseIrisLolaAmbient() {
+  return isIrisLolaThemeActive();
+}
 const DEFAULT_THEME = "Minimal Dark";
 let currentTheme = document.body?.getAttribute("data-theme") || DEFAULT_THEME;
 let themeActiveFilter = "all";
@@ -2548,6 +2551,8 @@ let dmUploading = false;
 let uploadXhr = null;
 let memberMenuUser = null;
 let memberMenuUsername = "";
+let memberMenuAnchor = null;
+let memberMenuRaf = null;
 let replyTarget = null;
 let dmReplyTarget = null;
 let chatPinned = true;
@@ -2817,6 +2822,11 @@ const memberMenuName = document.getElementById("memberMenuName");
 const memberViewProfileBtn = document.getElementById("memberViewProfileBtn");
 const memberDmBtn = document.getElementById("memberDmBtn");
 const memberReferBtn = document.getElementById("memberReferBtn");
+
+const appRoot = document.getElementById("app");
+if (memberMenu && appRoot && memberMenu.parentElement !== appRoot) {
+  appRoot.appendChild(memberMenu);
+}
 const commandPopup = document.getElementById("commandPopup");
 const commandPopupTitle = document.getElementById("commandPopupTitle");
 const commandPopupBody = document.getElementById("commandPopupBody");
@@ -7673,11 +7683,77 @@ function handleDmMessageDeleted(threadId, messageId){
   if (row) removeMessageWithAnimation(row);
 }
 
+function getSafeInsetPx(varName) {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(varName);
+  const parsed = parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function scheduleMemberMenuPosition() {
+  if (!memberMenu?.classList.contains("open")) return;
+  if (memberMenuRaf) return;
+  memberMenuRaf = requestAnimationFrame(() => {
+    memberMenuRaf = null;
+    positionMemberMenu();
+  });
+}
+
+function positionMemberMenu() {
+  if (!memberMenu || !memberMenuAnchor || !memberMenuAnchor.isConnected) {
+    closeMemberMenu();
+    return;
+  }
+
+  const anchorRect = memberMenuAnchor.getBoundingClientRect();
+  const viewport = window.visualViewport;
+  const viewportWidth = viewport?.width ?? window.innerWidth;
+  const viewportHeight = viewport?.height ?? window.innerHeight;
+  if (anchorRect.bottom < 0 || anchorRect.top > viewportHeight) {
+    closeMemberMenu();
+    return;
+  }
+
+  const appRect = appRoot?.getBoundingClientRect() ?? { left: 0, top: 0 };
+  memberMenu.style.visibility = "hidden";
+  memberMenu.style.left = "0px";
+  memberMenu.style.top = "0px";
+
+  const menuRect = memberMenu.getBoundingClientRect();
+  const menuWidth = menuRect.width;
+  const menuHeight = menuRect.height;
+
+  const safeTop = getSafeInsetPx("--safeT");
+  const safeBottom = getSafeInsetPx("--safeB");
+  const safeLeft = getSafeInsetPx("--safeL");
+  const safeRight = getSafeInsetPx("--safeR");
+
+  const pad = 12;
+  const gap = 8;
+  let left = anchorRect.right + gap;
+  let top = anchorRect.top + (anchorRect.height / 2) - (menuHeight / 2);
+
+  if (left + menuWidth + pad + safeRight > viewportWidth) {
+    left = anchorRect.left - menuWidth - gap;
+  }
+
+  left = Math.min(Math.max(left, pad + safeLeft), viewportWidth - menuWidth - pad - safeRight);
+  top = Math.min(Math.max(top, pad + safeTop), viewportHeight - menuHeight - pad - safeBottom);
+
+  memberMenu.style.left = `${left - appRect.left}px`;
+  memberMenu.style.top = `${top - appRect.top}px`;
+  memberMenu.style.visibility = "";
+}
+
 function closeMemberMenu(){
   if (!memberMenu) return;
   memberMenu.classList.remove("open");
   memberMenuUser = null;
   memberMenuUsername = "";
+  memberMenuAnchor = null;
+  if (memberMenuRaf) {
+    cancelAnimationFrame(memberMenuRaf);
+    memberMenuRaf = null;
+  }
 }
 
 
@@ -7719,8 +7795,15 @@ function openMemberMenu(user, anchor){
     return;
   }
 
+  const anchorEl = anchor?.querySelector(".mName") || anchor;
+  if (memberMenu.classList.contains("open") && memberMenuAnchor === anchorEl) {
+    closeMemberMenu();
+    return;
+  }
+
   memberMenuUser = user;
   memberMenuUsername = user?.username || user?.name || "";
+  memberMenuAnchor = anchorEl;
   // Show "Refer ban" for Moderators (they cannot ban directly)
   if(memberReferBtn){
     const isSelf = (memberMenuUsername && me?.username && memberMenuUsername.toLowerCase()===me.username.toLowerCase());
@@ -7728,13 +7811,7 @@ function openMemberMenu(user, anchor){
   }
   if (memberMenuName) memberMenuName.textContent = `${roleIcon(user.role)} ${user.name}`;
   memberMenu.classList.add("open");
-
-  const paneRect = membersPane.getBoundingClientRect();
-  const rect = anchor.getBoundingClientRect();
-  const top = rect.top - paneRect.top + membersPane.scrollTop + rect.height + 6;
-  const left = rect.left - paneRect.left + 6;
-  memberMenu.style.top = `${top}px`;
-  memberMenu.style.left = `${left}px`;
+  scheduleMemberMenuPosition();
 }
 
 function updateGoldUI(){
@@ -9737,7 +9814,16 @@ document.addEventListener("click", (e) => {
   if (e.target.closest(".mItem")) return;
   closeMemberMenu();
 });
-membersPane?.addEventListener("scroll", closeMemberMenu);
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (memberMenu?.classList.contains("open")) closeMemberMenu();
+});
+
+const repositionMemberMenu = () => scheduleMemberMenuPosition();
+membersPane?.addEventListener("scroll", repositionMemberMenu, { passive: true });
+window.addEventListener("resize", repositionMemberMenu, { passive: true });
+window.visualViewport?.addEventListener("resize", repositionMemberMenu, { passive: true });
+window.visualViewport?.addEventListener("scroll", repositionMemberMenu, { passive: true });
 
 mentionDropdown?.addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-name]");
