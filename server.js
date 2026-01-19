@@ -6973,6 +6973,7 @@ function safeNumber(value, fallback = 0) {
 }
 const PREFS_DEFAULTS = Object.freeze({
   dmBadgePrefs: { direct: "#ed4245", group: "#5865f2" },
+  dmNeonColor: "#5865f2",
   dmThemePrefs: { background: "#1e1f22" },
   pinnedThemeIds: [],
   favoriteThemeIds: [],
@@ -7019,6 +7020,9 @@ function normalizePrefs(raw) {
     if (typeof prefs.dmBadgePrefs.direct === "string") dmBadgePrefs.direct = prefs.dmBadgePrefs.direct;
     if (typeof prefs.dmBadgePrefs.group === "string") dmBadgePrefs.group = prefs.dmBadgePrefs.group;
   }
+  const dmNeonColor = typeof prefs.dmNeonColor === "string"
+    ? prefs.dmNeonColor
+    : (typeof prefs.dmThemePrefs?.background === "string" ? prefs.dmThemePrefs.background : PREFS_DEFAULTS.dmNeonColor);
   const dmThemePrefs = { ...PREFS_DEFAULTS.dmThemePrefs };
   if (prefs.dmThemePrefs && typeof prefs.dmThemePrefs === "object") {
     if (typeof prefs.dmThemePrefs.background === "string") dmThemePrefs.background = prefs.dmThemePrefs.background;
@@ -7029,6 +7033,7 @@ function normalizePrefs(raw) {
     favoriteThemeIds: normalizeThemeIdList(prefs.favoriteThemeIds),
     ownedThemeIds: normalizeThemeIdList(prefs.ownedThemeIds),
     dmBadgePrefs,
+    dmNeonColor,
     dmThemePrefs,
     sound: normalizeSoundPrefs(prefs.sound),
     chatFx: sanitizeChatFx(prefs.chatFx),
@@ -7038,6 +7043,7 @@ function sanitizePrefsInput(p) {
   const out = {};
   if (p && typeof p === "object") {
     if (p.dmBadgePrefs && typeof p.dmBadgePrefs === "object") out.dmBadgePrefs = p.dmBadgePrefs;
+    if (typeof p.dmNeonColor === "string") out.dmNeonColor = p.dmNeonColor;
     if (p.dmThemePrefs && typeof p.dmThemePrefs === "object") out.dmThemePrefs = p.dmThemePrefs;
     if (Array.isArray(p.pinnedThemeIds)) out.pinnedThemeIds = normalizeThemeIdList(p.pinnedThemeIds);
     if (Array.isArray(p.favoriteThemeIds)) out.favoriteThemeIds = normalizeThemeIdList(p.favoriteThemeIds);

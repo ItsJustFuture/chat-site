@@ -47,7 +47,8 @@
   /* legacy aliases so existing rules consume theme tokens */
   --soft: rgba(0, 0, 0, 0.13);
   --avatar-bg: #444444;
-  --dm-bg: #1e1f22;
+  --dm-bg: var(--panel2);
+  --dm-neon: var(--accent);
   --overlay-scrim: rgba(0, 0, 0, 0.6);
   --bubble: var(--messageOtherBg);
   --bubbleSelf: var(--messageSelfBg);
@@ -4848,10 +4849,13 @@ body.lockScroll{ overflow:hidden; }
   width:min(640px, 48vw);
   height:auto;
   max-height: calc(var(--vvhPx) - 16px - var(--dmPanelBottom));
-  background:linear-gradient(135deg, rgba(255,255,255,.02), rgba(255,255,255,.04)), var(--panel2);
-  border:1px solid var(--line);
+  background: var(--panel2);
+  border:1px solid color-mix(in srgb, var(--dm-neon) 18%, var(--line));
   border-radius:20px;
-  box-shadow: 0 22px 60px rgba(0,0,0,.5);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--dm-neon) 18%, transparent),
+    0 0 22px color-mix(in srgb, var(--dm-neon) 18%, transparent),
+    0 22px 60px rgba(0,0,0,.5);
   display:flex;
   flex-direction:column;
   /* Pop-out animation (shown when .open is toggled) */
@@ -4873,13 +4877,21 @@ body.lockScroll{ overflow:hidden; }
  }
 .dmHeader{
   /* Keep the DM panel header compact (closer to desktop DM header style). */
-  padding:6px 10px;
+  padding:8px 12px;
   display:flex;
   align-items:center;
   gap:12px;
   justify-content:space-between;
   border-bottom:1px solid var(--line);
+  background: var(--panel2);
 }
+.dmHeaderMain{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-width:0;
+}
+.dmBackBtn{ display:none; }
 .dmHeader .title{ font-weight:900; letter-spacing:.01em; }
 .dmHeader .small{ font-size:11px; }
 .dmHeader .iconBtn{ width:32px; height:32px; }
@@ -4898,22 +4910,51 @@ body.lockScroll{ overflow:hidden; }
 .dmNoticeText{ display:none; }
 .dmNotice.hasNotice .dmNoticeText{ display:block; }
 .dmContent{
-  /* Single-pane DM layout.
-     A previous 2-column grid left an unused/black column on desktop.
-     Keep this as a flex column so the conversation fills the whole panel. */
   flex:1;
+  display:flex;
+  flex-direction:row;
+  min-height:0;
+  background:var(--dm-bg);
+}
+.dmThreads{
+  width: min(320px, 38%);
+  border-right:1px solid var(--line);
+  overflow:auto;
   display:flex;
   flex-direction:column;
   min-height:0;
-  backdrop-filter: blur(4px);
-  background:var(--dm-bg);
+  gap:10px;
+  padding:10px;
+  background: var(--panel);
 }
-.dmThreads{ border-right:1px solid var(--line); overflow:auto; display:flex; flex-direction:column; min-height:0; gap:8px; padding:8px 10px 10px; }
+.dmThreadsHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:4px 4px 0;
+}
+.dmThreadList{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  min-height:0;
+}
 /* Remove the large "boxed" panel look so the left list doesn't waste vertical space (mobile) */
 .dmThreadList{ border:0; border-radius:0; overflow:auto; background:transparent; flex:1; min-height:0; }
-.dmItem{ padding:12px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; gap:10px; align-items:center; transition: background .12s ease, border-color .12s ease; }
+.dmItem{
+  padding:12px;
+  border:1px solid transparent;
+  border-radius:14px;
+  cursor:pointer;
+  display:flex;
+  gap:10px;
+  align-items:center;
+  transition: background .12s ease, border-color .12s ease, transform .12s ease;
+  min-height:48px;
+}
 .dmItem:hover{ background:var(--panel); }
-.dmItem.active{ background:var(--bubble); }
+.dmItem.active{ background:color-mix(in srgb, var(--panel2) 70%, transparent); border-color:color-mix(in srgb, var(--dm-neon) 18%, transparent); }
 .dmItem:last-child{ border-bottom:0; }
 .dmItem,
 .dmThreadRow{
@@ -4954,7 +4995,7 @@ body.lockScroll{ overflow:hidden; }
 .dmItemBottom{ display:flex; align-items:center; gap:6px; justify-content:space-between; }
 .dmItemTime{ font-size:11px; color:var(--muted); white-space:nowrap; }
 .dmUnread{ min-width:22px; height:22px; padding:0 8px; border-radius:999px; background:var(--accent); color:white; font-size:11px; display:flex; align-items:center; justify-content:center; }
-.dmAvatar{ width:42px; height:42px; border-radius:12px; overflow:hidden; background:var(--avatar-bg); flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+.dmAvatar{ width:44px; height:44px; border-radius:14px; overflow:hidden; background:var(--avatar-bg); flex-shrink:0; display:flex; align-items:center; justify-content:center; }
 .dmConversation{
   display:flex;
   flex-direction:column;
@@ -5333,7 +5374,21 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
 .dmThreadActions .btn.full{ width:100%; justify-content:center; }
 .dmModal{ position:fixed; inset:0; background:var(--overlay-scrim); display:none; align-items:center; justify-content:center; padding:14px; z-index:380; }
 .dmModal.show{ display:flex; }
-.dmModalCard{ background:var(--panel2); border:1px solid var(--line); border-radius:18px; width:min(560px, 96vw); max-height:90vh; display:flex; flex-direction:column; gap:12px; padding:14px; overflow:hidden; }
+.dmModalCard{
+  background:var(--panel2);
+  border:1px solid color-mix(in srgb, var(--dm-neon) 18%, var(--line));
+  border-radius:18px;
+  width:min(560px, 96vw);
+  max-height:90vh;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  padding:14px;
+  overflow:hidden;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--dm-neon) 16%, transparent),
+    0 12px 32px rgba(0,0,0,0.45);
+}
 .dmModalHeader{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
 .dmPickerList{ flex:1; min-height:200px; border:1px solid var(--line); border-radius:12px; overflow:auto; background:var(--panel); }
 .dmPickerRow{ display:flex; align-items:center; gap:10px; padding:10px 12px; border-bottom:1px solid var(--line); }
@@ -5393,14 +5448,23 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
     box-shadow:none;
   }
   .dmHeader{ position:sticky; top:0; background:var(--panel2); z-index:2; }
+  .dmBackBtn{ display:inline-flex; }
   .dmInput{
     position: static;
     bottom: auto;
     padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
-  /* DM is single-pane on mobile as well; keep full-height conversation */
   .dmContent{ display:flex; flex-direction:column; }
-  .dmThreads{ display:none; }
+  .dmThreads{
+    width:100%;
+    border-right:0;
+    border-bottom:1px solid var(--line);
+    background: var(--panel2);
+  }
+  .dmPanel.dmModeInbox .dmConversation{ display:none; }
+  .dmPanel.dmModeThread .dmThreads{ display:none; }
+  .dmPanel.dmModeThread .dmBackBtn{ display:inline-flex; }
+  .dmPanel.dmModeInbox .dmBackBtn{ display:none; }
   .dmMessages{ padding-bottom: 12px; }
 
   .channels{
