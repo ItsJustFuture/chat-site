@@ -2324,7 +2324,10 @@ function ensureIrisLolaStarfield() {
     node.style.setProperty("--delay", star.delay);
     field.appendChild(node);
   });
-  document.body?.appendChild(field);
+  // Mount inside the chat pane when possible so stars/shooting-stars are visible
+  // even if the app shell has an opaque background on some devices/browsers.
+  const mount = document.querySelector(".chat") || document.getElementById("app") || document.body;
+  mount?.appendChild(field);
   irisLolaStarfieldReady = true;
 }
 function updateIrisLolaTogetherClass() {
