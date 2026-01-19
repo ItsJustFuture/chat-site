@@ -2210,8 +2210,11 @@ let irisLolaSharedMomentTs = 0;
 let irisLolaLastPartnerMsgTs = 0;
 let irisLolaLastSelfMsgTs = 0;
 let irisLolaStarfieldReady = false;
+let irisLolaAmbientLoopsReady = false;
+let irisLolaConstellationTimer = null;
 let irisLolaShootingStarTimer = null;
-let irisLolaShootingStarStopRequested = false;
+let irisLolaTintTimer = null;
+let irisLolaDrawerEasterCooldownUntil = 0;
 
 function normalizeUserKey(value) {
   return String(value || "").trim().toLowerCase();
@@ -2324,6 +2327,9 @@ function ensureIrisLolaStarfield() {
     node.style.setProperty("--size", star.size);
     node.style.setProperty("--dur", star.dur);
     node.style.setProperty("--delay", star.delay);
+    // Keep a numeric copy so we can draw constellation whispers.
+    node.dataset.x = String(parseFloat(String(star.x).replace('%','')) || 0);
+    node.dataset.y = String(parseFloat(String(star.y).replace('%','')) || 0);
     field.appendChild(node);
   });
   // Mount inside the chat pane when possible so stars/shooting-stars are visible
@@ -2333,53 +2339,137 @@ function ensureIrisLolaStarfield() {
   irisLolaStarfieldReady = true;
 }
 
-function stopIrisLolaShootingStars() {
-  irisLolaShootingStarStopRequested = true;
-  if (irisLolaShootingStarTimer) {
-    clearTimeout(irisLolaShootingStarTimer);
-    irisLolaShootingStarTimer = null;
-  }
-  // Best-effort cleanup
-  document.querySelectorAll(".irisLolaShoot").forEach((n) => n.remove());
+function clearIrisLolaAmbientLoops(){
+  try{ if (irisLolaConstellationTimer) clearInterval(irisLolaConstellationTimer); }catch{}
+  try{ if (irisLolaShootingStarTimer) clearTimeout(irisLolaShootingStarTimer); }catch{}
+  try{ if (irisLolaTintTimer) clearInterval(irisLolaTintTimer); }catch{}
+  irisLolaConstellationTimer = null;
+  irisLolaShootingStarTimer = null;
+  irisLolaTintTimer = null;
+  irisLolaAmbientLoopsReady = false;
 }
 
-function spawnIrisLolaShootingStar() {
-  const field = document.getElementById("irisLolaStarfield");
+function setIrisLolaSkyTintVars(){
+  try{
+    // Slightly different aurora tint through the day; subtle so it doesn't fight readability.
+    const now = new Date();
+    const h = now.getHours() + (now.getMinutes()/60);
+    // Night (0-6, 20-24): deeper purple; Day: greener.
+    const night = (h < 6 || h >= 20);
+    const dusk = (!night && (h < 9 || h >= 17));
+
+    const root = document.documentElement;
+    if (night){
+      root.style.setProperty('--irisLolaSkyA', 'rgba(42, 0, 64, .72)');
+      root.style.setProperty('--irisLolaSkyB', 'rgba(0, 120, 92, .42)');
+      root.style.setProperty('--irisLolaSkyC', 'rgba(128, 0, 184, .22)');
+    } else if (dusk){
+      root.style.setProperty('--irisLolaSkyA', 'rgba(24, 10, 56, .60)');
+      root.style.setProperty('--irisLolaSkyB', 'rgba(0, 160, 126, .38)');
+      root.style.setProperty('--irisLolaSkyC', 'rgba(168, 62, 255, .20)');
+    } else {
+      root.style.setProperty('--irisLolaSkyA', 'rgba(10, 26, 42, .48)');
+      root.style.setProperty('--irisLolaSkyB', 'rgba(0, 190, 140, .34)');
+      root.style.setProperty('--irisLolaSkyC', 'rgba(130, 40, 220, .16)');
+    }
+  }catch{}
+}
+
+function spawnIrisLolaShootingStar(){
+  if (!shouldUseIrisLolaCoupleUi()) return;
+  const field = document.getElementById('irisLolaStarfield');
   if (!field) return;
-  const shoot = document.createElement("span");
-  shoot.className = "irisLolaShoot";
-  // Keep it within the visible chat area (not the very edges)
-  const x = 10 + Math.random() * 80;
-  const y = 10 + Math.random() * 75;
-  const len = 42 + Math.random() * 58;
-  const dur = 850 + Math.random() * 550;
-  const rot = -18 - Math.random() * 30;
-  shoot.style.setProperty("--sx", `${x}%`);
-  shoot.style.setProperty("--sy", `${y}%`);
-  shoot.style.setProperty("--len", `${len}px`);
-  shoot.style.setProperty("--dur", `${Math.round(dur)}ms`);
-  shoot.style.setProperty("--rot", `${rot}deg`);
-  field.appendChild(shoot);
-  const cleanup = () => { try{ shoot.remove(); }catch{} };
-  shoot.addEventListener("animationend", cleanup, { once: true });
-  setTimeout(cleanup, dur + 120);
+  if (!shouldAnimateAmbientEffects(PREFERS_REDUCED_MOTION)) return;
+
+  const node = document.createElement('span');
+  node.className = 'irisLolaShootingStar';
+  // Start somewhere near the top-right and streak down-left.
+  const startX = 70 + Math.random() * 25; // %
+  const startY = 6 + Math.random() * 30;  // %
+  const len = 80 + Math.random() * 90;    // px
+  const dur = 900 + Math.random() * 800;  // ms
+  node.style.setProperty('--sx', `${startX}%`);
+  node.style.setProperty('--sy', `${startY}%`);
+  node.style.setProperty('--len', `${len}px`);
+  node.style.setProperty('--sdur', `${dur}ms`);
+  field.appendChild(node);
+  setTimeout(()=>{ try{ node.remove(); }catch{} }, dur + 350);
 }
 
-function startIrisLolaShootingStars() {
-  // Randomized loop so it feels occasional, not spammy
-  irisLolaShootingStarStopRequested = false;
-  const tick = () => {
-    if (irisLolaShootingStarStopRequested) return;
-    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
-    if (prefersReducedMotion) return;
-    if (!isIrisLolaThemeActive()) return;
+function scheduleIrisLolaShootingStar(){
+  try{ if (irisLolaShootingStarTimer) clearTimeout(irisLolaShootingStarTimer); }catch{}
+  if (!shouldUseIrisLolaCoupleUi() || !shouldAnimateAmbientEffects(PREFERS_REDUCED_MOTION)) return;
+  const delay = 2000 + Math.random() * 5200; // 2s-7.2s
+  irisLolaShootingStarTimer = setTimeout(()=>{
     spawnIrisLolaShootingStar();
-    const next = 2200 + Math.random() * 5200; // ~2.2s - 7.4s
-    irisLolaShootingStarTimer = setTimeout(tick, next);
+    scheduleIrisLolaShootingStar();
+  }, delay);
+}
+
+function spawnIrisLolaConstellationWhisper(){
+  if (!shouldUseIrisLolaCoupleUi()) return;
+  const field = document.getElementById('irisLolaStarfield');
+  if (!field) return;
+  if (!shouldAnimateAmbientEffects(PREFERS_REDUCED_MOTION)) return;
+  const stars = Array.from(field.querySelectorAll('.irisLolaStar'));
+  if (stars.length < 3) return;
+
+  const rect = field.getBoundingClientRect();
+  const pick = () => stars[Math.floor(Math.random() * stars.length)];
+  const a = pick();
+  let b = pick();
+  let c = pick();
+  // avoid duplicates
+  for (let i=0;i<6 && (b===a);i++) b = pick();
+  for (let i=0;i<6 && (c===a || c===b);i++) c = pick();
+
+  const toXY = (el) => {
+    const xPct = parseFloat(el.dataset.x || '0') / 100;
+    const yPct = parseFloat(el.dataset.y || '0') / 100;
+    return { x: rect.width * xPct, y: rect.height * yPct };
   };
-  if (irisLolaShootingStarTimer) return;
-  const first = 1200 + Math.random() * 2600;
-  irisLolaShootingStarTimer = setTimeout(tick, first);
+  const p1 = toXY(a), p2 = toXY(b), p3 = toXY(c);
+
+  const makeLine = (pFrom, pTo) => {
+    const dx = pTo.x - pFrom.x;
+    const dy = pTo.y - pFrom.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const ang = Math.atan2(dy, dx) * (180/Math.PI);
+    const line = document.createElement('span');
+    line.className = 'irisLolaConstellationLine';
+    line.style.left = `${pFrom.x}px`;
+    line.style.top = `${pFrom.y}px`;
+    line.style.width = `${dist}px`;
+    line.style.transform = `translate3d(0,0,0) rotate(${ang}deg)`;
+    return line;
+  };
+
+  const wrap = document.createElement('div');
+  wrap.className = 'irisLolaConstellationWhisper';
+  wrap.appendChild(makeLine(p1, p2));
+  wrap.appendChild(makeLine(p2, p3));
+  field.appendChild(wrap);
+  setTimeout(()=>{ try{ wrap.remove(); }catch{} }, 1300);
+}
+
+function ensureIrisLolaAmbientLoops(){
+  if (irisLolaAmbientLoopsReady) return;
+  if (!shouldUseIrisLolaCoupleUi()) { clearIrisLolaAmbientLoops(); return; }
+  ensureIrisLolaStarfield();
+
+  // Time-based tint updates.
+  setIrisLolaSkyTintVars();
+  irisLolaTintTimer = setInterval(setIrisLolaSkyTintVars, 5 * 60 * 1000);
+
+  // Occasional constellation whispers: very rare.
+  irisLolaConstellationTimer = setInterval(()=>{
+    try{ spawnIrisLolaConstellationWhisper(); }catch{}
+  }, 2 * 60 * 1000 + Math.floor(Math.random()*60*1000));
+
+  // Shooting stars: randomized cadence.
+  scheduleIrisLolaShootingStar();
+
+  irisLolaAmbientLoopsReady = true;
 }
 function updateIrisLolaTogetherClass() {
   const themeActive = isIrisLolaThemeActive();
@@ -2390,14 +2480,9 @@ function updateIrisLolaTogetherClass() {
   document.body?.classList.toggle("irisLolaTogether", !!on);
   document.body?.classList.toggle("irisLolaCoupleActive", !!(themeActive && coupleActive));
   updateIrisLolaAvatarGlows({ themeActive, coupleActive, bothOnline, partnerName });
-  ensureIrisLolaStarfield();
-
-  // Occasional shooting stars around the chat area (theme-only, respects reduced motion)
-  if (themeActive && shouldAnimateAmbientEffects(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches)) {
-    startIrisLolaShootingStars();
-  } else {
-    stopIrisLolaShootingStars();
-  }
+  // Ambient layer: subtle starfield + shooting stars + rare constellation whispers.
+  if (themeActive && coupleActive) ensureIrisLolaAmbientLoops();
+  else clearIrisLolaAmbientLoops();
 }
 function updateIrisLolaAvatarGlows({ themeActive, coupleActive, bothOnline, partnerName } = {}) {
   const allow = shouldShowTogetherGlow(themeActive, coupleActive, bothOnline);
@@ -6990,6 +7075,12 @@ function maybeShowIrisLolaSharedMoment({ isSelf, isPartner, messageTs, container
     container.insertBefore(badge, anchorItem);
     setTimeout(() => badge.remove(), 1200);
   }
+
+  // Message-proximity glow: when you and your partner speak close together, softly brighten.
+  try{
+    document.body?.classList.add('irisLolaProximityGlow');
+    setTimeout(()=>{ try{ document.body?.classList.remove('irisLolaProximityGlow'); }catch{} }, 2000);
+  }catch{}
 }
 
 function addMessage(m){
@@ -8144,6 +8235,29 @@ function closeDrawers(){
   closeMemberMenu();
   syncDesktopMembersWidth();
 }
+
+function maybeSpawnIrisLolaDrawerEaster(pane){
+  try{
+    if (!pane) return;
+    if (!shouldUseIrisLolaCoupleUi()) return;
+    if (!shouldAnimateAmbientEffects(PREFERS_REDUCED_MOTION)) return;
+    const now = Date.now();
+    if (now < irisLolaDrawerEasterCooldownUntil) return;
+    // Rare: ~10% of opens, with a cooldown to avoid spam.
+    if (Math.random() > 0.10) return;
+    irisLolaDrawerEasterCooldownUntil = now + 18000; // 18s
+
+    const star = document.createElement('span');
+    star.className = 'irisLolaDrawerEasterStar';
+    // Randomize a small corner region so it feels like it "pops" around.
+    const x = 10 + Math.random() * 70; // %
+    const y = 6 + Math.random() * 30;  // %
+    star.style.setProperty('--dx', `${x}%`);
+    star.style.setProperty('--dy', `${y}%`);
+    pane.appendChild(star);
+    setTimeout(()=>{ try{ star.remove(); }catch{} }, 1400);
+  }catch{}
+}
 function openChannels(){
   // Desktop layouts render channels as a normal panel (not an off-canvas drawer).
   // If we show the mobile overlay on desktop, it will eat all taps and make UI feel “dead”.
@@ -8157,6 +8271,7 @@ function openChannels(){
   membersPane?.classList.remove('open');
   channelsPane?.classList.add('open');
   drawerOverlay?.classList.add('show');
+  maybeSpawnIrisLolaDrawerEaster(channelsPane);
   // Mobile: shift the fixed composer so it doesn't overlap the left drawer.
   document.body.classList.add('drawer-left-open');
   document.body.classList.remove('drawer-right-open');
@@ -8174,6 +8289,7 @@ function openMembers(){
   channelsPane?.classList.remove('open');
   membersPane?.classList.add('open');
   drawerOverlay?.classList.add('show');
+  maybeSpawnIrisLolaDrawerEaster(membersPane);
   // Mobile: shift the fixed composer so it doesn't overlap the right drawer.
   document.body.classList.add('drawer-right-open');
   document.body.classList.remove('drawer-left-open');
