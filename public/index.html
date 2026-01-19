@@ -620,13 +620,25 @@
 <!-- DM PANEL -->
 <div class="dmPanel" id="dmPanel">
 <div class="dmHeader">
+<div class="dmHeaderMain">
+<button class="iconBtn secondary dmBackBtn" id="dmBackBtn" title="Back to inbox" type="button">←</button>
 <div>
 <div class="title">Direct Messages</div>
 <div class="small">Start a DM from the members list.</div>
 </div>
+</div>
 <button class="iconBtn" id="dmCloseBtn" title="Close" type="button">✕</button>
 </div>
 <div class="dmContent">
+<div class="dmThreads">
+<div class="dmThreadsHeader">
+<div>
+<div class="title">Inbox</div>
+<div class="small">Direct and group chats</div>
+</div>
+</div>
+<div class="dmThreadList" id="dmThreadList"></div>
+</div>
 <div class="dmConversation">
 <div class="dmMeta">
 <div class="dmMetaText">
@@ -1675,13 +1687,13 @@
 <details class="customizeSection" data-section="advanced-extra">
 <summary>Advanced</summary>
 <div class="panelBox" id="advancedAdvanced">
-<div class="field" data-customize-item="" data-search="dm background">
-<div class="small">DM background</div>
+<div class="field" data-customize-item="" data-search="dm neon backing">
+<div class="small">DM neon backing</div>
 <div class="colorInputRow tight">
-<input aria-label="DM background color" id="dmBgColor" type="color"/>
-<input aria-label="DM background color text" id="dmBgColorText" placeholder="#1e1f22 or blue" type="text"/>
+<input aria-label="DM neon backing color" id="dmNeonColor" type="color"/>
+<input aria-label="DM neon backing color text" id="dmNeonColorText" placeholder="#5865f2 or blue" type="text"/>
 </div>
-<div class="small">Change the backdrop behind your DM threads and conversation.</div>
+<div class="small">Adds a subtle neon outline around your DM panel. DM background follows your current theme.</div>
 </div>
 <div class="field" data-customize-item="" data-search="dm badge color">
 <label>Direct message badge color</label>

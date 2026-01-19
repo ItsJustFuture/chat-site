@@ -1244,9 +1244,10 @@ const badgeDefaults = { direct: "#ed4245", group: "#5865f2" };
 let badgePrefs = { ...badgeDefaults };
 let directBadgePending = false;
 let groupBadgePending = false;
-const dmThemeDefaults = { background: "#1e1f22" };
-let dmThemePrefs = { ...dmThemeDefaults };
+const dmNeonDefaults = { color: "#5865f2" };
+let dmNeonColor = dmNeonDefaults.color;
 let dmTab = "direct";
+let dmViewMode = "inbox";
 const dmUnreadThreads = new Set();
 let chatFxPrefs = { ...CHAT_FX_DEFAULTS };
 let chatFxDraft = null;
@@ -3774,6 +3775,7 @@ function updateDmThreadPlaceholderVisibility(){
 }
 
 const dmCloseBtn = document.getElementById("dmCloseBtn");
+const dmBackBtn = document.getElementById("dmBackBtn");
 const dmTabs = document.getElementById("dmTabs");
 const dmCreateGroupBtn = document.getElementById("dmCreateGroupBtn");
 const dmThreadList = document.getElementById("dmThreadList");
@@ -3862,8 +3864,8 @@ const dmReplyPreview = document.getElementById("dmReplyPreview");
 const dmReplyPreviewText = document.getElementById("dmReplyPreviewText");
 const dmReplyClose = document.getElementById("dmReplyClose");
 const dmMentionDropdown = document.getElementById("dmMentionDropdown");
-const dmBgColor = document.getElementById("dmBgColor");
-const dmBgColorText = document.getElementById("dmBgColorText");
+const dmNeonColorInput = document.getElementById("dmNeonColor");
+const dmNeonColorText = document.getElementById("dmNeonColorText");
 const dmPickerModal = document.getElementById("dmPickerModal");
 const dmModalCloseBtn = document.getElementById("dmModalCloseBtn");
 const dmModalCancelBtn = document.getElementById("dmModalCancelBtn");
@@ -5781,26 +5783,37 @@ function applyProfileHeaderGradient(colorA, colorB, role){
   }
   applyProfileHeaderOverlay(role || currentProfileHeaderRole);
 }
-function loadDmThemePrefsFromStorage(){
+function loadDmNeonColorFromStorage(){
   try {
-    const raw = localStorage.getItem("dmThemePrefs");
-    const parsed = raw ? JSON.parse(raw) : {};
-    return { ...dmThemeDefaults, ...parsed };
-  } catch {
-    return { ...dmThemeDefaults };
-  }
+    const raw = localStorage.getItem("dmNeonColor");
+    if (raw) return raw;
+  } catch {}
+
+  // One-time migration from legacy DM background preference.
+  try {
+    const legacyRaw = localStorage.getItem("dmThemePrefs");
+    const parsed = safeJsonParse(legacyRaw, {});
+    const legacyColor = parsed?.background;
+    if (legacyColor) {
+      localStorage.setItem("dmNeonColor", legacyColor);
+      localStorage.removeItem("dmThemePrefs");
+      return legacyColor;
+    }
+  } catch {}
+
+  return dmNeonDefaults.color;
 }
-function saveDmThemePrefsToStorage(){
-  try { localStorage.setItem("dmThemePrefs", JSON.stringify(dmThemePrefs)); }
+function saveDmNeonColorToStorage(){
+  try { localStorage.setItem("dmNeonColor", dmNeonColor); }
   catch{}
-  queuePersistPrefs({ dmThemePrefs });
+  queuePersistPrefs({ dmNeonColor });
 }
-function applyDmThemePrefs(){
-  const bg = sanitizeColor(dmThemePrefs.background, dmThemeDefaults.background, dmThemeDefaults.background);
-  dmThemePrefs.background = bg;
-  document.documentElement.style.setProperty("--dm-bg", bg);
-  if(dmBgColor) dmBgColor.value = normalizeColorForInput(bg, dmThemeDefaults.background);
-  if(dmBgColorText) dmBgColorText.value = bg;
+function applyDmNeonPrefs(){
+  const color = sanitizeColor(dmNeonColor, dmNeonDefaults.color, dmNeonDefaults.color);
+  dmNeonColor = color;
+  document.documentElement.style.setProperty("--dm-neon", color);
+  if(dmNeonColorInput) dmNeonColorInput.value = normalizeColorForInput(color, dmNeonDefaults.color);
+  if(dmNeonColorText) dmNeonColorText.value = color;
 }
 
 function sanitizeThemeName(name){
@@ -5994,10 +6007,15 @@ async function loadUserPrefs(){
       saveBadgePrefsToStorage();
   queuePersistPrefs({ dmBadgePrefs: badgePrefs });
     }
-    if(prefs.dmThemePrefs && typeof prefs.dmThemePrefs === "object"){
-      dmThemePrefs = { ...dmThemeDefaults, ...prefs.dmThemePrefs };
-      applyDmThemePrefs();
-      saveDmThemePrefsToStorage();
+    if (typeof prefs.dmNeonColor === "string") {
+      dmNeonColor = prefs.dmNeonColor;
+      applyDmNeonPrefs();
+      saveDmNeonColorToStorage();
+    } else if (prefs.dmThemePrefs && typeof prefs.dmThemePrefs === "object" && typeof prefs.dmThemePrefs.background === "string") {
+      dmNeonColor = prefs.dmThemePrefs.background;
+      applyDmNeonPrefs();
+      saveDmNeonColorToStorage();
+      queuePersistPrefs({ dmNeonColor });
     }
     if (Array.isArray(prefs.pinnedThemeIds)) {
       themePinnedIds = normalizeThemeIdList(prefs.pinnedThemeIds);
@@ -6559,8 +6577,8 @@ function markDmNotification(threadId, isGroupHint){
 }
 badgePrefs = loadBadgePrefsFromStorage();
 applyBadgePrefs();
-dmThemePrefs = loadDmThemePrefsFromStorage();
-applyDmThemePrefs();
+dmNeonColor = loadDmNeonColorFromStorage();
+applyDmNeonPrefs();
 initCustomizationUi();
 const EMOJI_CHOICES = ["😀","😁","😂","🙂","😉","😍","😘","🤔","😤","😭","😡","🥹","😈","💀","🔥","👀","🖕","♥️","💯","👍","👎","🎉","📸","🫦",];
 
@@ -7537,7 +7555,7 @@ memberReferBtn?.addEventListener("click", ()=>{
   closeMemberMenu();
 });
 
-  if (uname) startDirectMessage(uname);
+  if (uname) startDirectMessage(uname, memberMenuUser?.id ?? memberMenuUser?.userId ?? memberMenuUser?.user_id);
   closeMemberMenu();
 });
 
@@ -8199,11 +8217,21 @@ function syncDmTabUi(){
   if (dmCreateGroupBtn) dmCreateGroupBtn.style.display = dmTab === "group" ? "block" : "none";
 }
 
+function setDmViewMode(mode){
+  const next = mode === "thread" ? "thread" : "inbox";
+  dmViewMode = next;
+  if (!dmPanel) return;
+  dmPanel.classList.toggle("dmModeInbox", next === "inbox");
+  dmPanel.classList.toggle("dmModeThread", next === "thread");
+}
+
 function setDmTab(tab){
   dmTab = tab === "group" ? "group" : "direct";
   syncDmTabUi();
   renderDmThreads();
 }
+
+setDmViewMode("inbox");
 
 // Some deployments mount DM routes under /api (e.g. /api/dm/thread) while others use
 // /dm directly. Try the likely variant first and fall back on 404.
@@ -8464,10 +8492,43 @@ function renderGroupThreads(){
   updateDmThreadPlaceholderVisibility();
 }
 
+function renderDmThreadList(){
+  if (!dmThreadList) return;
+  dmThreadList.innerHTML = "";
+  const direct = (dmThreads || []).filter(isDirectThread);
+  const groups = (dmThreads || []).filter((t)=>!!t.is_group);
+  const sortByRecent = (a, b) => Number(b.last_ts || 0) - Number(a.last_ts || 0);
+
+  if (!direct.length && !groups.length) {
+    const empty = document.createElement("div");
+    empty.className = "dmEmpty";
+    empty.textContent = "No DM threads yet.";
+    dmThreadList.appendChild(empty);
+    return;
+  }
+
+  if (direct.length) {
+    const title = document.createElement("div");
+    title.className = "dmSectionTitle";
+    title.textContent = "Direct messages";
+    dmThreadList.appendChild(title);
+    direct.sort(sortByRecent).forEach((t) => dmThreadList.appendChild(renderThreadItem(t)));
+  }
+
+  if (groups.length) {
+    const title = document.createElement("div");
+    title.className = "dmSectionTitle";
+    title.textContent = "Group chats";
+    dmThreadList.appendChild(title);
+    groups.sort(sortByRecent).forEach((t) => dmThreadList.appendChild(renderThreadItem(t)));
+  }
+}
+
 function renderDmThreads(){
   // Backwards-compatible entrypoint.
   renderDirectThreads();
   renderGroupThreads();
+  renderDmThreadList();
 }
 
 
@@ -8508,6 +8569,17 @@ try{
   }
 }
 
+function resolveParticipantIdsByNames(names = []){
+  const ids = new Set();
+  for (const name of names) {
+    const key = normKey(name);
+    const hit = (lastUsers || []).find((u) => normKey(u?.name || u?.username) === key);
+    const id = Number(hit?.id ?? hit?.userId ?? hit?.user_id);
+    if (Number.isInteger(id) && id > 0) ids.add(id);
+  }
+  return Array.from(ids);
+}
+
 async function startDirectMessage(username, targetId){
   if (!username) return;
   const target = String(username).trim();
@@ -8541,25 +8613,25 @@ async function startDirectMessage(username, targetId){
 
   setDmNotice("Preparing chat...");
   try {
-    const res = await dmFetch("/api/dm/thread", {
+    const resolvedId = Number(targetId);
+    const participantIds = Number.isInteger(resolvedId) && resolvedId > 0
+      ? [resolvedId]
+      : resolveParticipantIdsByNames([target]);
+
+    const res = await dmFetch("/dm/thread", {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      // Send multiple keys for backwards/forwards compatibility across server builds.
       body: JSON.stringify({
         kind: "direct",
         participants: [target],
-        participant: target,
-        user: target,
-        to: target,
-        username: target,
-        participantId: (Number.isInteger(Number(targetId)) && Number(targetId) > 0) ? Number(targetId) : undefined,
-        targetId: (Number.isInteger(Number(targetId)) && Number(targetId) > 0) ? Number(targetId) : undefined,
+        participantIds,
       })
     });
 
     if (!res.ok) {
       const text = await res.text();
       setDmNotice(text || "Could not start DM.");
+      toast?.(text || "Could not start DM.");
       return;
     }
 
@@ -8569,16 +8641,19 @@ async function startDirectMessage(username, targetId){
 
     if (data.threadId) {
       upsertThreadMeta(data.threadId, { participants: [target, meName].filter(Boolean), is_group: false });
+      await loadDmThreads();
       openDmThread(data.threadId);
     }
   } catch {
     setDmNotice("Could not start DM.");
+    toast?.("Could not start DM.");
   }
 }
 
 function openDmPanel(){
   dmPanel.classList.add("open");
   setDmNotice("");
+  setDmViewMode("inbox");
   // Do not clear badges on open; only clear when a thread is actually read.
   syncDmTabUi();
 
@@ -9066,6 +9141,7 @@ function openDmThread(threadId){
 
   const meta = dmThreads.find(t => String(t.id) === String(threadId));
   if (meta) setDmTab(meta.is_group ? "group" : "direct");
+  setDmViewMode("thread");
   dmUnreadThreads.delete(threadId);
   renderDmThreads();
   setDmMeta(meta);
@@ -9250,12 +9326,14 @@ async function submitDmPicker(){
 
   try {
     dmModalPrimaryBtn.disabled = true;
-    const res = await dmFetch("/api/dm/thread", {
+    const participantIds = resolveParticipantIdsByNames(names);
+    const res = await dmFetch("/dm/thread", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         kind: "group",
         participants: names,
+        participantIds,
         // Compatibility keys
         users: names.join(","),
       }),
@@ -9264,6 +9342,7 @@ async function submitDmPicker(){
     if (!res.ok) {
       const txt = await res.text();
       setDmNotice(txt || "Could not create group.");
+      toast?.(txt || "Could not create group.");
       return;
     }
     const data = await res.json();
@@ -9272,6 +9351,7 @@ async function submitDmPicker(){
     if (data.threadId) openDmThread(data.threadId);
   } catch {
     setDmNotice("Could not create group.");
+    toast?.("Could not create group.");
   }
 }
 
@@ -9417,6 +9497,7 @@ document.addEventListener("touchstart", closeQuickBarsOnOutside, { capture: true
 // The DM panel is entered only after selecting a thread from the quick strip.
 dmCreateGroupBtn?.addEventListener("click", () => openDmPicker("create"));
 dmCloseBtn?.addEventListener("click", closeDmPanel);
+dmBackBtn?.addEventListener("click", () => setDmViewMode("inbox"));
 dmSendBtn?.addEventListener("click", sendDmMessage);
 dmInfoBtn?.addEventListener("click", () => openDmInfo());
 dmSettingsBtn?.addEventListener("click", (e) => {
@@ -9450,17 +9531,17 @@ document.addEventListener("click", (e) => {
   closeDmSettingsMenu();
 });
 
-dmBgColor?.addEventListener("input", () => {
-  dmThemePrefs.background = dmBgColor.value;
-  if(dmBgColorText) dmBgColorText.value = dmBgColor.value;
-  applyDmThemePrefs();
-  saveDmThemePrefsToStorage();
+dmNeonColorInput?.addEventListener("input", () => {
+  dmNeonColor = dmNeonColorInput.value;
+  if(dmNeonColorText) dmNeonColorText.value = dmNeonColorInput.value;
+  applyDmNeonPrefs();
+  saveDmNeonColorToStorage();
 });
-dmBgColorText?.addEventListener("input", () => {
-  const safe = sanitizeColor(dmBgColorText.value, dmThemePrefs.background, dmThemeDefaults.background);
-  dmThemePrefs.background = safe;
-  applyDmThemePrefs();
-  saveDmThemePrefsToStorage();
+dmNeonColorText?.addEventListener("input", () => {
+  const safe = sanitizeColor(dmNeonColorText.value, dmNeonColor, dmNeonDefaults.color);
+  dmNeonColor = safe;
+  applyDmNeonPrefs();
+  saveDmNeonColorToStorage();
 });
 
 memberViewProfileBtn?.addEventListener("click", () => {
@@ -9470,7 +9551,7 @@ memberViewProfileBtn?.addEventListener("click", () => {
 });
 
 memberDmBtn?.addEventListener("click", () => {
-  if (memberMenuUser) startDirectMessage(memberMenuUser.name);
+  if (memberMenuUser) startDirectMessage(memberMenuUser.name, memberMenuUser?.id ?? memberMenuUser?.userId ?? memberMenuUser?.user_id);
 });
 
 document.addEventListener("click", (e) => {
@@ -14667,9 +14748,9 @@ resetAdvancedBtn?.addEventListener("click", () => {
   syncSoundPrefsUI(true);
   queuePersistPrefs({ sound: Sound.exportPrefs() });
 
-  dmThemePrefs = { ...dmThemeDefaults };
-  applyDmThemePrefs();
-  saveDmThemePrefsToStorage();
+  dmNeonColor = dmNeonDefaults.color;
+  applyDmNeonPrefs();
+  saveDmNeonColorToStorage();
 
   badgePrefs = { ...badgeDefaults };
   applyBadgePrefs();
