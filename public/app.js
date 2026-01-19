@@ -2210,6 +2210,8 @@ let irisLolaSharedMomentTs = 0;
 let irisLolaLastPartnerMsgTs = 0;
 let irisLolaLastSelfMsgTs = 0;
 let irisLolaStarfieldReady = false;
+let irisLolaShootingStarTimer = null;
+let irisLolaShootingStarStopRequested = false;
 
 function normalizeUserKey(value) {
   return String(value || "").trim().toLowerCase();
@@ -2330,6 +2332,55 @@ function ensureIrisLolaStarfield() {
   mount?.appendChild(field);
   irisLolaStarfieldReady = true;
 }
+
+function stopIrisLolaShootingStars() {
+  irisLolaShootingStarStopRequested = true;
+  if (irisLolaShootingStarTimer) {
+    clearTimeout(irisLolaShootingStarTimer);
+    irisLolaShootingStarTimer = null;
+  }
+  // Best-effort cleanup
+  document.querySelectorAll(".irisLolaShoot").forEach((n) => n.remove());
+}
+
+function spawnIrisLolaShootingStar() {
+  const field = document.getElementById("irisLolaStarfield");
+  if (!field) return;
+  const shoot = document.createElement("span");
+  shoot.className = "irisLolaShoot";
+  // Keep it within the visible chat area (not the very edges)
+  const x = 10 + Math.random() * 80;
+  const y = 10 + Math.random() * 75;
+  const len = 42 + Math.random() * 58;
+  const dur = 850 + Math.random() * 550;
+  const rot = -18 - Math.random() * 30;
+  shoot.style.setProperty("--sx", `${x}%`);
+  shoot.style.setProperty("--sy", `${y}%`);
+  shoot.style.setProperty("--len", `${len}px`);
+  shoot.style.setProperty("--dur", `${Math.round(dur)}ms`);
+  shoot.style.setProperty("--rot", `${rot}deg`);
+  field.appendChild(shoot);
+  const cleanup = () => { try{ shoot.remove(); }catch{} };
+  shoot.addEventListener("animationend", cleanup, { once: true });
+  setTimeout(cleanup, dur + 120);
+}
+
+function startIrisLolaShootingStars() {
+  // Randomized loop so it feels occasional, not spammy
+  irisLolaShootingStarStopRequested = false;
+  const tick = () => {
+    if (irisLolaShootingStarStopRequested) return;
+    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    if (prefersReducedMotion) return;
+    if (!isIrisLolaThemeActive()) return;
+    spawnIrisLolaShootingStar();
+    const next = 2200 + Math.random() * 5200; // ~2.2s - 7.4s
+    irisLolaShootingStarTimer = setTimeout(tick, next);
+  };
+  if (irisLolaShootingStarTimer) return;
+  const first = 1200 + Math.random() * 2600;
+  irisLolaShootingStarTimer = setTimeout(tick, first);
+}
 function updateIrisLolaTogetherClass() {
   const themeActive = isIrisLolaThemeActive();
   const coupleActive = isCoupleActiveState(couplesState);
@@ -2340,6 +2391,13 @@ function updateIrisLolaTogetherClass() {
   document.body?.classList.toggle("irisLolaCoupleActive", !!(themeActive && coupleActive));
   updateIrisLolaAvatarGlows({ themeActive, coupleActive, bothOnline, partnerName });
   ensureIrisLolaStarfield();
+
+  // Occasional shooting stars around the chat area (theme-only, respects reduced motion)
+  if (themeActive && shouldAnimateAmbientEffects(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches)) {
+    startIrisLolaShootingStars();
+  } else {
+    stopIrisLolaShootingStars();
+  }
 }
 function updateIrisLolaAvatarGlows({ themeActive, coupleActive, bothOnline, partnerName } = {}) {
   const allow = shouldShowTogetherGlow(themeActive, coupleActive, bothOnline);
