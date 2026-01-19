@@ -3840,7 +3840,7 @@ body:not(.polish-pack) .tonePicker{
 .mRoll{ font-size:11px; color:var(--accent); font-weight:800; }
 
 .memberMenu{
-  position:absolute;
+  position:fixed;
   top:0;
   left:0;
   background: color-mix(in srgb, var(--panel2) 92%, transparent);
@@ -3851,9 +3851,9 @@ body:not(.polish-pack) .tonePicker{
   display:none;
   flex-direction:column;
   gap:8px;
-  z-index: 8;
+  z-index: 500;
   min-width: 230px;
-  max-width: calc(100% - 20px);
+  max-width: min(320px, calc(100vw - 24px - var(--safeL) - var(--safeR)));
 }
 .memberMenu.open{ display:flex; }
 .memberMenuHeader{ display:flex; flex-direction:column; gap:4px; }
@@ -5931,6 +5931,9 @@ main.chat{ position: relative; }
   --leftDrawerW: 0px;
   --rightDrawerW: 0px;
   --safeB: env(safe-area-inset-bottom, 0px);
+  --safeT: env(safe-area-inset-top, 0px);
+  --safeL: env(safe-area-inset-left, 0px);
+  --safeR: env(safe-area-inset-right, 0px);
 }
 
 body.drawer-left-open  { --leftDrawerW: min(86vw, 340px); }
@@ -10544,6 +10547,20 @@ body[data-theme="Iris & Lola Neon"]{
     radial-gradient(900px 700px at 55% 88%, var(--irisLolaSkyC), transparent 64%),
     linear-gradient(180deg, rgba(0,0,0,.92), rgba(0,0,0,.94)) !important;
   animation: irisLolaBreath 10s ease-in-out infinite;
+}
+
+body[data-theme="Iris & Lola Neon"] .chat{
+  background: rgba(10, 2, 16, 0.42) !important;
+}
+
+body[data-theme="Iris & Lola Neon"] #roomsPanel,
+body[data-theme="Iris & Lola Neon"] #membersPane,
+body[data-theme="Iris & Lola Neon"] .modalCard,
+body[data-theme="Iris & Lola Neon"] .panel,
+body[data-theme="Iris & Lola Neon"] .sidebar,
+body[data-theme="Iris & Lola Neon"] .listPanel{
+  background: rgba(8, 2, 16, 0.78) !important;
+  backdrop-filter: blur(10px);
 }
 
 /* Ensure the starfield sits behind chat content and is clipped to the chat area. */
