@@ -4850,6 +4850,31 @@ body.lockScroll{ overflow:hidden; }
   overflow:hidden;
   min-height:0;
 }
+
+/* Optional: translucent DM panel so the room behind can still be noticed */
+.dmPanel.dmTranslucent{
+  background: color-mix(in srgb, var(--panel2) 72%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.dmPanel.dmTranslucent .dmHeader,
+.dmPanel.dmTranslucent .dmThreadsHeader,
+.dmPanel.dmTranslucent .dmMeta{
+  background: color-mix(in srgb, var(--panel2) 68%, transparent);
+}
+
+/* Simple checkbox row used in the DM settings menu */
+.checkRow{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  cursor:pointer;
+  user-select:none;
+}
+.checkRow input{
+  width:18px;
+  height:18px;
+}
 .dmPanel.open{
   visibility:visible;
   opacity:1;

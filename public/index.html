@@ -622,10 +622,7 @@
 <div class="dmHeader">
 <div class="dmHeaderMain">
 <button class="iconBtn secondary dmBackBtn" id="dmBackBtn" title="Back to inbox" type="button">←</button>
-<div>
-<div class="title">Direct Messages</div>
-<div class="small">Start a DM from the members list.</div>
-</div>
+<div class="title" id="dmHeaderTitle">Inbox</div>
 </div>
 <button class="iconBtn" id="dmCloseBtn" title="Close" type="button">✕</button>
 </div>
@@ -653,6 +650,13 @@
 <button class="iconBtn secondary" id="dmInfoBtn" title="Group info" type="button">ℹ️</button>
 <button class="iconBtn secondary" id="dmSettingsBtn" title="DM settings" type="button">⚙️</button>
 <div class="dmSettingsMenu" id="dmSettingsMenu">
+<div class="dmSettingsRow">
+  <label class="checkRow">
+    <input id="dmTranslucentToggle" type="checkbox"/>
+    <span>Translucent DM panel</span>
+  </label>
+  <div class="small">Makes the DM panel slightly see-through so you can still notice the room behind it.</div>
+</div>
 <div class="dmSettingsRow">
 <button class="btn danger" id="dmDeleteHistoryBtn" type="button">Delete history</button>
 <div class="small">Remove every message in this DM for all participants.</div>

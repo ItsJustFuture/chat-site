@@ -4014,6 +4014,7 @@ const leaderboardsMsg = document.getElementById("leaderboardsMsg");
 const leaderboardsUpdatedAt = document.getElementById("leaderboardsUpdatedAt");
 const refreshLeaderboardsBtn = document.getElementById("refreshLeaderboardsBtn");
 const dmSettingsMenu = document.getElementById("dmSettingsMenu");
+const dmTranslucentToggle = document.getElementById("dmTranslucentToggle");
 const dmDeleteHistoryBtn = document.getElementById("dmDeleteHistoryBtn");
 const dmReportBtn = document.getElementById("dmReportBtn");
 const dmReplyPreview = document.getElementById("dmReplyPreview");
@@ -5972,6 +5973,27 @@ function applyDmNeonPrefs(){
   if(dmNeonColorText) dmNeonColorText.value = color;
 }
 
+// --- DM panel translucency (optional)
+const DM_TRANSLUCENT_KEY = "dmTranslucent";
+function readDmTranslucentStorage(){
+  try {
+    const raw = localStorage.getItem(DM_TRANSLUCENT_KEY);
+    if (raw === "1") return true;
+    if (raw === "0") return false;
+  } catch {}
+  // default: off
+  return false;
+}
+function applyDmTranslucent(enabled, { persistLocal = true, persistServer = true } = {}){
+  const on = !!enabled;
+  dmPanel?.classList.toggle("dmTranslucent", on);
+  if (dmTranslucentToggle) dmTranslucentToggle.checked = on;
+  if (persistLocal) {
+    try { localStorage.setItem(DM_TRANSLUCENT_KEY, on ? "1" : "0"); } catch {}
+  }
+  if (persistServer) queuePersistPrefs({ dmTranslucent: on });
+}
+
 function sanitizeThemeName(name){
   const match = THEME_LIST.find((t) => t.name === name);
   return match ? match.name : DEFAULT_THEME;
@@ -6735,6 +6757,7 @@ badgePrefs = loadBadgePrefsFromStorage();
 applyBadgePrefs();
 dmNeonColor = loadDmNeonColorFromStorage();
 applyDmNeonPrefs();
+applyDmTranslucent(readDmTranslucentStorage(), { persistLocal: false, persistServer: false });
 initCustomizationUi();
 const EMOJI_CHOICES = ["😀","😁","😂","🙂","😉","😍","😘","🤔","😤","😭","😡","🥹","😈","💀","🔥","👀","🖕","♥️","💯","👍","👎","🎉","📸","🫦",];
 
@@ -8477,6 +8500,12 @@ function setDmViewMode(mode){
   if (!dmPanel) return;
   dmPanel.classList.toggle("dmModeInbox", next === "inbox");
   dmPanel.classList.toggle("dmModeThread", next === "thread");
+
+  // Compact header title (mobile space saver)
+  try {
+    const head = document.getElementById("dmHeaderTitle");
+    if (head) head.textContent = (next === "thread") ? (document.getElementById("dmMetaTitle")?.textContent || "DM") : "Inbox";
+  } catch {}
 }
 
 function setDmTab(tab){
@@ -8493,6 +8522,10 @@ async function dmFetch(url, options){
   const u = String(url || "");
   const tries = [];
 
+  // Ensure cookies/session are included reliably across mobile browsers.
+  const opts = options ? { ...options } : {};
+  if (!opts.credentials) opts.credentials = "same-origin";
+
   if (u.startsWith("/dm/")) {
     tries.push("/api" + u);
     tries.push(u);
@@ -8507,7 +8540,7 @@ async function dmFetch(url, options){
   let lastRes;
   for (const candidate of tries) {
     try {
-      const res = await fetch(candidate, options);
+      const res = await fetch(candidate, opts);
       lastRes = res;
       // Only fall back on 404 (route missing). Any other status should be surfaced.
       if (res && res.status !== 404) return res;
@@ -8883,9 +8916,20 @@ async function startDirectMessage(username, targetId){
     });
 
     if (!res.ok) {
-      const text = await res.text();
-      setDmNotice(text || "Could not start DM.");
-      toast?.(text || "Could not start DM.");
+      let msg = "";
+      try {
+        const ct = res.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+          const j = await res.json().catch(()=>null);
+          msg = j?.message || j?.error || "";
+        }
+      } catch {}
+      if (!msg) {
+        try { msg = (await res.text()) || ""; } catch {}
+      }
+      msg = String(msg || "").trim();
+      setDmNotice(msg || "Could not start DM.");
+      toast?.(msg || "Could not start DM.");
       return;
     }
 
@@ -8898,9 +8942,10 @@ async function startDirectMessage(username, targetId){
       await loadDmThreads();
       openDmThread(data.threadId);
     }
-  } catch {
-    setDmNotice("Could not start DM.");
-    toast?.("Could not start DM.");
+  } catch (e) {
+    const msg = String(e?.message || "").trim();
+    setDmNotice(msg ? `Could not start DM: ${msg}` : "Could not start DM.");
+    toast?.(msg ? `Could not start DM: ${msg}` : "Could not start DM.");
   }
 }
 
@@ -9758,6 +9803,10 @@ dmSettingsBtn?.addEventListener("click", (e) => {
   e.stopPropagation();
   toggleDmSettingsMenu();
 });
+
+dmTranslucentToggle?.addEventListener("change", () => {
+  applyDmTranslucent(!!dmTranslucentToggle.checked);
+});
 dmDeleteHistoryBtn?.addEventListener("click", deleteDmHistory);
 dmReportBtn?.addEventListener("click", () => {
   setDmNotice("Report feature coming soon.");
@@ -9805,7 +9854,9 @@ memberViewProfileBtn?.addEventListener("click", () => {
 });
 
 memberDmBtn?.addEventListener("click", () => {
-  if (memberMenuUser) startDirectMessage(memberMenuUser.name, memberMenuUser?.id ?? memberMenuUser?.userId ?? memberMenuUser?.user_id);
+  const uname = (memberMenuUsername || memberMenuUser?.username || memberMenuUser?.name || "").trim();
+  const uid = memberMenuUser?.id ?? memberMenuUser?.userId ?? memberMenuUser?.user_id;
+  if (uname) startDirectMessage(uname, uid);
 });
 
 document.addEventListener("click", (e) => {
