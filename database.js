@@ -626,6 +626,8 @@ await run(`CREATE INDEX IF NOT EXISTS idx_appeal_messages_appeal ON appeal_messa
     ["user_high", "user_high INTEGER"],
     ["last_message_id", "last_message_id INTEGER"],
     ["last_message_at", "last_message_at INTEGER"],
+    ["participants_key", "participants_key TEXT"],
+    ["participants_json", "participants_json TEXT"],
   ]);
 
   await ensureColumns("dm_participants", [
@@ -641,6 +643,11 @@ await run(`CREATE INDEX IF NOT EXISTS idx_appeal_messages_appeal ON appeal_messa
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_dm_threads_pair
        ON dm_threads(user_low, user_high)
        WHERE is_group = 0 AND user_low IS NOT NULL AND user_high IS NOT NULL`
+  );
+  await run(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_dm_threads_group_key
+       ON dm_threads(participants_key)
+       WHERE is_group = 1 AND participants_key IS NOT NULL`
   );
 
 

@@ -8477,10 +8477,63 @@ function formatDmTime(ts){
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function formatRelativeTime(ts){
+  if (!ts) return "";
+  const delta = Math.floor((Date.now() - ts) / 1000);
+  if (delta < 60) return "just now";
+  const mins = Math.floor(delta / 60);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  return new Date(ts).toLocaleDateString();
+}
+
 function threadAvatarNode(t){
   const wrap = document.createElement("div");
   wrap.className = "dmAvatar";
-  wrap.appendChild(avatarNode(null, threadLabel(t), "member"));
+  if (!t?.is_group) {
+    const other = otherParty(t) || threadLabel(t);
+    const meta = getUserMeta(other);
+    const fromDetail = Array.isArray(t.participantsDetail)
+      ? (t.participantsDetail.find(p => normKey(p?.username) === normKey(other)) || null)
+      : null;
+    const avatarUrl = t.otherUser?.avatar || fromDetail?.avatar || avatarCache?.[other] || null;
+    const av = makeAvatarEl({
+      username: meta.username || other || "?",
+      role: meta.role || "member",
+      avatarUrl: meta.avatarUrl || avatarUrl || null,
+      size: 40
+    });
+    wrap.appendChild(av);
+    return wrap;
+  }
+
+  const stack = document.createElement("div");
+  stack.className = "dmGroupStack";
+  const namesFromParticipants = Array.isArray(t.participants) ? t.participants : [];
+  const namesFromDetail = Array.isArray(t.participantsDetail) ? t.participantsDetail.map(p => p?.username).filter(Boolean) : [];
+  const names = [...namesFromParticipants, ...namesFromDetail].filter(Boolean);
+  const others = names.filter(n => normKey(n) !== normKey(me?.username));
+  const picks = (others.length ? others : names).slice(0, 4);
+
+  picks.forEach((name, idx) => {
+    const meta = getUserMeta(name);
+    const fromDetail = Array.isArray(t.participantsDetail)
+      ? (t.participantsDetail.find(p => normKey(p?.username) === normKey(name)) || null)
+      : null;
+    const avatarUrl = fromDetail?.avatar || avatarCache?.[name] || null;
+    const av = makeAvatarEl({
+      username: meta.username || name || "?",
+      role: meta.role || "member",
+      avatarUrl: meta.avatarUrl || avatarUrl || null,
+      size: 20
+    });
+    av.classList.add("dmGroupAvatar", `dmGroupAvatar${idx + 1}`);
+    stack.appendChild(av);
+  });
+  wrap.appendChild(stack);
   return wrap;
 }
 
@@ -8552,6 +8605,16 @@ async function dmFetch(url, options){
   return lastRes;
 }
 
+function getThreadUnreadCount(t){
+  const base = Number(t?.unreadCount || 0);
+  if (base > 0) return base;
+  if (dmUnreadThreads.has(t.id)) return 1;
+  const lastTs = Number(t?.last_ts || 0);
+  const lastRead = Number(dmLastRead?.[t.id] || 0);
+  if (lastTs && lastTs > lastRead) return 1;
+  return 0;
+}
+
 function renderThreadItem(t){
   const div = document.createElement("div");
   div.className = "dmItem" + (t.id === activeDmId ? " active" : "");
@@ -8583,7 +8646,8 @@ function renderThreadItem(t){
   } catch {}
   const time = document.createElement("div");
   time.className = "dmItemTime";
-  time.textContent = formatDmTime(t.last_ts);
+  const lastTs = Number(t.last_ts || t.created_at || 0);
+  time.textContent = formatRelativeTime(lastTs);
   top.appendChild(title);
   top.appendChild(time);
 
@@ -8594,10 +8658,11 @@ function renderThreadItem(t){
   prev.textContent = preview;
   bottom.appendChild(prev);
 
-  if (dmUnreadThreads.has(t.id)) {
+  const unreadCount = getThreadUnreadCount(t);
+  if (unreadCount > 0) {
     const unread = document.createElement("div");
     unread.className = "dmUnread";
-    unread.textContent = "New";
+    unread.textContent = String(Math.min(99, unreadCount));
     bottom.appendChild(unread);
   }
 
@@ -8783,12 +8848,17 @@ function renderDmThreadList(){
   dmThreadList.innerHTML = "";
   const direct = (dmThreads || []).filter(isDirectThread);
   const groups = (dmThreads || []).filter((t)=>!!t.is_group);
-  const sortByRecent = (a, b) => Number(b.last_ts || 0) - Number(a.last_ts || 0);
+  const sortByInbox = (a, b) => {
+    const aUnread = getThreadUnreadCount(a) > 0;
+    const bUnread = getThreadUnreadCount(b) > 0;
+    if (aUnread !== bUnread) return aUnread ? -1 : 1;
+    return Number(b.last_ts || b.created_at || 0) - Number(a.last_ts || a.created_at || 0);
+  };
 
   if (!direct.length && !groups.length) {
     const empty = document.createElement("div");
     empty.className = "dmEmpty";
-    empty.textContent = "No DM threads yet.";
+    empty.textContent = "No conversations yet.";
     dmThreadList.appendChild(empty);
     return;
   }
@@ -8798,7 +8868,7 @@ function renderDmThreadList(){
     title.className = "dmSectionTitle";
     title.textContent = "Direct messages";
     dmThreadList.appendChild(title);
-    direct.sort(sortByRecent).forEach((t) => dmThreadList.appendChild(renderThreadItem(t)));
+    direct.sort(sortByInbox).forEach((t) => dmThreadList.appendChild(renderThreadItem(t)));
   }
 
   if (groups.length) {
@@ -8806,7 +8876,7 @@ function renderDmThreadList(){
     title.className = "dmSectionTitle";
     title.textContent = "Group chats";
     dmThreadList.appendChild(title);
-    groups.sort(sortByRecent).forEach((t) => dmThreadList.appendChild(renderThreadItem(t)));
+    groups.sort(sortByInbox).forEach((t) => dmThreadList.appendChild(renderThreadItem(t)));
   }
 }
 
@@ -8948,16 +9018,30 @@ async function startDirectMessage(username, targetId){
   }
 }
 
-function openDmPanel(){
+function openDmPanel({ view } = {}){
   dmPanel.classList.add("open");
   setDmNotice("");
-  setDmViewMode("inbox");
+  if (view) setDmViewMode(view);
   // Do not clear badges on open; only clear when a thread is actually read.
   syncDmTabUi();
 
   // load threads if we haven't yet
   if (!dmThreads.length) loadDmThreads();
   else renderDmThreads();
+}
+
+function showDmInbox({ tab } = {}){
+  saveDmDraft();
+  if (activeDmId) {
+    try { socket?.emit("dm leave", { threadId: activeDmId }); } catch {}
+  }
+  activeDmId = null;
+  setDmViewMode("inbox");
+  setDmMeta(null);
+  setDmReplyTarget(null);
+  if (dmMessagesEl) dmMessagesEl.innerHTML = "";
+  if (tab) setDmTab(tab);
+  renderDmThreads();
 }
 
 function closeDmPanel(){
@@ -9763,8 +9847,7 @@ async function toggleDmQuickBar(kind){
   else renderDirectThreads();
 }
 
-// DM button should open the full DM panel (mobile-friendly). The quick avatar strip
-// is a nice extra, but it must not be the only way to access DMs.
+// DM buttons open the inbox strip only; threads open the conversation panel.
 dmToggleBtn?.addEventListener("click", () => {
   try { hideAllDmQuickBars(); } catch {}
   if (!dmPanel) return;
@@ -9773,11 +9856,21 @@ dmToggleBtn?.addEventListener("click", () => {
   if (dmPanel.classList.contains("open")) {
     closeDmPanel();
   } else {
-    setDmTab("direct");
     openDmPanel();
+    showDmInbox({ tab: "direct" });
   }
 });
-groupDmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("group"); });
+groupDmToggleBtn?.addEventListener("click", () => {
+  try { hideAllDmQuickBars(); } catch {}
+  if (!dmPanel) return;
+
+  if (dmPanel.classList.contains("open")) {
+    closeDmPanel();
+  } else {
+    openDmPanel();
+    showDmInbox({ tab: "group" });
+  }
+});
 
 groupQuickStartBtn?.addEventListener("click", (e) => {
   e.stopPropagation();
@@ -9808,7 +9901,7 @@ document.addEventListener("touchstart", closeQuickBarsOnOutside, { capture: true
 // The DM panel is entered only after selecting a thread from the quick strip.
 dmCreateGroupBtn?.addEventListener("click", () => openDmPicker("create"));
 dmCloseBtn?.addEventListener("click", closeDmPanel);
-dmBackBtn?.addEventListener("click", () => setDmViewMode("inbox"));
+dmBackBtn?.addEventListener("click", () => showDmInbox());
 dmSendBtn?.addEventListener("click", sendDmMessage);
 dmInfoBtn?.addEventListener("click", () => openDmInfo());
 dmSettingsBtn?.addEventListener("click", (e) => {
