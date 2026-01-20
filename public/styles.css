@@ -4865,6 +4865,29 @@ body.lockScroll{ overflow:hidden; }
   background: color-mix(in srgb, var(--panel2) 68%, transparent);
 }
 
+/* When translucent mode is enabled, make the whole DM surface (not just the top bars)
+   follow the same glassy background treatment. */
+.dmPanel.dmTranslucent .dmContent{
+  background: transparent;
+}
+.dmPanel.dmTranslucent .dmThreads{
+  background: color-mix(in srgb, var(--panel) 68%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border-right-color: color-mix(in srgb, var(--line) 55%, transparent);
+}
+.dmPanel.dmTranslucent .dmConversation,
+.dmPanel.dmTranslucent .dmMessages{
+  background: transparent;
+}
+.dmPanel.dmTranslucent .dmNotice,
+.dmPanel.dmTranslucent .dmInput,
+.dmPanel.dmTranslucent .replyPreview{
+  background: color-mix(in srgb, var(--panel2) 64%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
 /* Simple checkbox row used in the DM settings menu */
 .checkRow{
   display:flex;
@@ -5228,7 +5251,15 @@ body.lockScroll{ overflow:hidden; }
 .dmMsgAvatar{ width:30px; height:30px; }
 
 /* Self messages don't need a left avatar column */
-.dmRow.self .dmAvatarSlot{ display:none; }
+/* Self messages: show your avatar on the RIGHT (like modern DMs) */
+.dmRow.self .dmAvatarSlot{
+  display:flex;
+  order:2;
+  padding-right:0;
+  padding-left:6px;
+  justify-content:center;
+}
+.dmRow.self .dmBubbleWrap{ order:1; }
 
 body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
   animation: msgArrival 160ms cubic-bezier(.22,.61,.36,1);

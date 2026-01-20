@@ -9120,59 +9120,94 @@ function renderDmMessages(threadId){
       row.classList.add("couple-partner-msg");
     }
 
-// Avatar column (non-self). Keep spacing consistent for grouped messages.
-const threadMeta = dmThreads.find(t => String(t.id) === String(threadId));
-if (!isSelf) {
-  const slot = document.createElement("div");
-  slot.className = "dmAvatarSlot";
+    // Avatar column (both sides). Keep spacing consistent for grouped messages.
+    const threadMeta = dmThreads.find(t => String(t.id) === String(threadId));
+    {
+      const slot = document.createElement("div");
+      slot.className = "dmAvatarSlot";
 
-  const prevUserKey = normKey(prev?.user || prev?.username || resolveMessageAuthor(prev) || "");
-  const curUserKey  = normKey(m?.user || m?.username || authorName || "");
-  const showAvatar = !prev || prevUserKey !== curUserKey;
+      const prevUserKey = normKey(prev?.user || prev?.username || resolveMessageAuthor(prev) || "");
+      const curUserKey  = normKey(authorName || m?.user || m?.username || "");
+      const showAvatar = !prev || prevUserKey !== curUserKey;
 
-  if (showAvatar) {
-    const fromDetail = Array.isArray(threadMeta?.participantsDetail)
-      ? (threadMeta.participantsDetail.find(p => normKey(p?.username) === normKey(authorName)) || null)
-      : null;
+      if (showAvatar) {
+        // Resolve avatar + role from thread payload first, then cached meta.
+        let avatarUrl = null;
+        let roleKeyGuess = null;
 
-    const avatarUrl = threadMeta?.otherUser?.username && normKey(threadMeta.otherUser.username) === normKey(authorName)
-      ? threadMeta.otherUser.avatar
-      : (fromDetail?.avatar || avatarCache?.[authorName] || null);
+        if (isSelf) {
+          const meName = me?.username || authorName || "me";
+          const metaMe = getUserMeta(meName);
+          roleKeyGuess = metaMe?.role || me?.role || "member";
+          avatarUrl = metaMe?.avatarUrl || me?.avatar || avatarCache?.[meName] || null;
 
-    const meta = getUserMeta(authorName);
+          const av = makeAvatarEl({
+            username: metaMe.username || meName,
+            role: roleKeyGuess || "member",
+            avatarUrl,
+            size: 30
+          });
+          av.classList.add("dmMsgAvatar");
+          slot.appendChild(av);
 
-    const av = makeAvatarEl({
-      username: meta.username || authorName,
-      role: meta.role || "member",
-      avatarUrl: meta.avatarUrl || avatarUrl || null,
-      size: 30
-    });
-    av.classList.add("dmMsgAvatar");
-    slot.appendChild(av);
-
-    // Fetch avatar if we don't have it yet (background)
-    if (authorName && !meta.avatarUrl && !avatarUrl) {
-      getAvatarUrl(authorName).then((u)=>{
-        if (!u) return;
-        try{
-          const img = av.querySelector("img.avatarImg");
-          if (img) img.src = u;
-          else {
-            const repl = makeAvatarEl({ username: meta.username || authorName, role: meta.role || "member", avatarUrl: u, size: 30 });
-            repl.classList.add("dmMsgAvatar");
-            av.replaceWith(repl);
+          // If we still don't have a URL, try fetching it.
+          if (meName && !metaMe?.avatarUrl && !avatarUrl) {
+            getAvatarUrl(meName).then((u)=>{
+              if (!u) return;
+              try{
+                const img = av.querySelector("img.avatarImg");
+                if (img) img.src = u;
+              }catch{}
+            }).catch(()=>{});
           }
-        }catch{}
-      }).catch(()=>{});
-    }
-  } else {
-    slot.classList.add("empty");
-    // Keep layout width but hide the avatar for grouped messages.
-    slot.innerHTML = "<div class='dmAvatarSpacer'></div>";
-  }
+        } else {
+          const fromDetail = Array.isArray(threadMeta?.participantsDetail)
+            ? (threadMeta.participantsDetail.find(p => normKey(p?.username) === normKey(authorName)) || null)
+            : null;
 
-  row.appendChild(slot);
-}
+          avatarUrl = threadMeta?.otherUser?.username && normKey(threadMeta.otherUser.username) === normKey(authorName)
+            ? threadMeta.otherUser.avatar
+            : (fromDetail?.avatar || avatarCache?.[authorName] || null);
+
+          const meta = getUserMeta(authorName);
+          roleKeyGuess = meta.role || m.role || roleForUser(authorName) || "member";
+
+          const av = makeAvatarEl({
+            username: meta.username || authorName,
+            role: roleKeyGuess || "member",
+            avatarUrl: meta.avatarUrl || avatarUrl || null,
+            size: 30
+          });
+          av.classList.add("dmMsgAvatar");
+          slot.appendChild(av);
+
+          // Fetch avatar if we don't have it yet (background)
+          if (authorName && !meta.avatarUrl && !avatarUrl) {
+            getAvatarUrl(authorName).then((u)=>{
+              if (!u) return;
+              try{
+                const img = av.querySelector("img.avatarImg");
+                if (img) img.src = u;
+                else {
+                  const repl = makeAvatarEl({ username: meta.username || authorName, role: meta.role || "member", avatarUrl: u, size: 30 });
+                  repl.classList.add("dmMsgAvatar");
+                  av.replaceWith(repl);
+                }
+              }catch{}
+            }).catch(()=>{});
+          }
+        }
+      } else {
+        slot.classList.add("empty");
+        // Keep layout width but hide the avatar for grouped messages.
+        slot.innerHTML = "<div class='dmAvatarSpacer'></div>";
+      }
+
+      // Non-self avatars go on the left; self avatars go on the right.
+      if (!isSelf) row.appendChild(slot);
+      // For self messages, we append the slot later (after bubbleWrap) so it lands on the right.
+      else row.__selfAvatarSlot = slot;
+    }
 
     // Actions bar (reveals below the bubble; does NOT reserve horizontal space)
     const actions = document.createElement("div");
@@ -9193,9 +9228,9 @@ if (!isSelf) {
     replyBtn.className = "iconBtn smallIcon";
     replyBtn.title = "Reply";
     replyBtn.textContent = "↩️";
-    replyBtn.onclick = (e) => {
+      replyBtn.onclick = (e) => {
       e.stopPropagation();
-      setDmReplyTarget({ id: m.messageId || m.id, user: m.user, text: m.text });
+        setDmReplyTarget({ id: m.messageId || m.id, user: authorName || m.user, text: m.text });
       focusDmComposer();
     };
 
@@ -9280,8 +9315,8 @@ if (!isSelf) {
     meta.className = "dmMetaRow";
     const u = document.createElement("span");
     u.className = "dmMetaUser";
-    u.textContent = m.user || "";
-    u.dataset.role = roleKey(m.role || roleForUser(m.user));
+    u.textContent = authorName || m.user || "";
+    u.dataset.role = roleKey(m.role || roleForUser(authorName || m.user));
 
     if (gClass !== " g-start" && gClass !== " g-solo") {
       u.textContent = ""; // grouped: avoid repeating the username
@@ -9337,6 +9372,11 @@ if (!isSelf) {
 
     // Only the bubble stack goes into the row (actions are inside bubbleWrap).
     row.appendChild(bubbleWrap);
+    // If this is a self message, place your avatar on the right.
+    if (isSelf && row.__selfAvatarSlot) {
+      try { row.appendChild(row.__selfAvatarSlot); } catch {}
+      try { delete row.__selfAvatarSlot; } catch {}
+    }
     queueContrastReinforcement(bubble);
 
     // Mobile/desktop: tap/click the bubble to toggle actions (parity with main chat)
