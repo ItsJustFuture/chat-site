@@ -7788,6 +7788,9 @@ memberViewProfileBtn?.addEventListener("click", ()=>{
 });
 memberDmBtn?.addEventListener("click", ()=>{
   const uname = (memberMenuUsername || memberMenuUser?.username || memberMenuUser?.name || "").trim();
+  if (uname) startDirectMessage(uname, memberMenuUser?.id ?? memberMenuUser?.userId ?? memberMenuUser?.user_id);
+  closeMemberMenu();
+});
 
 memberReferBtn?.addEventListener("click", ()=>{
   const target = (memberMenuUsername || memberMenuUser?.username || memberMenuUser?.name || "").trim();
@@ -7803,10 +7806,6 @@ memberReferBtn?.addEventListener("click", ()=>{
       toast?.(resp?.error || "Failed to send referral.");
     }
   });
-  closeMemberMenu();
-});
-
-  if (uname) startDirectMessage(uname, memberMenuUser?.id ?? memberMenuUser?.userId ?? memberMenuUser?.user_id);
   closeMemberMenu();
 });
 
@@ -9764,7 +9763,20 @@ async function toggleDmQuickBar(kind){
   else renderDirectThreads();
 }
 
-dmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("direct"); });
+// DM button should open the full DM panel (mobile-friendly). The quick avatar strip
+// is a nice extra, but it must not be the only way to access DMs.
+dmToggleBtn?.addEventListener("click", () => {
+  try { hideAllDmQuickBars(); } catch {}
+  if (!dmPanel) return;
+
+  // Toggle the panel.
+  if (dmPanel.classList.contains("open")) {
+    closeDmPanel();
+  } else {
+    setDmTab("direct");
+    openDmPanel();
+  }
+});
 groupDmToggleBtn?.addEventListener("click", () => { toggleDmQuickBar("group"); });
 
 groupQuickStartBtn?.addEventListener("click", (e) => {
