@@ -387,6 +387,8 @@ const THEMES = [
     root.style.setProperty("--vvTop", `${metrics.vvTop}px`);
     root.style.setProperty("--kbInset", `${metrics.kbInset}px`);
     root.style.setProperty("--headerH", `${metrics.headerH}px`);
+    // Used by survival mini-button and sticky panels to avoid sitting under the fixed top bar.
+    root.style.setProperty("--topBarH", `${metrics.headerH}px`);
     root.style.setProperty("--composerH", `${metrics.composerH}px`);
     root.style.setProperty("--playerH", `${metrics.playerH}px`);
     root.style.setProperty("--menuHeaderH", `${metrics.menuHeaderH}px`);

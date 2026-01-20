@@ -2625,7 +2625,8 @@ body.dice-room .luckMeter{
 .survivalPanel{
   display:none;
   position: sticky;
-  top:0;
+  /* Keep below the fixed top bar on mobile/desktop */
+  top: calc(var(--topBarH, 56px) + var(--safeT, 0px));
   z-index:120;
   margin:8px 12px 6px;
   padding:12px 14px;
@@ -2687,7 +2688,8 @@ body.survival-room .survivalPanel{
 /* Mini collapsed button shown at the very top when survival UI is collapsed */
 .survivalMiniBtn{
   position:fixed;
-  top:8px;
+  /* Show below the top bar so it's never hidden behind it */
+  top: calc(var(--topBarH, 56px) + var(--safeT, 0px) + 8px);
   left:50%;
   transform:translateX(-50%);
   z-index:140;
