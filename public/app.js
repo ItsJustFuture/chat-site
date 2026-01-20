@@ -8974,12 +8974,17 @@ async function startDirectMessage(username, targetId){
       ? [resolvedId]
       : resolveParticipantIdsByNames([target]);
 
+    // IMPORTANT: for direct DMs, do NOT send BOTH `participants` and `participantIds` for the same user.
+    // Some server builds historically inferred "group" from raw request counts, and
+    // `1 name + 1 id` could accidentally create a group DM.
+    const participants = participantIds.length ? [] : [target];
+
     const res = await dmFetch("/dm/thread", {
       method: "POST",
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify({
         kind: "direct",
-        participants: [target],
+        participants,
         participantIds,
       })
     });
