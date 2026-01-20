@@ -3096,7 +3096,12 @@ body.survival-room .survivalArena{
 .msgGroupBody,
 .msgItem,
 .msgMain,
-.bubble{
+.bubble,
+.dmRow,
+.dmBubbleWrap,
+.dmMetaRow,
+.dmAvatarSlot,
+.dmMessages{
   outline: none !important;
   -webkit-tap-highlight-color: transparent;
 }
@@ -3202,6 +3207,11 @@ body.survival-room .survivalArena{
   body.polish-pack .msgItem.hasReacts:hover .bubble,
   body.polish-pack .dmRow.hasReacts:hover .dmBubble{
     outline-color: color-mix(in srgb, var(--fx-accent, var(--accent)) 42%, transparent);
+  }
+
+  /* DMs: disable the square outline ring (it can appear as harsh boxes on some themes). */
+  body.polish-pack .dmRow .dmBubble{
+    outline: none !important;
   }
 }
 
@@ -5222,6 +5232,24 @@ body.lockScroll{ overflow:hidden; }
 .dmMetaTop{ display:flex; align-items:center; gap:8px; min-width:0; }
 .dmMetaAvatar{ display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
 .dmMetaAvatar .avatar{ border-radius:50%; overflow:hidden; }
+.dmTyping{ min-height:14px; opacity:.82; letter-spacing:.5px; }
+.dmTyping.isOn{ opacity:.95; }
+.dmTyping .dots{ font-weight:800; display:inline-block; min-width:22px; }
+
+/* DM typing indicator must never reflow messages.
+   It's rendered inside .dmInput and positioned above the composer. */
+.dmInput .dmTyping{
+  position:absolute;
+  left:14px;
+  right:14px;
+  top:-16px;
+  min-height:0;
+  margin:0;
+  pointer-events:none;
+  opacity:.85;
+  text-shadow: 0 0 10px rgba(0,0,0,.45);
+}
+
 .dmMetaActions{ position:relative; display:flex; align-items:center; gap:8px; }
 .dmMetaActions .iconBtn{ width:32px; height:32px; }
 .dmMetaActions .iconBtn{ width:32px; height:32px; }
@@ -8007,6 +8035,17 @@ body.polish-pack.polish-animations .msg-new .dmBubble{
   opacity: .75;
   font-size: 12px;
   margin-left: 6px;
+}
+
+/* DM read receipt: a small checkmark next to the timestamp on the last message read by the other person */
+.dmReadTick{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size: 12px;
+  line-height: 1;
+  margin-left: 6px;
+  opacity: .85;
 }
 
 /* Bubble "tail" only on end/solo messages (g-end / g-solo) */

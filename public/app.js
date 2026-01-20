@@ -1946,6 +1946,17 @@ function otherParty(thread) {
   if (!thread) return "";
   if (thread.otherUser?.username) return thread.otherUser.username;
 
+  // Prefer ID-based resolution if we have participant details.
+  // This avoids edge-cases where string compares fail (case/spacing/etc.).
+  try {
+    const myId = Number(me?.id);
+    const details = Array.isArray(thread.participantsDetail) ? thread.participantsDetail : [];
+    if (Number.isInteger(myId) && details.length) {
+      const other = details.find(p => Number(p?.id ?? p?.user_id ?? p?.userId) !== myId) || details[0] || null;
+      if (other?.username) return other.username;
+    }
+  } catch {}
+
   const meKey = normKey(me?.username);
   const parts = Array.isArray(thread.participants) ? thread.participants : [];
   const details = Array.isArray(thread.participantsDetail) ? thread.participantsDetail.map(p => p?.username).filter(Boolean) : [];
@@ -3949,6 +3960,7 @@ function setDmNotice(text){
 }
 const dmMetaTitle = document.getElementById("dmMetaTitle");
 const dmMetaPeople = document.getElementById("dmMetaPeople");
+const dmTypingIndicator = document.getElementById("dmTypingIndicator");
 const dmMetaAvatar = document.getElementById("dmMetaAvatar");
 const dmMessagesEl = document.getElementById("dmMessages");
 const dmText = document.getElementById("dmText");
@@ -8445,7 +8457,21 @@ function threadLabel(t){
 
   // Prefer explicit "other user" if provided by the server.
   const otherUser = t.otherUser?.username || t.other_user?.username || null;
-  if (!t.is_group && otherUser) return otherUser;
+  if (!t.is_group) {
+    // Prefer ID-based resolution first (handles names with spaces reliably).
+    let other = null;
+    try {
+      const myId = Number(me?.id);
+      const details = Array.isArray(t.participantsDetail) ? t.participantsDetail : [];
+      if (Number.isInteger(myId) && details.length) {
+        const hit = details.find(p => Number(p?.id ?? p?.user_id ?? p?.userId) !== myId) || details[0] || null;
+        other = hit?.username || null;
+      }
+    } catch {}
+
+    other = other || otherParty(t) || otherUser || null;
+    if (other) return other;
+  }
 
   // Fall back to participants / participantsDetail (case-insensitive vs me).
   const meKey = normKey(me?.username);
@@ -9041,6 +9067,7 @@ function showDmInbox({ tab } = {}){
   saveDmDraft();
   if (activeDmId) {
     try { socket?.emit("dm leave", { threadId: activeDmId }); } catch {}
+    try { socket?.emit("dm stop typing", { threadId: activeDmId }); } catch {}
   }
   activeDmId = null;
   setDmViewMode("inbox");
@@ -9058,6 +9085,7 @@ function closeDmPanel(){
   // Leaving the active DM prevents ongoing read receipts/badge suppression while the panel is closed.
   if (activeDmId) {
     try { socket?.emit("dm leave", { threadId: activeDmId }); } catch {}
+    try { socket?.emit("dm stop typing", { threadId: activeDmId }); } catch {}
   }
   activeDmId = null;
   activeDmUsers = new Set();
@@ -9076,16 +9104,21 @@ function renderDmMessages(threadId){
   const threadMeta = dmThreads.find(t => String(t.id) === String(threadId));
 
   // For read receipts, we only show "Seen" under the latest message YOU sent.
-  let lastSelfMid = null;
-  for (let j = msgsArr.length - 1; j >= 0; j--) {
-    const mm = msgsArr[j];
-    if (String(mm.user) === String(me?.username) && (mm.messageId || mm.id)) {
-      lastSelfMid = (mm.messageId || mm.id);
-      break;
-    }
-  }
   const rr = dmReadCache[String(threadId)] || null;
   const otherReadMid = (rr && me && rr.userId && String(rr.userId) !== String(me.id)) ? Number(rr.messageId) : null;
+
+  // Read receipt should "stick" to the last self message the other person has read,
+  // and move forward when a newer self message gets read.
+  let lastReadSelfMid = null;
+  if (otherReadMid != null && Number.isFinite(otherReadMid)) {
+    for (let j = msgsArr.length - 1; j >= 0; j--) {
+      const mm = msgsArr[j];
+      if (String(mm.user) !== String(me?.username)) continue;
+      const mid = Number(mm.messageId || mm.id);
+      if (!Number.isFinite(mid)) continue;
+      if (mid <= otherReadMid) { lastReadSelfMid = String(mm.messageId || mm.id); break; }
+    }
+  }
 
 
   if (!msgsArr.length) {
@@ -9359,13 +9392,13 @@ function renderDmMessages(threadId){
     reacts.dataset.threadId = String(threadId);
     meta.appendChild(reacts);
 
-    // Read receipt: show "Seen" only on your latest message, when the other user has marked it read.
-    const midForSeen = (m.messageId || m.id);
-    if (isSelf && lastSelfMid && String(midForSeen) === String(lastSelfMid) && otherReadMid && Number(otherReadMid) >= Number(midForSeen)) {
-      const seen = document.createElement("span");
-      seen.className = "dmSeen";
-      seen.textContent = "Seen";
-      meta.appendChild(seen);
+    // Read receipt: show a small check next to the timestamp on the last self message that was read.
+    const midForTick = (m.messageId || m.id);
+    if (isSelf && lastReadSelfMid && String(midForTick) === String(lastReadSelfMid)) {
+      const tick = document.createElement("span");
+      tick.className = "dmReadTick";
+      tick.textContent = "☑";
+      t.appendChild(tick);
     }
 
     bubbleWrap.appendChild(bubble);
@@ -9484,6 +9517,7 @@ function setDmMeta(thread){
     dmMetaTitle.textContent = "Pick a thread";
     dmMetaPeople.textContent = "";
     if (dmMetaAvatar) dmMetaAvatar.innerHTML = "";
+    if (dmTypingIndicator) dmTypingIndicator.textContent = "";
     activeDmUsers = new Set();
     updatePresenceAuras();
     return;
@@ -9503,6 +9537,9 @@ function setDmMeta(thread){
   dmMetaPeople.textContent = thread.is_group
     ? `${names.length} member${names.length === 1 ? "" : "s"}`
     : names.filter(n => normKey(n) !== normKey(me?.username)).join(", ");
+
+  // Update DM typing indicator (if any)
+  renderDmTypingIndicator();
 
   // Avatar in DM header:
   // - direct: other user's avatar
@@ -9555,6 +9592,9 @@ function setDmMeta(thread){
       }
     }catch{}
   }
+
+  // Update typing indicator for this thread (if any).
+  try { renderDmTypingIndicator(); } catch {}
 }
 
 function openDmThread(threadId){
@@ -12829,6 +12869,66 @@ msgInput?.addEventListener("click", ()=>renderMentionDropdown(mentionDropdown, m
 msgInput?.addEventListener("focus", ()=>renderMentionDropdown(mentionDropdown, msgInput));
 dmText?.addEventListener("click", ()=>renderMentionDropdown(dmMentionDropdown, dmText));
 dmText?.addEventListener("focus", ()=>renderMentionDropdown(dmMentionDropdown, dmText));
+
+// --- DM typing indicator (subtle . .. … cycle)
+let dmTypingDebounce = null;
+const dmTypingByThread = new Map(); // threadId -> [names]
+let dmTypingTicker = null;
+let dmTypingDots = 0;
+
+function renderDmTypingIndicator(){
+  if (!dmTypingIndicator) return;
+  const tid = activeDmId != null ? String(activeDmId) : "";
+  const names = tid ? (dmTypingByThread.get(tid) || []) : [];
+  const others = (names || []).filter(n => normKey(n) !== normKey(me?.username));
+
+  if (!tid || !others.length || !dmPanel?.classList.contains("open") || dmViewMode !== "thread") {
+    dmTypingIndicator.textContent = "";
+    dmTypingIndicator.classList.remove("isOn");
+    return;
+  }
+
+  const dots = [".", "..", "...", ""][dmTypingDots % 4];
+  // Keep this subtle: show just dots (optionally with a name if multiple).
+  const prefix = others.length === 1 ? "" : "";
+  dmTypingIndicator.innerHTML = `${prefix}<span class="dots">${dots}</span>`;
+  dmTypingIndicator.classList.add("isOn");
+}
+
+function ensureDmTypingTicker(){
+  if (dmTypingTicker) return;
+  dmTypingTicker = setInterval(() => {
+    dmTypingDots = (dmTypingDots + 1) % 4;
+    renderDmTypingIndicator();
+  }, 450);
+}
+
+function stopDmTypingTickerIfIdle(){
+  // If no threads currently have typers, stop the interval.
+  for (const v of dmTypingByThread.values()) {
+    if (Array.isArray(v) && v.length) return;
+  }
+  if (dmTypingTicker) {
+    clearInterval(dmTypingTicker);
+    dmTypingTicker = null;
+  }
+  dmTypingDots = 0;
+}
+
+function emitDmTyping(){
+  if(!socket) return;
+  if (!activeDmId) return;
+  socket.emit("dm typing", { threadId: activeDmId });
+  clearTimeout(dmTypingDebounce);
+  dmTypingDebounce = setTimeout(() => {
+    try { socket.emit("dm stop typing", { threadId: activeDmId }); } catch {}
+  }, 900);
+}
+
+dmText?.addEventListener("input", () => {
+  emitDmTyping();
+  renderMentionDropdown(dmMentionDropdown, dmText);
+});
 
 async function sendMessage(){
   if(!socket) return;
@@ -16677,6 +16777,17 @@ socket.on("dm history", (payload = {}) => {
       refreshDmBadgesFromThreads();
       renderDmThreads();
     }
+  });
+
+  // DM typing indicators
+  socket.on("dm typing update", (payload = {}) => {
+    const tid = payload.threadId != null ? String(payload.threadId) : "";
+    const names = Array.isArray(payload.names) ? payload.names : [];
+    if (!tid) return;
+    dmTypingByThread.set(tid, names);
+    if (names.length) ensureDmTypingTicker();
+    renderDmTypingIndicator();
+    stopDmTypingTickerIfIdle();
   });
 
   socket.on("dm history cleared", (payload = {}) => {

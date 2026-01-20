@@ -644,6 +644,7 @@
 <div class="title" id="dmMetaTitle">Pick a thread</div>
 </div>
 <div class="small" id="dmMetaPeople"></div>
+	<!-- typing indicator is positioned near the composer so it never pushes the message list -->
 </div>
 <div class="dmMetaActions">
 <button class="iconBtn secondary" id="dmCreateGroupBtn" title="Create group" type="button">➕</button>
@@ -672,7 +673,8 @@
 <div class="replyText" id="dmReplyPreviewText"></div>
 <button aria-label="Cancel reply" class="iconBtn smallIcon" id="dmReplyClose" type="button">✕</button>
 </div>
-<div class="dmInput">
+	<div class="dmInput">
+	<div class="small dmTyping" id="dmTypingIndicator" aria-live="polite"></div>
 <input id="dmText" maxlength="800" placeholder="Message"/>
 <input accept="image/*" id="dmFileInput" style="display:none" type="file"/>
 <button class="iconBtn" id="dmPickFileBtn" title="Upload image" type="button">📷</button>
