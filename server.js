@@ -4852,6 +4852,16 @@ function normalizeDmPair(a, b) {
   return { low: Math.min(aId, bId), high: Math.max(aId, bId) };
 }
 
+function normalizeDmParticipants(ids = []) {
+  return Array.from(
+    new Set(
+      (ids || [])
+        .map((v) => Number(v))
+        .filter((n) => Number.isInteger(n) && n > 0)
+    )
+  ).sort((a, b) => a - b);
+}
+
 function ensureDmParticipants(threadId, userIds, addedBy, joinedAt, cb) {
   let pending = userIds.length;
   if (!pending) return cb && cb();
@@ -4867,45 +4877,113 @@ function ensureDmParticipants(threadId, userIds, addedBy, joinedAt, cb) {
   }
 }
 
-function getOrCreateDirectThread({ userA, userB, createdBy }, cb) {
-  const pair = normalizeDmPair(userA, userB);
-  if (!pair) return cb(new Error("invalid participants"));
+function resolveOrCreateThread({ participantIds, isGroup, title, createdBy }, cb) {
+  const ids = normalizeDmParticipants(participantIds);
   const now = Date.now();
 
+  if (!isGroup) {
+    if (ids.length !== 2) return cb(new Error("invalid participants"));
+    const pair = normalizeDmPair(ids[0], ids[1]);
+    if (!pair) return cb(new Error("invalid participants"));
+
+    const finish = (row, created) => {
+      ensureDmParticipants(row.id, [pair.low, pair.high], createdBy, now, () => {
+        cb(null, { id: row.id, created: !!created, user_low: pair.low, user_high: pair.high });
+      });
+    };
+
+    const lookup = () => {
+      db.get(
+        `SELECT id, user_low, user_high FROM dm_threads WHERE is_group=0 AND user_low=? AND user_high=?`,
+        [pair.low, pair.high],
+        (err, row) => {
+          if (row && row.id) {
+            if (!row.user_low || !row.user_high) {
+              db.run(`UPDATE dm_threads SET user_low=?, user_high=? WHERE id=?`, [pair.low, pair.high, row.id]);
+            }
+            return finish(row, false);
+          }
+
+          if (err) return cb(err);
+
+          // Fallback: legacy rows without user_low/user_high but with both participants.
+          db.get(
+            `SELECT t.id FROM dm_threads t
+               JOIN dm_participants p1 ON p1.thread_id=t.id AND p1.user_id=?
+               JOIN dm_participants p2 ON p2.thread_id=t.id AND p2.user_id=?
+             WHERE t.is_group=0
+             ORDER BY t.id DESC LIMIT 1`,
+            [pair.low, pair.high],
+            (legacyErr, legacyRow) => {
+              if (legacyRow && legacyRow.id) {
+                db.run(`UPDATE dm_threads SET user_low=?, user_high=? WHERE id=?`, [pair.low, pair.high, legacyRow.id]);
+                return finish({ ...legacyRow, user_low: pair.low, user_high: pair.high }, false);
+              }
+              if (legacyErr) return cb(legacyErr);
+              return insert();
+            }
+          );
+        }
+      );
+    };
+
+    const insert = () => {
+      db.run(
+        `INSERT INTO dm_threads (title, is_group, created_by, created_at, user_low, user_high) VALUES (?, 0, ?, ?, ?, ?)`,
+        [null, createdBy, now, pair.low, pair.high],
+        function (insertErr) {
+          if (insertErr) {
+            // Unique constraint race: try lookup again.
+            if (String(insertErr.message || "").toLowerCase().includes("unique")) return lookup();
+            return cb(insertErr);
+          }
+          console.log(`[dm:create] thread ${this.lastID} created for users ${pair.low}/${pair.high}`);
+          finish({ id: this.lastID, user_low: pair.low, user_high: pair.high }, true);
+        }
+      );
+    };
+
+    return lookup();
+  }
+
+  if (ids.length < 2) return cb(new Error("invalid participants"));
+  const participantsKey = ids.join(",");
+  const participantsJson = JSON.stringify(ids);
+
   const finish = (row, created) => {
-    ensureDmParticipants(row.id, [pair.low, pair.high], createdBy, now, () => {
-      cb(null, { id: row.id, created: !!created, user_low: pair.low, user_high: pair.high });
+    ensureDmParticipants(row.id, ids, createdBy, now, () => {
+      cb(null, { id: row.id, created: !!created, participants_key: participantsKey });
     });
   };
 
   const lookup = () => {
     db.get(
-      `SELECT id, user_low, user_high FROM dm_threads WHERE is_group=0 AND user_low=? AND user_high=?`,
-      [pair.low, pair.high],
+      `SELECT id FROM dm_threads WHERE is_group=1 AND participants_key=?`,
+      [participantsKey],
       (err, row) => {
-        if (row && row.id) {
-          if (!row.user_low || !row.user_high) {
-            db.run(`UPDATE dm_threads SET user_low=?, user_high=? WHERE id=?`, [pair.low, pair.high, row.id]);
-          }
-          return finish(row, false);
-        }
-
+        if (row && row.id) return finish(row, false);
         if (err) return cb(err);
 
-        // Fallback: legacy rows without user_low/user_high but with both participants.
+        const placeholders = ids.map(() => "?").join(",");
+        if (!placeholders) return insert();
         db.get(
           `SELECT t.id FROM dm_threads t
-             JOIN dm_participants p1 ON p1.thread_id=t.id AND p1.user_id=?
-             JOIN dm_participants p2 ON p2.thread_id=t.id AND p2.user_id=?
-           WHERE t.is_group=0
-           ORDER BY t.id DESC LIMIT 1`,
-          [pair.low, pair.high],
+             JOIN dm_participants dp ON dp.thread_id=t.id
+            WHERE t.is_group=1 AND dp.user_id IN (${placeholders})
+            GROUP BY t.id
+            HAVING COUNT(DISTINCT dp.user_id)=? AND (SELECT COUNT(*) FROM dm_participants WHERE thread_id=t.id)=?
+            ORDER BY t.id DESC LIMIT 1`,
+          [...ids, ids.length, ids.length],
           (legacyErr, legacyRow) => {
-            if (legacyRow && legacyRow.id) {
-              db.run(`UPDATE dm_threads SET user_low=?, user_high=? WHERE id=?`, [pair.low, pair.high, legacyRow.id]);
-              return finish({ ...legacyRow, user_low: pair.low, user_high: pair.high }, false);
-            }
             if (legacyErr) return cb(legacyErr);
+            if (legacyRow && legacyRow.id) {
+              db.run(
+                `UPDATE dm_threads SET participants_key=?, participants_json=? WHERE id=?`,
+                [participantsKey, participantsJson, legacyRow.id],
+                () => finish({ id: legacyRow.id }, false)
+              );
+              return;
+            }
             return insert();
           }
         );
@@ -4915,16 +4993,15 @@ function getOrCreateDirectThread({ userA, userB, createdBy }, cb) {
 
   const insert = () => {
     db.run(
-      `INSERT INTO dm_threads (title, is_group, created_by, created_at, user_low, user_high) VALUES (?, 0, ?, ?, ?, ?)`,
-      [null, createdBy, now, pair.low, pair.high],
+      `INSERT INTO dm_threads (title, is_group, created_by, created_at, participants_key, participants_json)
+       VALUES (?, 1, ?, ?, ?, ?)`,
+      [title || null, createdBy, now, participantsKey, participantsJson],
       function (insertErr) {
         if (insertErr) {
-          // Unique constraint race: try lookup again.
           if (String(insertErr.message || "").toLowerCase().includes("unique")) return lookup();
           return cb(insertErr);
         }
-        console.log(`[dm:create] thread ${this.lastID} created for users ${pair.low}/${pair.high}`);
-        finish({ id: this.lastID, user_low: pair.low, user_high: pair.high }, true);
+        finish({ id: this.lastID }, true);
       }
     );
   };
@@ -10324,7 +10401,6 @@ app.get("/api/dm/thread/:id", requireLogin, (req, res) => {
 
       const myId = req.session.user.id;
       const myName = req.session.user.username;
-      const now = Date.now();
 
       const usersById = await fetchUsersByIds(participantIds);
       if (usersById.length !== participantIds.length) {
@@ -10366,29 +10442,20 @@ app.get("/api/dm/thread/:id", requireLogin, (req, res) => {
         return res.json({ ok: true, threadId, reused, isGroup: isGroupThread, participants: allParticipantNames });
       };
 
-      if (!isGroup) {
-        const otherId = recipientIds[0];
-        return getOrCreateDirectThread({ userA: myId, userB: otherId, createdBy: myId }, (err3, info) => {
+      const threadParticipants = allParticipantIds;
+      return resolveOrCreateThread(
+        {
+          participantIds: threadParticipants,
+          isGroup,
+          title,
+          createdBy: myId,
+        },
+        (err3, info) => {
           if (err3) {
-            console.error("[dm:create] direct helper failed", err3);
+            console.error("[dm:create] resolve failed", err3);
             return res.status(500).send("Failed to create thread");
           }
-          notifyParticipants(info.id, !info.created, false, null);
-        });
-      }
-
-      db.run(
-        `INSERT INTO dm_threads (title, is_group, created_by, created_at) VALUES (?, ?, ?, ?)`,
-        [title || null, 1, myId, now],
-        function (insertErr) {
-          if (insertErr) {
-            console.error("[dm:create] failed to insert group", insertErr);
-            return res.status(500).send("Failed to create thread");
-          }
-          const threadId = this.lastID;
-          ensureDmParticipants(threadId, allParticipantIds, myId, now, () =>
-            notifyParticipants(threadId, false, true, title || null)
-          );
+          notifyParticipants(info.id, !info.created, isGroup, title || null);
         }
       );
     } catch (err) {
