@@ -43,6 +43,25 @@ const SURVIVAL_ROOM_ID = "survivalsimulator";
 const SURVIVAL_ROOM_DB_ID = 1;
 const SURVIVAL_SEASON_COOLDOWN_MS = 2 * 60 * 1000;
 const SURVIVAL_ADVANCE_COOLDOWN_MS = 2000;
+
+// Auto-fill NPC pool: 25 male + 25 female (big recognizable names; used only for NPC slots).
+// NOTE: Keep this list PG and non-offensive.
+const SURVIVAL_AUTOFILL_POOL = {
+  female: [
+    "Taylor Swift","Beyonce","Rihanna","Ariana Grande","Lady Gaga",
+    "Selena Gomez","Billie Eilish","Dua Lipa","Katy Perry","Adele",
+    "Miley Cyrus","Jennifer Lawrence","Emma Stone","Scarlett Johansson","Zendaya",
+    "Margot Robbie","Emma Watson","Natalie Portman","Gal Gadot","Angelina Jolie",
+    "Shakira","Cardi B","Nicki Minaj","Serena Williams","Oprah Winfrey",
+  ],
+  male: [
+    "Dwayne Johnson","Chris Hemsworth","Leonardo DiCaprio","Tom Holland","Ryan Reynolds",
+    "Keanu Reeves","Robert Downey Jr.","Brad Pitt","Will Smith","Johnny Depp",
+    "Tom Cruise","Jason Momoa","Chris Evans","Michael B. Jordan","Drake",
+    "Ed Sheeran","Justin Bieber","Harry Styles","The Weeknd","Bruno Mars",
+    "Lionel Messi","Cristiano Ronaldo","LeBron James","Stephen Curry","Elon Musk",
+  ],
+};
 const survivalSeasonCooldownByRoom = new Map();
 const survivalAdvanceCooldownBySeason = new Map();
 const qualifyingMsgWindowByUserId = new Map();
@@ -183,66 +202,6 @@ const {
   normalizeLuckMessage,
 } = require("./luck-utils");
 const { SURVIVAL_EVENT_TEMPLATES, SURVIVAL_ITEM_POOL } = require("./survival-events");
-
-// Auto-fill name pool (50 total: 25 male, 25 female). Used when "Fill slots" is set.
-// Keep these as plain strings (no @), and avoid punctuation that could look like mentions.
-const SURVIVAL_AUTOFILL_MALE = [
-  "Tom Holland",
-  "Chris Hemsworth",
-  "Ryan Reynolds",
-  "Dwayne Johnson",
-  "Leonardo DiCaprio",
-  "Brad Pitt",
-  "Keanu Reeves",
-  "Robert Downey Jr",
-  "Chris Evans",
-  "Michael B Jordan",
-  "Timothee Chalamet",
-  "Pedro Pascal",
-  "Henry Cavill",
-  "Jason Momoa",
-  "Will Smith",
-  "Hugh Jackman",
-  "Idris Elba",
-  "Tom Hardy",
-  "Daniel Radcliffe",
-  "Benedict Cumberbatch",
-  "Mark Ruffalo",
-  "Andrew Garfield",
-  "David Beckham",
-  "Harry Styles",
-  "Justin Bieber",
-];
-
-const SURVIVAL_AUTOFILL_FEMALE = [
-  "Taylor Swift",
-  "Ariana Grande",
-  "Beyonce",
-  "Rihanna",
-  "Lady Gaga",
-  "Zendaya",
-  "Margot Robbie",
-  "Scarlett Johansson",
-  "Emma Watson",
-  "Jennifer Lawrence",
-  "Gal Gadot",
-  "Angelina Jolie",
-  "Natalie Portman",
-  "Anne Hathaway",
-  "Selena Gomez",
-  "Billie Eilish",
-  "Dua Lipa",
-  "Megan Thee Stallion",
-  "Cardi B",
-  "Sabrina Carpenter",
-  "Olivia Rodrigo",
-  "Jenna Ortega",
-  "Kim Kardashian",
-  "Kylie Jenner",
-  "Oprah Winfrey",
-];
-
-const SURVIVAL_AUTOFILL_POOL = [...SURVIVAL_AUTOFILL_MALE, ...SURVIVAL_AUTOFILL_FEMALE];
 
 // ---- Safety nets (prevents silent crashes in prod) ----
 process.on("unhandledRejection", (err) => {
@@ -929,8 +888,6 @@ try {
         day_index INTEGER NOT NULL DEFAULT 1,
         phase TEXT NOT NULL DEFAULT 'day',
         rng_seed TEXT,
-        arena_state_json TEXT,
-        winner_rewarded INTEGER NOT NULL DEFAULT 0,
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL
       );
@@ -938,7 +895,7 @@ try {
       CREATE TABLE IF NOT EXISTS survival_participants (
         id SERIAL PRIMARY KEY,
         season_id INTEGER NOT NULL REFERENCES survival_seasons(id) ON DELETE CASCADE,
-        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         display_name TEXT NOT NULL,
         avatar_url TEXT,
         alive INTEGER NOT NULL DEFAULT 1,
@@ -947,7 +904,6 @@ try {
         alliance_id INTEGER,
         inventory_json TEXT DEFAULT '[]',
         traits_json TEXT DEFAULT '{}',
-        location TEXT,
         last_event_at BIGINT,
         created_at BIGINT NOT NULL
       );
@@ -978,51 +934,13 @@ try {
     await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_events_season ON survival_events(season_id)`);
     await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_events_day_phase ON survival_events(season_id, day_index, phase)`);
 
-    // Best-effort migrations (older installs may have stricter schemas).
-    try { await pgPool.query(`ALTER TABLE survival_seasons ADD COLUMN IF NOT EXISTS arena_state_json TEXT`); } catch {}
-    try { await pgPool.query(`ALTER TABLE survival_seasons ADD COLUMN IF NOT EXISTS winner_rewarded INTEGER NOT NULL DEFAULT 0`); } catch {}
-    try { await pgPool.query(`ALTER TABLE survival_participants ADD COLUMN IF NOT EXISTS location TEXT`); } catch {}
-
-    // Allow NPC participants in Postgres by making user_id nullable.
-    // If an older FK exists (ON DELETE CASCADE + NOT NULL), we relax it.
-    try { await pgPool.query(`ALTER TABLE survival_participants ALTER COLUMN user_id DROP NOT NULL`); } catch {}
-    try {
-      const { rows } = await pgPool.query(
-        `SELECT conname FROM pg_constraint WHERE conrelid = 'survival_participants'::regclass AND contype='f'`
-      );
-      for (const r of rows || []) {
-        const name = r?.conname;
-        if (name && /user_id/i.test(name)) {
-          try { await pgPool.query(`ALTER TABLE survival_participants DROP CONSTRAINT ${name}`); } catch {}
-        }
-      }
-      // Re-add a permissive FK.
-      try {
-        await pgPool.query(
-          `ALTER TABLE survival_participants ADD CONSTRAINT survival_participants_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL`
-        );
-      } catch {}
-    } catch {}
+    // Migrations / compatibility:
+    // - Allow NPC participants by letting user_id be nullable (FK still applies for real users; NULL is allowed).
+    // - Ensure location column exists for arena map.
+    try { await pgPool.query(`ALTER TABLE survival_participants ALTER COLUMN user_id DROP NOT NULL`); } catch(e) {}
+    try { await pgPool.query(`ALTER TABLE survival_participants ADD COLUMN IF NOT EXISTS location TEXT`); } catch(e) {}
   } catch (e) {
     console.warn('[pg-init] survival tables failed:', e?.message || e);
-  }
-
-  // PG migrations for older deployments (safe / idempotent)
-  try {
-    // Seasons: arena state + payout tracking
-    await pgPool.query(`ALTER TABLE survival_seasons ADD COLUMN IF NOT EXISTS arena_state_json TEXT`);
-    await pgPool.query(`ALTER TABLE survival_seasons ADD COLUMN IF NOT EXISTS winner_rewarded INTEGER NOT NULL DEFAULT 0`);
-
-    // Participants: location column
-    await pgPool.query(`ALTER TABLE survival_participants ADD COLUMN IF NOT EXISTS location TEXT`);
-
-    // Participants: allow NPCs (user_id nullable)
-    // If the column is NOT NULL in an older schema, drop that requirement.
-    try {
-      await pgPool.query(`ALTER TABLE survival_participants ALTER COLUMN user_id DROP NOT NULL`);
-    } catch {}
-  } catch (e) {
-    console.warn('[pg-init] survival column migrations failed:', e?.message || e);
   }
 
 PG_READY = true;
@@ -4310,6 +4228,22 @@ function sanitizeRoomName(r) {
 
 function sanitizeDisplayName(name) {
   return String(name || "").replace(/[<>"'&]/g, "").trim();
+}
+
+// Must match the client arena map zone keys.
+const SURVIVAL_ZONES = [
+  "central",
+  "woods",
+  "lake",
+  "ruins",
+  "caves",
+  "ridge",
+  "swamp",
+];
+
+function pickSurvivalSpawnLocation(rng) {
+  const fn = typeof rng === "function" ? rng : () => Math.random();
+  return SURVIVAL_ZONES[Math.floor(fn() * SURVIVAL_ZONES.length)] || "central";
 }
 
 function buildSurvivalSeedPayload(seed, options) {
@@ -7640,43 +7574,81 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
   const participantIds = Array.isArray(req.body?.participant_user_ids)
     ? req.body.participant_user_ids
     : [];
-  const npcRaw = String(req.body?.npc_names || "");
-  const fillSlots = Math.max(0, Math.min(48, Number(req.body?.fill_slots || 0) || 0));
+  const npcRaw = String(req.body?.npc_names || "").trim();
+  const fillSlots = Number(req.body?.fill_slots || 0) || 0;
+  // include_lobby is accepted for client compatibility; if you later persist lobby signups,
+  // this flag can add them here.
+  const includeLobby = !!req.body?.include_lobby;
   const options = {
     includeCouples: !!req.body?.options?.includeCouples,
     chaoticMode: !!req.body?.options?.chaoticMode,
   };
-  const npcNames = npcRaw
-    .split(/[\n,]/g)
-    .map((s) => String(s || "").trim())
-    .filter(Boolean)
-    .slice(0, 48);
-
+  // User snapshots (real site users)
   const userSnapshots = await fetchSurvivalUserSnapshots(participantIds);
+
+  // NPC names typed by owner (comma/newline separated)
+  const npcTyped = npcRaw
+    ? npcRaw
+        .split(/[\n,]/g)
+        .map((s) => String(s || "").trim())
+        .filter(Boolean)
+    : [];
+  const npcNames = [];
+  {
+    const seen = new Set();
+    for (const n of npcTyped) {
+      const key = n.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      npcNames.push(n.slice(0, 40));
+      if (npcNames.length >= 80) break;
+    }
+  }
+
+  // Total participants can be users + NPCs. We only require at least two TOTAL.
   const baseCount = userSnapshots.length + npcNames.length;
   const desiredCount = fillSlots > 0 ? Math.max(fillSlots, baseCount) : baseCount;
   if (desiredCount < 2) {
-    return res.status(400).json({ message: "Add at least two total participants (users or custom names)." });
+    return res.status(400).json({ message: "Add at least two total participants (users or NPC names)." });
   }
-
-  // Pick unique filler names from a curated celeb pool (50 names: 25 male, 25 female).
-  const lowerTaken = new Set(
-    [...userSnapshots.map((u) => u.username), ...npcNames].map((n) => String(n || "").toLowerCase())
-  );
-  const fillerNames = [];
-  const fillerNeeded = Math.max(0, desiredCount - baseCount);
-  const pool = SURVIVAL_AUTOFILL_POOL.filter((n) => !lowerTaken.has(String(n).toLowerCase()));
-  // We use a deterministic seeded RNG so "Fill slots" behaves consistently per season.
-  // (Still random enough for fun; it just won't change on retries.)
-  // We'll create rngSeed below and reuse it.
 
   const seed = crypto.randomBytes(8).toString("hex");
   const rng = createSeededRng(seed);
 
-  for (let i = 0; i < fillerNeeded; i += 1) {
-    const candidate = pool.length ? pool.splice(Math.floor(rng() * pool.length), 1)[0] : null;
-    const name = candidate || `Tribute ${i + 1}`;
-    fillerNames.push(name);
+  // Auto-fill NPC slots to desiredCount using a fixed pool (25 male / 25 female)
+  if (desiredCount > baseCount) {
+    const used = new Set([
+      ...userSnapshots.map((u) => String(u.display_name || "").toLowerCase()),
+      ...npcNames.map((n) => String(n).toLowerCase()),
+    ]);
+    const pool = [...SURVIVAL_AUTOFILL_POOL.female, ...SURVIVAL_AUTOFILL_POOL.male];
+    // Shuffle with seeded RNG
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const tmp = pool[i];
+      pool[i] = pool[j];
+      pool[j] = tmp;
+    }
+    let need = desiredCount - baseCount;
+    for (const name of pool) {
+      if (need <= 0) break;
+      const key = String(name).toLowerCase();
+      if (used.has(key)) continue;
+      used.add(key);
+      npcNames.push(String(name));
+      need--;
+    }
+    // Hard fallback if pool exhausted
+    let t = 1;
+    while (need > 0) {
+      const name = `Tribute ${t++}`;
+      const key = name.toLowerCase();
+      if (!used.has(key)) {
+        used.add(key);
+        npcNames.push(name);
+        need--;
+      }
+    }
   }
   const seasonPayload = {
     room_id: SURVIVAL_ROOM_DB_ID,
@@ -7712,9 +7684,9 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
       );
       seasonId = rows[0]?.id;
       if (!seasonId) throw new Error("missing season id");
-      const startZone = () => pickRandom(SURVIVAL_ZONES, rng) || "Central Plaza";
       for (const user of userSnapshots) {
         const traits = buildSurvivalTraits(rng, options.chaoticMode);
+        const location = pickSurvivalSpawnLocation(rng);
         await pgPool.query(
           `INSERT INTO survival_participants
            (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
@@ -7726,20 +7698,28 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
             user.avatar || null,
             JSON.stringify([]),
             JSON.stringify(traits),
-            startZone(),
+            location,
             now,
           ]
         );
       }
 
-      // NPC participants (custom + autofill). In Postgres we store user_id as NULL.
-      for (const name of [...npcNames, ...fillerNames]) {
+      // NPC participants (custom + autofill)
+      for (const name of npcNames) {
         const traits = buildSurvivalTraits(rng, options.chaoticMode);
+        const location = pickSurvivalSpawnLocation(rng);
         await pgPool.query(
           `INSERT INTO survival_participants
            (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
            VALUES ($1, NULL, $2, NULL, 1, 100, 0, NULL, $3, $4, $5, NULL, $6)`,
-          [seasonId, String(name).slice(0, 80), JSON.stringify([]), JSON.stringify(traits), startZone(), now]
+          [
+            seasonId,
+            String(name).slice(0, 40),
+            JSON.stringify([]),
+            JSON.stringify(traits),
+            location,
+            now,
+          ]
         );
       }
       await pgPool.query("COMMIT");
@@ -7762,9 +7742,9 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
         ]
       );
       seasonId = result.lastID;
-      const startZone = () => pickRandom(SURVIVAL_ZONES, rng) || "Central Plaza";
       for (const user of userSnapshots) {
         const traits = buildSurvivalTraits(rng, options.chaoticMode);
+        const location = pickSurvivalSpawnLocation(rng);
         await dbRunAsync(
           `INSERT INTO survival_participants
            (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
@@ -7776,20 +7756,28 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
             user.avatar || null,
             JSON.stringify([]),
             JSON.stringify(traits),
-            startZone(),
+            location,
             now,
           ]
         );
       }
 
-      // NPC participants (custom + autofill). In sqlite we store user_id=0.
-      for (const name of [...npcNames, ...fillerNames]) {
+      // NPC participants (custom + autofill). SQLite has no FK on user_id here, so we use 0.
+      for (const name of npcNames) {
         const traits = buildSurvivalTraits(rng, options.chaoticMode);
+        const location = pickSurvivalSpawnLocation(rng);
         await dbRunAsync(
           `INSERT INTO survival_participants
            (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
            VALUES (?, 0, ?, NULL, 1, 100, 0, NULL, ?, ?, ?, NULL, ?)`,
-          [seasonId, String(name).slice(0, 80), JSON.stringify([]), JSON.stringify(traits), startZone(), now]
+          [
+            seasonId,
+            String(name).slice(0, 40),
+            JSON.stringify([]),
+            JSON.stringify(traits),
+            location,
+            now,
+          ]
         );
       }
       await dbRunAsync("COMMIT");
@@ -7827,10 +7815,6 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
   if (!season) return res.status(404).json({ message: "Season not found." });
   if (season.status !== "running") return res.status(400).json({ message: "Season is not running." });
 
-  // We mirror THIS tick's narrative (before phase/day advances) into the room as system messages.
-  const tickDay = Number(season.day_index || 1);
-  const tickPhase = String(season.phase || "day");
-
   const participants = await fetchSurvivalParticipants(seasonId);
   const alliances = await fetchSurvivalAlliances(seasonId);
   const alive = participants.filter((p) => p.alive);
@@ -7844,8 +7828,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
     ? await (async () => {
       try {
         if (await pgUsersEnabled()) {
-          const ids = alive.map((p) => Number(p.user_id) || 0).filter((id) => id > 0);
-          if (ids.length === 0) return [];
+          const ids = alive.map((p) => p.user_id);
           const { rows } = await pgPool.query(
             `SELECT user1_id, user2_id FROM couple_links WHERE user1_id = ANY($1::int[]) OR user2_id = ANY($1::int[])`,
             [ids]
@@ -8114,15 +8097,6 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
   const payload = await buildSurvivalPayload(await fetchSurvivalSeasonById(seasonId));
   io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
   io.to(SURVIVAL_ROOM_ID).emit("survival:events", { seasonId, events });
-
-  // Mirror the narrative into the Survival Simulator room's system feed.
-  // Spectators can rely on chat history; the expanded log/map can still show the same info.
-  try {
-    io.to(SURVIVAL_ROOM_ID).emit("system", `Day ${tickDay} — ${String(tickPhase).toUpperCase()}`);
-    for (const ev of events) {
-      if (ev?.text) io.to(SURVIVAL_ROOM_ID).emit("system", String(ev.text));
-    }
-  } catch {}
   return res.json(payload);
 });
 
