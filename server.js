@@ -2398,6 +2398,7 @@ const USERNAME_CHANGE_COST = 5000;
 const onlineState = new Map(); // userId -> { room, status }
 const socketIdByUserId = new Map(); // userId -> socket.id
 const typingByRoom = new Map(); // room -> Set(username)
+const dmTypingByThread = new Map(); // threadId -> Set(username)
 const msgRate = new Map(); // socket.id -> { lastTs, count }
 const socketEventRate = new Map(); // socket.id -> Map(eventKey -> { count, resetAt })
 const socketConnByIp = new Map(); // ip -> { count, lastSeen }
@@ -11171,6 +11172,14 @@ function broadcastTyping(room) {
   io.to(room).emit("typing update", names);
 }
 
+function broadcastDmTyping(threadId) {
+  const tid = Number(threadId);
+  if (!Number.isInteger(tid)) return;
+  const set = dmTypingByThread.get(tid);
+  const names = set ? Array.from(set) : [];
+  io.to(`dm:${tid}`).emit("dm typing update", { threadId: tid, names });
+}
+
 function emitOnlineUsers() {
   try {
     io.emit("onlineUsers", Array.from(ONLINE_USERS));
@@ -11261,6 +11270,13 @@ function updateLiveUsername(userId, newUsername) {
 
   // Replace any live typing indicators so the UI updates immediately.
   for (const set of typingByRoom.values()) {
+    if (oldUsername && set.has(oldUsername)) {
+      set.delete(oldUsername);
+      set.add(newUsername);
+    }
+  }
+
+  for (const set of dmTypingByThread.values()) {
     if (oldUsername && set.has(oldUsername)) {
       set.delete(oldUsername);
       set.add(newUsername);
@@ -12174,6 +12190,64 @@ if (!room) {
               authorsFx,
             });
 
+            // Prime read-receipt state for the joining client.
+            // The socket-side in-memory map (dmReadState) is best-effort and can be empty after
+            // reloads. We persist last_read_at per user in dm_participants; on join, translate
+            // that into a message id so the client can reliably render the "☑" tick.
+            try {
+              db.all(
+                `SELECT user_id, COALESCE(last_read_at,0) AS last_read_at
+                   FROM dm_participants
+                  WHERE thread_id = ?`,
+                [tid],
+                (_re0, readRows) => {
+                  const rows = readRows || [];
+                  for (const rr of rows) {
+                    const uid = Number(rr.user_id);
+                    const lastReadAt = Number(rr.last_read_at || 0);
+                    if (!Number.isInteger(uid) || uid <= 0) continue;
+                    if (!lastReadAt) continue;
+
+                    // Prefer the in-memory state if it's newer.
+                    try {
+                      const perThread = dmReadState.get(tid);
+                      const mem = perThread?.get(uid);
+                      if (mem?.ts && Number(mem.ts) > lastReadAt && Number.isInteger(Number(mem.messageId))) {
+                        socket.emit("dm read", {
+                          threadId: tid,
+                          userId: uid,
+                          messageId: Number(mem.messageId),
+                          ts: Number(mem.ts)
+                        });
+                        continue;
+                      }
+                    } catch {}
+
+                    // Translate timestamp -> message id in this thread.
+                    db.get(
+                      `SELECT id, ts
+                         FROM dm_messages
+                        WHERE thread_id = ? AND deleted=0 AND ts <= ?
+                        ORDER BY ts DESC, id DESC
+                        LIMIT 1`,
+                      [tid, lastReadAt],
+                      (_re1, hit) => {
+                        const mid = Number(hit?.id);
+                        const mts = Number(hit?.ts || lastReadAt);
+                        if (!Number.isInteger(mid) || mid <= 0) return;
+                        socket.emit("dm read", {
+                          threadId: tid,
+                          userId: uid,
+                          messageId: mid,
+                          ts: mts
+                        });
+                      }
+                    );
+                  }
+                }
+              );
+            } catch {}
+
             // Send initial DM reactions for these messages (so the client can render immediately)
             try {
               const mids = (msgs || []).map(m => Number(m.messageId || m.id)).filter(n => Number.isInteger(n));
@@ -12248,6 +12322,38 @@ if (!room) {
     if (!Number.isInteger(tid)) return;
     try { socket.leave(`dm:${tid}`); } catch {}
     try { socket.dmThreads?.delete(tid); } catch {}
+
+    // Clear any lingering DM typing state for this user in that thread.
+    try {
+      const set = dmTypingByThread.get(tid);
+      if (set && socket.user?.username) {
+        set.delete(socket.user.username);
+        if (set.size === 0) dmTypingByThread.delete(tid);
+        broadcastDmTyping(tid);
+      }
+    } catch {}
+  });
+
+  // DM typing indicators (per thread)
+  socket.on("dm typing", (payload = {}) => {
+    const tid = Number(payload.threadId);
+    if (!Number.isInteger(tid)) return;
+    if (!socket.dmThreads?.has(tid)) return; // must have joined
+    let set = dmTypingByThread.get(tid);
+    if (!set) dmTypingByThread.set(tid, (set = new Set()));
+    if (socket.user?.username) set.add(socket.user.username);
+    broadcastDmTyping(tid);
+  });
+
+  socket.on("dm stop typing", (payload = {}) => {
+    const tid = Number(payload.threadId);
+    if (!Number.isInteger(tid)) return;
+    const set = dmTypingByThread.get(tid);
+    if (set && socket.user?.username) {
+      set.delete(socket.user.username);
+      if (set.size === 0) dmTypingByThread.delete(tid);
+      broadcastDmTyping(tid);
+    }
   });
 
   socket.on("dm message", (payload = {}) => {
@@ -13451,6 +13557,21 @@ socket.on("disconnect", () => {
       }
       emitUserList(room);
     }
+
+    // Clear DM typing indicators for any DM rooms this socket was in.
+    try {
+      const u = socket.user?.username;
+      if (u && socket.dmThreads && socket.dmThreads.size) {
+        for (const tid of socket.dmThreads) {
+          const set = dmTypingByThread.get(tid);
+          if (set && set.has(u)) {
+            set.delete(u);
+            if (set.size === 0) dmTypingByThread.delete(tid);
+            broadcastDmTyping(tid);
+          }
+        }
+      }
+    } catch {}
   });
 
 });
