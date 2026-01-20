@@ -10383,13 +10383,14 @@ app.get("/api/dm/thread/:id", requireLogin, (req, res) => {
       return res.status(400).send("Pick someone to message");
     }
 
-    // Determine kind: group if explicitly requested OR more than one recipient (by name or id) OR a title is provided.
-    const requestedCount = cleanedNames.length + participantIds.length;
-    const isGroup = kindRaw === "group" || requestedCount > 1 || !!title;
-
-    if (isGroup && requestedCount < 2) {
-      return res.status(400).send("Group chats need 2+ participants (or a title)");
-    }
+    // NOTE:
+    // The client may pass BOTH `participants` (names) and `participantIds` for the SAME user.
+    // If we derive group/direct from the raw request counts, a normal direct DM can be
+    // misclassified as a group chat (e.g. 1 name + 1 id = 2 requestedCount).
+    // Instead, determine group/direct based on the *resolved unique recipients*.
+    //
+    // Also: if the client explicitly requests a direct DM, honor that.
+    const requestedKind = kindRaw === "group" ? "group" : (kindRaw === "direct" ? "direct" : "auto");
 
     try {
       const usersByName = await fetchUsersByNames(cleanedNames);
@@ -10415,6 +10416,14 @@ app.get("/api/dm/thread/:id", requireLogin, (req, res) => {
       merged.delete(Number(myId));
 
       const recipients = Array.from(merged.values());
+
+      // Determine group/direct from resolved recipients.
+      const isGroup = (requestedKind === "group") || (requestedKind === "auto" && (recipients.length > 1 || !!title));
+
+      if (requestedKind === "group" && recipients.length < 2) {
+        return res.status(400).send("Group chats need 2+ participants (or a title)");
+      }
+
       if (!isGroup && recipients.length !== 1) {
         return res.status(400).send("Pick exactly one person for a direct DM");
       }
