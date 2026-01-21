@@ -3473,7 +3473,18 @@ function renderSurvivalLog(targetEl, events) {
     icon.textContent = getSurvivalEventIcon(event.outcome || {});
     const text = document.createElement("div");
     text.className = "survivalLogText";
-    text.textContent = event.text || "";
+    const zone = event?.outcome?.zone || null;
+    const scope = event?.outcome?.scope || null;
+    const baseText = event.text || "";
+    text.innerHTML = applyMentions(baseText, { linkifyText: false });
+    if (me?.username && hasMention(baseText, me.username)) row.classList.add("mention-hit");
+    if (zone || scope === "global") {
+      const tag = document.createElement("span");
+      tag.className = "survivalLogZoneTag";
+      tag.textContent = scope === "global" ? "Arena" : zone;
+      text.prepend(tag);
+      text.insertAdjacentText("afterbegin", " ");
+    }
     row.appendChild(icon);
     row.appendChild(text);
     targetEl.appendChild(row);
@@ -3494,22 +3505,121 @@ const SURVIVAL_ARENA_ZONES = [
 function renderSurvivalArena() {
   if (!survivalArenaGrid) return;
   const participants = survivalState.participants || [];
+  const zones = SURVIVAL_ARENA_ZONES.slice();
   const byZone = new Map();
+  zones.forEach((z)=>byZone.set(z, []));
   participants.forEach((p) => {
     const zRaw = (p?.location || "Open Field").toString();
-    const z = SURVIVAL_ARENA_ZONES.find((n) => n.toLowerCase() === zRaw.toLowerCase()) || "Open Field";
-    if (!byZone.has(z)) byZone.set(z, []);
+    const z = zones.find((n) => n.toLowerCase() === zRaw.toLowerCase()) || "Open Field";
     byZone.get(z).push(p);
   });
 
+  // Selected zone for inspecting + filtering.
+  const selected = survivalState?.arena?.selectedZone || null;
+
+  const dangerLevels = survivalState.arena?.dangerLevels || {};
+  const zoneMeta = zones.map((z) => {
+    const list = (byZone.get(z) || []).slice();
+    const alive = list.filter((p) => p.alive).length;
+    const danger = Number(dangerLevels?.[z] || 0);
+    return { zone: z, alive, total: list.length, danger };
+  });
+
   survivalArenaGrid.innerHTML = "";
-  SURVIVAL_ARENA_ZONES.forEach((zone) => {
+
+  // --- Graphic map (SVG) ---
+  const wrap = document.createElement("div");
+  wrap.className = "survivalMapWrap";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 400 220");
+  svg.setAttribute("class", "survivalMapSvg");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Arena map");
+
+  const layout = [
+    { z: "Pine Woods", x: 20, y: 20, w: 140, h: 70 },
+    { z: "Rocky Ridge", x: 170, y: 20, w: 120, h: 70 },
+    { z: "Ruins", x: 300, y: 20, w: 80, h: 70 },
+    { z: "River Bend", x: 20, y: 100, w: 150, h: 60 },
+    { z: "Open Field", x: 180, y: 100, w: 120, h: 60 },
+    { z: "Cornucopia", x: 310, y: 100, w: 70, h: 60 },
+    { z: "Caves", x: 20, y: 170, w: 180, h: 40 },
+    { z: "Swamp", x: 210, y: 170, w: 170, h: 40 },
+  ];
+
+  layout.forEach((cell) => {
+    const meta = zoneMeta.find((m) => m.zone === cell.z) || { alive: 0, total: 0, danger: 0 };
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("class", "survivalMapZone" + ((selected === cell.z) ? " selected" : ""));
+    g.setAttribute("data-zone", cell.z);
+
+    const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    r.setAttribute("x", String(cell.x));
+    r.setAttribute("y", String(cell.y));
+    r.setAttribute("width", String(cell.w));
+    r.setAttribute("height", String(cell.h));
+    r.setAttribute("rx", "12");
+
+    const name = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    name.setAttribute("x", String(cell.x + 10));
+    name.setAttribute("y", String(cell.y + 22));
+    name.setAttribute("class", "survivalMapLabel");
+    name.textContent = cell.z;
+
+    const stats = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    stats.setAttribute("x", String(cell.x + 10));
+    stats.setAttribute("y", String(cell.y + 44));
+    stats.setAttribute("class", "survivalMapStats");
+    stats.textContent = `Alive: ${meta.alive}  ·  Danger: ${meta.danger}`;
+
+    g.appendChild(r);
+    g.appendChild(name);
+    g.appendChild(stats);
+
+    // little pips for alive count
+    const pipCount = Math.min(10, meta.alive);
+    for (let i = 0; i < pipCount; i += 1) {
+      const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      c.setAttribute("cx", String(cell.x + 12 + (i * 10)));
+      c.setAttribute("cy", String(cell.y + cell.h - 10));
+      c.setAttribute("r", "3.5");
+      c.setAttribute("class", "survivalMapPip");
+      g.appendChild(c);
+    }
+
+    g.addEventListener("click", () => {
+      survivalState.arena = survivalState.arena || {};
+      survivalState.arena.selectedZone = (survivalState.arena.selectedZone === cell.z) ? null : cell.z;
+      renderSurvivalArena();
+      // Filter the log view when a zone is selected (spectator-friendly).
+      if (survivalState.arena.selectedZone) {
+        const z = survivalState.arena.selectedZone;
+        const filtered = (survivalState.events || []).filter((ev) => {
+          if (ev?.outcome?.scope === "global") return true;
+          return String(ev?.outcome?.zone || "").toLowerCase() === String(z).toLowerCase();
+        });
+        renderSurvivalLog(survivalLogList, filtered);
+      } else {
+        renderSurvivalLog(survivalLogList, survivalState.events);
+      }
+    });
+
+    svg.appendChild(g);
+  });
+
+  wrap.appendChild(svg);
+
+  // Zone detail list (either selected zone, or all zones as cards).
+  const detail = document.createElement("div");
+  detail.className = "survivalZoneDetail";
+
+  const buildZoneCard = (zone) => {
     const list = (byZone.get(zone) || []).slice().sort((a, b) => Number(b.alive) - Number(a.alive));
     const alive = list.filter((p) => p.alive).length;
-    const danger = Number(survivalState.arena?.dangerLevels?.[zone] || 0);
+    const danger = Number(dangerLevels?.[zone] || 0);
 
     const card = document.createElement("div");
-    card.className = "survivalZone";
+    card.className = "survivalZone" + ((selected === zone) ? " selected" : "");
     card.innerHTML = `
       <div class="survivalZoneTop">
         <div class="survivalZoneName">${escapeHtml(zone)}</div>
@@ -3518,7 +3628,7 @@ function renderSurvivalArena() {
       <div class="survivalZoneList"></div>
     `;
     const ul = card.querySelector(".survivalZoneList");
-    const show = list.slice(0, 12);
+    const show = list.slice(0, 18);
     ul.innerHTML = show.map((p) => {
       const name = p?.display_name || "?";
       const cls = p?.alive ? "survivalZoneP" : "survivalZoneP dead";
@@ -3530,8 +3640,34 @@ function renderSurvivalArena() {
       more.textContent = `+${list.length - show.length} more`;
       card.appendChild(more);
     }
-    survivalArenaGrid.appendChild(card);
-  });
+    card.addEventListener("click", () => {
+      survivalState.arena = survivalState.arena || {};
+      survivalState.arena.selectedZone = (survivalState.arena.selectedZone === zone) ? null : zone;
+      renderSurvivalArena();
+    });
+    return card;
+  };
+
+  if (selected) {
+    const top = document.createElement("div");
+    top.className = "survivalZoneSelectedHeader";
+    top.innerHTML = `<span class="survivalZoneSelectedTitle">Viewing: ${escapeHtml(selected)}</span>
+      <button class="btn secondary small" type="button" id="survivalZoneClearBtn">Clear</button>`;
+    detail.appendChild(top);
+    const clearBtn = top.querySelector("#survivalZoneClearBtn");
+    clearBtn?.addEventListener("click", () => {
+      survivalState.arena = survivalState.arena || {};
+      survivalState.arena.selectedZone = null;
+      renderSurvivalArena();
+      renderSurvivalLog(survivalLogList, survivalState.events);
+    });
+    detail.appendChild(buildZoneCard(selected));
+  } else {
+    zones.forEach((z) => detail.appendChild(buildZoneCard(z)));
+  }
+
+  survivalArenaGrid.appendChild(wrap);
+  survivalArenaGrid.appendChild(detail);
 
   if (survivalLobbyCount) {
     const count = (survivalState.lobbyUserIds || []).length;
@@ -3542,6 +3678,7 @@ function renderSurvivalArena() {
     survivalLobbyBtn.textContent = isIn ? "Opt-out" : "Opt-in";
   }
 }
+
 
 function renderSurvivalRoster() {
   if (!survivalRosterList) return;
@@ -3613,6 +3750,9 @@ function applySurvivalPayload(payload, { replaceEvents = false } = {}) {
   }
   if (payload.arena && typeof payload.arena === "object") {
     survivalState.arena = payload.arena;
+    if (Array.isArray(payload.arena.lobbyUserIds)) {
+      survivalState.lobbyUserIds = payload.arena.lobbyUserIds.map((x) => Number(x)).filter((x) => x > 0);
+    }
   }
   if (!survivalState.selectedSeasonId && payload.season) {
     survivalState.selectedSeasonId = payload.season.id;
@@ -5695,12 +5835,14 @@ function addSystem(text, options = {}){
 
   // Dice Room: make system messages larger, and make dice faces much more visible
   if(currentRoom === "diceroom"){
-    const safe = escapeHtml(String(text ?? ""));
-    // Wrap dice unicode faces so CSS can scale them independently
-    const withFaces = safe.replace(/[⚀⚁⚂⚃⚄⚅]/g, (m)=>`<span class="diceFace">${m}</span>`);
+    const mentioned = applyMentions(String(text ?? ""), { linkifyText: false });
+    const withFaces = mentioned.replace(/[⚀⚁⚂⚃⚄⚅]/g, (m)=>`<span class="diceFace">${m}</span>`);
     div.innerHTML = withFaces;
+    if (me?.username && hasMention(String(text||""), me.username)) div.classList.add("sys-mention");
   }else{
-    div.textContent = text;
+    const html = applyMentions(String(text ?? ""), { linkifyText: false });
+    div.innerHTML = html;
+    if (me?.username && hasMention(String(text||""), me.username)) div.classList.add("sys-mention");
   }
 
   msgs.appendChild(div);
@@ -16357,6 +16499,16 @@ initAppealsDurationSelect();
       renderSurvivalLog(survivalLogModalList, survivalState.events);
     }
   });
+
+  socket.on("survival:lobby", (payload = {}) => {
+    if (!isSurvivalRoom(currentRoom)) return;
+    const ids = Array.isArray(payload.user_ids) ? payload.user_ids : payload.user_ids || payload.userIds;
+    if (Array.isArray(ids)) {
+      survivalState.lobbyUserIds = ids.map((x) => Number(x)).filter((x) => x > 0);
+      renderSurvivalArena();
+    }
+  });
+
 
   socket.on("survival:lobby", (payload = {}) => {
     if (!isSurvivalRoom(currentRoom)) return;

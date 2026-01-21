@@ -10834,3 +10834,97 @@ body[data-theme="Iris & Lola Neon"] .irisLolaDrawerEasterStar{
   body[data-theme="Iris & Lola Neon"] .irisLolaConstellationWhisper,
   body[data-theme="Iris & Lola Neon"] .irisLolaDrawerEasterStar{ display: none !important; }
 }
+
+
+/* --- Survival Simulator: mention highlighting + arena map --- */
+.sys.sys-mention { box-shadow: 0 0 0 2px rgba(120, 255, 170, 0.25) inset; }
+
+.survivalLogItem.mention-hit { box-shadow: 0 0 0 2px rgba(120, 255, 170, 0.22) inset; }
+.survivalLogZoneTag{
+  display:inline-flex;
+  align-items:center;
+  padding:2px 8px;
+  border-radius:999px;
+  font-size:12px;
+  line-height:1.1;
+  opacity:.9;
+  border:1px solid rgba(255,255,255,.18);
+  background:rgba(0,0,0,.18);
+  margin-right:6px;
+}
+
+.survivalMapWrap{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  margin-bottom:10px;
+}
+.survivalMapSvg{
+  width:100%;
+  max-width:860px;
+  height:auto;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(0,0,0,.14);
+}
+.survivalMapZone rect{
+  fill:rgba(255,255,255,.06);
+  stroke:rgba(255,255,255,.18);
+  stroke-width:1.2;
+}
+.survivalMapZone:hover rect{
+  fill:rgba(255,255,255,.09);
+  stroke:rgba(160,255,200,.32);
+}
+.survivalMapZone.selected rect{
+  fill:rgba(120,255,170,.10);
+  stroke:rgba(120,255,170,.55);
+}
+.survivalMapLabel{
+  font-size:12px;
+  fill:rgba(255,255,255,.92);
+}
+.survivalMapStats{
+  font-size:11px;
+  fill:rgba(255,255,255,.72);
+}
+.survivalMapPip{
+  fill:rgba(120,255,170,.65);
+  opacity:.8;
+}
+
+.survivalZoneDetail{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:10px;
+}
+@media (max-width: 720px){
+  .survivalZoneDetail{ grid-template-columns:1fr; }
+}
+.survivalZoneSelectedHeader{
+  grid-column:1/-1;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:8px 4px;
+}
+.survivalZoneSelectedTitle{ font-weight:700; }
+.survivalZoneList{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  padding-top:8px;
+}
+.survivalZoneP{
+  display:inline-flex;
+  padding:3px 8px;
+  border-radius:999px;
+  background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.12);
+  font-size:12px;
+}
+.survivalZoneP.dead{
+  opacity:.55;
+  text-decoration:line-through;
+}
