@@ -64,6 +64,13 @@ const SURVIVAL_AUTOFILL_POOL = {
 };
 const survivalSeasonCooldownByRoom = new Map();
 const survivalAdvanceCooldownBySeason = new Map();
+
+// Survival lobby (opt-in list) — in-memory, per room. Used to quickly add participants.
+const survivalLobbyByRoom = new Map(); // roomDbId -> Set<userId>
+function getSurvivalLobbySet(roomDbId){
+  if(!survivalLobbyByRoom.has(roomDbId)) survivalLobbyByRoom.set(roomDbId, new Set());
+  return survivalLobbyByRoom.get(roomDbId);
+}
 const qualifyingMsgWindowByUserId = new Map();
 const rollCadenceWindowByUserId = new Map();
 
@@ -4231,15 +4238,16 @@ function sanitizeDisplayName(name) {
   return String(name || "").replace(/[<>"'&]/g, "").trim();
 }
 
-// Must match the client arena map zone keys.
+// Must match the client arena map zone labels.
 const SURVIVAL_ZONES = [
-  "central",
-  "woods",
-  "lake",
-  "ruins",
-  "caves",
-  "ridge",
-  "swamp",
+  "Open Field",
+  "Pine Woods",
+  "Rocky Ridge",
+  "Ruins",
+  "River Bend",
+  "Caves",
+  "Swamp",
+  "Cornucopia",
 ];
 
 function pickSurvivalSpawnLocation(rng) {
@@ -4342,8 +4350,8 @@ function clamp(val, min, max) {
 }
 
 function getSurvivalEventCount(aliveCount) {
-  const base = Math.min(8, Math.max(3, aliveCount));
-  return Math.min(base, Math.max(1, aliveCount));
+  const count = Math.round(Number(aliveCount || 0) * 0.55);
+  return clamp(count, 4, 16);
 }
 
 function normalizeSurvivalParticipantRow(row) {
@@ -4361,6 +4369,7 @@ function normalizeSurvivalParticipantRow(row) {
     inventory: Array.isArray(row.inventory) ? row.inventory : safeJsonParse(row.inventory_json || "[]", []),
     traits: row.traits || safeJsonParse(row.traits_json || "{}", {}),
     last_event_at: row.last_event_at ? Number(row.last_event_at) : null,
+    location: row.location || null,
     created_at: row.created_at ? Number(row.created_at) : null,
   };
 }
@@ -4759,6 +4768,126 @@ function applySurvivalOutcome({
   }
 
   return outcome;
+}
+
+
+function survivalNameTag(p){
+  if(!p) return "Someone";
+  const name = sanitizeDisplayName(p.display_name);
+  return p.user_id ? `@${name}` : name;
+}
+
+function pickZoneFromAlive(alive, rng){
+  if(!alive.length) return pickRandom(SURVIVAL_ZONES, rng) || SURVIVAL_ZONES[0];
+  // Prefer zones that currently have people (so the map feels alive).
+  const counts = new Map();
+  for(const p of alive){
+    const z = String(p.location || SURVIVAL_ZONES[0]);
+    counts.set(z, (counts.get(z) || 0) + 1);
+  }
+  const weighted = Array.from(counts.entries()).map(([zone, c]) => ({ zone, weight: Math.max(1, c) }));
+  const pick = pickWeighted(weighted.map((w)=>({ ...w, user_id: w.zone })), rng); // hack: reuse pickWeighted shape
+  const zone = pick?.user_id || pickRandom(Array.from(counts.keys()), rng);
+  return zone || SURVIVAL_ZONES[0];
+}
+
+function maybeGenerateArenaEvent({ season, participants, rng, now }) {
+  const alive = (participants || []).filter((p) => p.alive);
+  if (alive.length < 3) return null;
+
+  const dayIndex = Number(season?.day_index || 1);
+  const baseChance = clamp(0.16 + dayIndex * 0.03 + (alive.length >= 12 ? 0.06 : 0), 0.14, 0.36);
+  if (rng() > baseChance) return null;
+
+  const scope = rng() < 0.62 ? "zone" : "global";
+  const zone = scope === "zone" ? pickZoneFromAlive(alive, rng) : null;
+
+  const population = scope === "zone"
+    ? alive.filter((p) => String(p.location || SURVIVAL_ZONES[0]).toLowerCase() === String(zone || "").toLowerCase())
+    : alive;
+
+  if (!population.length) return null;
+
+  const kindRoll = rng();
+  const kind =
+    kindRoll < 0.34 ? "storm" :
+    kindRoll < 0.64 ? "wildfire" :
+    kindRoll < 0.82 ? "supply_drop" :
+    "fog";
+
+  // Determine victims (for supply drops we may still injure a couple via scramble).
+  const maxVictims = scope === "global"
+    ? clamp(Math.round(population.length * 0.12), 1, 4)
+    : clamp(Math.round(population.length * 0.22), 1, 6);
+
+  const victims = [];
+  const pool = [...population];
+  while (victims.length < maxVictims && pool.length) {
+    const v = pickRandom(pool, rng);
+    if (!v) break;
+    victims.push(v);
+    pool.splice(pool.findIndex((p) => p.id === v.id), 1);
+  }
+
+  const outcome = { type: "arena", scope, zone: zone || null, kind, affected_user_ids: victims.map((v) => v.user_id) };
+
+  // Apply effects
+  if (kind === "supply_drop") {
+    // Small heal/loot vibe.
+    for (const v of victims) {
+      v.hp = clamp(v.hp + Math.round(6 + rng() * 10), 1, 100);
+      v.last_event_at = now;
+      v.inventory = v.inventory || [];
+      if (!v.inventory.includes("food")) v.inventory.push("food");
+      if (rng() < 0.35 && !v.inventory.includes("weapon")) v.inventory.push("weapon");
+    }
+  } else {
+    const minD = kind === "storm" ? 10 : kind === "fog" ? 8 : 16;
+    const maxD = kind === "storm" ? 28 : kind === "fog" ? 20 : 38;
+    for (const v of victims) {
+      const delta = Math.round(minD + rng() * (maxD - minD));
+      v.hp = clamp(v.hp - delta, 0, 100);
+      v.last_event_at = now;
+      if (v.hp <= 0) {
+        // Don't over-kill early days.
+        if (dayIndex <= 1 && rng() < 0.7) v.hp = 1;
+        else {
+          v.alive = false;
+          v.alliance_id = null;
+          v.kills = v.kills || 0;
+        }
+      }
+      // Forced movement makes the map feel dynamic.
+      if (v.alive && rng() < 0.55) {
+        v.location = pickRandom(SURVIVAL_ZONES, rng) || v.location || SURVIVAL_ZONES[0];
+      }
+    }
+  }
+
+  const victimTags = victims.map(survivalNameTag);
+  let text = "";
+  if (kind === "storm") {
+    text = scope === "global"
+      ? `⚡ A brutal storm sweeps the arena — ${victimTags.join(", ")} struggle to stay on their feet.`
+      : `⚡ A sudden storm hits ${zone} — ${victimTags.join(", ")} take the worst of it.`;
+  } else if (kind === "wildfire") {
+    text = scope === "global"
+      ? `🔥 Wildfires spread across the arena — ${victimTags.join(", ")} get caught in the chaos.`
+      : `🔥 A wildfire erupts in ${zone} — ${victimTags.join(", ")} scramble for safety.`;
+  } else if (kind === "fog") {
+    text = scope === "global"
+      ? `🌫️ A thick fog blankets the arena — ${victimTags.join(", ")} stumble into danger.`
+      : `🌫️ A choking fog rolls into ${zone} — ${victimTags.join(", ")} lose their bearings.`;
+  } else {
+    text = scope === "global"
+      ? `🎁 Supply pods crash down all over — ${victimTags.join(", ")} snatch up provisions.`
+      : `🎁 A supply pod lands in ${zone} — ${victimTags.join(", ")} race for it.`;
+  }
+
+  return {
+    text,
+    outcome,
+  };
 }
 
 const DEFAULT_ROOM_MASTERS = ["Site Rooms", "User Rooms"];
@@ -7458,6 +7587,26 @@ function formatSurvivalSeason(season) {
   };
 }
 
+
+function buildSurvivalArenaPayload(season, participants = []) {
+  if (!season) return null;
+  const { seed } = parseSurvivalSeedPayload(season.rng_seed);
+  const rng = createSeededRng(`${seed || "survival"}:arena:${season.day_index}:${season.phase}`);
+  const dangerLevels = {};
+  for (const z of SURVIVAL_ZONES) {
+    // 0–5, lightly influenced by population + RNG (purely cosmetic for now).
+    const pop = participants.filter((p) => p.alive && String(p.location || "").toLowerCase() === String(z).toLowerCase()).length;
+    const base = clamp(Math.round(rng() * 3) + (pop ? 1 : 0), 0, 5);
+    dangerLevels[z] = base;
+  }
+  const lobbySet = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
+  return {
+    zones: [...SURVIVAL_ZONES],
+    dangerLevels,
+    lobbyUserIds: Array.from(lobbySet.values()),
+  };
+}
+
 async function buildSurvivalPayload(season, { beforeId = null, limit = 200 } = {}) {
   if (!season) {
     return { season: null, participants: [], alliances: [], events: [], history: await buildSurvivalHistoryPayload() };
@@ -7476,6 +7625,7 @@ async function buildSurvivalPayload(season, { beforeId = null, limit = 200 } = {
     events,
     winner,
     history,
+    arena: buildSurvivalArenaPayload(season, participants),
   };
 }
 
@@ -7534,6 +7684,43 @@ app.post("/rooms", strictLimiter, requireLogin, express.json({ limit: "16kb" }),
 });
 
 // ---- Survival Simulator API
+
+// Lobby endpoints (opt-in list for quick season fills)
+app.get("/api/survival/lobby", requireLogin, async (_req, res) => {
+  try {
+    const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
+    return res.json({ user_ids: Array.from(set.values()) });
+  } catch {
+    return res.json({ user_ids: [] });
+  }
+});
+
+app.post("/api/survival/lobby/join", requireLogin, async (req, res) => {
+  try {
+    const uid = Number(req.session?.user?.id);
+    if (!uid) return res.status(401).send("Unauthorized");
+    const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
+    set.add(uid);
+    io.to(SURVIVAL_ROOM_ID).emit("survival:lobby", { user_ids: Array.from(set.values()) });
+    return res.json({ ok: true, user_ids: Array.from(set.values()) });
+  } catch (e) {
+    return res.status(500).send("Failed");
+  }
+});
+
+app.post("/api/survival/lobby/leave", requireLogin, async (req, res) => {
+  try {
+    const uid = Number(req.session?.user?.id);
+    if (!uid) return res.status(401).send("Unauthorized");
+    const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
+    set.delete(uid);
+    io.to(SURVIVAL_ROOM_ID).emit("survival:lobby", { user_ids: Array.from(set.values()) });
+    return res.json({ ok: true, user_ids: Array.from(set.values()) });
+  } catch (e) {
+    return res.status(500).send("Failed");
+  }
+});
+
 app.get("/api/survival/current", requireLogin, async (_req, res) => {
   try {
     const season = await fetchSurvivalCurrentSeason();
@@ -7584,6 +7771,17 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
     includeCouples: !!req.body?.options?.includeCouples,
     chaoticMode: !!req.body?.options?.chaoticMode,
   };
+
+  // If requested, merge in current lobby signups as participants (deduped).
+  if (includeLobby) {
+    const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
+    const lobbyIds = Array.from(set.values()).map((x) => Number(x)).filter((x) => x > 0);
+    if (lobbyIds.length) {
+      const merged = new Set([...(participantIds || []).map((x) => Number(x)).filter((x) => x > 0), ...lobbyIds]);
+      participantIds.length = 0;
+      for (const id of merged.values()) participantIds.push(id);
+    }
+  }
   // User snapshots (real site users)
   const userSnapshots = await fetchSurvivalUserSnapshots(participantIds);
 
@@ -7791,6 +7989,15 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
   }
 
   survivalSeasonCooldownByRoom.set(SURVIVAL_ROOM_DB_ID, now);
+
+  // Clear lobby signups when a season starts (so the next season starts fresh).
+  try {
+    const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
+    if (set.size) {
+      set.clear();
+      io.to(SURVIVAL_ROOM_ID).emit("survival:lobby", { user_ids: [] });
+    }
+  } catch {}
   const season = await fetchSurvivalSeasonById(seasonId);
   const payload = await buildSurvivalPayload(season);
   io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
@@ -7824,7 +8031,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
   }
 
   const { seed, options } = parseSurvivalSeedPayload(season.rng_seed);
-  const rng = createSeededRng(`${seed || "survival"}:${season.day_index}:${season.phase}`);
+  const rng = createSeededRng(`${seed || "survival"}:${season.day_index}:${season.phase}:${now}`);
   const couples = options?.includeCouples
     ? await (async () => {
       try {
@@ -7912,6 +8119,16 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
       existingAllianceNames,
     });
 
+    // Attach a best-guess zone for this event so the arena map can filter/animate.
+    try {
+      const zones = (selectedParticipants || []).map((p) => String(p.location || "")).filter(Boolean);
+      const zone = zones.length ? zones.sort((a, b) => zones.filter(z=>z===a).length - zones.filter(z=>z===b).length).pop() : null;
+      if (zone) {
+        outcome.zone = zone;
+        if (!outcome.scope) outcome.scope = "local";
+      }
+    } catch {}
+
     orderIndex += 1;
     events.push({
       id: null,
@@ -7924,6 +8141,28 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
       outcome,
       created_at: now,
     });
+  }
+
+
+  // Occasional zone-wide / arena-wide events (adds variety + makes the map feel alive).
+  try {
+    const arenaEv = maybeGenerateArenaEvent({ season, participants, rng, now });
+    if (arenaEv && arenaEv.text) {
+      orderIndex += 1;
+      events.push({
+        id: null,
+        season_id: seasonId,
+        day_index: season.day_index,
+        phase: season.phase,
+        order_index: orderIndex,
+        text: arenaEv.text,
+        involved_user_ids: Array.isArray(arenaEv.outcome?.affected_user_ids) ? arenaEv.outcome.affected_user_ids : [],
+        outcome: arenaEv.outcome || { type: "arena", scope: "global" },
+        created_at: now,
+      });
+    }
+  } catch (e) {
+    console.warn("[survival] arena event failed:", e?.message || e);
   }
 
   const aliveAfter = participants.filter((p) => p.alive);
@@ -7987,8 +8226,8 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
         participant.alliance_id = allianceId && allianceId < 0 ? null : allianceId;
         await pgPool.query(
           `UPDATE survival_participants
-           SET alive=$1, hp=$2, kills=$3, alliance_id=$4, inventory_json=$5, traits_json=$6, last_event_at=$7
-           WHERE id=$8`,
+           SET alive=$1, hp=$2, kills=$3, alliance_id=$4, inventory_json=$5, traits_json=$6, location=$7, last_event_at=$8
+           WHERE id=$9`,
           [
             participant.alive ? 1 : 0,
             participant.hp,
@@ -7996,6 +8235,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
             participant.alliance_id,
             JSON.stringify(participant.inventory || []),
             JSON.stringify(participant.traits || {}),
+            participant.location || null,
             participant.last_event_at,
             participant.id,
           ]
@@ -8045,7 +8285,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
         participant.alliance_id = allianceId && allianceId < 0 ? null : allianceId;
         await dbRunAsync(
           `UPDATE survival_participants
-           SET alive=?, hp=?, kills=?, alliance_id=?, inventory_json=?, traits_json=?, last_event_at=?
+           SET alive=?, hp=?, kills=?, alliance_id=?, inventory_json=?, traits_json=?, location=?, last_event_at=?
            WHERE id=?`,
           [
             participant.alive ? 1 : 0,
@@ -8054,6 +8294,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
             participant.alliance_id,
             JSON.stringify(participant.inventory || []),
             JSON.stringify(participant.traits || {}),
+            participant.location || null,
             participant.last_event_at,
             participant.id,
           ]
@@ -8098,6 +8339,15 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
   const payload = await buildSurvivalPayload(await fetchSurvivalSeasonById(seasonId));
   io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
   io.to(SURVIVAL_ROOM_ID).emit("survival:events", { seasonId, events });
+
+  // Mirror every simulator event into room system messages so spectators see the full story.
+  try {
+    for (const ev of events || []) {
+      if (!ev || !ev.text) continue;
+      io.to(SURVIVAL_ROOM_ID).emit("system", `⚔️ ${ev.text}`);
+    }
+  } catch {}
+
   return res.json(payload);
 });
 
