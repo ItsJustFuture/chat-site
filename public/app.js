@@ -5828,6 +5828,29 @@ function isDiceResultSystemMessage(text){
   return hasRoll && hasDiceHint;
 }
 
+// ---- Room-scoped system message routing
+// Server can send { room, text } for room-scoped system messages.
+// Buffer off-room system messages so they don't appear in the wrong room.
+const pendingSystemByRoom = new Map(); // room -> Array<string>
+function bufferSystemForRoom(room, text){
+  const r = String(room || "").trim();
+  if(!r) return;
+  const arr = pendingSystemByRoom.get(r) || [];
+  arr.push(String(text ?? ""));
+  if(arr.length > 80) arr.splice(0, arr.length - 80);
+  pendingSystemByRoom.set(r, arr);
+}
+function flushBufferedSystem(room){
+  const r = String(room || "").trim();
+  if(!r) return;
+  const arr = pendingSystemByRoom.get(r);
+  if(!arr || !arr.length) return;
+  pendingSystemByRoom.delete(r);
+  for(const msg of arr){
+    addSystem(msg, { className: isDiceResultSystemMessage(msg) ? "diceResult" : "" });
+  }
+}
+
 function addSystem(text, options = {}){
   const div=document.createElement("div");
   div.className="sys";
@@ -11133,6 +11156,7 @@ function joinRoom(room){
 
   setActiveRoom(room);
   clearMsgs();
+  try { flushBufferedSystem(room); } catch(_){ }
   socket?.emit("join room", { room, status: normalizeStatusLabel(statusSelect.value, "Online") });
   closeDrawers();
 }
@@ -16638,7 +16662,20 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   });
   updateRoomControlsVisibility();
 
-  socket.on("system", (text) => {
+  socket.on("system", (payload) => {
+    // Backward compatible: older servers send a string.
+    if(typeof payload === "string"){
+      addSystem(payload, { className: isDiceResultSystemMessage(payload) ? "diceResult" : "" });
+      return;
+    }
+
+    const text = (payload && typeof payload === "object") ? payload.text : "";
+    const room = (payload && typeof payload === "object") ? payload.room : "";
+    if(room && room !== currentRoom){
+      bufferSystemForRoom(room, text);
+      return;
+    }
+
     addSystem(text, { className: isDiceResultSystemMessage(text) ? "diceResult" : "" });
   });
 
