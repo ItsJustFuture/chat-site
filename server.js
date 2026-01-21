@@ -8053,7 +8053,10 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
     })()
     : [];
 
-  const eventCount = getSurvivalEventCount(alive.length);
+  
+  // Chaos baseline (extra events after the guaranteed participation pass)
+  const chaosEventCount = getSurvivalEventCount(alive.length);
+
   const events = [];
   const pendingAlliances = [];
   const appearanceCount = new Map();
@@ -8066,7 +8069,97 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
   });
 
   let orderIndex = 0;
-  for (let i = 0; i < eventCount; i += 1) {
+
+  // GUARANTEE: Every alive participant appears in at least ONE event per phase.
+  // IMPORTANT: If someone is included in a multi-person event, they do NOT get an additional solo event in the same phase.
+  const remainingForGuarantee = new Set(alive.map((p) => p.user_id));
+
+  let guard = 0;
+  while (remainingForGuarantee.size > 0 && guard < 5000) {
+    guard += 1;
+
+    // Only pick from participants that haven't yet appeared this phase (and are still alive).
+    const eligibleAlive = participants.filter((p) => p.alive && remainingForGuarantee.has(p.user_id));
+    if (eligibleAlive.length < 1) break;
+
+    // Constrain templates so we never request more participants than we have eligible.
+    const constrainedPool = templatePool.filter((t) => Number(t?.participants || 1) <= eligibleAlive.length);
+
+    let selectedTemplate = null;
+    let selectedParticipants = null;
+
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const template = pickWeighted(constrainedPool, rng);
+      if (!template) break;
+
+      const picked = pickParticipantsForTemplate({
+        template,
+        alive: eligibleAlive,
+        rng,
+        appearanceCount,
+        couples,
+      });
+
+      if (!picked || picked.length < template.participants) continue;
+
+      selectedTemplate = template;
+      selectedParticipants = picked;
+      break;
+    }
+
+    if (!selectedTemplate || !selectedParticipants) {
+      // Guaranteed fallback: at least a solo neutral event for one remaining participant.
+      const fallback = SURVIVAL_EVENT_TEMPLATES.find((t) => t.id.startsWith("solo_neutral_"));
+      selectedTemplate = fallback || SURVIVAL_EVENT_TEMPLATES.find((t) => Number(t?.participants || 1) === 1) || null;
+      if (!selectedTemplate) break;
+      selectedParticipants = [eligibleAlive[0]];
+    }
+
+    selectedParticipants.forEach((p) => {
+      appearanceCount.set(p.user_id, (appearanceCount.get(p.user_id) || 0) + 1);
+      p.last_event_at = now;
+      remainingForGuarantee.delete(p.user_id);
+    });
+
+    const text = renderSurvivalEventText(selectedTemplate, selectedParticipants, rng);
+    const outcome = applySurvivalOutcome({
+      template: selectedTemplate,
+      participants: selectedParticipants,
+      rng,
+      pendingAlliances,
+      existingAllianceNames,
+    });
+
+    // Attach a best-guess zone for this event so the arena map can filter/animate.
+    try {
+      const zones = (selectedParticipants || []).map((p) => String(p.location || "")).filter(Boolean);
+      const zone = zones.length
+        ? zones
+            .sort(
+              (a, b) =>
+                zones.filter((z) => z === a).length - zones.filter((z) => z === b).length
+            )
+            .pop()
+        : null;
+      if (zone) outcome.zone = zone;
+    } catch {}
+
+    orderIndex += 1;
+    events.push({
+      id: null,
+      season_id: seasonId,
+      day_index: season.day_index,
+      phase: season.phase,
+      order_index: orderIndex,
+      text,
+      involved_user_ids: selectedParticipants.map((p) => p.user_id),
+      outcome,
+      created_at: now,
+    });
+  }
+
+  // EXTRA CHAOS: add additional events on top (can include anyone, including those already covered).
+  for (let i = 0; i < chaosEventCount; i += 1) {
     const currentAlive = participants.filter((p) => p.alive);
     if (currentAlive.length < 1) break;
     let selectedTemplate = null;
@@ -8082,11 +8175,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
         couples,
       });
       if (!picked || picked.length < template.participants) continue;
-      if (picked.some((p) => (appearanceCount.get(p.user_id) || 0) >= 2)) continue;
-      if (template.type === "steal") {
-        const victim = picked[1];
-        if (!victim || !Array.isArray(victim.inventory) || victim.inventory.length === 0) continue;
-      }
+
       selectedTemplate = template;
       selectedParticipants = picked;
       break;
@@ -8096,13 +8185,14 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
       const fallback = SURVIVAL_EVENT_TEMPLATES.find((t) => t.id.startsWith("solo_neutral_"));
       if (!fallback) break;
       selectedTemplate = fallback;
-      selectedParticipants = pickParticipantsForTemplate({
-        template: fallback,
-        alive: currentAlive,
-        rng,
-        appearanceCount,
-        couples,
-      }) || [currentAlive[0]];
+      selectedParticipants =
+        pickParticipantsForTemplate({
+          template: fallback,
+          alive: currentAlive,
+          rng,
+          appearanceCount,
+          couples,
+        }) || [currentAlive[0]];
     }
 
     selectedParticipants.forEach((p) => {
@@ -8122,11 +8212,15 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
     // Attach a best-guess zone for this event so the arena map can filter/animate.
     try {
       const zones = (selectedParticipants || []).map((p) => String(p.location || "")).filter(Boolean);
-      const zone = zones.length ? zones.sort((a, b) => zones.filter(z=>z===a).length - zones.filter(z=>z===b).length).pop() : null;
-      if (zone) {
-        outcome.zone = zone;
-        if (!outcome.scope) outcome.scope = "local";
-      }
+      const zone = zones.length
+        ? zones
+            .sort(
+              (a, b) =>
+                zones.filter((z) => z === a).length - zones.filter((z) => z === b).length
+            )
+            .pop()
+        : null;
+      if (zone) outcome.zone = zone;
     } catch {}
 
     orderIndex += 1;
@@ -8142,6 +8236,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
       created_at: now,
     });
   }
+
 
 
   // Occasional zone-wide / arena-wide events (adds variety + makes the map feel alive).
