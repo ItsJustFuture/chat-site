@@ -4575,21 +4575,20 @@ function pickParticipantsForTemplate({
   couples = [],
 }) {
   const maxAppearance = 2;
+  const keyOf = (p) => (p && p.user_id ? `u:${p.user_id}` : `p:${p?.id}`);
   const pickWithWeights = (candidates, count) => {
     const selected = [];
     const pool = [...candidates];
     while (selected.length < count && pool.length) {
       const weighted = pool.map((p) => ({
         participant: p,
-        weight: 1 / (1 + (appearanceCount.get(p.user_id) || 0)),
+        weight: 1 / (1 + (appearanceCount.get(keyOf(p)) || 0)),
       }));
       const pick = pickWeighted(weighted.map((w) => ({ ...w.participant, weight: w.weight })), rng);
-      const chosen = pick?.user_id
-        ? pool.find((p) => p.user_id === pick.user_id)
-        : pool[0];
+      const chosen = pick?.id ? pool.find((p) => p.id === pick.id) : pool[0];
       if (!chosen) break;
       selected.push(chosen);
-      const idx = pool.findIndex((p) => p.user_id === chosen.user_id);
+      const idx = pool.findIndex((p) => p.id === chosen.id);
       if (idx >= 0) pool.splice(idx, 1);
     }
     return selected;
@@ -8055,7 +8054,10 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
 
   
   // Chaos baseline (extra events after the guaranteed participation pass)
-  const chaosEventCount = getSurvivalEventCount(alive.length);
+  // NOTE: We enforce EXACTLY one participant-scoped event per alive participant per phase
+  // (day + night), so we disable extra participant-scoped "chaos" events here.
+  // Arena / zone-wide events still provide chaos without starving or spamming individuals.
+  const chaosEventCount = 0;
 
   const events = [];
   const pendingAlliances = [];
@@ -8070,16 +8072,17 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
 
   let orderIndex = 0;
 
-  // GUARANTEE: Every alive participant appears in at least ONE event per phase.
+  // GUARANTEE: Every alive participant appears in EXACTLY ONE participant-scoped event per phase.
   // IMPORTANT: If someone is included in a multi-person event, they do NOT get an additional solo event in the same phase.
-  const remainingForGuarantee = new Set(alive.map((p) => p.user_id));
+  // We track by participant.id (NOT user_id) so NPCs are treated as unique individuals.
+  const remainingForGuarantee = new Set(alive.map((p) => p.id));
 
   let guard = 0;
   while (remainingForGuarantee.size > 0 && guard < 5000) {
     guard += 1;
 
     // Only pick from participants that haven't yet appeared this phase (and are still alive).
-    const eligibleAlive = participants.filter((p) => p.alive && remainingForGuarantee.has(p.user_id));
+    const eligibleAlive = participants.filter((p) => p.alive && remainingForGuarantee.has(p.id));
     if (eligibleAlive.length < 1) break;
 
     // Constrain templates so we never request more participants than we have eligible.
@@ -8116,9 +8119,10 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
     }
 
     selectedParticipants.forEach((p) => {
-      appearanceCount.set(p.user_id, (appearanceCount.get(p.user_id) || 0) + 1);
+      const k = p.user_id ? `u:${p.user_id}` : `p:${p.id}`;
+      appearanceCount.set(k, (appearanceCount.get(k) || 0) + 1);
       p.last_event_at = now;
-      remainingForGuarantee.delete(p.user_id);
+      remainingForGuarantee.delete(p.id);
     });
 
     const text = renderSurvivalEventText(selectedTemplate, selectedParticipants, rng);
@@ -8152,90 +8156,14 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
       phase: season.phase,
       order_index: orderIndex,
       text,
-      involved_user_ids: selectedParticipants.map((p) => p.user_id),
+      // Only store real user IDs (NPCs have user_id NULL/0 and should not collide in logs).
+      involved_user_ids: selectedParticipants.map((p) => p.user_id).filter((id) => Number(id) > 0),
       outcome,
       created_at: now,
     });
   }
 
-  // EXTRA CHAOS: add additional events on top (can include anyone, including those already covered).
-  for (let i = 0; i < chaosEventCount; i += 1) {
-    const currentAlive = participants.filter((p) => p.alive);
-    if (currentAlive.length < 1) break;
-    let selectedTemplate = null;
-    let selectedParticipants = null;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const template = pickWeighted(templatePool, rng);
-      if (!template) break;
-      const picked = pickParticipantsForTemplate({
-        template,
-        alive: currentAlive,
-        rng,
-        appearanceCount,
-        couples,
-      });
-      if (!picked || picked.length < template.participants) continue;
-
-      selectedTemplate = template;
-      selectedParticipants = picked;
-      break;
-    }
-
-    if (!selectedTemplate || !selectedParticipants) {
-      const fallback = SURVIVAL_EVENT_TEMPLATES.find((t) => t.id.startsWith("solo_neutral_"));
-      if (!fallback) break;
-      selectedTemplate = fallback;
-      selectedParticipants =
-        pickParticipantsForTemplate({
-          template: fallback,
-          alive: currentAlive,
-          rng,
-          appearanceCount,
-          couples,
-        }) || [currentAlive[0]];
-    }
-
-    selectedParticipants.forEach((p) => {
-      appearanceCount.set(p.user_id, (appearanceCount.get(p.user_id) || 0) + 1);
-      p.last_event_at = now;
-    });
-
-    const text = renderSurvivalEventText(selectedTemplate, selectedParticipants, rng);
-    const outcome = applySurvivalOutcome({
-      template: selectedTemplate,
-      participants: selectedParticipants,
-      rng,
-      pendingAlliances,
-      existingAllianceNames,
-    });
-
-    // Attach a best-guess zone for this event so the arena map can filter/animate.
-    try {
-      const zones = (selectedParticipants || []).map((p) => String(p.location || "")).filter(Boolean);
-      const zone = zones.length
-        ? zones
-            .sort(
-              (a, b) =>
-                zones.filter((z) => z === a).length - zones.filter((z) => z === b).length
-            )
-            .pop()
-        : null;
-      if (zone) outcome.zone = zone;
-    } catch {}
-
-    orderIndex += 1;
-    events.push({
-      id: null,
-      season_id: seasonId,
-      day_index: season.day_index,
-      phase: season.phase,
-      order_index: orderIndex,
-      text,
-      involved_user_ids: selectedParticipants.map((p) => p.user_id),
-      outcome,
-      created_at: now,
-    });
-  }
+  // NOTE: participant-scoped chaos events intentionally disabled (see chaosEventCount above).
 
 
 
@@ -8251,7 +8179,9 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
         phase: season.phase,
         order_index: orderIndex,
         text: arenaEv.text,
-        involved_user_ids: Array.isArray(arenaEv.outcome?.affected_user_ids) ? arenaEv.outcome.affected_user_ids : [],
+        involved_user_ids: Array.isArray(arenaEv.outcome?.affected_user_ids)
+          ? arenaEv.outcome.affected_user_ids.filter((id) => Number(id) > 0)
+          : [],
         outcome: arenaEv.outcome || { type: "arena", scope: "global" },
         created_at: now,
       });
@@ -8274,7 +8204,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
         phase: season.phase,
         order_index: orderIndex + 1,
         text: `🏆 ${winnerTag} wins the season!`,
-        involved_user_ids: [winner.user_id],
+        involved_user_ids: winner.user_id ? [winner.user_id] : [],
         outcome: { type: "winner" },
         created_at: now,
       });
