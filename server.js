@@ -288,6 +288,19 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
     pingTimeout: 300_000,  // wait 5 minutes for pong before disconnect (mobile suspend)
     upgradeTimeout: 45_000,
   });
+
+  // ---- System messages (room-scoped)
+  // Historically the server emitted plain strings on the "system" event.
+  // Some client UIs keep a single visible log and can accidentally render
+  // a system message that was meant for another room.
+  //
+  // For room-scoped system messages, we now emit an explicit payload
+  // { room, text } so the client can route it correctly.
+  function emitRoomSystem(room, text) {
+    const r = typeof room === "string" ? room : "";
+    if (!r) return;
+    io.to(r).emit("system", { room: r, text: String(text ?? "") });
+  }
   const pgPool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === "production"
@@ -8002,8 +8015,8 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
   io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
   // Mirror the narrative into the room as system messages.
   try {
-    io.to(SURVIVAL_ROOM_ID).emit("system", `🏟️ Survival season started: ${payload?.season?.title || title}`);
-    io.to(SURVIVAL_ROOM_ID).emit("system", `Day ${payload?.season?.day_index || 1} — ${String(payload?.season?.phase || "day").toUpperCase()}`);
+    emitRoomSystem(SURVIVAL_ROOM_ID, `🏟️ Survival season started: ${payload?.season?.title || title}`);
+    emitRoomSystem(SURVIVAL_ROOM_ID, `Day ${payload?.season?.day_index || 1} — ${String(payload?.season?.phase || "day").toUpperCase()}`);
   } catch {}
   return res.json(payload);
 });
@@ -8369,7 +8382,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
   try {
     for (const ev of events || []) {
       if (!ev || !ev.text) continue;
-      io.to(SURVIVAL_ROOM_ID).emit("system", `⚔️ ${ev.text}`);
+      emitRoomSystem(SURVIVAL_ROOM_ID, `⚔️ ${ev.text}`);
     }
   } catch {}
 
@@ -12134,8 +12147,8 @@ socket.on("join room", ({ room, status }) => {
           emitProgressionUpdate(uid);
           emitLuckUpdate(uid, finalLuck, luckState.nextStreak);
 
-          io.to(room).emit(
-            "system",
+          emitRoomSystem(
+            room,
             formatDiceSystemMessage({ result: roll.result, breakdown: roll.breakdown, deltaGold, outcome: reward.outcome })
           );
 
@@ -12237,8 +12250,8 @@ socket.on("join room", ({ room, status }) => {
             emitProgressionUpdate(uid);
             emitLuckUpdate(uid, finalLuck, luckState.nextStreak);
 
-            io.to(room).emit(
-              "system",
+            emitRoomSystem(
+              room,
               formatDiceSystemMessage({ result: roll.result, breakdown: roll.breakdown, deltaGold, outcome: reward.outcome })
             );
 
@@ -13251,7 +13264,7 @@ socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300 } = 
     }
     invalidateSessionsForUserId(target.id);
 
-    io.to(room).emit("system", `${username} was kicked.`);
+    emitRoomSystem(room, `${username} was kicked.`);
     logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: target.username, room, details: `duration=${dur}s reason=${why}` });
     respond({ ok: true, username: target.username, durationSeconds: dur });
   });
@@ -13315,7 +13328,7 @@ socket.on("mod unkick", async ({ username } = {}, ack) => {
          VALUES (?, 'mute', ?, ?, ?, ?)`,
         [target.id, expiresAt, String(reason || "").slice(0, 180), socket.user.id, Date.now()],
         () => {
-          io.to(room).emit("system", `${username} was muted for ${mins} minutes.`);
+          emitRoomSystem(room, `${username} was muted for ${mins} minutes.`);
           logModAction({
             actor: socket.user,
             action: "MUTE",
@@ -13352,8 +13365,8 @@ socket.on("mod unkick", async ({ username } = {}, ack) => {
          VALUES (?, 'ban', ?, ?, ?, ?)`,
         [target.id, expiresAt, String(reason || "").slice(0, 180), socket.user.id, Date.now()],
         () => {
-          io.to(room).emit(
-            "system",
+          emitRoomSystem(
+            room,
             `${username} was banned${expiresAt ? ` for ${mins} minutes` : " permanently"}.`
           );
 const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
@@ -13395,7 +13408,7 @@ invalidateSessionsForUserId(target.id);
       if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
       db.run("DELETE FROM punishments WHERE user_id=? AND type='mute'", [target.id], () => {
-        io.to(room).emit("system", `${username} was unmuted.`);
+        emitRoomSystem(room, `${username} was unmuted.`);
         logModAction({
           actor: socket.user,
           action: "UNMUTE",
@@ -13423,7 +13436,7 @@ invalidateSessionsForUserId(target.id);
       if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
       db.run("DELETE FROM punishments WHERE user_id=? AND type='ban'", [target.id], () => {
-        io.to(room).emit("system", `${username} was unbanned.`);
+        emitRoomSystem(room, `${username} was unbanned.`);
 // Clear persistent restriction as well
 const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
 clearRestrictionEverywhere(username, actorName, String(reason || "").slice(0, 180) || "unban").catch(()=>{});
@@ -13709,7 +13722,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
       if (!target) return;
       if (!canModerate(actorRole, target.role)) return;
 
-      io.to(room).emit("system", `${username} was warned: ${String(reason || "").slice(0, 120)}`);
+      emitRoomSystem(room, `${username} was warned: ${String(reason || "").slice(0, 120)}`);
       logModAction({
         actor: socket.user,
         action: "WARN",
@@ -13783,7 +13796,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
           }
         }
 
-        io.to(room).emit("system", `${target.username} role set to ${role}.${reason ? "" : ""}`);
+        emitRoomSystem(room, `${target.username} role set to ${role}.${reason ? "" : ""}`);
         emitUserList(room);
         respond({ ok: true, username: target.username, role });
       }).catch((e) => {
