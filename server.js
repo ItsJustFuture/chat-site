@@ -40,7 +40,7 @@ const sessionByUserId = new Map(); // userId -> Set(socket.id)
 const DICE_ROLL_MIN_INTERVAL_MS = 1000;
 const diceRollRateByUserId = new Map();
 const SURVIVAL_ROOM_ID = "survivalsimulator";
-const SURVIVAL_ROOM_DB_ID = 1;
+let SURVIVAL_ROOM_DB_ID = 1; // resolved from Postgres rooms.id when available
 const SURVIVAL_SEASON_COOLDOWN_MS = 2 * 60 * 1000;
 const SURVIVAL_ADVANCE_COOLDOWN_MS = 2000;
 const CHESS_DEFAULT_ELO = 1200;
@@ -246,6 +246,124 @@ const ALLOWED_ORIGINS = new Set(
     .filter(Boolean)
 );
 
+
+async function syncRoomHierarchySqliteToPostgres() {
+  if (!PG_READY) return;
+  try {
+    const { rows } = await pgPool.query(`SELECT COUNT(*)::int AS n FROM rooms`);
+    const n = Number(rows?.[0]?.n || 0);
+    if (n > 0) return; // already populated
+  } catch {
+    // If query fails, don't attempt sync
+    return;
+  }
+
+  try {
+    const masters = await dbAllAsync(`SELECT name, sort_order, created_at FROM room_master_categories ORDER BY sort_order ASC, name ASC`);
+    for (const m of masters || []) {
+      await pgPool.query(
+        `INSERT INTO room_master_categories (name, sort_order, created_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (name) DO UPDATE SET sort_order = EXCLUDED.sort_order`,
+        [m.name, Number(m.sort_order || 0), Number(m.created_at || Date.now())]
+      );
+    }
+
+    const categories = await dbAllAsync(
+      `SELECT c.name as category_name, c.sort_order, c.created_at, m.name as master_name
+         FROM room_categories c
+         JOIN room_master_categories m ON m.id = c.master_id
+        ORDER BY c.sort_order ASC, c.name ASC`
+    );
+    for (const c of categories || []) {
+      const { rows: mr } = await pgPool.query(`SELECT id FROM room_master_categories WHERE name = $1 LIMIT 1`, [c.master_name]);
+      const masterId = mr?.[0]?.id;
+      if (!masterId) continue;
+      await pgPool.query(
+        `INSERT INTO room_categories (master_id, name, sort_order, created_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (master_id, name) DO UPDATE SET sort_order = EXCLUDED.sort_order`,
+        [masterId, c.category_name, Number(c.sort_order || 0), Number(c.created_at || Date.now())]
+      );
+    }
+
+    const rooms = await dbAllAsync(
+      `SELECT r.name, r.created_by, r.created_at, r.slowmode_seconds, r.is_locked, r.pinned_message_ids,
+              r.maintenance_mode, r.room_sort_order, r.created_by_user_id, r.is_user_room,
+              c.name as category_name, m.name as master_name
+         FROM rooms r
+         LEFT JOIN room_categories c ON c.id = r.category_id
+         LEFT JOIN room_master_categories m ON m.id = c.master_id
+        ORDER BY r.room_sort_order ASC, r.name ASC`
+    );
+
+    for (const r of rooms || []) {
+      let categoryId = null;
+      try {
+        if (r.master_name && r.category_name) {
+          const { rows: cr } = await pgPool.query(
+            `SELECT c.id
+               FROM room_categories c
+               JOIN room_master_categories m ON m.id = c.master_id
+              WHERE m.name = $1 AND lower(c.name) = lower($2)
+              LIMIT 1`,
+            [r.master_name, r.category_name]
+          );
+          categoryId = cr?.[0]?.id ?? null;
+        }
+      } catch {}
+
+      await pgPool.query(
+        `INSERT INTO rooms (name, created_by, created_at, slowmode_seconds, is_locked, pinned_message_ids,
+                           maintenance_mode, category_id, room_sort_order, created_by_user_id, is_user_room)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT (name) DO UPDATE SET
+           slowmode_seconds = EXCLUDED.slowmode_seconds,
+           is_locked = EXCLUDED.is_locked,
+           pinned_message_ids = EXCLUDED.pinned_message_ids,
+           maintenance_mode = EXCLUDED.maintenance_mode,
+           category_id = EXCLUDED.category_id,
+           room_sort_order = EXCLUDED.room_sort_order,
+           created_by_user_id = EXCLUDED.created_by_user_id,
+           is_user_room = EXCLUDED.is_user_room`,
+        [
+          r.name,
+          r.created_by ?? null,
+          Number(r.created_at || Date.now()),
+          Number(r.slowmode_seconds || 0),
+          Number(r.is_locked || 0),
+          r.pinned_message_ids ?? null,
+          Number(r.maintenance_mode || 0),
+          categoryId,
+          Number(r.room_sort_order || 0),
+          r.created_by_user_id ?? null,
+          Number(r.is_user_room || 0),
+        ]
+      );
+    }
+  } catch (e) {
+    console.warn('[startup] room hierarchy sync sqlite->pg failed:', e?.message || e);
+  }
+}
+
+async function resolveSurvivalRoomDbId() {
+  if (!PG_READY) return;
+  try {
+    const { rows } = await pgPool.query(`SELECT id FROM rooms WHERE name = $1 LIMIT 1`, [SURVIVAL_ROOM_ID]);
+    const id = Number(rows?.[0]?.id || 0);
+    if (id > 0) {
+      const prev = SURVIVAL_ROOM_DB_ID;
+      SURVIVAL_ROOM_DB_ID = id;
+      // If survival seasons were previously keyed to 1, migrate them to the resolved id.
+      if (prev === 1 && SURVIVAL_ROOM_DB_ID !== 1) {
+        try {
+          await pgPool.query(`UPDATE survival_seasons SET room_id = $1 WHERE room_id = 1`, [SURVIVAL_ROOM_DB_ID]);
+        } catch {}
+      }
+    }
+  } catch {}
+}
+
 // ---- Startup sanity checks (fail fast in production)
 const IS_PROD = process.env.NODE_ENV === "production";
 if (IS_PROD) {
@@ -427,6 +545,15 @@ const pgInitPromise = (async () => {
       );
     `);
 
+
+    // Lightweight server config store (Postgres)
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS config (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );
+    `);
+
     await pgPool.query(`
       CREATE TABLE IF NOT EXISTS room_master_categories (
         id SERIAL PRIMARY KEY,
@@ -469,6 +596,19 @@ const pgInitPromise = (async () => {
     ];
     for (const q of roomCols) {
       try { await pgPool.query(q); } catch (_) {}
+    }
+
+
+    // Assign stable numeric IDs to rooms in Postgres (used by survival simulator room_id, cooldown maps, etc.)
+    try {
+      await pgPool.query(`CREATE SEQUENCE IF NOT EXISTS rooms_id_seq`);
+      await pgPool.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS id BIGINT`);
+      await pgPool.query(`ALTER TABLE rooms ALTER COLUMN id SET DEFAULT nextval('rooms_id_seq')`);
+      await pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS rooms_id_unique ON rooms(id)`);
+      // Backfill any missing ids
+      await pgPool.query(`UPDATE rooms SET id = nextval('rooms_id_seq') WHERE id IS NULL`);
+    } catch (e) {
+      console.warn('[pg-init] rooms id backfill failed:', e?.message || e);
     }
 
     try {
@@ -2488,22 +2628,41 @@ const SOCKET_CONN_TTL_MS = 15 * 60 * 1000;
 // ---- DM read receipts (in-memory; resets on restart)
 const dmReadState = new Map(); // threadId -> Map(userId -> { messageId, ts })
 
-db.get(`SELECT value FROM config WHERE key='maintenance'`, [], (_e, row) => {
-  maintenanceState.enabled = row?.value === "on";
-});
 
-db.get(`SELECT value FROM config WHERE key='active_room_events'`, [], (_e, row) => {
+// Load small server config values. Prefer Postgres in production; fallback to SQLite.
+async function loadServerConfigIntoMemory() {
+  // Maintenance
   try {
-    const obj = safeJsonParse(row?.value || "{}", {});
-    for (const [room, ev] of Object.entries(obj || {})) {
-      if (!ev || typeof ev !== "object") continue;
-      if (ev.endsAt && Number(ev.endsAt) < Date.now()) continue;
-      ACTIVE_ROOM_EVENTS.set(room, ev);
+    if (PG_READY) {
+      const { rows } = await pgPool.query(`SELECT value FROM config WHERE key='maintenance' LIMIT 1`);
+      const val = rows?.[0]?.value;
+      if (typeof val === "string") maintenanceState.enabled = val === "on";
+    } else {
+      const row = await dbGetAsync(`SELECT value FROM config WHERE key='maintenance'`, []);
+      maintenanceState.enabled = row?.value === "on";
     }
   } catch {}
-});
 
-
+  // Active room events (optional)
+  try {
+    let val = null;
+    if (PG_READY) {
+      const { rows } = await pgPool.query(`SELECT value FROM config WHERE key='active_room_events' LIMIT 1`);
+      val = rows?.[0]?.value;
+    } else {
+      const row = await dbGetAsync(`SELECT value FROM config WHERE key='active_room_events'`, []);
+      val = row?.value;
+    }
+    if (typeof val === "string") {
+      const obj = safeJsonParse(val || "{}", {});
+      for (const [room, ev] of Object.entries(obj || {})) {
+        if (!ev || typeof ev !== "object") continue;
+        if (ev.endsAt && Number(ev.endsAt) < Date.now()) continue;
+        ACTIVE_ROOM_EVENTS.set(room, ev);
+      }
+    }
+  } catch {}
+}
 
 function dbGetAsync(sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -2533,6 +2692,15 @@ function dbRunAsync(sql, params = []) {
 }
 
 async function getConfigValue(key, fallback = null) {
+  // Prefer Postgres for persistence in production; fallback to SQLite.
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query(`SELECT value FROM config WHERE key = $1 LIMIT 1`, [key]);
+      const val = rows?.[0]?.value;
+      return val != null ? String(val) : fallback;
+    }
+  } catch {}
+
   try {
     const row = await dbGetAsync("SELECT value FROM config WHERE key = ?", [key]);
     return row?.value ?? fallback;
@@ -2543,10 +2711,26 @@ async function getConfigValue(key, fallback = null) {
 
 async function setConfigValue(key, value) {
   const v = value == null ? "" : String(value);
-  await dbRunAsync(
-    "INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-    [key, v]
-  );
+
+  // Best-effort: write to Postgres when available.
+  try {
+    if (PG_READY) {
+      await pgPool.query(
+        `INSERT INTO config (key, value) VALUES ($1, $2)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [key, v]
+      );
+    }
+  } catch {}
+
+  // Also write to SQLite for local/legacy reads.
+  try {
+    await dbRunAsync(
+      "INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+      [key, v]
+    );
+  } catch {}
+
   return v;
 }
 
@@ -4062,7 +4246,7 @@ const commandRegistry = {
       const val = (args[0] || "").toLowerCase();
       if (val !== "on" && val !== "off") return { ok: false, message: "Use on|off" };
       maintenanceState.enabled = val === "on";
-      await dbRunAsync(`INSERT INTO config (key, value) VALUES ('maintenance', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [val]);
+      await setConfigValue('maintenance', val);
       io.emit("system", `Maintenance mode ${val}`);
       return { ok: true, message: `Maintenance ${val}` };
     },
@@ -5666,18 +5850,46 @@ async function getUserRoomCollapseState(userId) {
 }
 
 async function buildRoomStructure() {
-  const masters = await dbAllAsync(
-    `SELECT id, name, sort_order FROM room_master_categories ORDER BY sort_order ASC, name ASC`
-  );
-  const categories = await dbAllAsync(
-    `SELECT id, master_id, name, sort_order FROM room_categories ORDER BY sort_order ASC, name ASC`
-  );
-  const rooms = await dbAllAsync(
-    `SELECT name, category_id, room_sort_order, slowmode_seconds, is_locked, maintenance_mode,
-            created_by, created_by_user_id, is_user_room
-       FROM rooms
-      ORDER BY room_sort_order ASC, name ASC`
-  );
+  // Prefer Postgres room hierarchy (production); fallback to SQLite.
+  let masters = null;
+  let categories = null;
+  let rooms = null;
+
+  if (PG_READY) {
+    try {
+      const mRes = await pgPool.query(`SELECT id, name, sort_order FROM room_master_categories ORDER BY sort_order ASC, name ASC`);
+      masters = mRes.rows || [];
+      const cRes = await pgPool.query(`SELECT id, master_id, name, sort_order FROM room_categories ORDER BY sort_order ASC, name ASC`);
+      categories = cRes.rows || [];
+      const rRes = await pgPool.query(
+        `SELECT name, category_id, room_sort_order, slowmode_seconds, is_locked, maintenance_mode,
+                created_by, created_by_user_id, is_user_room
+           FROM rooms
+          ORDER BY room_sort_order ASC, name ASC`
+      );
+      rooms = rRes.rows || [];
+    } catch {
+      masters = null;
+      categories = null;
+      rooms = null;
+    }
+  }
+
+  if (!masters || !categories || !rooms) {
+    masters = await dbAllAsync(
+      `SELECT id, name, sort_order FROM room_master_categories ORDER BY sort_order ASC, name ASC`
+    );
+    categories = await dbAllAsync(
+      `SELECT id, master_id, name, sort_order FROM room_categories ORDER BY sort_order ASC, name ASC`
+    );
+    rooms = await dbAllAsync(
+      `SELECT name, category_id, room_sort_order, slowmode_seconds, is_locked, maintenance_mode,
+              created_by, created_by_user_id, is_user_room
+         FROM rooms
+        ORDER BY room_sort_order ASC, name ASC`
+    );
+  }
+
   return {
     masters,
     categories,
@@ -8440,8 +8652,18 @@ app.post("/rooms", strictLimiter, requireLogin, express.json({ limit: "16kb" }),
   if (!name) return res.status(400).send("Invalid room name");
 
   try {
-    const row = await dbGetAsync(`SELECT name FROM rooms WHERE name=?`, [name]);
-    if (row) return res.status(409).send("Room already exists");
+    // Check both Postgres + SQLite for existing room
+    try {
+      if (PG_READY) {
+        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name=$1 LIMIT 1`, [name]);
+        if (rows?.[0]) return res.status(409).send("Room already exists");
+      }
+    } catch {}
+    try {
+      const row = await dbGetAsync(`SELECT name FROM rooms WHERE name=?`, [name]);
+      if (row) return res.status(409).send("Room already exists");
+    } catch {}
+
 
     const requestedCategoryId = Number(req.body?.category_id) || null;
     const requestedMasterId = Number(req.body?.master_id) || null;
@@ -8474,6 +8696,26 @@ app.post("/rooms", strictLimiter, requireLogin, express.json({ limit: "16kb" }),
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [name, actor.id, Date.now(), categoryId, sortOrder, actor.id, isUserRoom]
     );
+
+    // Keep Postgres in sync (production source of truth)
+    try {
+      if (PG_READY) {
+        await pgPool.query(
+          `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           ON CONFLICT (name) DO UPDATE SET
+             category_id = EXCLUDED.category_id,
+             room_sort_order = EXCLUDED.room_sort_order,
+             slowmode_seconds = rooms.slowmode_seconds,
+             is_locked = rooms.is_locked,
+             maintenance_mode = rooms.maintenance_mode,
+             created_by_user_id = EXCLUDED.created_by_user_id,
+             is_user_room = EXCLUDED.is_user_room`,
+          [name, actor.id, Date.now(), categoryId, sortOrder, actor.id, isUserRoom]
+        );
+      }
+    } catch {}
+
 
     logModAction({ actor, action: "room.create", room: name, details: null });
     await emitRoomStructureUpdate();
@@ -14478,7 +14720,7 @@ socket.on("mod unkick", async ({ username } = {}, ack) => {
     }
 
     emitOnlineUsers();
-    io.to(room).emit("system message", { text: `${target.username} has been un-kicked by ${actorName}.` });
+    emitRoomSystem(room, `${target.username} has been un-kicked by ${actorName}.` );
     respond({ ok: true, username: target.username });
   });
 });
@@ -15057,6 +15299,26 @@ async function startServer() {
     console.error("[startup] Postgres init failed", pgResult.reason);
   }
 
+
+
+  // --- De-mix step: keep room hierarchy/config in Postgres in production
+  try {
+    await syncRoomHierarchySqliteToPostgres();
+  } catch (e) {
+    console.warn('[startup] room hierarchy sync failed:', e?.message || e);
+  }
+
+  try {
+    await resolveSurvivalRoomDbId();
+  } catch (e) {
+    console.warn('[startup] survival room id resolve failed:', e?.message || e);
+  }
+
+  try {
+    await loadServerConfigIntoMemory();
+  } catch (e) {
+    console.warn('[startup] config load failed:', e?.message || e);
+  }
   await new Promise((resolve) => {
     httpServer.listen(PORT, () => {
       SERVER_STARTED = true;
