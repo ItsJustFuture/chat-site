@@ -2068,6 +2068,30 @@ const leaderboardState = {
   lastError: false,
   wsCooldownUntil: 0
 };
+const chessState = {
+  isOpen: false,
+  contextType: null,
+  contextId: null,
+  gameId: null,
+  fen: null,
+  pgn: "",
+  status: "none",
+  turn: null,
+  whiteUser: null,
+  blackUser: null,
+  legalMoves: [],
+  selectedSquare: null,
+  pendingPromotion: null,
+  drawOfferBy: null,
+  result: null,
+  rated: null,
+  ratedReason: null,
+  whiteEloChange: null,
+  blackEloChange: null,
+  seatClaimable: { white: false, black: false },
+};
+const chessChallengesByThread = new Map();
+let pendingChessChallenge = null;
 const recentDiceRolls = new Map();
 const diceRollTimers = new Map();
 let typingUsers = new Set();
@@ -4215,6 +4239,7 @@ dmFileInput?.addEventListener("change", async () => {
 
 dmMessagesEl?.addEventListener("scroll", ()=>{ dmPinned = isNearBottom(dmMessagesEl, 160); });
 const dmUserBtn = document.getElementById("dmUserBtn");
+const dmChessQuickBtn = document.getElementById("dmChessQuickBtn");
 const dmInfoBtn = document.getElementById("dmInfoBtn");
 const dmSettingsBtn = document.getElementById("dmSettingsBtn");
 const likeProfileBtn = document.getElementById("likeProfileBtn");
@@ -4226,9 +4251,26 @@ const leaderboardXp = document.getElementById("leaderboardXp");
 const leaderboardGold = document.getElementById("leaderboardGold");
 const leaderboardDice = document.getElementById("leaderboardDice");
 const leaderboardLikes = document.getElementById("leaderboardLikes");
+const leaderboardChess = document.getElementById("leaderboardChess");
 const leaderboardsMsg = document.getElementById("leaderboardsMsg");
 const leaderboardsUpdatedAt = document.getElementById("leaderboardsUpdatedAt");
 const refreshLeaderboardsBtn = document.getElementById("refreshLeaderboardsBtn");
+const roomChessBtn = document.getElementById("roomChessBtn");
+const dmChessBtn = document.getElementById("dmChessBtn");
+const dmChessChallenge = document.getElementById("dmChessChallenge");
+const chessModal = document.getElementById("chessModal");
+const chessCloseBtn = document.getElementById("chessCloseBtn");
+const chessBoard = document.getElementById("chessBoard");
+const chessSeats = document.getElementById("chessSeats");
+const chessStatus = document.getElementById("chessStatus");
+const chessMeta = document.getElementById("chessMeta");
+const chessContextLabel = document.getElementById("chessContextLabel");
+const chessPromotion = document.getElementById("chessPromotion");
+const chessResignBtn = document.getElementById("chessResignBtn");
+const chessDrawOfferBtn = document.getElementById("chessDrawOfferBtn");
+const chessDrawAcceptBtn = document.getElementById("chessDrawAcceptBtn");
+const chessCreateBtn = document.getElementById("chessCreateBtn");
+const chessLeaderboardBtn = document.getElementById("chessLeaderboardBtn");
 const dmSettingsMenu = document.getElementById("dmSettingsMenu");
 const dmTranslucentToggle = document.getElementById("dmTranslucentToggle");
 const dmDeleteHistoryBtn = document.getElementById("dmDeleteHistoryBtn");
@@ -9565,10 +9607,15 @@ function renderDmMessages(threadId){
       bubble.appendChild(replyLink);
     }
 
-    const text = document.createElement("div");
-    text.className = "dmText";
-    text.innerHTML = applyMentions(m.text || "");
-    bubble.appendChild(text);
+    const chessMessage = buildDmChessMessage(m.text);
+    if (chessMessage) {
+      bubble.appendChild(chessMessage);
+    } else {
+      const text = document.createElement("div");
+      text.className = "dmText";
+      text.innerHTML = applyMentions(m.text || "");
+      bubble.appendChild(text);
+    }
 
     const attachmentPayload = m?.attachment?.url
       ? { url: m.attachment.url, type: m.attachment.type, mime: m.attachment.mime }
@@ -9746,6 +9793,11 @@ function setDmMeta(thread){
     if (dmMetaAvatar) dmMetaAvatar.innerHTML = "";
     if (dmTypingIndicator) dmTypingIndicator.textContent = "";
     activeDmUsers = new Set();
+    if (dmChessChallenge) {
+      dmChessChallenge.hidden = true;
+      dmChessChallenge.innerHTML = "";
+    }
+    if (dmChessBtn) dmChessBtn.disabled = true;
     updatePresenceAuras();
     return;
   }
@@ -9767,6 +9819,8 @@ function setDmMeta(thread){
 
   // Update DM typing indicator (if any)
   renderDmTypingIndicator();
+  updateDmChessButtons(thread);
+  renderDmChessChallenge(thread);
 
   // Avatar in DM header:
   // - direct: other user's avatar
@@ -9824,6 +9878,17 @@ function setDmMeta(thread){
   try { renderDmTypingIndicator(); } catch {}
 }
 
+function maybeTriggerPendingChessChallenge(thread){
+  if (!pendingChessChallenge || !thread || thread.is_group) return;
+  const otherId = thread.otherUser?.id;
+  if (pendingChessChallenge.userId && Number(otherId) !== Number(pendingChessChallenge.userId)) return;
+  socket?.emit("chess:challenge:create", {
+    dmThreadId: thread.id,
+    challengedUserId: pendingChessChallenge.userId,
+  });
+  pendingChessChallenge = null;
+}
+
 function openDmThread(threadId){
   // persist draft for previous thread before switching
   saveDmDraft();
@@ -9841,6 +9906,7 @@ function openDmThread(threadId){
   dmUnreadThreads.delete(threadId);
   renderDmThreads();
   setDmMeta(meta);
+  if (meta) maybeTriggerPendingChessChallenge(meta);
   if (meta) setBadgeVisibility(meta.is_group ? "group" : "direct", false);
   setDmReplyTarget(null);
 
@@ -10329,6 +10395,13 @@ dmUserBtn?.addEventListener("click", () => {
     startDirectMessage(modalTargetUsername, modalTargetUserId);
   }
 });
+dmChessQuickBtn?.addEventListener("click", () => {
+  if (modalTargetUsername && modalTargetUserId) {
+    pendingChessChallenge = { userId: modalTargetUserId, username: modalTargetUsername };
+    closeModal();
+    startDirectMessage(modalTargetUsername, modalTargetUserId);
+  }
+});
 profileEditBtn?.addEventListener("click", () => {
   if (!currentProfileIsSelf) return;
   setProfileEditMode(true);
@@ -10349,6 +10422,56 @@ profileSettingsBtn?.addEventListener("click", async () => {
   setTab("customize");
   try { syncSoundPrefsUI(true); } catch {}
   await loadChatFxPrefs({ force: true });
+});
+
+roomChessBtn?.addEventListener("click", () => {
+  openChessModal({ contextType: "room", contextId: currentRoom, label: `Room • ${displayRoomName(currentRoom)}` });
+});
+
+dmChessBtn?.addEventListener("click", () => {
+  if (!activeDmId) return;
+  const thread = dmThreads.find((t) => String(t.id) === String(activeDmId));
+  if (!thread || thread.is_group) return;
+  const pending = chessChallengesByThread.get(Number(thread.id));
+  const otherUserId = thread.otherUser?.id;
+  if (pending?.status === "pending") {
+    renderDmChessChallenge(thread);
+    return;
+  }
+  socket?.emit("chess:game:join", { contextType: "dm", contextId: String(activeDmId) }, (res = {}) => {
+    if (res?.ok) {
+      openChessModal({ contextType: "dm", contextId: String(activeDmId), label: `DM • ${threadLabel(thread)}`, skipJoin: true });
+      return;
+    }
+    if (otherUserId) {
+      socket?.emit("chess:challenge:create", { dmThreadId: Number(activeDmId), challengedUserId: otherUserId });
+    }
+  });
+});
+
+chessCloseBtn?.addEventListener("click", closeChessModal);
+chessModal?.addEventListener("click", (e) => {
+  if (e.target === chessModal) closeChessModal();
+});
+chessCreateBtn?.addEventListener("click", () => {
+  if (!chessState.contextId) return;
+  socket?.emit("chess:game:create", { contextType: chessState.contextType, contextId: chessState.contextId });
+});
+chessResignBtn?.addEventListener("click", () => {
+  if (!chessState.gameId) return;
+  socket?.emit("chess:game:resign", { gameId: chessState.gameId });
+});
+chessDrawOfferBtn?.addEventListener("click", () => {
+  if (!chessState.gameId) return;
+  socket?.emit("chess:game:drawOffer", { gameId: chessState.gameId });
+});
+chessDrawAcceptBtn?.addEventListener("click", () => {
+  if (!chessState.gameId) return;
+  socket?.emit("chess:game:drawRespond", { gameId: chessState.gameId, accept: true });
+});
+chessLeaderboardBtn?.addEventListener("click", () => {
+  setRightPanelMode("menu");
+  setMenuTab("leaderboards");
 });
 
 // unified media button
@@ -11962,6 +12085,35 @@ function renderLeaderboard(listEl, items, mapper){
   });
 }
 
+function renderChessLeaderboard(listEl, items){
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  if (!items?.length) {
+    const empty = document.createElement("div");
+    empty.className = "small muted";
+    empty.textContent = "No chess games yet.";
+    listEl.appendChild(empty);
+    return;
+  }
+  items.forEach((item, idx) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "leaderboardItem leaderboardChessRow";
+    const left = document.createElement("div");
+    left.className = "label";
+    left.textContent = `${idx + 1}. ${item.username}`;
+    const right = document.createElement("div");
+    right.className = "meta leaderboardChessMeta";
+    right.textContent = `${item.elo} Elo • ${item.wins}-${item.losses}-${item.draws}`;
+    row.appendChild(left);
+    row.appendChild(right);
+    row.addEventListener("click", () => {
+      if (item.username) openMemberProfile(item.username);
+    });
+    listEl.appendChild(row);
+  });
+}
+
 function formatLeaderboardTime(ts){
   if(!ts) return "";
   try{
@@ -11999,13 +12151,18 @@ async function fetchLeaderboards({ force=false, reason="manual" } = {}){
     leaderboardsMsg.textContent = (reason === "manual" || !leaderboardState.lastFetchAt) ? "Loading..." : "";
   }
   try{
-    const res = await fetch("/api/leaderboard", { credentials:"include" });
+    const [res, chessRes] = await Promise.all([
+      fetch("/api/leaderboard", { credentials:"include" }),
+      fetch("/api/chess/leaderboard", { credentials:"include" }),
+    ]);
     if(!res.ok) throw new Error("failed");
     const data = await res.json();
+    const chessData = chessRes.ok ? await chessRes.json() : null;
     renderLeaderboard(leaderboardXp, data?.xp, (item, idx) => ({ label: `${idx + 1}. ${item.username}`, meta: `Level ${item.level}` }));
     renderLeaderboard(leaderboardGold, data?.gold, (item, idx) => ({ label: `${idx + 1}. ${item.username}`, meta: `${Number(item.gold || 0).toLocaleString()} Gold` }));
     renderLeaderboard(leaderboardDice, data?.dice, (item, idx) => ({ label: `${idx + 1}. ${item.username}`, meta: `${Number(item.sixes || 0)}× ${diceFace(6)}` }));
     renderLeaderboard(leaderboardLikes, data?.likes, (item, idx) => ({ label: `${idx + 1}. ${item.username}`, meta: `${Number(item.likes || 0)} likes` }));
+    renderChessLeaderboard(leaderboardChess, chessData?.rows || []);
     leaderboardState.lastFetchAt = Date.now();
     leaderboardState.lastError = false;
     if (leaderboardsMsg) leaderboardsMsg.textContent = "";
@@ -12016,6 +12173,419 @@ async function fetchLeaderboards({ force=false, reason="manual" } = {}){
   }finally{
     leaderboardState.inFlight = false;
   }
+}
+
+const CHESS_PIECES = {
+  p: "♟", r: "♜", n: "♞", b: "♝", q: "♛", k: "♚",
+  P: "♙", R: "♖", N: "♘", B: "♗", Q: "♕", K: "♔",
+};
+const CHESS_FILES = ["a","b","c","d","e","f","g","h"];
+
+function parseFenToMap(fen){
+  const map = {};
+  if (!fen) return map;
+  const board = String(fen).split(" ")[0];
+  const ranks = board.split("/");
+  for (let r = 0; r < 8; r += 1) {
+    const rank = ranks[r] || "";
+    let fileIndex = 0;
+    for (const ch of rank) {
+      if (/\d/.test(ch)) {
+        fileIndex += Number(ch);
+      } else {
+        const file = CHESS_FILES[fileIndex];
+        const square = `${file}${8 - r}`;
+        map[square] = ch;
+        fileIndex += 1;
+      }
+    }
+  }
+  return map;
+}
+
+function getChessMyColor(){
+  if (!me?.id) return null;
+  if (chessState.whiteUser && Number(chessState.whiteUser.id) === Number(me.id)) return "w";
+  if (chessState.blackUser && Number(chessState.blackUser.id) === Number(me.id)) return "b";
+  return null;
+}
+
+function getLegalMovesMap(){
+  const map = new Map();
+  for (const move of chessState.legalMoves || []) {
+    if (!map.has(move.from)) map.set(move.from, []);
+    map.get(move.from).push(move);
+  }
+  return map;
+}
+
+function clearChessSelection(){
+  chessState.selectedSquare = null;
+  chessState.pendingPromotion = null;
+  if (chessPromotion) chessPromotion.hidden = true;
+}
+
+function showChessPromotion(options, from, to){
+  if (!chessPromotion) return;
+  chessPromotion.innerHTML = "";
+  chessPromotion.hidden = false;
+  const color = chessState.turn === "b" ? "black" : "white";
+  const promoOrder = ["q","r","b","n"];
+  promoOrder.forEach((piece) => {
+    const opt = options.find((m) => m.promotion === piece);
+    if (!opt) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = CHESS_PIECES[color === "white" ? piece.toUpperCase() : piece];
+    btn.addEventListener("click", () => {
+      chessPromotion.hidden = true;
+      chessState.pendingPromotion = null;
+      sendChessMove({ from, to, promotion: piece });
+    });
+    chessPromotion.appendChild(btn);
+  });
+}
+
+function sendChessMove({ from, to, promotion }){
+  if (!socket || !chessState.gameId) return;
+  socket.emit("chess:game:move", { gameId: chessState.gameId, from, to, promotion });
+  clearChessSelection();
+}
+
+function renderChessBoard(){
+  if (!chessBoard) return;
+  chessBoard.innerHTML = "";
+  if (!chessState.fen) return;
+  const boardMap = parseFenToMap(chessState.fen);
+  const orientation = getChessMyColor() === "b" ? "black" : "white";
+  const files = orientation === "white" ? CHESS_FILES : [...CHESS_FILES].reverse();
+  const ranks = orientation === "white" ? [8,7,6,5,4,3,2,1] : [1,2,3,4,5,6,7,8];
+  const legalByFrom = getLegalMovesMap();
+  const selected = chessState.selectedSquare;
+  const legalTargets = selected ? legalByFrom.get(selected) || [] : [];
+  const legalTargetSquares = new Map(legalTargets.map((m) => [m.to, m]));
+
+  ranks.forEach((rank, rIndex) => {
+    files.forEach((file, fIndex) => {
+      const square = `${file}${rank}`;
+      const piece = boardMap[square] || "";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `chessSquare ${(rIndex + fIndex) % 2 === 0 ? "light" : "dark"}`;
+      button.dataset.square = square;
+      if (piece) button.textContent = CHESS_PIECES[piece] || "";
+      if (selected === square) button.classList.add("is-selected");
+      if (legalTargetSquares.has(square)) {
+        button.classList.add("is-legal");
+        if (boardMap[square]) button.classList.add("is-capture");
+      }
+      button.addEventListener("click", () => handleChessSquareTap(square, boardMap));
+      chessBoard.appendChild(button);
+    });
+  });
+}
+
+function handleChessSquareTap(square, boardMap){
+  if (!chessState.gameId || chessState.status !== "active") return;
+  const myColor = getChessMyColor();
+  if (!myColor || myColor !== chessState.turn) return;
+  const piece = boardMap[square];
+  const isWhitePiece = piece && piece === piece.toUpperCase();
+  const isOwnPiece = piece && ((myColor === "w" && isWhitePiece) || (myColor === "b" && !isWhitePiece));
+  const legalByFrom = getLegalMovesMap();
+
+  if (!chessState.selectedSquare) {
+    if (isOwnPiece) chessState.selectedSquare = square;
+    renderChessBoard();
+    return;
+  }
+
+  const selected = chessState.selectedSquare;
+  if (selected === square) {
+    clearChessSelection();
+    renderChessBoard();
+    return;
+  }
+
+  if (isOwnPiece) {
+    chessState.selectedSquare = square;
+    renderChessBoard();
+    return;
+  }
+
+  const options = (legalByFrom.get(selected) || []).filter((m) => m.to === square);
+  if (!options.length) {
+    clearChessSelection();
+    renderChessBoard();
+    return;
+  }
+
+  const promos = options.filter((m) => m.promotion);
+  if (promos.length > 1) {
+    chessState.pendingPromotion = { from: selected, to: square };
+    showChessPromotion(promos, selected, square);
+    return;
+  }
+  sendChessMove({ from: selected, to: square, promotion: promos[0]?.promotion || undefined });
+}
+
+function renderChessSeats(){
+  if (!chessSeats) return;
+  chessSeats.innerHTML = "";
+  const seats = [
+    { color: "white", user: chessState.whiteUser },
+    { color: "black", user: chessState.blackUser },
+  ];
+  seats.forEach(({ color, user }) => {
+    const row = document.createElement("div");
+    row.className = "chessSeat";
+    const meta = document.createElement("div");
+    meta.className = "chessSeatMeta";
+    const label = document.createElement("div");
+    label.className = "chessSeatLabel";
+    label.textContent = color === "white" ? "White" : "Black";
+    const name = document.createElement("div");
+    name.className = "small muted";
+    name.textContent = user?.username ? user.username : "Open seat";
+    meta.appendChild(label);
+    meta.appendChild(name);
+    row.appendChild(meta);
+
+    if (chessState.contextType === "room") {
+      const action = document.createElement("button");
+      action.type = "button";
+      action.className = "btn secondary";
+      const isMe = user?.id && me?.id && Number(user.id) === Number(me.id);
+      if (!user) {
+        action.textContent = `Sit ${color}`;
+      } else if (isMe) {
+        action.textContent = "Seated";
+        action.disabled = true;
+      } else if (chessState.seatClaimable?.[color]) {
+        action.textContent = "Claim seat";
+      } else {
+        action.textContent = "Occupied";
+        action.disabled = true;
+      }
+      if (!chessState.gameId) {
+        action.disabled = true;
+      }
+      if (!action.disabled) {
+        action.addEventListener("click", () => {
+          socket?.emit("chess:game:seat", { gameId: chessState.gameId, color });
+        });
+      }
+      row.appendChild(action);
+    }
+    chessSeats.appendChild(row);
+  });
+}
+
+function renderChessStatus(){
+  if (!chessStatus) return;
+  const turnLabel = chessState.turn === "w" ? "White" : "Black";
+  let text = "";
+  if (chessState.status === "none") {
+    text = "No active chess table yet.";
+  } else if (chessState.status === "pending") {
+    text = "Waiting for players to sit.";
+  } else if (chessState.status === "active") {
+    text = `Turn: ${turnLabel}`;
+  } else if (chessState.result === "draw") {
+    text = "Game ended in a draw.";
+  } else if (chessState.result === "white") {
+    text = "White wins.";
+  } else if (chessState.result === "black") {
+    text = "Black wins.";
+  } else {
+    text = "Game finished.";
+  }
+
+  if (chessState.drawOfferBy?.username && chessState.status === "active") {
+    text += ` Draw offered by ${chessState.drawOfferBy.username}.`;
+  }
+  chessStatus.textContent = text;
+}
+
+function renderChessMeta(){
+  if (!chessMeta) return;
+  const lines = [];
+  if (chessState.rated === false) {
+    lines.push(`Unrated${chessState.ratedReason ? ` (${chessState.ratedReason.replace(/_/g, " ")})` : ""}`);
+  }
+  if (chessState.rated && chessState.whiteEloChange != null && chessState.blackEloChange != null) {
+    lines.push(`Elo change — White ${chessState.whiteEloChange >= 0 ? "+" : ""}${chessState.whiteEloChange}, Black ${chessState.blackEloChange >= 0 ? "+" : ""}${chessState.blackEloChange}`);
+  }
+  chessMeta.textContent = lines.join(" • ");
+}
+
+function updateChessActions(){
+  if (!chessResignBtn || !chessDrawOfferBtn || !chessDrawAcceptBtn || !chessCreateBtn) return;
+  const isPlayer = !!getChessMyColor();
+  const isActive = chessState.status === "active";
+  const isDrawOfferedByMe = chessState.drawOfferBy?.id && me?.id && Number(chessState.drawOfferBy.id) === Number(me.id);
+  chessResignBtn.hidden = !(isPlayer && isActive);
+  chessDrawOfferBtn.hidden = !(isPlayer && isActive);
+  chessDrawOfferBtn.disabled = !!chessState.drawOfferBy;
+  chessDrawAcceptBtn.hidden = !(isActive && chessState.drawOfferBy && !isDrawOfferedByMe);
+  const canCreate = chessState.contextType === "room" && (chessState.status === "none" || chessState.status !== "active");
+  chessCreateBtn.hidden = !canCreate;
+  chessCreateBtn.textContent = chessState.status === "none" ? "Start Table" : "New Table";
+}
+
+function renderChess(){
+  renderChessBoard();
+  renderChessSeats();
+  renderChessStatus();
+  renderChessMeta();
+  updateChessActions();
+}
+
+function openChessModal({ contextType, contextId, label, skipJoin } = {}){
+  if (!chessModal) return;
+  chessModal.hidden = false;
+  chessState.isOpen = true;
+  if (contextType && contextId && (chessState.contextType !== contextType || String(chessState.contextId) !== String(contextId))) {
+    chessState.gameId = null;
+    chessState.fen = null;
+    chessState.pgn = "";
+    chessState.status = "none";
+    chessState.whiteUser = null;
+    chessState.blackUser = null;
+    chessState.legalMoves = [];
+    chessState.drawOfferBy = null;
+    chessState.result = null;
+    chessState.rated = null;
+    chessState.ratedReason = null;
+    chessState.whiteEloChange = null;
+    chessState.blackEloChange = null;
+    chessState.seatClaimable = { white: false, black: false };
+  }
+  chessState.contextType = contextType || null;
+  chessState.contextId = contextId || null;
+  if (chessContextLabel) chessContextLabel.textContent = label || (contextType === "dm" ? "DM Chess" : "Room Chess");
+  if (!skipJoin && socket && contextType && contextId) {
+    socket.emit("chess:game:join", { contextType, contextId }, (res = {}) => {
+      if (!res?.ok && contextType === "room") {
+        clearChessSelection();
+        renderChess();
+      }
+    });
+  }
+  renderChess();
+}
+
+function closeChessModal(){
+  if (!chessModal) return;
+  chessModal.hidden = true;
+  chessState.isOpen = false;
+  clearChessSelection();
+}
+
+function updateChessState(payload){
+  if (!payload) return;
+  if (payload.fen && payload.fen !== chessState.fen) {
+    clearChessSelection();
+  }
+  chessState.gameId = payload.gameId;
+  chessState.contextType = payload.contextType || chessState.contextType;
+  chessState.contextId = payload.contextId || chessState.contextId;
+  chessState.fen = payload.fen;
+  chessState.pgn = payload.pgn || "";
+  chessState.status = payload.status || "none";
+  chessState.turn = payload.turn;
+  chessState.whiteUser = payload.whiteUser || null;
+  chessState.blackUser = payload.blackUser || null;
+  chessState.legalMoves = payload.legalMoves || [];
+  chessState.drawOfferBy = payload.drawOfferBy || null;
+  chessState.result = payload.result || null;
+  chessState.rated = payload.rated;
+  chessState.ratedReason = payload.ratedReason || null;
+  chessState.whiteEloChange = payload.whiteEloChange ?? null;
+  chessState.blackEloChange = payload.blackEloChange ?? null;
+  chessState.seatClaimable = payload.seatClaimable || { white: false, black: false };
+  if (chessState.status !== "active") clearChessSelection();
+  renderChess();
+}
+
+function renderDmChessChallenge(thread){
+  if (!dmChessChallenge || !thread) return;
+  const challenge = chessChallengesByThread.get(Number(thread.id));
+  if (!challenge || challenge.status !== "pending") {
+    dmChessChallenge.hidden = true;
+    dmChessChallenge.innerHTML = "";
+    return;
+  }
+  dmChessChallenge.hidden = false;
+  dmChessChallenge.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "dmChessChallengeRow";
+  const label = document.createElement("div");
+  label.className = "dmChessChallengeTag";
+  const challengerName = challenge.challenger?.username || "Someone";
+  const challengedName = challenge.challenged?.username || "you";
+  label.textContent = `${challengerName} challenged ${challengedName} to chess.`;
+  title.appendChild(label);
+  dmChessChallenge.appendChild(title);
+
+  const actionRow = document.createElement("div");
+  actionRow.className = "dmChessChallengeActions";
+  const isChallengedMe = challenge.challenged?.id && me?.id && Number(challenge.challenged.id) === Number(me.id);
+  if (isChallengedMe) {
+    const acceptBtn = document.createElement("button");
+    acceptBtn.type = "button";
+    acceptBtn.className = "btn";
+    acceptBtn.textContent = "Accept";
+    acceptBtn.addEventListener("click", () => {
+      socket?.emit("chess:challenge:respond", { challengeId: challenge.challengeId, accept: true });
+    });
+    const declineBtn = document.createElement("button");
+    declineBtn.type = "button";
+    declineBtn.className = "btn secondary";
+    declineBtn.textContent = "Decline";
+    declineBtn.addEventListener("click", () => {
+      socket?.emit("chess:challenge:respond", { challengeId: challenge.challengeId, accept: false });
+    });
+    actionRow.appendChild(acceptBtn);
+    actionRow.appendChild(declineBtn);
+  } else {
+    const wait = document.createElement("div");
+    wait.className = "small muted";
+    wait.textContent = "Waiting on response.";
+    actionRow.appendChild(wait);
+  }
+  dmChessChallenge.appendChild(actionRow);
+}
+
+function updateDmChessButtons(thread){
+  if (!dmChessBtn) return;
+  const isDirect = thread && !thread.is_group;
+  dmChessBtn.disabled = !isDirect;
+  dmChessBtn.title = isDirect ? "Play Chess" : "Chess is only for direct DMs";
+}
+
+function buildDmChessMessage(text){
+  if (!text || typeof text !== "string") return null;
+  if (!text.startsWith("[chess:") || !text.endsWith("]")) return null;
+  const payload = text.slice(7, -1);
+  const parts = payload.split(":");
+  const type = parts[0];
+  let message = "";
+  if (type === "challenge" && parts[1] === "accepted") {
+    message = "Chess challenge accepted.";
+  } else if (type === "challenge" && parts[1] === "declined") {
+    message = "Chess challenge declined.";
+  } else if (type === "challenge") {
+    message = "Chess challenge sent.";
+  } else if (type === "result") {
+    message = parts[2] ? `Chess result: ${parts[2]}` : "Chess game finished.";
+  } else {
+    message = "Chess update.";
+  }
+  const card = document.createElement("div");
+  card.className = "dmChessMessage";
+  card.textContent = message;
+  return card;
 }
 
 function setLeaderboardOpen(isOpen){
@@ -14747,6 +15317,7 @@ function updateProfileActions({ isSelf = false, canModerate = false } = {}){
   if (profileEditToggleBtn) profileEditToggleBtn.style.display = isSelf ? "" : "none";
   if (profileEditToggleRow) profileEditToggleRow.style.display = "none";
   applyCustomizeVisibility();
+  if (dmChessQuickBtn) dmChessQuickBtn.style.display = isSelf ? "none" : "";
   if (addFriendBtn) addFriendBtn.style.display = isSelf ? "none" : "";
   if (declineFriendBtn) declineFriendBtn.style.display = "none";
   if (!isSelf && addFriendBtn) {
@@ -16451,6 +17022,10 @@ initAppealsDurationSelect();
 
     // Join initial room so history + realtime messages work reliably
     joinRoom(currentRoom);
+
+    if (chessState.isOpen && chessState.contextType && chessState.contextId) {
+      socket.emit("chess:game:join", { contextType: chessState.contextType, contextId: chessState.contextId });
+    }
   });
 
   socket.on("restriction:status", async (payload) => {
@@ -16599,6 +17174,17 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
     if(now < leaderboardState.wsCooldownUntil) return;
     leaderboardState.wsCooldownUntil = now + 2000;
     fetchLeaderboards({ force:true, reason:"ws" });
+  });
+  socket.on("chess:game:state", (payload = {}) => {
+    updateChessState(payload);
+  });
+  socket.on("chess:challenge:state", (payload = {}) => {
+    if (!payload?.dmThreadId) return;
+    chessChallengesByThread.set(Number(payload.dmThreadId), payload);
+    if (activeDmId && Number(activeDmId) === Number(payload.dmThreadId)) {
+      const thread = dmThreads.find((t) => String(t.id) === String(activeDmId));
+      if (thread) renderDmChessChallenge(thread);
+    }
   });
   await loadRooms();
   await loadLatestUpdateSnippet();

@@ -650,6 +650,63 @@ await run(`CREATE INDEX IF NOT EXISTS idx_appeal_messages_appeal ON appeal_messa
        WHERE is_group = 1 AND participants_key IS NOT NULL`
   );
 
+  // --- Chess (games, challenges, ratings)
+  await run(`
+    CREATE TABLE IF NOT EXISTS chess_user_stats (
+      user_id INTEGER PRIMARY KEY,
+      chess_elo INTEGER NOT NULL DEFAULT 1200,
+      chess_games_played INTEGER NOT NULL DEFAULT 0,
+      chess_wins INTEGER NOT NULL DEFAULT 0,
+      chess_losses INTEGER NOT NULL DEFAULT 0,
+      chess_draws INTEGER NOT NULL DEFAULT 0,
+      chess_peak_elo INTEGER NOT NULL DEFAULT 1200,
+      chess_last_game_at INTEGER,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS chess_games (
+      game_id TEXT PRIMARY KEY,
+      context_type TEXT NOT NULL,
+      context_id TEXT NOT NULL,
+      white_user_id INTEGER,
+      black_user_id INTEGER,
+      fen TEXT NOT NULL,
+      pgn TEXT NOT NULL,
+      status TEXT NOT NULL,
+      turn TEXT NOT NULL,
+      result TEXT,
+      rated INTEGER,
+      rated_reason TEXT,
+      plies_count INTEGER NOT NULL DEFAULT 0,
+      draw_offer_by_user_id INTEGER,
+      draw_offer_at INTEGER,
+      white_elo_change INTEGER,
+      black_elo_change INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      last_move_at INTEGER
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS chess_challenges (
+      challenge_id TEXT PRIMARY KEY,
+      dm_thread_id INTEGER NOT NULL,
+      challenger_user_id INTEGER NOT NULL,
+      challenged_user_id INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
+  await run(`CREATE INDEX IF NOT EXISTS idx_chess_games_context ON chess_games(context_type, context_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_chess_games_status ON chess_games(status)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_chess_challenges_thread ON chess_challenges(dm_thread_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_chess_challenges_status ON chess_challenges(status)`);
+
 
   // --- Role presets + user permission overrides (for Role Debug panel)
   await run(`
