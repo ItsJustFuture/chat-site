@@ -12175,10 +12175,45 @@ async function fetchLeaderboards({ force=false, reason="manual" } = {}){
   }
 }
 
-const CHESS_PIECES = {
-  p: "♟", r: "♜", n: "♞", b: "♝", q: "♛", k: "♚",
-  P: "♙", R: "♖", N: "♘", B: "♗", Q: "♕", K: "♔",
+// Chess piece assets (PNG) — filenames match your uploaded set.
+// Note: Knights use "H" in filenames (bH/wH) even though FEN uses N/n.
+const CHESS_PIECE_ASSETS = {
+  p: "/chess/pieces/bP.png",
+  r: "/chess/pieces/bR.png",
+  n: "/chess/pieces/bH.png",
+  b: "/chess/pieces/bB.png",
+  q: "/chess/pieces/bQ.png",
+  k: "/chess/pieces/bK.png",
+  P: "/chess/pieces/wP.png",
+  R: "/chess/pieces/wR.png",
+  N: "/chess/pieces/wH.png",
+  B: "/chess/pieces/wB.png",
+  Q: "/chess/pieces/wQ.png",
+  K: "/chess/pieces/wK.png",
 };
+
+function chessPieceAlt(piece){
+  if (!piece) return "";
+  const isWhite = piece === piece.toUpperCase();
+  const color = isWhite ? "White" : "Black";
+  const type = ({
+    p: "Pawn", r: "Rook", n: "Knight", b: "Bishop", q: "Queen", k: "King",
+  })[piece.toLowerCase()] || "Piece";
+  return `${color} ${type}`;
+}
+
+function createChessPieceImg(piece){
+  const src = CHESS_PIECE_ASSETS[piece];
+  if (!src) return null;
+  const img = document.createElement("img");
+  img.className = "chessPiece";
+  img.alt = chessPieceAlt(piece);
+  img.src = src;
+  img.decoding = "async";
+  img.loading = "lazy";
+  img.draggable = false;
+  return img;
+}
 const CHESS_FILES = ["a","b","c","d","e","f","g","h"];
 
 function parseFenToMap(fen){
@@ -12236,7 +12271,9 @@ function showChessPromotion(options, from, to){
     if (!opt) return;
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.textContent = CHESS_PIECES[color === "white" ? piece.toUpperCase() : piece];
+    const pieceChar = color === "white" ? piece.toUpperCase() : piece;
+    const img = createChessPieceImg(pieceChar);
+    if (img) btn.appendChild(img);
     btn.addEventListener("click", () => {
       chessPromotion.hidden = true;
       chessState.pendingPromotion = null;
@@ -12273,7 +12310,10 @@ function renderChessBoard(){
       button.type = "button";
       button.className = `chessSquare ${(rIndex + fIndex) % 2 === 0 ? "light" : "dark"}`;
       button.dataset.square = square;
-      if (piece) button.textContent = CHESS_PIECES[piece] || "";
+      if (piece) {
+        const img = createChessPieceImg(piece);
+        if (img) button.appendChild(img);
+      }
       if (selected === square) button.classList.add("is-selected");
       if (legalTargetSquares.has(square)) {
         button.classList.add("is-legal");
