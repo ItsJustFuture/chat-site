@@ -2692,6 +2692,7 @@ body.survival-room .survivalPanel{
   top: calc(var(--topBarH, 56px) + var(--safeT, 0px) + 8px);
   left:50%;
   transform:translateX(-50%);
+  pointer-events:none;
   z-index:140;
   width:auto;
   border-radius:14px;
@@ -5846,9 +5847,11 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
 #diceOverlay{
   position:absolute;
   left:50%;
-  /* Slightly higher so it doesn't sit on top of the composer/roll button on short screens */
-  top:42%;
-  transform:translate(-50%,-50%);
+  /* Keep result overlay above the composer/roll button on all viewports */
+  top:auto;
+  bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom, 0px) + 18px);
+  transform:translateX(-50%);
+  pointer-events:none;
   min-width: 170px;
   min-height: 96px;
   padding: 14px 14px 12px;
@@ -5861,17 +5864,6 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
   border:1px solid var(--border);
   box-shadow:0 10px 30px rgba(0,0,0,.25);
   z-index:50;
-}
-
-/* Dice Room: keep overlay/flares away from the composer on small screens */
-body.dice-room #diceOverlay{
-  top: 36%;
-}
-@media (max-height: 700px){
-  body.dice-room #diceOverlay{ top: 33%; }
-}
-@media (max-height: 600px){
-  body.dice-room #diceOverlay{ top: 29%; }
 }
 #diceOverlay .diceOverlayInner{ width:100%; display:flex; flex-direction:column; gap:6px; align-items:center; }
 #diceOverlay .diceDisplay{ font-size:54px; font-weight:900; letter-spacing:0.5px; line-height:1; }
@@ -5921,13 +5913,13 @@ body.dice-room #diceOverlay{
   right:0;
   top:0;
   /* Keep celebratory confetti above the composer area (especially on mobile). */
-  bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom, 0px) + 24px);
+  bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom, 0px) + 8px);
   pointer-events:none;
   z-index:45;
 }
 #confettiLayer .confetti{
   position:absolute;
-  top:24%;
+  top:35%;
   width:10px;
   height:14px;
   border-radius:3px;
