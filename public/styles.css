@@ -3414,7 +3414,8 @@ body.survival-room .survivalArena{
   position:absolute;
   left:0;
   right:0;
-  bottom: calc(var(--composerH, 72px) + 6px);
+  /* Use a capped anchor so theme-specific composer UI can't push typing too high */
+  bottom: calc(var(--typingAnchorH, var(--composerH, 72px)) + 6px);
   height:22px;
   padding:0 14px;
   color:var(--muted);
@@ -3457,7 +3458,7 @@ body.survival-room .survivalArena{
 #jumpToLatest{
   position:absolute;
   right:14px;
-  bottom: calc(var(--composerH, 72px) + 16px);
+  bottom: calc(var(--typingAnchorH, var(--composerH, 72px)) + 16px);
   display:none;
   align-items:center;
   gap:6px;
@@ -5636,7 +5637,7 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
     position:fixed;
     left:0;
     right:0;
-    bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom));
+    bottom: calc(var(--typingAnchorH, var(--composerH, 72px)) + env(safe-area-inset-bottom));
     height:auto;
     padding:6px 12px;
     display:none;
@@ -6833,6 +6834,14 @@ body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive {
   animation: irisLolaNebulaPulse 32s ease-in-out infinite;
 }
 
+/* Iris & Lola Neon: Performance mode
+   - Disable large background-size animations (expensive on mobile GPUs)
+   - Keep the same nebula look, just static
+*/
+body[data-theme="Iris & Lola Neon"].irisLolaPerf{
+  animation: none !important;
+}
+
 @keyframes irisLolaNebulaPulse {
   0%, 100% {
     background-size: 156vmax 156vmax, 148vmax 148vmax, 136vmax 136vmax, cover;
@@ -6840,6 +6849,10 @@ body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive {
   50% {
     background-size: 168vmax 168vmax, 158vmax 158vmax, 146vmax 146vmax, cover;
   }
+}
+
+body[data-theme="Iris & Lola Neon"].irisLolaPerf.irisLolaCoupleActive{
+  animation: none !important;
 }
 
 /* Iris & Lola Space Backdrop */
@@ -6873,6 +6886,18 @@ body[data-theme="Iris & Lola Neon"] .irisLolaStarfield {
   transform: translate3d(0, 0, 0) rotate(-28deg);
   animation: irisLolaStarDrift var(--dur) linear infinite;
   animation-delay: var(--delay);
+}
+
+/* In perf mode, slow the drifting stars down and reduce alpha a touch */
+body[data-theme="Iris & Lola Neon"].irisLolaPerf .irisLolaStar{
+  animation-duration: 60s !important;
+  opacity: 0;
+}
+
+/* Perf mode: fewer stars are spawned by JS; also slow down their drift. */
+body[data-theme="Iris & Lola Neon"].irisLolaPerf .irisLolaStar{
+  animation-duration: 58s;
+  opacity: 0.0;
 }
 
 @keyframes irisLolaStarDrift {
@@ -10717,6 +10742,11 @@ body[data-theme="Iris & Lola Neon"] .irisLolaShootingStar{
   opacity: 0;
   animation: irisLolaShoot var(--sdur, 1200ms) ease-out forwards;
 }
+
+/* Perf: remove GPU-expensive filters */
+body[data-theme="Iris & Lola Neon"].irisLolaPerf .irisLolaShootingStar{
+  filter: none !important;
+}
 @keyframes irisLolaShoot{
   0%{ opacity:0; transform: translate3d(0,0,0) rotate(-28deg); }
   10%{ opacity:.95; }
@@ -10737,6 +10767,14 @@ body[data-theme="Iris & Lola Neon"] .irisLolaConstellationLine{
   transform-origin: 0 50%;
   background: linear-gradient(90deg, rgba(0,0,0,0), rgba(120,255,210,.62), rgba(170,90,255,.36), rgba(0,0,0,0));
   filter: drop-shadow(0 0 6px rgba(120,255,210,.18));
+}
+
+body[data-theme="Iris & Lola Neon"].irisLolaPerf .irisLolaConstellationLine{
+  filter: none !important;
+}
+
+body[data-theme="Iris & Lola Neon"].irisLolaPerf .irisLolaConstellationLine{
+  filter: none !important;
 }
 @keyframes irisLolaConstellation{
   0%{ opacity:0; }

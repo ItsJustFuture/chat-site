@@ -390,6 +390,13 @@ const THEMES = [
     // Used by survival mini-button and sticky panels to avoid sitting under the fixed top bar.
     root.style.setProperty("--topBarH", `${metrics.headerH}px`);
     root.style.setProperty("--composerH", `${metrics.composerH}px`);
+    // Typing overlay should sit just above the composer. Some themes introduce
+    // extra transient UI inside the composer that can inflate measured height
+    // and push the typing label too far upward (especially on iOS). We keep a
+    // capped anchor height for positioning the typing overlay.
+    const typingCap = (isIrisLolaThemeActive() || (IS_IOS && metrics.kbInset > 0)) ? 96 : 128;
+    const typingAnchorH = Math.max(56, Math.min(metrics.composerH, typingCap));
+    root.style.setProperty("--typingAnchorH", `${typingAnchorH}px`);
     root.style.setProperty("--playerH", `${metrics.playerH}px`);
     root.style.setProperty("--menuHeaderH", `${metrics.menuHeaderH}px`);
 
@@ -2229,6 +2236,35 @@ let irisLolaShootingStarTimer = null;
 let irisLolaTintTimer = null;
 let irisLolaDrawerEasterCooldownUntil = 0;
 
+// Iris & Lola: performance safety
+// This theme intentionally has animated ambience. On some phones (especially iOS)
+// large background animations + frequent shooting stars can overheat/lag.
+// We auto-enable a lighter mode on likely low-power devices while preserving the look.
+let irisLolaPerfMode = false;
+
+function computeIrisLolaPerfMode(){
+  try{
+    const prefersReduced = !!PREFERS_REDUCED_MOTION;
+    const saveData = !!(navigator?.connection && navigator.connection.saveData);
+    const mem = Number(navigator?.deviceMemory || 0);
+    const cores = Number(navigator?.hardwareConcurrency || 0);
+    const mobileLike = !!window.matchMedia && window.matchMedia('(hover: none)').matches;
+    const lowSpec = (mem && mem <= 4) || (cores && cores <= 4);
+    // iOS Safari can struggle with animating huge background gradients.
+    return prefersReduced || saveData || lowSpec || (IS_IOS && mobileLike);
+  }catch{
+    return false;
+  }
+}
+
+function syncIrisLolaPerfClass(){
+  const on = computeIrisLolaPerfMode();
+  irisLolaPerfMode = on;
+  try{
+    document.body?.classList.toggle('irisLolaPerf', !!on);
+  }catch{}
+}
+
 function normalizeUserKey(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -2316,11 +2352,23 @@ function ensureIrisLolaStarfield() {
     irisLolaStarfieldReady = true;
     return;
   }
+
+  // Make sure perf class is in sync before we build the DOM for the ambience.
+  syncIrisLolaPerfClass();
+
   const field = document.createElement("div");
   field.id = "irisLolaStarfield";
   field.className = "irisLolaStarfield";
   field.setAttribute("aria-hidden", "true");
-  const stars = [
+  // Perf mode: fewer animated elements.
+  const stars = irisLolaPerfMode ? [
+    { x: "12%", y: "22%", size: "1px", dur: "38s", delay: "-6s" },
+    { x: "28%", y: "68%", size: "1px", dur: "44s", delay: "-18s" },
+    { x: "46%", y: "30%", size: "1px", dur: "40s", delay: "-12s" },
+    { x: "66%", y: "56%", size: "1px", dur: "42s", delay: "-22s" },
+    { x: "82%", y: "72%", size: "1px", dur: "48s", delay: "-28s" },
+    { x: "90%", y: "38%", size: "1px", dur: "46s", delay: "-16s" },
+  ] : [
     { x: "8%", y: "18%", size: "1px", dur: "26s", delay: "-4s" },
     { x: "22%", y: "64%", size: "2px", dur: "32s", delay: "-12s" },
     { x: "38%", y: "32%", size: "1px", dur: "28s", delay: "-8s" },
@@ -2399,8 +2447,8 @@ function spawnIrisLolaShootingStar(){
   // Start somewhere near the top-right and streak down-left.
   const startX = 70 + Math.random() * 25; // %
   const startY = 6 + Math.random() * 30;  // %
-  const len = 80 + Math.random() * 90;    // px
-  const dur = 900 + Math.random() * 800;  // ms
+  const len = irisLolaPerfMode ? (58 + Math.random() * 70) : (80 + Math.random() * 90);    // px
+  const dur = irisLolaPerfMode ? (750 + Math.random() * 600) : (900 + Math.random() * 800);  // ms
   node.style.setProperty('--sx', `${startX}%`);
   node.style.setProperty('--sy', `${startY}%`);
   node.style.setProperty('--len', `${len}px`);
@@ -2412,7 +2460,10 @@ function spawnIrisLolaShootingStar(){
 function scheduleIrisLolaShootingStar(){
   try{ if (irisLolaShootingStarTimer) clearTimeout(irisLolaShootingStarTimer); }catch{}
   if (!shouldUseIrisLolaAmbient() || !shouldAnimateAmbientEffects(PREFERS_REDUCED_MOTION)) return;
-  const delay = 2000 + Math.random() * 5200; // 2s-7.2s
+  // Perf mode: much less frequent to avoid overheating on phones.
+  const delay = irisLolaPerfMode
+    ? (10000 + Math.random() * 12000) // 10s-22s
+    : (2000 + Math.random() * 5200); // 2s-7.2s
   irisLolaShootingStarTimer = setTimeout(()=>{
     spawnIrisLolaShootingStar();
     scheduleIrisLolaShootingStar();
@@ -2470,14 +2521,19 @@ function ensureIrisLolaAmbientLoops(){
   if (!shouldUseIrisLolaAmbient()) { clearIrisLolaAmbientLoops(); return; }
   ensureIrisLolaStarfield();
 
+  // Re-sync perf mode (can change if user toggles Reduce Motion etc.).
+  syncIrisLolaPerfClass();
+
   // Time-based tint updates.
   setIrisLolaSkyTintVars();
   irisLolaTintTimer = setInterval(setIrisLolaSkyTintVars, 5 * 60 * 1000);
 
-  // Occasional constellation whispers: very rare.
-  irisLolaConstellationTimer = setInterval(()=>{
-    try{ spawnIrisLolaConstellationWhisper(); }catch{}
-  }, 2 * 60 * 1000 + Math.floor(Math.random()*60*1000));
+  // Occasional constellation whispers: very rare (disabled in perf mode).
+  if (!irisLolaPerfMode){
+    irisLolaConstellationTimer = setInterval(()=>{
+      try{ spawnIrisLolaConstellationWhisper(); }catch{}
+    }, 2 * 60 * 1000 + Math.floor(Math.random()*60*1000));
+  }
 
   // Shooting stars: randomized cadence.
   scheduleIrisLolaShootingStar();
@@ -2493,6 +2549,12 @@ function updateIrisLolaTogetherClass() {
   document.body?.classList.toggle("irisLolaTogether", !!on);
   document.body?.classList.toggle("irisLolaCoupleActive", !!(themeActive && coupleActive));
   updateIrisLolaAvatarGlows({ themeActive, coupleActive, bothOnline, partnerName });
+  // Toggle perf class only while the theme is active.
+  if (themeActive) syncIrisLolaPerfClass();
+  else {
+    irisLolaPerfMode = false;
+    try{ document.body?.classList.remove('irisLolaPerf'); }catch{}
+  }
   // Ambient layer: subtle starfield + shooting stars + rare constellation whispers.
   if (themeActive) ensureIrisLolaAmbientLoops();
   else clearIrisLolaAmbientLoops();
