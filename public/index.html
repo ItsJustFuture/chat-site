@@ -268,6 +268,10 @@
 <div class="sectionTitle">Profile likes</div>
 <div class="leaderboardList" id="leaderboardLikes"></div>
 </div>
+<div class="card leaderboardCard">
+<div class="sectionTitle">Chess leaderboard</div>
+<div class="leaderboardList" id="leaderboardChess"></div>
+</div>
 </div>
 </div>
 </div>
@@ -323,6 +327,7 @@
 <button class="iconBtn withBadge" id="dmToggleBtn" title="Direct messages" type="button">💬<span class="notifDot" id="dmBadgeDot" title="New DMs"></span></button>
 <button class="iconBtn withBadge" id="groupDmToggleBtn" title="Group DMs" type="button">👥<span class="notifDot" id="groupDmBadgeDot" title="New group DMs"></span></button>
 <button aria-label="Notifications" class="iconBtn withBadge" id="notificationsBtn" title="Notifications" type="button">🔔<span class="notifDot" id="notificationsDot" title="New notifications"></span></button>
+<button class="iconBtn" id="roomChessBtn" title="Chess Table" type="button">♟</button>
 <button class="iconBtn mobOnly" id="openMembersBtn" title="Members" type="button">👥</button>
 </div>
 </div>
@@ -647,6 +652,7 @@
 	<!-- typing indicator is positioned near the composer so it never pushes the message list -->
 </div>
 <div class="dmMetaActions">
+<button class="iconBtn secondary" id="dmChessBtn" title="Play Chess" type="button">♟</button>
 <button class="iconBtn secondary" id="dmCreateGroupBtn" title="Create group" type="button">➕</button>
 <button class="iconBtn secondary" id="dmInfoBtn" title="Group info" type="button">ℹ️</button>
 <button class="iconBtn secondary" id="dmSettingsBtn" title="DM settings" type="button">⚙️</button>
@@ -668,6 +674,7 @@
 </div>
 </div>
 </div>
+<div class="dmChessChallenge" id="dmChessChallenge" hidden=""></div>
 <div class="dmMessages" id="dmMessages"></div>
 <div class="replyPreview" id="dmReplyPreview">
 <div class="replyText" id="dmReplyPreviewText"></div>
@@ -875,6 +882,7 @@
 <div class="profileQuickActions" id="profileQuickActions">
 <div class="quickActionGroup">
 <button class="btn btnSecondary" id="dmUserBtn" type="button">Message</button>
+<button class="btn btnSecondary" id="dmChessQuickBtn" type="button">Play Chess</button>
 <button class="btn btnSecondary" id="addFriendBtn" style="display:none;" type="button">🤝 Add Friend</button>
 <button class="btn btnSecondary" id="declineFriendBtn" style="display:none;" type="button">✖ Decline</button>
 <button class="btn btnSecondary" id="likeProfileBtn" type="button">❤️ Like</button>
@@ -2308,6 +2316,40 @@
       <button class="btn secondary" id="themesActionApplyBtn" type="button">Apply</button>
       <button class="btn secondary" id="themesActionBuyBtn" type="button">Buy for 0 Gold</button>
       <button class="btn" id="themesActionCloseBtn" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- === Chess Modal === -->
+<div class="chessModal" id="chessModal" hidden="">
+  <div class="modalCard chessModalCard">
+    <div class="modalHeader chessModalHeader">
+      <div>
+        <div class="title">Chess Table</div>
+        <div class="small muted" id="chessContextLabel">Room</div>
+      </div>
+      <div class="row" style="gap:8px;">
+        <button class="btn secondary" id="chessLeaderboardBtn" type="button">Leaderboard</button>
+        <button aria-label="Close chess" class="iconBtn" id="chessCloseBtn" title="Close" type="button">✕</button>
+      </div>
+    </div>
+    <div class="chessModalBody">
+      <div class="chessBoardWrap">
+        <div class="chessBoard" id="chessBoard"></div>
+        <div class="chessPromotion" id="chessPromotion" hidden=""></div>
+      </div>
+      <div class="chessSidePanel">
+        <div class="chessSeats" id="chessSeats"></div>
+        <div class="chessStatus" id="chessStatus"></div>
+        <div class="chessActions">
+          <button class="btn secondary" id="chessCreateBtn" type="button">Start Table</button>
+          <button class="btn secondary" id="chessResignBtn" type="button">Resign</button>
+          <button class="btn secondary" id="chessDrawOfferBtn" type="button">Offer Draw</button>
+          <button class="btn secondary" id="chessDrawAcceptBtn" type="button">Accept Draw</button>
+        </div>
+        <div class="chessMeta" id="chessMeta"></div>
+      </div>
     </div>
   </div>
 </div>

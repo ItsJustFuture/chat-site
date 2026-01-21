@@ -43,6 +43,9 @@ const SURVIVAL_ROOM_ID = "survivalsimulator";
 const SURVIVAL_ROOM_DB_ID = 1;
 const SURVIVAL_SEASON_COOLDOWN_MS = 2 * 60 * 1000;
 const SURVIVAL_ADVANCE_COOLDOWN_MS = 2000;
+const CHESS_DEFAULT_ELO = 1200;
+const CHESS_MIN_PLIES_RATED = 6;
+const CHESS_SEAT_CLAIM_TIMEOUT_MS = 10 * 60 * 1000;
 
 // Auto-fill NPC pool: 25 male + 25 female (big recognizable names; used only for NPC slots).
 // NOTE: Keep this list PG and non-offensive.
@@ -175,6 +178,7 @@ setInterval(decayHeat, 60_000).unref?.();
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const { Chess } = require("chess.js");
 const express = require("express");
 const helmet = require("helmet");
 const session = require("express-session");
@@ -550,6 +554,55 @@ const pgInitPromise = (async () => {
       );
       CREATE INDEX IF NOT EXISTS idx_profile_likes_target ON profile_likes(target_user_id);
       CREATE INDEX IF NOT EXISTS idx_profile_likes_user ON profile_likes(user_id);
+    `);
+
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS chess_user_stats (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        chess_elo INTEGER NOT NULL DEFAULT 1200,
+        chess_games_played INTEGER NOT NULL DEFAULT 0,
+        chess_wins INTEGER NOT NULL DEFAULT 0,
+        chess_losses INTEGER NOT NULL DEFAULT 0,
+        chess_draws INTEGER NOT NULL DEFAULT 0,
+        chess_peak_elo INTEGER NOT NULL DEFAULT 1200,
+        chess_last_game_at BIGINT,
+        updated_at BIGINT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS chess_games (
+        game_id TEXT PRIMARY KEY,
+        context_type TEXT NOT NULL,
+        context_id TEXT NOT NULL,
+        white_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        black_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        fen TEXT NOT NULL,
+        pgn TEXT NOT NULL,
+        status TEXT NOT NULL,
+        turn TEXT NOT NULL,
+        result TEXT,
+        rated BOOLEAN,
+        rated_reason TEXT,
+        plies_count INTEGER NOT NULL DEFAULT 0,
+        draw_offer_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        draw_offer_at BIGINT,
+        white_elo_change INTEGER,
+        black_elo_change INTEGER,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        last_move_at BIGINT
+      );
+      CREATE TABLE IF NOT EXISTS chess_challenges (
+        challenge_id TEXT PRIMARY KEY,
+        dm_thread_id INTEGER NOT NULL,
+        challenger_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        challenged_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        status TEXT NOT NULL,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_chess_games_context ON chess_games(context_type, context_id);
+      CREATE INDEX IF NOT EXISTS idx_chess_games_status ON chess_games(status);
+      CREATE INDEX IF NOT EXISTS idx_chess_challenges_thread ON chess_challenges(dm_thread_id);
+      CREATE INDEX IF NOT EXISTS idx_chess_challenges_status ON chess_challenges(status);
     `);
 
     await pgPool.query(`
@@ -2516,6 +2569,675 @@ async function setConfigJson(key, obj) {
   const raw = JSON.stringify(obj ?? {});
   await setConfigValue(key, raw);
   return obj;
+}
+
+function createChessInstance(fen) {
+  const chess = new Chess();
+  if (fen) {
+    try {
+      chess.load(fen);
+    } catch {
+      return chess;
+    }
+  }
+  return chess;
+}
+
+function createChessId() {
+  return typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : crypto.randomBytes(16).toString("hex");
+}
+
+async function chessPgEnabled() {
+  if (!process.env.DATABASE_URL) return false;
+  try {
+    await pgInitPromise;
+    return !!PG_READY;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeChessGameRow(row) {
+  if (!row) return null;
+  return {
+    game_id: row.game_id ?? row.gameId,
+    context_type: row.context_type ?? row.contextType,
+    context_id: row.context_id ?? row.contextId,
+    white_user_id: row.white_user_id ?? row.whiteUserId ?? null,
+    black_user_id: row.black_user_id ?? row.blackUserId ?? null,
+    fen: row.fen,
+    pgn: row.pgn,
+    status: row.status,
+    turn: row.turn,
+    result: row.result ?? null,
+    rated: row.rated,
+    rated_reason: row.rated_reason ?? row.ratedReason ?? null,
+    plies_count: Number(row.plies_count ?? row.pliesCount ?? 0),
+    draw_offer_by_user_id: row.draw_offer_by_user_id ?? row.drawOfferByUserId ?? null,
+    draw_offer_at: row.draw_offer_at ?? row.drawOfferAt ?? null,
+    white_elo_change: row.white_elo_change ?? row.whiteEloChange ?? null,
+    black_elo_change: row.black_elo_change ?? row.blackEloChange ?? null,
+    created_at: Number(row.created_at ?? row.createdAt ?? 0),
+    updated_at: Number(row.updated_at ?? row.updatedAt ?? 0),
+    last_move_at: Number(row.last_move_at ?? row.lastMoveAt ?? 0) || null,
+  };
+}
+
+function normalizeChessChallengeRow(row) {
+  if (!row) return null;
+  return {
+    challenge_id: row.challenge_id ?? row.challengeId,
+    dm_thread_id: Number(row.dm_thread_id ?? row.dmThreadId ?? 0),
+    challenger_user_id: Number(row.challenger_user_id ?? row.challengerUserId ?? 0),
+    challenged_user_id: Number(row.challenged_user_id ?? row.challengedUserId ?? 0),
+    status: row.status,
+    created_at: Number(row.created_at ?? row.createdAt ?? 0),
+    updated_at: Number(row.updated_at ?? row.updatedAt ?? 0),
+  };
+}
+
+async function ensureChessStatsRow(userId) {
+  const now = Date.now();
+  if (!userId) return;
+  if (await chessPgEnabled()) {
+    try {
+      await pgPool.query(
+        `INSERT INTO chess_user_stats (user_id, chess_elo, chess_peak_elo, updated_at)
+         VALUES ($1, $2, $2, $3)
+         ON CONFLICT (user_id) DO NOTHING`,
+        [userId, CHESS_DEFAULT_ELO, now]
+      );
+      return;
+    } catch (e) {
+      console.warn("[chess][pg] ensure stats failed:", e?.message || e);
+    }
+  }
+  await dbRunAsync(
+    `INSERT OR IGNORE INTO chess_user_stats (user_id, chess_elo, chess_peak_elo, updated_at)
+     VALUES (?, ?, ?, ?)`,
+    [userId, CHESS_DEFAULT_ELO, CHESS_DEFAULT_ELO, now]
+  ).catch(() => {});
+}
+
+async function loadChessStats(userId) {
+  if (!userId) return null;
+  await ensureChessStatsRow(userId);
+  if (await chessPgEnabled()) {
+    try {
+      const { rows } = await pgPool.query(
+        `SELECT user_id, chess_elo, chess_games_played, chess_wins, chess_losses, chess_draws, chess_peak_elo, chess_last_game_at, updated_at
+         FROM chess_user_stats WHERE user_id = $1`,
+        [userId]
+      );
+      return rows?.[0] || null;
+    } catch (e) {
+      console.warn("[chess][pg] load stats failed:", e?.message || e);
+    }
+  }
+  return await dbGetAsync(
+    `SELECT user_id, chess_elo, chess_games_played, chess_wins, chess_losses, chess_draws, chess_peak_elo, chess_last_game_at, updated_at
+     FROM chess_user_stats WHERE user_id = ?`,
+    [userId]
+  ).catch(() => null);
+}
+
+function chessExpectedScore(ra, rb) {
+  return 1 / (1 + Math.pow(10, (rb - ra) / 400));
+}
+
+function chessKFactor(rating, gamesPlayed) {
+  if (Number(gamesPlayed) < 30) return 40;
+  if (Number(rating) >= 2000) return 10;
+  return 20;
+}
+
+function chessScoreForResult(result, color) {
+  if (result === "draw") return 0.5;
+  if (result === "white") return color === "white" ? 1 : 0;
+  if (result === "black") return color === "black" ? 1 : 0;
+  return 0;
+}
+
+function chessComputeElo(whiteStats, blackStats, result) {
+  const whiteRating = Number(whiteStats?.chess_elo ?? CHESS_DEFAULT_ELO);
+  const blackRating = Number(blackStats?.chess_elo ?? CHESS_DEFAULT_ELO);
+  const whiteGames = Number(whiteStats?.chess_games_played ?? 0);
+  const blackGames = Number(blackStats?.chess_games_played ?? 0);
+  const expectedWhite = chessExpectedScore(whiteRating, blackRating);
+  const expectedBlack = chessExpectedScore(blackRating, whiteRating);
+  const scoreWhite = chessScoreForResult(result, "white");
+  const scoreBlack = chessScoreForResult(result, "black");
+  const whiteK = chessKFactor(whiteRating, whiteGames);
+  const blackK = chessKFactor(blackRating, blackGames);
+  const whiteNext = Math.round(whiteRating + whiteK * (scoreWhite - expectedWhite));
+  const blackNext = Math.round(blackRating + blackK * (scoreBlack - expectedBlack));
+  return {
+    whiteNext,
+    blackNext,
+    whiteDelta: whiteNext - whiteRating,
+    blackDelta: blackNext - blackRating,
+  };
+}
+
+async function chessGetGameById(gameId) {
+  if (!gameId) return null;
+  if (await chessPgEnabled()) {
+    const { rows } = await pgPool.query(`SELECT * FROM chess_games WHERE game_id = $1`, [gameId]);
+    return normalizeChessGameRow(rows?.[0] || null);
+  }
+  const row = await dbGetAsync(`SELECT * FROM chess_games WHERE game_id = ?`, [gameId]).catch(() => null);
+  return normalizeChessGameRow(row);
+}
+
+async function chessGetActiveGameForContext(contextType, contextId) {
+  if (!contextType || !contextId) return null;
+  if (await chessPgEnabled()) {
+    const { rows } = await pgPool.query(
+      `SELECT * FROM chess_games
+       WHERE context_type = $1 AND context_id = $2 AND status IN ('active', 'pending')
+       ORDER BY updated_at DESC LIMIT 1`,
+      [contextType, contextId]
+    );
+    return normalizeChessGameRow(rows?.[0] || null);
+  }
+  const row = await dbGetAsync(
+    `SELECT * FROM chess_games
+     WHERE context_type = ? AND context_id = ? AND status IN ('active', 'pending')
+     ORDER BY updated_at DESC LIMIT 1`,
+    [contextType, contextId]
+  ).catch(() => null);
+  return normalizeChessGameRow(row);
+}
+
+async function chessGetLatestGameForContext(contextType, contextId) {
+  if (!contextType || !contextId) return null;
+  if (await chessPgEnabled()) {
+    const { rows } = await pgPool.query(
+      `SELECT * FROM chess_games
+       WHERE context_type = $1 AND context_id = $2
+       ORDER BY updated_at DESC LIMIT 1`,
+      [contextType, contextId]
+    );
+    return normalizeChessGameRow(rows?.[0] || null);
+  }
+  const row = await dbGetAsync(
+    `SELECT * FROM chess_games
+     WHERE context_type = ? AND context_id = ?
+     ORDER BY updated_at DESC LIMIT 1`,
+    [contextType, contextId]
+  ).catch(() => null);
+  return normalizeChessGameRow(row);
+}
+
+async function chessCreateGame(contextType, contextId, whiteId, blackId) {
+  const now = Date.now();
+  const gameId = createChessId();
+  const chess = createChessInstance();
+  const fen = chess.fen();
+  const pgn = chess.pgn();
+  const status = whiteId && blackId ? "active" : "pending";
+  const turn = chess.turn();
+  if (await chessPgEnabled()) {
+    await pgPool.query(
+      `INSERT INTO chess_games
+       (game_id, context_type, context_id, white_user_id, black_user_id, fen, pgn, status, turn, created_at, updated_at, last_move_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [gameId, contextType, contextId, whiteId || null, blackId || null, fen, pgn, status, turn, now, now, now]
+    );
+  } else {
+    await dbRunAsync(
+      `INSERT INTO chess_games
+       (game_id, context_type, context_id, white_user_id, black_user_id, fen, pgn, status, turn, created_at, updated_at, last_move_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [gameId, contextType, contextId, whiteId || null, blackId || null, fen, pgn, status, turn, now, now, now]
+    );
+  }
+  return await chessGetGameById(gameId);
+}
+
+async function chessUpdateGame(gameId, updates = {}) {
+  if (!gameId) return null;
+  const now = Date.now();
+  const columns = {
+    white_user_id: updates.white_user_id,
+    black_user_id: updates.black_user_id,
+    fen: updates.fen,
+    pgn: updates.pgn,
+    status: updates.status,
+    turn: updates.turn,
+    result: updates.result,
+    rated: updates.rated,
+    rated_reason: updates.rated_reason,
+    plies_count: updates.plies_count,
+    draw_offer_by_user_id: updates.draw_offer_by_user_id,
+    draw_offer_at: updates.draw_offer_at,
+    white_elo_change: updates.white_elo_change,
+    black_elo_change: updates.black_elo_change,
+    updated_at: updates.updated_at ?? now,
+    last_move_at: updates.last_move_at,
+  };
+
+  if (await chessPgEnabled()) {
+    const set = [];
+    const vals = [];
+    let idx = 1;
+    for (const [key, val] of Object.entries(columns)) {
+      if (val === undefined) continue;
+      set.push(`${key} = $${idx++}`);
+      vals.push(val);
+    }
+    if (!set.length) return await chessGetGameById(gameId);
+    vals.push(gameId);
+    await pgPool.query(`UPDATE chess_games SET ${set.join(", ")} WHERE game_id = $${idx}`, vals);
+  } else {
+    const set = [];
+    const vals = [];
+    for (const [key, val] of Object.entries(columns)) {
+      if (val === undefined) continue;
+      set.push(`${key} = ?`);
+      vals.push(val);
+    }
+    if (!set.length) return await chessGetGameById(gameId);
+    vals.push(gameId);
+    await dbRunAsync(`UPDATE chess_games SET ${set.join(", ")} WHERE game_id = ?`, vals);
+  }
+  return await chessGetGameById(gameId);
+}
+
+async function chessCreateChallenge(dmThreadId, challengerId, challengedId) {
+  const now = Date.now();
+  const challengeId = createChessId();
+  if (await chessPgEnabled()) {
+    await pgPool.query(
+      `INSERT INTO chess_challenges
+       (challenge_id, dm_thread_id, challenger_user_id, challenged_user_id, status, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,'pending',$5,$6)`,
+      [challengeId, dmThreadId, challengerId, challengedId, now, now]
+    );
+  } else {
+    await dbRunAsync(
+      `INSERT INTO chess_challenges
+       (challenge_id, dm_thread_id, challenger_user_id, challenged_user_id, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
+      [challengeId, dmThreadId, challengerId, challengedId, now, now]
+    );
+  }
+  return await chessGetChallengeById(challengeId);
+}
+
+async function chessGetChallengeById(challengeId) {
+  if (!challengeId) return null;
+  if (await chessPgEnabled()) {
+    const { rows } = await pgPool.query(`SELECT * FROM chess_challenges WHERE challenge_id = $1`, [challengeId]);
+    return normalizeChessChallengeRow(rows?.[0] || null);
+  }
+  const row = await dbGetAsync(`SELECT * FROM chess_challenges WHERE challenge_id = ?`, [challengeId]).catch(() => null);
+  return normalizeChessChallengeRow(row);
+}
+
+async function chessGetLatestChallengeForThread(dmThreadId) {
+  if (!dmThreadId) return null;
+  if (await chessPgEnabled()) {
+    const { rows } = await pgPool.query(
+      `SELECT * FROM chess_challenges WHERE dm_thread_id = $1 ORDER BY updated_at DESC LIMIT 1`,
+      [dmThreadId]
+    );
+    return normalizeChessChallengeRow(rows?.[0] || null);
+  }
+  const row = await dbGetAsync(
+    `SELECT * FROM chess_challenges WHERE dm_thread_id = ? ORDER BY updated_at DESC LIMIT 1`,
+    [dmThreadId]
+  ).catch(() => null);
+  return normalizeChessChallengeRow(row);
+}
+
+async function chessUpdateChallenge(challengeId, updates = {}) {
+  if (!challengeId) return null;
+  const now = Date.now();
+  const columns = {
+    status: updates.status,
+    updated_at: updates.updated_at ?? now,
+  };
+  if (await chessPgEnabled()) {
+    const set = [];
+    const vals = [];
+    let idx = 1;
+    for (const [key, val] of Object.entries(columns)) {
+      if (val === undefined) continue;
+      set.push(`${key} = $${idx++}`);
+      vals.push(val);
+    }
+    if (!set.length) return await chessGetChallengeById(challengeId);
+    vals.push(challengeId);
+    await pgPool.query(`UPDATE chess_challenges SET ${set.join(", ")} WHERE challenge_id = $${idx}`, vals);
+  } else {
+    const set = [];
+    const vals = [];
+    for (const [key, val] of Object.entries(columns)) {
+      if (val === undefined) continue;
+      set.push(`${key} = ?`);
+      vals.push(val);
+    }
+    if (!set.length) return await chessGetChallengeById(challengeId);
+    vals.push(challengeId);
+    await dbRunAsync(`UPDATE chess_challenges SET ${set.join(", ")} WHERE challenge_id = ?`, vals);
+  }
+  return await chessGetChallengeById(challengeId);
+}
+
+async function chessApplyEloUpdate(game, result) {
+  const whiteId = Number(game.white_user_id || 0);
+  const blackId = Number(game.black_user_id || 0);
+  if (!whiteId || !blackId || whiteId === blackId) {
+    return { rated: false, ratedReason: "invalid_players", whiteDelta: 0, blackDelta: 0 };
+  }
+
+  const whiteStats = await loadChessStats(whiteId);
+  const blackStats = await loadChessStats(blackId);
+  const { whiteNext, blackNext, whiteDelta, blackDelta } = chessComputeElo(whiteStats, blackStats, result);
+  const now = Date.now();
+  const whiteWins = Number(whiteStats?.chess_wins ?? 0);
+  const whiteLosses = Number(whiteStats?.chess_losses ?? 0);
+  const whiteDraws = Number(whiteStats?.chess_draws ?? 0);
+  const blackWins = Number(blackStats?.chess_wins ?? 0);
+  const blackLosses = Number(blackStats?.chess_losses ?? 0);
+  const blackDraws = Number(blackStats?.chess_draws ?? 0);
+
+  const whiteUpdate = {
+    chess_elo: whiteNext,
+    chess_games_played: Number(whiteStats?.chess_games_played ?? 0) + 1,
+    chess_wins: whiteWins + (result === "white" ? 1 : 0),
+    chess_losses: whiteLosses + (result === "black" ? 1 : 0),
+    chess_draws: whiteDraws + (result === "draw" ? 1 : 0),
+    chess_peak_elo: Math.max(Number(whiteStats?.chess_peak_elo ?? whiteNext), whiteNext),
+    chess_last_game_at: now,
+    updated_at: now,
+  };
+
+  const blackUpdate = {
+    chess_elo: blackNext,
+    chess_games_played: Number(blackStats?.chess_games_played ?? 0) + 1,
+    chess_wins: blackWins + (result === "black" ? 1 : 0),
+    chess_losses: blackLosses + (result === "white" ? 1 : 0),
+    chess_draws: blackDraws + (result === "draw" ? 1 : 0),
+    chess_peak_elo: Math.max(Number(blackStats?.chess_peak_elo ?? blackNext), blackNext),
+    chess_last_game_at: now,
+    updated_at: now,
+  };
+
+  if (await chessPgEnabled()) {
+    await pgPool.query("BEGIN");
+    try {
+      await pgPool.query(
+        `UPDATE chess_user_stats
+         SET chess_elo = $2,
+             chess_games_played = $3,
+             chess_wins = $4,
+             chess_losses = $5,
+             chess_draws = $6,
+             chess_peak_elo = $7,
+             chess_last_game_at = $8,
+             updated_at = $9
+         WHERE user_id = $1`,
+        [whiteId, whiteUpdate.chess_elo, whiteUpdate.chess_games_played, whiteUpdate.chess_wins, whiteUpdate.chess_losses, whiteUpdate.chess_draws, whiteUpdate.chess_peak_elo, whiteUpdate.chess_last_game_at, whiteUpdate.updated_at]
+      );
+      await pgPool.query(
+        `UPDATE chess_user_stats
+         SET chess_elo = $2,
+             chess_games_played = $3,
+             chess_wins = $4,
+             chess_losses = $5,
+             chess_draws = $6,
+             chess_peak_elo = $7,
+             chess_last_game_at = $8,
+             updated_at = $9
+         WHERE user_id = $1`,
+        [blackId, blackUpdate.chess_elo, blackUpdate.chess_games_played, blackUpdate.chess_wins, blackUpdate.chess_losses, blackUpdate.chess_draws, blackUpdate.chess_peak_elo, blackUpdate.chess_last_game_at, blackUpdate.updated_at]
+      );
+      await pgPool.query("COMMIT");
+    } catch (e) {
+      await pgPool.query("ROLLBACK");
+      throw e;
+    }
+  } else {
+    await dbRunAsync("BEGIN");
+    try {
+      await dbRunAsync(
+        `UPDATE chess_user_stats
+         SET chess_elo = ?,
+             chess_games_played = ?,
+             chess_wins = ?,
+             chess_losses = ?,
+             chess_draws = ?,
+             chess_peak_elo = ?,
+             chess_last_game_at = ?,
+             updated_at = ?
+         WHERE user_id = ?`,
+        [whiteUpdate.chess_elo, whiteUpdate.chess_games_played, whiteUpdate.chess_wins, whiteUpdate.chess_losses, whiteUpdate.chess_draws, whiteUpdate.chess_peak_elo, whiteUpdate.chess_last_game_at, whiteUpdate.updated_at, whiteId]
+      );
+      await dbRunAsync(
+        `UPDATE chess_user_stats
+         SET chess_elo = ?,
+             chess_games_played = ?,
+             chess_wins = ?,
+             chess_losses = ?,
+             chess_draws = ?,
+             chess_peak_elo = ?,
+             chess_last_game_at = ?,
+             updated_at = ?
+         WHERE user_id = ?`,
+        [blackUpdate.chess_elo, blackUpdate.chess_games_played, blackUpdate.chess_wins, blackUpdate.chess_losses, blackUpdate.chess_draws, blackUpdate.chess_peak_elo, blackUpdate.chess_last_game_at, blackUpdate.updated_at, blackId]
+      );
+      await dbRunAsync("COMMIT");
+    } catch (e) {
+      await dbRunAsync("ROLLBACK");
+      throw e;
+    }
+  }
+
+  return { rated: true, ratedReason: null, whiteDelta, blackDelta };
+}
+
+async function chessFinalizeGame(game, { result, status, reason }) {
+  const plies = Number(game.plies_count || 0);
+  const whiteId = Number(game.white_user_id || 0);
+  const blackId = Number(game.black_user_id || 0);
+  const tooFewMoves = plies < CHESS_MIN_PLIES_RATED;
+  const invalidPlayers = !whiteId || !blackId || whiteId === blackId;
+  const rated = !tooFewMoves && !invalidPlayers;
+  const ratedReason = rated ? null : (tooFewMoves ? "too_few_moves" : "invalid_players");
+  let whiteDelta = 0;
+  let blackDelta = 0;
+
+  if (rated) {
+    try {
+      const eloResult = await chessApplyEloUpdate(game, result);
+      whiteDelta = eloResult.whiteDelta;
+      blackDelta = eloResult.blackDelta;
+    } catch (e) {
+      console.warn("[chess] Elo update failed:", e?.message || e);
+    }
+  }
+
+  const updated = await chessUpdateGame(game.game_id, {
+    status,
+    result,
+    rated,
+    rated_reason: ratedReason,
+    draw_offer_by_user_id: null,
+    draw_offer_at: null,
+    white_elo_change: rated ? whiteDelta : null,
+    black_elo_change: rated ? blackDelta : null,
+    updated_at: Date.now(),
+    last_move_at: game.last_move_at || Date.now(),
+  });
+
+  return { game: updated, rated, ratedReason, whiteDelta, blackDelta };
+}
+
+function chessLegalMoves(fen) {
+  const chess = createChessInstance(fen);
+  return chess.moves({ verbose: true }).map((m) => ({
+    from: m.from,
+    to: m.to,
+    promotion: m.promotion || null,
+    san: m.san,
+  }));
+}
+
+function isUsernameOnline(username) {
+  if (!username) return false;
+  return ONLINE_USERS.has(username);
+}
+
+function seatClaimable(game, seatUser) {
+  if (!seatUser?.username) return false;
+  if (isUsernameOnline(seatUser.username)) return false;
+  const lastMoveAt = Number(game.last_move_at || game.updated_at || game.created_at || 0);
+  return Date.now() - lastMoveAt > CHESS_SEAT_CLAIM_TIMEOUT_MS;
+}
+
+async function chessBuildGameState(game, viewerId) {
+  if (!game) {
+    return {
+      gameId: null,
+      status: "none",
+      contextType: null,
+      contextId: null,
+      fen: null,
+      pgn: "",
+      turn: null,
+      pliesCount: 0,
+      whiteUser: null,
+      blackUser: null,
+      myColor: null,
+      legalMoves: [],
+      drawOfferBy: null,
+      result: null,
+      rated: null,
+      ratedReason: null,
+      whiteEloChange: null,
+      blackEloChange: null,
+      seatClaimable: { white: false, black: false },
+    };
+  }
+
+  const whiteUser = game.white_user_id ? await getUserIdentityForMemory(game.white_user_id) : null;
+  const blackUser = game.black_user_id ? await getUserIdentityForMemory(game.black_user_id) : null;
+  const myColor =
+    viewerId && Number(viewerId) === Number(game.white_user_id)
+      ? "w"
+      : viewerId && Number(viewerId) === Number(game.black_user_id)
+        ? "b"
+        : null;
+  const drawOfferBy =
+    game.draw_offer_by_user_id && Number(game.draw_offer_by_user_id) === Number(game.white_user_id)
+      ? whiteUser
+      : game.draw_offer_by_user_id && Number(game.draw_offer_by_user_id) === Number(game.black_user_id)
+        ? blackUser
+        : null;
+  const legalMoves = game.status === "active" ? chessLegalMoves(game.fen) : [];
+
+  return {
+    gameId: game.game_id,
+    contextType: game.context_type,
+    contextId: game.context_id,
+    fen: game.fen,
+    pgn: game.pgn,
+    status: game.status,
+    turn: game.turn,
+    pliesCount: game.plies_count,
+    whiteUser,
+    blackUser,
+    myColor,
+    legalMoves,
+    drawOfferBy,
+    result: game.result,
+    rated: typeof game.rated === "boolean" ? game.rated : (game.rated == null ? null : !!game.rated),
+    ratedReason: game.rated_reason || null,
+    whiteEloChange: game.white_elo_change ?? null,
+    blackEloChange: game.black_elo_change ?? null,
+    seatClaimable: {
+      white: game.context_type === "room" ? seatClaimable(game, whiteUser) : false,
+      black: game.context_type === "room" ? seatClaimable(game, blackUser) : false,
+    },
+  };
+}
+
+async function chessBuildChallengeState(challenge) {
+  if (!challenge) return null;
+  const challenger = await getUserIdentityForMemory(challenge.challenger_user_id);
+  const challenged = await getUserIdentityForMemory(challenge.challenged_user_id);
+  return {
+    challengeId: challenge.challenge_id,
+    dmThreadId: challenge.dm_thread_id,
+    status: challenge.status,
+    challenger,
+    challenged,
+    createdAt: challenge.created_at,
+    updatedAt: challenge.updated_at,
+  };
+}
+
+async function emitChessStateToSocket(socket, game) {
+  if (!socket) return;
+  const payload = await chessBuildGameState(game, socket.user?.id || null);
+  socket.emit("chess:game:state", payload);
+}
+
+async function emitChessStateToGameRoom(game) {
+  if (!game?.game_id) return;
+  const payload = await chessBuildGameState(game, null);
+  io.to(`chess:${game.game_id}`).emit("chess:game:state", payload);
+}
+
+async function emitChessChallengeStateToRoom(dmThreadId, challenge) {
+  const payload = await chessBuildChallengeState(challenge);
+  if (!payload) return;
+  io.to(`dm:${dmThreadId}`).emit("chess:challenge:state", payload);
+}
+
+async function emitChessChallengeStateToSocket(socket, challenge) {
+  const payload = await chessBuildChallengeState(challenge);
+  if (!payload) return;
+  socket.emit("chess:challenge:state", payload);
+}
+
+async function insertDmChessMessage({ threadId, authorId, authorName, text }) {
+  const ts = Date.now();
+  const safeText = String(text || "").slice(0, MAX_DM_MESSAGE_CHARS);
+  const payload = {
+    threadId,
+    messageId: null,
+    userId: authorId,
+    user: authorName,
+    text: safeText,
+    tone: "",
+    ts,
+    attachmentUrl: null,
+    attachmentMime: null,
+    attachmentType: null,
+    attachmentSize: null,
+    chatFx: null,
+    replyToId: null,
+    replyToUser: "",
+    replyToText: "",
+  };
+  const result = await dbRunAsync(
+    `INSERT INTO dm_messages (thread_id, user_id, username, text, tone, ts)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [threadId, authorId, authorName, safeText, "", ts]
+  ).catch(() => null);
+  if (result?.lastID) {
+    payload.messageId = result.lastID;
+    dbRunAsync(
+      `UPDATE dm_threads SET last_message_id=?, last_message_at=? WHERE id=?`,
+      [result.lastID, ts, threadId]
+    ).catch(() => {});
+    io.to(`dm:${threadId}`).emit("dm message", payload);
+  }
 }
 
 let FEATURE_FLAGS_CACHE = {};
@@ -7538,8 +8260,76 @@ async function sendLeaderboard(res) {
   }
 }
 
+async function fetchChessLeaderboard(limit = 50, offset = 0) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const safeOffset = Math.max(Number(offset) || 0, 0);
+  if (await chessPgEnabled()) {
+    const { rows } = await pgPool.query(
+      `SELECT s.user_id,
+              u.username,
+              s.chess_elo,
+              s.chess_games_played,
+              s.chess_wins,
+              s.chess_losses,
+              s.chess_draws,
+              s.chess_peak_elo
+         FROM chess_user_stats s
+         JOIN users u ON u.id = s.user_id
+        ORDER BY s.chess_elo DESC, s.chess_games_played DESC, u.username ASC
+        LIMIT $1 OFFSET $2`,
+      [safeLimit, safeOffset]
+    );
+    return rows || [];
+  }
+
+  const rows = await dbAllAsync(
+    `SELECT s.user_id,
+            u.username,
+            s.chess_elo,
+            s.chess_games_played,
+            s.chess_wins,
+            s.chess_losses,
+            s.chess_draws,
+            s.chess_peak_elo
+       FROM chess_user_stats s
+       JOIN users u ON u.id = s.user_id
+      ORDER BY s.chess_elo DESC, s.chess_games_played DESC, u.username ASC
+      LIMIT ? OFFSET ?`,
+    [safeLimit, safeOffset]
+  );
+  return rows || [];
+}
+
 app.get("/api/leaderboard", requireLogin, async (_req, res) => sendLeaderboard(res));
 app.get("/api/leaderboards", requireLogin, async (_req, res) => sendLeaderboard(res));
+
+app.get("/api/chess/leaderboard", requireLogin, async (req, res) => {
+  try {
+    const rows = await fetchChessLeaderboard(req.query?.limit, req.query?.offset);
+    const payload = rows.map((row) => {
+      const games = Number(row.chess_games_played || 0);
+      const wins = Number(row.chess_wins || 0);
+      const losses = Number(row.chess_losses || 0);
+      const draws = Number(row.chess_draws || 0);
+      const winrate = games > 0 ? Math.round((wins / games) * 1000) / 10 : 0;
+      return {
+        userId: Number(row.user_id),
+        username: row.username,
+        elo: Number(row.chess_elo || CHESS_DEFAULT_ELO),
+        gamesPlayed: games,
+        wins,
+        losses,
+        draws,
+        winrate,
+        peakElo: Number(row.chess_peak_elo || row.chess_elo || CHESS_DEFAULT_ELO),
+      };
+    });
+    return res.json({ rows: payload, limit: Number(req.query?.limit || 50), offset: Number(req.query?.offset || 0) });
+  } catch (err) {
+    console.warn("[chess] leaderboard failed:", err?.message || err);
+    return res.status(500).json({ ok: false });
+  }
+});
 
 app.post("/api/me/award-gold", strictLimiter, requireLogin, (req, res) => {
   if (process.env.ALLOW_DEV_AWARD_GOLD !== "1") return res.status(404).send("Not found");
@@ -12468,7 +13258,7 @@ if (!room) {
             attachmentSize: r.attachment_size || null,
           }));
           const usernames = msgs.map((m) => m.user).filter(Boolean);
-          buildAuthorsFxMap(usernames, (authorsFx) => {
+          buildAuthorsFxMap(usernames, async (authorsFx) => {
             socket.emit("dm history", {
               threadId: tid,
               title: thread.title || "",
@@ -12562,6 +13352,15 @@ if (!room) {
                 );
               }
             } catch {}
+
+            try {
+              const latestChallenge = await chessGetLatestChallengeForThread(tid);
+              if (latestChallenge) {
+                await emitChessChallengeStateToSocket(socket, latestChallenge);
+              }
+            } catch (e) {
+              console.warn("[chess] dm join challenge state failed:", e?.message || e);
+            }
           });
 
         }
@@ -12816,7 +13615,386 @@ if (!room) {
   });
 
 
-socket.on("status change", ({ status }) => {
+  socket.on("chess:challenge:create", async ({ dmThreadId, challengedUserId } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    const tid = Number(dmThreadId);
+    const challengedId = Number(challengedUserId);
+    if (!Number.isInteger(tid) || !Number.isInteger(challengedId)) {
+      return respond({ ok: false, error: "Invalid challenge request" });
+    }
+    if (challengedId === Number(socket.user.id)) {
+      return respond({ ok: false, error: "Cannot challenge yourself" });
+    }
+
+    loadThreadForUser(tid, socket.user.id, async (err, thread) => {
+      if (err || !thread) return respond({ ok: false, error: "Thread not found" });
+      if (thread.is_group) return respond({ ok: false, error: "Chess challenges are direct DMs only" });
+      if (!thread.participantIds?.includes?.(challengedId)) {
+        return respond({ ok: false, error: "User not in this DM" });
+      }
+
+      try {
+        const latest = await chessGetLatestChallengeForThread(tid);
+        if (latest && latest.status === "pending") {
+          await emitChessChallengeStateToSocket(socket, latest);
+          return respond({ ok: false, error: "Challenge already pending", challengeId: latest.challenge_id });
+        }
+        const activeGame = await chessGetActiveGameForContext("dm", String(tid));
+        if (activeGame) {
+          await emitChessStateToSocket(socket, activeGame);
+          return respond({ ok: false, error: "Game already active", gameId: activeGame.game_id });
+        }
+        const challenge = await chessCreateChallenge(tid, socket.user.id, challengedId);
+        await insertDmChessMessage({
+          threadId: tid,
+          authorId: socket.user.id,
+          authorName: socket.user.username,
+          text: `[chess:challenge:${challenge.challenge_id}]`,
+        });
+        await emitChessChallengeStateToRoom(tid, challenge);
+        respond({ ok: true, challengeId: challenge.challenge_id });
+      } catch (e) {
+        console.warn("[chess] challenge create failed:", e?.message || e);
+        respond({ ok: false, error: "Failed to create challenge" });
+      }
+    });
+  });
+
+  socket.on("chess:challenge:respond", async ({ challengeId, accept } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    if (!challengeId) return respond({ ok: false, error: "Missing challenge" });
+    try {
+      const challenge = await chessGetChallengeById(String(challengeId));
+      if (!challenge || challenge.status !== "pending") {
+        return respond({ ok: false, error: "Challenge not available" });
+      }
+      if (Number(challenge.challenged_user_id) !== Number(socket.user.id)) {
+        return respond({ ok: false, error: "Not allowed" });
+      }
+      const nextStatus = accept ? "accepted" : "declined";
+      const updated = await chessUpdateChallenge(challenge.challenge_id, { status: nextStatus });
+      await emitChessChallengeStateToRoom(updated.dm_thread_id, updated);
+      if (!accept) {
+        await insertDmChessMessage({
+          threadId: updated.dm_thread_id,
+          authorId: socket.user.id,
+          authorName: socket.user.username,
+          text: `[chess:challenge:declined:${updated.challenge_id}]`,
+        });
+        return respond({ ok: true, status: nextStatus });
+      }
+
+      const game = await chessCreateGame("dm", String(updated.dm_thread_id), updated.challenger_user_id, updated.challenged_user_id);
+      await insertDmChessMessage({
+        threadId: updated.dm_thread_id,
+        authorId: socket.user.id,
+        authorName: socket.user.username,
+        text: `[chess:challenge:accepted:${updated.challenge_id}]`,
+      });
+      await emitChessStateToGameRoom(game);
+      respond({ ok: true, status: nextStatus, gameId: game.game_id });
+    } catch (e) {
+      console.warn("[chess] challenge respond failed:", e?.message || e);
+      respond({ ok: false, error: "Failed to respond" });
+    }
+  });
+
+  socket.on("chess:game:create", async ({ contextType, contextId } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    if (contextType !== "room") return respond({ ok: false, error: "Invalid context" });
+    const roomId = String(contextId || "");
+    if (!roomId) return respond({ ok: false, error: "Missing room" });
+    try {
+      const existing = await chessGetActiveGameForContext("room", roomId);
+      if (existing) {
+        await emitChessStateToSocket(socket, existing);
+        return respond({ ok: true, gameId: existing.game_id });
+      }
+      const game = await chessCreateGame("room", roomId);
+      socket.join(`chess:${game.game_id}`);
+      await emitChessStateToSocket(socket, game);
+      respond({ ok: true, gameId: game.game_id });
+    } catch (e) {
+      console.warn("[chess] game create failed:", e?.message || e);
+      respond({ ok: false, error: "Failed to create game" });
+    }
+  });
+
+  socket.on("chess:game:join", async ({ gameId, contextType, contextId } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    try {
+      let game = null;
+      if (gameId) {
+        game = await chessGetGameById(String(gameId));
+      } else if (contextType && contextId) {
+        game = await chessGetActiveGameForContext(String(contextType), String(contextId));
+        if (!game && String(contextType) === "dm") {
+          game = await chessGetLatestGameForContext(String(contextType), String(contextId));
+        }
+      }
+      if (!game) {
+        await emitChessStateToSocket(socket, null);
+        return respond({ ok: false, error: "Game not found" });
+      }
+      if (game.context_type === "dm") {
+        const threadOk = await new Promise((resolve) => {
+          loadThreadForUser(Number(game.context_id), socket.user.id, (err, thread) => resolve(!err && !!thread));
+        });
+        if (!threadOk) return respond({ ok: false, error: "Not allowed" });
+      }
+      socket.join(`chess:${game.game_id}`);
+      await emitChessStateToSocket(socket, game);
+      respond({ ok: true, gameId: game.game_id });
+    } catch (e) {
+      console.warn("[chess] game join failed:", e?.message || e);
+      respond({ ok: false, error: "Failed to join game" });
+    }
+  });
+
+  socket.on("chess:game:seat", async ({ gameId, color } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    const seatColor = color === "white" ? "white" : (color === "black" ? "black" : "");
+    if (!seatColor || !gameId) return respond({ ok: false, error: "Invalid seat" });
+    try {
+      let game = await chessGetGameById(String(gameId));
+      if (!game) return respond({ ok: false, error: "Game not found" });
+      if (game.context_type !== "room") return respond({ ok: false, error: "Seats only for rooms" });
+      const seatKey = seatColor === "white" ? "white_user_id" : "black_user_id";
+      const seatUserId = Number(game[seatKey] || 0);
+      if (seatUserId && seatUserId !== Number(socket.user.id)) {
+        const seatUser = await getUserIdentityForMemory(seatUserId);
+        if (!seatClaimable(game, seatUser)) {
+          return respond({ ok: false, error: "Seat occupied" });
+        }
+      }
+      const updates = { [seatKey]: socket.user.id };
+      if (game.status === "pending") {
+        const nextWhite = seatColor === "white" ? socket.user.id : game.white_user_id;
+        const nextBlack = seatColor === "black" ? socket.user.id : game.black_user_id;
+        if (nextWhite && nextBlack) updates.status = "active";
+      }
+      game = await chessUpdateGame(game.game_id, updates);
+      await emitChessStateToGameRoom(game);
+      respond({ ok: true });
+    } catch (e) {
+      console.warn("[chess] seat failed:", e?.message || e);
+      respond({ ok: false, error: "Failed to seat" });
+    }
+  });
+
+  socket.on("chess:game:move", async ({ gameId, from, to, promotion } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    if (!allowSocketEvent(socket, "chess_move", 12, 4000)) return respond({ ok: false, error: "Rate limited" });
+    if (!gameId || !from || !to) return respond({ ok: false, error: "Invalid move" });
+    try {
+      let game = await chessGetGameById(String(gameId));
+      if (!game) return respond({ ok: false, error: "Game not found" });
+      if (game.status !== "active") return respond({ ok: false, error: "Game not active" });
+      const isWhite = Number(game.white_user_id || 0) === Number(socket.user.id);
+      const isBlack = Number(game.black_user_id || 0) === Number(socket.user.id);
+      if (!isWhite && !isBlack) return respond({ ok: false, error: "Spectators cannot move" });
+      if ((game.turn === "w" && !isWhite) || (game.turn === "b" && !isBlack)) {
+        return respond({ ok: false, error: "Not your turn" });
+      }
+      const chess = createChessInstance(game.fen);
+      const move = chess.move({ from, to, promotion: promotion || undefined });
+      if (!move) return respond({ ok: false, error: "Illegal move" });
+
+      const now = Date.now();
+      const nextStatus = chess.isCheckmate() ? "mate" : (chess.isStalemate() || chess.isDraw() ? "draw" : "active");
+      const result =
+        chess.isCheckmate()
+          ? (chess.turn() === "w" ? "black" : "white")
+          : (chess.isStalemate() || chess.isDraw()) ? "draw" : null;
+      const updates = {
+        fen: chess.fen(),
+        pgn: chess.pgn(),
+        turn: chess.turn(),
+        plies_count: Number(game.plies_count || 0) + 1,
+        last_move_at: now,
+        updated_at: now,
+        draw_offer_by_user_id: null,
+        draw_offer_at: null,
+      };
+      if (nextStatus !== "active") {
+        const updatedGame = await chessUpdateGame(game.game_id, updates);
+        const finalResult = await chessFinalizeGame(
+          updatedGame,
+          { result: result || "draw", status: nextStatus, reason: nextStatus }
+        );
+        game = finalResult.game;
+      } else {
+        game = await chessUpdateGame(game.game_id, updates);
+      }
+
+      await emitChessStateToGameRoom(game);
+      respond({ ok: true });
+
+      if (game.context_type === "room" && move?.san) {
+        const actorName = socket.user.username;
+        emitRoomSystem(game.context_id, `${actorName} played ${move.san}`);
+      }
+
+      if (game.status !== "active" && game.context_type === "dm") {
+        const summary = game.result === "draw"
+          ? "Draw"
+          : game.result === "white"
+            ? "White wins"
+            : "Black wins";
+        await insertDmChessMessage({
+          threadId: Number(game.context_id),
+          authorId: socket.user.id,
+          authorName: socket.user.username,
+          text: `[chess:result:${game.game_id}:${summary}]`,
+        });
+      }
+    } catch (e) {
+      console.warn("[chess] move failed:", e?.message || e);
+      respond({ ok: false, error: "Move failed" });
+    }
+  });
+
+  socket.on("chess:game:resign", async ({ gameId } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    if (!gameId) return respond({ ok: false, error: "Missing game" });
+    try {
+      const game = await chessGetGameById(String(gameId));
+      if (!game || game.status !== "active") return respond({ ok: false, error: "Game not active" });
+      const isWhite = Number(game.white_user_id || 0) === Number(socket.user.id);
+      const isBlack = Number(game.black_user_id || 0) === Number(socket.user.id);
+      if (!isWhite && !isBlack) return respond({ ok: false, error: "Not a player" });
+      const result = isWhite ? "black" : "white";
+      const finalResult = await chessFinalizeGame(game, { result, status: "resigned", reason: "resign" });
+      await emitChessStateToGameRoom(finalResult.game);
+      if (finalResult.game.context_type === "dm") {
+        const summary = result === "white" ? "White wins" : "Black wins";
+        await insertDmChessMessage({
+          threadId: Number(finalResult.game.context_id),
+          authorId: socket.user.id,
+          authorName: socket.user.username,
+          text: `[chess:result:${finalResult.game.game_id}:${summary}]`,
+        });
+      }
+      respond({ ok: true });
+    } catch (e) {
+      console.warn("[chess] resign failed:", e?.message || e);
+      respond({ ok: false, error: "Failed to resign" });
+    }
+  });
+
+  socket.on("chess:game:drawOffer", async ({ gameId } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    if (!gameId) return respond({ ok: false, error: "Missing game" });
+    try {
+      const game = await chessGetGameById(String(gameId));
+      if (!game || game.status !== "active") return respond({ ok: false, error: "Game not active" });
+      const isWhite = Number(game.white_user_id || 0) === Number(socket.user.id);
+      const isBlack = Number(game.black_user_id || 0) === Number(socket.user.id);
+      if (!isWhite && !isBlack) return respond({ ok: false, error: "Not a player" });
+      const updated = await chessUpdateGame(game.game_id, {
+        draw_offer_by_user_id: socket.user.id,
+        draw_offer_at: Date.now(),
+      });
+      await emitChessStateToGameRoom(updated);
+      respond({ ok: true });
+    } catch (e) {
+      console.warn("[chess] draw offer failed:", e?.message || e);
+      respond({ ok: false, error: "Failed to offer draw" });
+    }
+  });
+
+  socket.on("chess:game:drawRespond", async ({ gameId, accept } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    if (!gameId) return respond({ ok: false, error: "Missing game" });
+    try {
+      const game = await chessGetGameById(String(gameId));
+      if (!game || game.status !== "active") return respond({ ok: false, error: "Game not active" });
+      if (!game.draw_offer_by_user_id) return respond({ ok: false, error: "No draw offer" });
+      if (Number(game.draw_offer_by_user_id) === Number(socket.user.id)) {
+        return respond({ ok: false, error: "Cannot respond to your own offer" });
+      }
+      if (!accept) {
+        const updated = await chessUpdateGame(game.game_id, { draw_offer_by_user_id: null, draw_offer_at: null });
+        await emitChessStateToGameRoom(updated);
+        return respond({ ok: true, status: "declined" });
+      }
+      const finalResult = await chessFinalizeGame(game, { result: "draw", status: "draw", reason: "draw" });
+      await emitChessStateToGameRoom(finalResult.game);
+      if (finalResult.game.context_type === "dm") {
+        await insertDmChessMessage({
+          threadId: Number(finalResult.game.context_id),
+          authorId: socket.user.id,
+          authorName: socket.user.username,
+          text: `[chess:result:${finalResult.game.game_id}:Draw]`,
+        });
+      }
+      respond({ ok: true, status: "accepted" });
+    } catch (e) {
+      console.warn("[chess] draw respond failed:", e?.message || e);
+      respond({ ok: false, error: "Failed to respond" });
+    }
+  });
+
+  socket.on("chess:leaderboard:get", async ({ limit, offset } = {}, ack) => {
+    try {
+      const rows = await fetchChessLeaderboard(limit, offset);
+      const payload = rows.map((row) => {
+        const games = Number(row.chess_games_played || 0);
+        const wins = Number(row.chess_wins || 0);
+        const losses = Number(row.chess_losses || 0);
+        const draws = Number(row.chess_draws || 0);
+        const winrate = games > 0 ? Math.round((wins / games) * 1000) / 10 : 0;
+        return {
+          userId: Number(row.user_id),
+          username: row.username,
+          elo: Number(row.chess_elo || CHESS_DEFAULT_ELO),
+          gamesPlayed: games,
+          wins,
+          losses,
+          draws,
+          winrate,
+          peakElo: Number(row.chess_peak_elo || row.chess_elo || CHESS_DEFAULT_ELO),
+        };
+      });
+      if (typeof ack === "function") {
+        ack({ rows: payload, limit: Number(limit || 50), offset: Number(offset || 0) });
+      }
+      socket.emit("chess:leaderboard:data", { rows: payload, limit: Number(limit || 50), offset: Number(offset || 0) });
+    } catch (e) {
+      console.warn("[chess] leaderboard socket failed:", e?.message || e);
+      if (typeof ack === "function") ack({ ok: false });
+    }
+  });
+
+
+  socket.on("status change", ({ status }) => {
     status = normalizeStatus(status, "Online");
     socket.user.status = status;
 
