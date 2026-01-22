@@ -84,7 +84,43 @@ function ensureToastStack(){
   wrap.id = "toastStack";
   document.body.appendChild(wrap);
   toastStackEl = wrap;
+  // Place toasts correctly for the current room (prevents overlap with composer in dice room).
+  try { updateToastStackPlacement(); } catch(_){ }
   return toastStackEl;
+}
+
+// Toast placement:
+// - Default (non-dice rooms): bottom-right
+// - Dice room: top-right, directly under the Luck/Streak bar so nothing blocks the composer/roll button.
+function updateToastStackPlacement(){
+  const el = toastStackEl || document.getElementById("toastStack");
+  if(!el) return;
+
+  const dice = (typeof isDiceRoom === "function") ? isDiceRoom(currentRoom) : (String(currentRoom) === "diceroom");
+  if(!dice){
+    // revert to CSS defaults
+    el.style.top = "";
+    el.style.bottom = "";
+    return;
+  }
+
+  let topPx = 12;
+  try {
+    const topbar = document.querySelector(".topbar") || document.getElementById("topbar");
+    if(topbar){
+      const tb = topbar.getBoundingClientRect();
+      if(Number.isFinite(tb.bottom)) topPx = tb.bottom + 12;
+    }
+    // Prefer luck bar position when present/visible
+    const lm = (typeof luckMeter !== "undefined" && luckMeter) ? luckMeter : (document.getElementById("luckMeter") || document.querySelector(".luckMeter"));
+    if(lm && lm.offsetParent !== null){
+      const r = lm.getBoundingClientRect();
+      if(Number.isFinite(r.bottom) && r.bottom > 0) topPx = r.bottom + 10;
+    }
+  } catch(_){ }
+
+  el.style.top = `${Math.round(topPx)}px`;
+  el.style.bottom = "auto";
 }
 function showToast(message, { actionLabel, actionFn, durationMs = 4200 } = {}){
   const root = ensureToastStack();
@@ -127,6 +163,15 @@ function showToast(message, { actionLabel, actionFn, durationMs = 4200 } = {}){
   return toast;
 }
 const toast = showToast;
+
+// Keep toast placement correct on iOS (keyboard/viewport changes) and orientation changes.
+try {
+  window.addEventListener("resize", () => updateToastStackPlacement());
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", () => updateToastStackPlacement());
+    window.visualViewport.addEventListener("scroll", () => updateToastStackPlacement());
+  }
+} catch(_){ }
 
 // ---- Rooms: Site/User mode (pill switcher under Latest update)
 let activeRoomMode = (localStorage.getItem("roomMode") || "site").toLowerCase();
@@ -11237,6 +11282,9 @@ function setActiveRoom(room){
   document.querySelectorAll(".chan").forEach(el=>{
     el.classList.toggle("active", el.dataset.room === room);
   });
+
+  // Re-anchor milestone/toast popups for the new room (critical for dice room UX).
+  try { updateToastStackPlacement(); } catch(_){ }
 }
 
 let activeRoomEvent = null;

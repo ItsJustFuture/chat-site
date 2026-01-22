@@ -8621,6 +8621,13 @@ main.chatMain {
   max-width: min(360px, 92vw);
   pointer-events: none;
 }
+
+/* Dice room: milestone/toast popups must never cover the composer/roll button.
+   JS will set an exact `top` under the Luck bar; this is a safe CSS fallback. */
+body.dice-room .toastStack{
+  bottom: auto;
+  top: calc(var(--topbarH, 56px) + 64px);
+}
 .toast{
   pointer-events: auto;
   display: flex;
