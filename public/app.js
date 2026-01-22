@@ -17296,8 +17296,14 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
 
     const text = (payload && typeof payload === "object") ? payload.text : "";
     const room = (payload && typeof payload === "object") ? payload.room : "";
+    const meta = (payload && typeof payload === "object") ? (payload.meta || null) : null;
+
+    // Global system messages should ONLY render when explicitly marked.
+    // This prevents accidental room bleed if something is emitted with room="__global__".
     if (room === "__global__") {
-      addSystem(text, { className: isDiceResultSystemMessage(text) ? "diceResult" : "" });
+      if (meta && typeof meta === "object" && meta.kind === "global") {
+        addSystem(text, { className: isDiceResultSystemMessage(text) ? "diceResult" : "" });
+      }
       return;
     }
     if (!room) return;
@@ -17337,6 +17343,15 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   chatMain.appendChild(diceOverlay);
   chatMain.appendChild(confettiLayer);
 
+  function restoreDiceOverlayLift(){
+    try {
+      if (typeof showDiceAnimation.__prevLift !== "undefined") {
+        document.documentElement.style.setProperty("--diceOverlayLift", String(showDiceAnimation.__prevLift || "0px"));
+        delete showDiceAnimation.__prevLift;
+      }
+    } catch {}
+  }
+
   function showDiceAnimation({ result, variant, won, deltaGold, breakdown, outcome } = {}){
     const faces = ["⚀","⚁","⚂","⚃","⚄","⚅"];
     const v = String(variant || "d6").toLowerCase();
@@ -17344,6 +17359,17 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
     const dg = Number(deltaGold ?? 0);
     const sign = dg >= 0 ? "+" : "";
     const o = String(outcome || (dg > 0 ? "win" : "loss"));
+
+    // Lift dice visuals away from the composer/roll button (especially on iOS where
+    // safe-area + viewport quirks can cause overlays to sit too low).
+    try {
+      const prev = getComputedStyle(document.documentElement).getPropertyValue("--diceOverlayLift").trim();
+      if (typeof showDiceAnimation.__prevLift === "undefined") showDiceAnimation.__prevLift = prev;
+      const kbOpen = document.body && document.body.classList.contains("kb-open");
+      const baseLift = IS_IOS ? 38 : 26;
+      const extra = kbOpen ? 46 : 0;
+      document.documentElement.style.setProperty("--diceOverlayLift", `${baseLift + extra}px`);
+    } catch {}
 
     diceOverlay.style.display = "flex";
     diceOverlay.classList.remove(
@@ -17374,7 +17400,10 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
 
     if (PREFERS_REDUCED_MOTION) {
       diceDisplayEl.textContent = finalDisplay;
-      setTimeout(()=>{ diceOverlay.style.display="none"; }, 260);
+      setTimeout(()=>{
+        diceOverlay.style.display="none";
+        restoreDiceOverlayLift();
+      }, 260);
       return;
     }
 
@@ -17393,7 +17422,10 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
       if (t >= 11){
         clearInterval(iv);
         diceDisplayEl.textContent = finalDisplay;
-        setTimeout(()=>{ diceOverlay.style.display="none"; }, 420);
+        setTimeout(()=>{
+          diceOverlay.style.display="none";
+          restoreDiceOverlayLift();
+        }, 420);
         if (won || dg >= 500) popConfetti();
       }
     }, 80);
