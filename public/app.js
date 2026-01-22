@@ -11590,6 +11590,12 @@ async function loadRooms(){
 }
 
 function openRoomCreateModal(){
+  // Prevent overlay stacking: close drawers / other modals before opening room modals
+  try{ closeDrawers(); }catch{}
+  try{ if(typeof closeMemberMenu==="function") closeMemberMenu(); }catch{}
+  try{ if(typeof closeActionMenu==="function") closeActionMenu(); }catch{}
+  try{ if(typeof closeModal==="function" && modal && modal.style && modal.style.display !== "none") closeModal(); }catch{}
+  try{ if(typeof closeCouplesModal==="function") closeCouplesModal(); }catch{}
   if(!roomCreateModal) return;
   if(roomCreateMsg) roomCreateMsg.textContent = "";
   if(roomCreateNameInput) roomCreateNameInput.value = "";
@@ -11950,6 +11956,12 @@ function refreshRoomManageUi(){
 }
 
 function openRoomManageModal(){
+  // Prevent overlay stacking: close drawers / other modals before opening room modals
+  try{ closeDrawers(); }catch{}
+  try{ if(typeof closeMemberMenu==="function") closeMemberMenu(); }catch{}
+  try{ if(typeof closeActionMenu==="function") closeActionMenu(); }catch{}
+  try{ if(typeof closeModal==="function" && modal && modal.style && modal.style.display !== "none") closeModal(); }catch{}
+  try{ if(typeof closeCouplesModal==="function") closeCouplesModal(); }catch{}
   if(!roomManageModal) return;
   if(!me){
     toast("Loading your profile — try again in a second.");
