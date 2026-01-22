@@ -11015,6 +11015,8 @@ tabActions?.addEventListener("click", async ()=>{
 // modal open/close
 function openModal(){
   if (!modal) return;
+  // Prevent opening an empty profile modal that blocks the app
+  if (!modalTargetUsername) { forceCloseProfileModal(); return; }
   modal.style.display="flex";
   modal.classList.remove("modal-closing");
   if (PREFERS_REDUCED_MOTION) {
@@ -11047,6 +11049,19 @@ function closeModal(){
     modal.style.display="none";
     modal.classList.remove("modal-closing");
   }, 220);
+
+
+// Hard-close the profile modal (used on boot / when other overlays should take over)
+function forceCloseProfileModal(){
+  if (!modal) return;
+  modal.classList.remove("modal-visible", "modal-closing");
+  modal.style.display = "none";
+  modalTargetUsername = null;
+  modalTargetUserId = null;
+  try { setProfileEditMode(false); } catch {}
+  try { setCustomizePage(null); } catch {}
+}
+
 }
 
 // Couples popout modal (reuses the existing Couples nodes from the profile editor)
