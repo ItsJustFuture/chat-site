@@ -18655,3 +18655,30 @@ function openRoomsOverflowMenu(anchor){
   openActionMenu(anchor, items);
 }
 
+
+
+// ===== DM ACTIONS MENU =====
+function openDMActionMenu() {
+  openContextMenu([
+    { label: 'DM settings', action: () => openDMSettings() },
+    { label: 'Group info', action: () => openGroupInfo(), condition: () => isGroupDM() },
+    { label: 'Play chess', action: () => openChessFromDM() }
+  ]);
+}
+
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'dmActionsBtn') openDMActionMenu();
+});
+
+// ===== TOPBAR MORE MENU =====
+function openTopbarMoreMenu() {
+  openContextMenu([
+    { label: 'Group DMs', action: () => openGroupDMPanel() },
+    { label: 'Chess', action: () => openChessLobby() },
+    { label: 'Notifications', action: () => openNotifications?.() }
+  ]);
+}
+
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'topbarMoreBtn') openTopbarMoreMenu();
+});
