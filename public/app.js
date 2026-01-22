@@ -17289,15 +17289,19 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   updateRoomControlsVisibility();
 
   socket.on("system", (payload) => {
-    // Backward compatible: older servers send a string.
-    if(typeof payload === "string"){
-      addSystem(payload, { className: isDiceResultSystemMessage(payload) ? "diceResult" : "" });
+    // Legacy: ignore bare strings to avoid room bleed.
+    if (typeof payload === "string") {
       return;
     }
 
     const text = (payload && typeof payload === "object") ? payload.text : "";
     const room = (payload && typeof payload === "object") ? payload.room : "";
-    if(room && room !== currentRoom){
+    if (room === "__global__") {
+      addSystem(text, { className: isDiceResultSystemMessage(text) ? "diceResult" : "" });
+      return;
+    }
+    if (!room) return;
+    if (room !== currentRoom) {
       bufferSystemForRoom(room, text);
       return;
     }

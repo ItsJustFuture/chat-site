@@ -1516,6 +1516,7 @@ body[data-theme="420 Friendly (Light)"]{
   --headerH: 54px;
   --playerH: 0px;
   --menuHeaderH: 0px;
+  --diceOverlayLift: 0px;
 }
 @media (max-width: 360px){
   :root{ --uiScaleAuto: 0.92; }
@@ -5849,7 +5850,7 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
   left:50%;
   /* Keep result overlay above the composer/roll button on all viewports */
   top:auto;
-  bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom, 0px) + 18px + 56px);
+  bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom, 0px) + 12px + var(--diceOverlayLift, 0px));
   transform:translateX(-50%);
   pointer-events:none;
   min-width: 170px;
@@ -5913,7 +5914,7 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
   right:0;
   top:0;
   /* Keep celebratory confetti above the composer area (especially on mobile). */
-  bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom, 0px) + 8px + 56px);
+  bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom, 0px) + 8px + var(--diceOverlayLift, 0px));
   pointer-events:none;
   z-index:45;
 }
@@ -5931,6 +5932,18 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
 @keyframes confettiPop{
   0%{ transform:translateY(0) rotate(0deg); opacity:1; }
   100%{ transform:translateY(180px) rotate(420deg); opacity:0; }
+}
+
+@media (max-height: 700px){
+  :root{
+    --diceOverlayLift: 28px;
+  }
+  #diceOverlay{
+    min-width: 150px;
+    min-height: 84px;
+  }
+  #diceOverlay .diceDisplay{ font-size: 46px; }
+  #diceOverlay .diceDelta{ font-size: 13px; }
 }
 
 main.chat{ position: relative; }
