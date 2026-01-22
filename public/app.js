@@ -11013,10 +11013,20 @@ tabActions?.addEventListener("click", async ()=>{
 });
 
 // modal open/close
+
 function openModal(){
   if (!modal) return;
-  // Prevent opening an empty profile modal that blocks the app
-  if (!modalTargetUsername) { forceCloseProfileModal(); return; }
+  // Guard: never open an empty profile modal (prevents app from being blocked)
+  const nameText = (modalName && modalName.textContent) ? modalName.textContent.trim() : "";
+  if (!modalTargetUsername && !nameText) {
+    try { closeModal(); } catch {}
+    // Hard hide just in case
+    try {
+      modal.style.display = "none";
+      modal.classList.remove("modal-visible", "modal-closing");
+    } catch {}
+    return;
+  }
   modal.style.display="flex";
   modal.classList.remove("modal-closing");
   if (PREFERS_REDUCED_MOTION) {
@@ -11027,7 +11037,8 @@ function openModal(){
     modal.classList.add("modal-visible");
   });
 }
-function closeModal(){
+function closeModal(
+){
   if (!modal) return;
   modal.classList.remove("modal-visible");
   modal.classList.add("modal-closing");
@@ -11049,19 +11060,6 @@ function closeModal(){
     modal.style.display="none";
     modal.classList.remove("modal-closing");
   }, 220);
-
-
-// Hard-close the profile modal (used on boot / when other overlays should take over)
-function forceCloseProfileModal(){
-  if (!modal) return;
-  modal.classList.remove("modal-visible", "modal-closing");
-  modal.style.display = "none";
-  modalTargetUsername = null;
-  modalTargetUserId = null;
-  try { setProfileEditMode(false); } catch {}
-  try { setCustomizePage(null); } catch {}
-}
-
 }
 
 // Couples popout modal (reuses the existing Couples nodes from the profile editor)
@@ -17921,8 +17919,10 @@ socket.on("dm history", (payload = {}) => {
 
 // boot: auth gate
 
-async function bootApp(){
+async function bootApp()
+{
   setView("loading");
+  try{ if(modal){ modal.style.display='none'; modal.classList.remove('modal-visible','modal-closing'); } }catch{}
   bindRestrictedUI();
   bindStaffAppealsUI();
   bindReferralsUI();

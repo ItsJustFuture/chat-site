@@ -759,29 +759,8 @@
 </div>
 </div>
 
-<div id="roomManageModal" class="roomModal" hidden="">
-<div class="modalCard roomModalCard">
-<div class="modalTop">
-<strong>Manage Rooms</strong>
-<button class="iconBtn smallIcon" id="roomManageCloseBtn" title="Close" type="button">✕</button>
-</div>
-<div class="modalBody roomModalBody">
-<div class="tabs roomManageTabs">
-<button class="tab active" data-room-manage-tab="masters" type="button">Masters</button>
-<button class="tab" data-room-manage-tab="categories" type="button">Subcategories</button>
-<button class="tab" data-room-manage-tab="rooms" type="button">Rooms</button>
-<button class="tab" data-room-manage-tab="create" type="button">Create</button>
-<button class="tab" data-room-manage-tab="events" type="button">Room Events</button>
-</div>
-<div class="roomManageSection active" data-room-manage-section="masters">
-<div class="field">
-<label for="roomMasterCreateInput">New master</label>
-<div class="row" style="gap:8px; flex-wrap:wrap;">
-<input id="roomMasterCreateInput" maxlength="40" placeholder="Master name"/>
-<button class="btn" id="roomMasterCreateBtn" type="button">Create</button>
-</div>
-<div class="msgline" id="roomMasterMsg"></div>
-</div>
+
+
 <div class="roomManageList" id="roomMasterList"></div>
 </div>
 <div class="roomManageSection" data-room-manage-section="categories">
@@ -882,30 +861,8 @@
 </div>
 </div
 
-<div id="roomCreateModal" class="roomModal" hidden="">
-<div class="modalCard roomModalCard">
-<div class="modalTop">
-<strong>Create Room</strong>
-<button class="iconBtn smallIcon" id="roomCreateCloseBtn" title="Close" type="button">✕</button>
-</div>
-<div class="modalBody roomModalBody">
-<div class="field">
-<label for="roomCreateNameInput">Room name</label>
-<input id="roomCreateNameInput" maxlength="24" placeholder="room-name"/>
-</div>
-<div class="field">
-<label for="roomCreateMasterSelect">Master group</label>
-<select id="roomCreateMasterSelect"></select>
-</div>
-<div class="field">
-<label for="roomCreateCategorySelect">Subcategory</label>
-<select id="roomCreateCategorySelect"></select>
-</div>
-<div class="row" style="gap:8px; flex-wrap:wrap;">
-<button class="btn" id="roomCreateSubmitBtn" type="button">Create</button>
-<button class="btn secondary" id="roomCreateCancelBtn" type="button">Cancel</button>
-<div class="msgline" id="roomCreateMsg"></div>
-</div>
+
+
 </div>
 </div>
 </div>
@@ -2452,6 +2409,58 @@
       </div>
     </div>
   </div>
+</div>
+
+
+
+<!-- ROOM MANAGEMENT MODALS (moved out of profile modal to prevent stuck overlay) -->
+<div id="roomManageModal" class="roomModal" hidden="">
+<div class="modalCard roomModalCard">
+<div class="modalTop">
+<strong>Manage Rooms</strong>
+<button class="iconBtn smallIcon" id="roomManageCloseBtn" title="Close" type="button">✕</button>
+</div>
+<div class="modalBody roomModalBody">
+<div class="tabs roomManageTabs">
+<button class="tab active" data-room-manage-tab="masters" type="button">Masters</button>
+<button class="tab" data-room-manage-tab="categories" type="button">Subcategories</button>
+<button class="tab" data-room-manage-tab="rooms" type="button">Rooms</button>
+<button class="tab" data-room-manage-tab="create" type="button">Create</button>
+<button class="tab" data-room-manage-tab="events" type="button">Room Events</button>
+</div>
+<div class="roomManageSection active" data-room-manage-section="masters">
+<div class="field">
+<label for="roomMasterCreateInput">New master</label>
+<div class="row" style="gap:8px; flex-wrap:wrap;">
+<input id="roomMasterCreateInput" maxlength="40" placeholder="Master name"/>
+<button class="btn" id="roomMasterCreateBtn" type="button">Create</button>
+</div>
+<div class="msgline" id="roomMasterMsg"></div>
+</div>
+
+<div id="roomCreateModal" class="roomModal" hidden="">
+<div class="modalCard roomModalCard">
+<div class="modalTop">
+<strong>Create Room</strong>
+<button class="iconBtn smallIcon" id="roomCreateCloseBtn" title="Close" type="button">✕</button>
+</div>
+<div class="modalBody roomModalBody">
+<div class="field">
+<label for="roomCreateNameInput">Room name</label>
+<input id="roomCreateNameInput" maxlength="24" placeholder="room-name"/>
+</div>
+<div class="field">
+<label for="roomCreateMasterSelect">Master group</label>
+<select id="roomCreateMasterSelect"></select>
+</div>
+<div class="field">
+<label for="roomCreateCategorySelect">Subcategory</label>
+<select id="roomCreateCategorySelect"></select>
+</div>
+<div class="row" style="gap:8px; flex-wrap:wrap;">
+<button class="btn" id="roomCreateSubmitBtn" type="button">Create</button>
+<button class="btn secondary" id="roomCreateCancelBtn" type="button">Cancel</button>
+<div class="msgline" id="roomCreateMsg"></div>
 </div>
 
 </body>
