@@ -3924,7 +3924,7 @@ body:not(.polish-pack) .tonePicker{
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding: 18px;
-  z-index: 9999;
+  z-index: 1200;
 }
 .roomModal.modal-visible{ opacity: 1; }
 .roomModalCard{
