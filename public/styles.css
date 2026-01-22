@@ -5849,7 +5849,7 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
   left:50%;
   /* Keep result overlay above the composer/roll button on all viewports */
   top:auto;
-  bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom, 0px) + 18px);
+  bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom, 0px) + 18px + 56px);
   transform:translateX(-50%);
   pointer-events:none;
   min-width: 170px;
@@ -5913,7 +5913,7 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
   right:0;
   top:0;
   /* Keep celebratory confetti above the composer area (especially on mobile). */
-  bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom, 0px) + 8px);
+  bottom: calc(var(--composerH, 72px) + env(safe-area-inset-bottom, 0px) + 8px + 56px);
   pointer-events:none;
   z-index:45;
 }
