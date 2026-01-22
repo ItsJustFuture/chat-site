@@ -307,7 +307,23 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
     if (!r) return;
     const payload = { room: r, text: String(text ?? "") };
     if (meta && typeof meta === "object") payload.meta = meta;
-    io.to(r).emit("system", payload);
+    // IMPORTANT: Some historical code paths can leave a socket joined to a room
+    // even after its "currentRoom" changes (e.g., legacy "#room" mismatches or
+    // reconnect races). If we emit to the Socket.IO room directly, those stale
+    // memberships can cause system messages to "bleed" into other rooms.
+    //
+    // To hard-stop bleeding, emit only to sockets that explicitly report being
+    // in that room.
+    try {
+      for (const s of io.sockets.sockets.values()) {
+        if (s?.currentRoom === r || s?.data?.currentRoom === r) {
+          s.emit("system", payload);
+        }
+      }
+    } catch {
+      // Fallback to room emit if iteration fails for any reason.
+      io.to(r).emit("system", payload);
+    }
     if (DEBUG_ROOMS) {
       console.log("[rooms] system emit", { room: r, text: payload.text, meta: payload.meta || null });
     }
