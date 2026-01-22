@@ -293,17 +293,33 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
     upgradeTimeout: 45_000,
   });
 
+  const DEBUG_ROOMS = String(process.env.DEBUG_ROOMS || "").toLowerCase() === "true";
+
   // ---- System messages (room-scoped)
   // Historically the server emitted plain strings on the "system" event.
   // Some client UIs keep a single visible log and can accidentally render
   // a system message that was meant for another room.
   //
   // For room-scoped system messages, we now emit an explicit payload
-  // { room, text } so the client can route it correctly.
-  function emitRoomSystem(room, text) {
+  // { room, text, meta? } so the client can route it correctly.
+  function emitRoomSystem(room, text, meta) {
     const r = typeof room === "string" ? room : "";
     if (!r) return;
-    io.to(r).emit("system", { room: r, text: String(text ?? "") });
+    const payload = { room: r, text: String(text ?? "") };
+    if (meta && typeof meta === "object") payload.meta = meta;
+    io.to(r).emit("system", payload);
+    if (DEBUG_ROOMS) {
+      console.log("[rooms] system emit", { room: r, text: payload.text, meta: payload.meta || null });
+    }
+  }
+
+  function emitGlobalSystem(text, meta) {
+    const payload = { room: "__global__", text: String(text ?? "") };
+    if (meta && typeof meta === "object") payload.meta = meta;
+    io.emit("system", payload);
+    if (DEBUG_ROOMS) {
+      console.log("[rooms] system emit", { room: "__global__", text: payload.text, meta: payload.meta || null });
+    }
   }
   const pgPool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -3718,7 +3734,7 @@ const commandRegistry = {
       if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
       const reason = args.slice(1).join(" ").slice(0, 180) || "No reason provided";
       const sid = socketIdByUserId.get(target.id);
-      if (sid) io.to(sid).emit("system", { room: "__global__", text: `You were warned by ${actor.username}: ${reason}` });
+      if (sid) io.to(sid).emit("system", { room: "__global__", text: "You were warned by " + actor.username + ": " + reason });
       logModAction({ actor, action: "WARN_COMMAND", targetUserId: target.id, targetUsername: target.username, room: null, details: reason });
       return { ok: true, message: `Warned ${target.username}: ${reason}`, targets: target.id };
     },
@@ -4049,7 +4065,7 @@ const commandRegistry = {
     handler: async ({ args }) => {
       const msg = args.join(" ").trim();
       if (!msg) return { ok: false, message: "Missing message" };
-      io.emit("system", { room: "__global__", text: `[Announcement] ${msg}` });
+      emitGlobalSystem("[Announcement] " + msg);
       return { ok: true, message: "Announcement sent" };
     },
   },
@@ -4063,7 +4079,7 @@ const commandRegistry = {
       if (val !== "on" && val !== "off") return { ok: false, message: "Use on|off" };
       maintenanceState.enabled = val === "on";
       await dbRunAsync(`INSERT INTO config (key, value) VALUES ('maintenance', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [val]);
-      io.emit("system", { room: "__global__", text: `Maintenance mode ${val}` });
+      emitGlobalSystem("Maintenance mode " + val);
       return { ok: true, message: `Maintenance ${val}` };
     },
   },
@@ -12767,6 +12783,7 @@ if (existingSid && existingSid !== socket.id) {
 })();
 
   socket.currentRoom = null;
+  socket.data.currentRoom = null;
     // --- SAFETY: ensure user is always in a room so messages can appear
   // If client fails to emit "join room" (mobile / reconnect / race), auto-join main.
   // IMPORTANT: never auto-join if the user is kicked/banned.
@@ -13078,24 +13095,31 @@ function doJoin(room, status) {
     });
     return;
   }
-  // leave old room
-  if (socket.currentRoom) {
-    socket.leave(socket.currentRoom);
-    const old = socket.currentRoom;
-    socket.currentRoom = null;
+  const previousRoom = socket.data.currentRoom || socket.currentRoom || null;
+  const targetRoom = room;
+  if (previousRoom && previousRoom !== targetRoom) {
+    if (DEBUG_ROOMS) {
+      console.log("[rooms] leave", { sid: socket.id, room: previousRoom, next: targetRoom });
+    }
+    socket.leave(previousRoom);
 
-    const set = typingByRoom.get(old);
+    const set = typingByRoom.get(previousRoom);
     if (set) {
       set.delete(socket.user.username);
-      broadcastTyping(old);
+      broadcastTyping(previousRoom);
     }
 
-    emitUserList(old);
-    try { socket.leave(old); } catch {}
+    emitUserList(previousRoom);
   }
 
-  socket.currentRoom = room;
-  socket.join(room);
+  if (previousRoom !== targetRoom) {
+    if (DEBUG_ROOMS) {
+      console.log("[rooms] join", { sid: socket.id, room: targetRoom, prev: previousRoom });
+    }
+    socket.join(targetRoom);
+  }
+  socket.currentRoom = targetRoom;
+  socket.data.currentRoom = targetRoom;
 
   // session map + heat + daily unique rooms
   try {
@@ -13198,7 +13222,7 @@ function doJoin(room, status) {
     }
   );
 
-  socket.emit("system", { room, text: `Joined ${room}` });
+  socket.emit("system", { room, text: "Joined " + room });
   emitUserList(room);
 }
 
@@ -14042,7 +14066,7 @@ if (!room) {
 
         const rawText = safeString(payload.text, "");
         if (rawText.length > MAX_CHAT_MESSAGE_CHARS) {
-          socket.emit("system", { room: socket.currentRoom || "main", text: `Message too long (max ${MAX_CHAT_MESSAGE_CHARS} characters).` });
+      socket.emit("system", { room: socket.currentRoom || "main", text: "Message too long (max " + MAX_CHAT_MESSAGE_CHARS + " characters)." });
           return;
         }
         const text = rawText.slice(0, MAX_CHAT_MESSAGE_CHARS);
