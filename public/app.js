@@ -392,21 +392,11 @@ const THEMES = [
   function collectMetrics(){
     const vv = window.visualViewport;
     const vvReliable = vv && typeof vv.height === "number" && vv.height > 120;
-    
-    // visualViewport can report negative offsetTop or oversized heights on some desktop browsers
-    // (zoom/UI chrome). Clamp to keep the top bar + composer anchored correctly.
-    const rawInnerH = Number(window.innerHeight) || Number(document.documentElement.clientHeight) || 0;
-    const rawVvHeight = vvReliable ? Number(vv.height) : rawInnerH;
-    const rawVvTop = vvReliable ? Number(vv.offsetTop || 0) : 0;
-    
-    const vvTop = Number.isFinite(rawVvTop) ? Math.max(0, Math.min(rawVvTop, Math.max(0, rawInnerH - 120))) : 0;
-    const vvHeight = Number.isFinite(rawVvHeight)
-      ? Math.max(120, Math.min(rawVvHeight, rawInnerH || rawVvHeight))
-      : (rawInnerH || 0);
-    
+    const vvHeight = vvReliable ? vv.height : window.innerHeight;
+    const vvTop = vvReliable ? Number(vv.offsetTop || 0) : 0;
     const vvPageTop = vvReliable && typeof vv.pageTop === "number" ? vv.pageTop : "";
-    const kbInset = Math.max(0, Math.round((rawInnerH || vvHeight) - vvHeight - vvTop));
-    
+    const kbInset = Math.max(0, Math.round(window.innerHeight - vvHeight - vvTop));
+
     const composer = document.querySelector(selectors.composer);
     const player = document.querySelector(selectors.player);
 
@@ -885,12 +875,7 @@ function isSurvivalRoom(activeRoom){
 function displayRoomName(room){
   if (isDiceRoom(room)) return "Dice Room";
   if (isSurvivalRoom(room)) return "Survival Simulator";
-  const raw = String(room || "");
-  if(isVipRoomName(raw)){
-    const cleaned = raw.replace(/^vip[_-]/i, "");
-    return cleaned ? `⭐ ${cleaned}` : "⭐ VIP Room";
-  }
-  return raw;
+  return room;
 }
 
 let lastUsers = [];
@@ -2743,7 +2728,6 @@ const referralsPanelBtn = document.getElementById("referralsPanelBtn");
 const roleDebugPanelBtn = document.getElementById("roleDebugPanelBtn");
 const featureFlagsPanelBtn = document.getElementById("featureFlagsPanelBtn");
 const sessionsPanelBtn = document.getElementById("sessionsPanelBtn");
-const membersAdminMenuBtn = document.getElementById("membersAdminMenuBtn");
 const appealsPanel = document.getElementById("appealsPanel");
 const referralsPanel = document.getElementById("referralsPanel");
 const roleDebugPanel = document.getElementById("roleDebugPanel");
@@ -2821,26 +2805,6 @@ const roomManageMasterSelect = document.getElementById("roomManageMasterSelect")
 const roomManageCategorySelect = document.getElementById("roomManageCategorySelect");
 const roomManageRoomList = document.getElementById("roomManageRoomList");
 const roomManageMsg = document.getElementById("roomManageMsg");
-
-const roomManageCreateTab = document.getElementById("roomManageTab_create");
-const roomManageEventsTab = document.getElementById("roomManageTab_events");
-const roomCreateForm = document.getElementById("roomCreateForm");
-const roomCreateName = document.getElementById("roomCreateName");
-const roomCreateMaster = document.getElementById("roomCreateMaster");
-const roomCreateCategory = document.getElementById("roomCreateCategory");
-const roomCreateVipOnly = document.getElementById("roomCreateVipOnly");
-const roomCreateStaffOnly = document.getElementById("roomCreateStaffOnly");
-const roomCreateMinLevel = document.getElementById("roomCreateMinLevel");
-const roomCreateLocked = document.getElementById("roomCreateLocked");
-const roomCreateMaintenance = document.getElementById("roomCreateMaintenance");
-const roomCreateEventsEnabled = document.getElementById("roomCreateEventsEnabled");
-const roomEventsRoomSelect = document.getElementById("roomEventsRoomSelect");
-const roomEventsType = document.getElementById("roomEventsType");
-const roomEventsText = document.getElementById("roomEventsText");
-const roomEventsDuration = document.getElementById("roomEventsDuration");
-const roomEventsXpMult = document.getElementById("roomEventsXpMult");
-const roomEventsStartBtn = document.getElementById("roomEventsStartBtn");
-const roomEventsActiveList = document.getElementById("roomEventsActiveList");
 const roomCreateModal = document.getElementById("roomCreateModal");
 const roomCreateCloseBtn = document.getElementById("roomCreateCloseBtn");
 const roomCreateNameInput = document.getElementById("roomCreateNameInput");
@@ -4782,68 +4746,6 @@ function capitalize(value){
   const str = String(value || "");
   return str ? str.charAt(0).toUpperCase() + str.slice(1) : "";
 }
-
-// ---- Small action menu (click-outside to close)
-let __activeActionMenu = null;
-function closeActionMenu(){
-  try { __activeActionMenu?.remove(); } catch(_){}
-  __activeActionMenu = null;
-  document.removeEventListener("mousedown", __actionMenuOutside, true);
-  document.removeEventListener("touchstart", __actionMenuOutside, true);
-  window.removeEventListener("resize", closeActionMenu, true);
-  window.removeEventListener("scroll", closeActionMenu, true);
-}
-function __actionMenuOutside(ev){
-  if(!__activeActionMenu) return;
-  if(ev && __activeActionMenu.contains(ev.target)) return;
-  closeActionMenu();
-}
-function openActionMenu(anchorEl, items){
-  if(!anchorEl) return;
-  closeActionMenu();
-  const menu = document.createElement("div");
-  menu.className = "actionMenu";
-  menu.setAttribute("role","menu");
-  const visible = (items || []).filter(it => it && it.visible !== false);
-  if(!visible.length) return;
-  for(const it of visible){
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "amItem";
-    btn.setAttribute("role","menuitem");
-    if(it.disabled) btn.disabled = true;
-    if(it.title) btn.title = it.title;
-    btn.addEventListener("click", (e)=>{
-      e.preventDefault();
-      e.stopPropagation();
-      closeActionMenu();
-      try { it.onClick && it.onClick(); } catch(err){ console.warn("[menu] item failed", err); }
-    });
-    const icon = document.createElement("span");
-    icon.className = "amIcon";
-    icon.textContent = it.icon || "";
-    const label = document.createElement("span");
-    label.textContent = it.label || "";
-    btn.appendChild(icon);
-    btn.appendChild(label);
-    menu.appendChild(btn);
-  }
-  document.body.appendChild(menu);
-  __activeActionMenu = menu;
-  const r = anchorEl.getBoundingClientRect();
-  const mw = menu.offsetWidth || 200;
-  const mh = menu.offsetHeight || 120;
-  const pad = 8;
-  let left = Math.min(window.innerWidth - mw - pad, Math.max(pad, r.left));
-  let top = Math.min(window.innerHeight - mh - pad, Math.max(pad, r.bottom + 6));
-  menu.style.left = `${left}px`;
-  menu.style.top = `${top}px`;
-  document.addEventListener("mousedown", __actionMenuOutside, true);
-  document.addEventListener("touchstart", __actionMenuOutside, true);
-  window.addEventListener("resize", closeActionMenu, true);
-  window.addEventListener("scroll", closeActionMenu, true);
-}
-
 
 // Linkify plain-text URLs into safe anchors.
 // Always pass ESCAPED text into linkify (e.g. linkify(escapeHtml(text))).
@@ -11534,16 +11436,6 @@ function getDefaultMasterIds(masters){
   return { site: site?.id, user: user?.id };
 }
 
-
-
-function isVipRoomName(name){
-  const n = String(name || "").trim().toLowerCase();
-  return n.startsWith("vip_") || n.startsWith("vip-");
-}
-function canSeeVipRooms(){
-  const lvl = Number(me?.level || me?.lvl || 0);
-  return me && roleRank(me.role) >= roleRank("VIP") && lvl >= 25;
-}
 function renderRoomsList(structureOrRooms){
   if(Array.isArray(structureOrRooms)){
     withFlip(chanList, "data-flip-key", () => {
@@ -11659,7 +11551,6 @@ function renderRoomsList(structureOrRooms){
         for(const r of categoryRooms){
           const name = r?.name || r;
           if(!name) continue;
-          if(isVipRoomName(name) && !canSeeVipRooms()) continue;
           const div = document.createElement("div");
           div.className = "chan" + (name === currentRoom ? " active" : "");
           div.dataset.room = name;
@@ -11753,71 +11644,24 @@ async function submitCreateRoom(){
     return;
   }
   closeRoomCreateModal();
-
-if(action === "settings"){
-  const body = {
-    slowmode_seconds: Number(row.querySelector(".set-slow")?.value || 0) || 0,
-    is_locked: row.querySelector(".set-locked")?.checked ? 1 : 0,
-    maintenance_mode: row.querySelector(".set-maint")?.checked ? 1 : 0,
-    vip_only: row.querySelector(".set-vip")?.checked ? 1 : 0,
-    staff_only: row.querySelector(".set-staff")?.checked ? 1 : 0,
-    min_level: Number(row.querySelector(".set-minlvl")?.value || 0) || 0,
-    events_enabled: row.querySelector(".set-events")?.checked ? 1 : 0,
-  };
-  await api(`/api/rooms/${encodeURIComponent(room.name)}/settings`, {
-    method:"PATCH",
-    headers: { "Content-Type":"application/json" },
-    body: JSON.stringify(body),
-  });
-  toast("Saved.");
-}
-if(action === "events"){
-  __roomEventsSelectedRoom = room.name;
-  setRoomManageTab("events");
-}
-      await loadRooms();
+  await loadRooms();
   joinRoom(name);
 }
 
-async function createRoomFlow(opts = {}){
-  const options = opts && typeof opts === "object" ? opts : {};
-  const forceMode = String(options.forceMode || "").toLowerCase(); // "site" | "user" | ""
-  const namePrefix = String(options.namePrefix || "");
-  const vipOnly = options.vipOnly ? true : false;
-
-  // If we have the modern create modal, use it (and force Site/User mode if requested)
+async function createRoomFlow(){
   if(roomCreateModal){
-    if(forceMode === "site" || forceMode === "user"){
-      activeRoomMode = forceMode;
-      try { localStorage.setItem("roomMode", activeRoomMode); } catch(_){}
-      try { renderRoomsList(roomStructure || roomStructure?.rooms || []); } catch(_){}
-    }
     openRoomCreateModal();
-    // If we need a VIP prefix, prefill a hint (user still confirms)
-    if(namePrefix && roomCreateNameInput && !roomCreateNameInput.value){
-      roomCreateNameInput.value = namePrefix;
-      try { roomCreateNameInput.setSelectionRange(roomCreateNameInput.value.length, roomCreateNameInput.value.length); } catch(_){}
-    }
     return;
   }
-
-  const promptLabel = vipOnly ? "New VIP room name (letters/numbers/_/-):" : "New room name (letters/numbers/_/-):";
-  const raw = prompt(promptLabel);
+  const raw = prompt("New room name (letters/numbers/_/-):");
   if(!raw) return;
-  const cleaned = sanitizeRoomClient(raw);
-  if(!cleaned){ addSystem("Invalid room name."); return; }
-
-  const finalName = (namePrefix && !isVipRoomName(cleaned)) ? (namePrefix + cleaned.replace(/^vip[_-]/i,"")) : cleaned;
-
-  const body = { name: finalName };
-  // Force site/user rooms for the classic prompt path
-  if(forceMode === "user") body.is_user_room = true;
-  if(forceMode === "site") body.is_user_room = false;
+  const name = sanitizeRoomClient(raw);
+  if(!name){ addSystem("Invalid room name."); return; }
 
   const {res, text} = await api("/rooms", {
     method:"POST",
     headers: {"Content-Type":"application/json"},
-    body: JSON.stringify(body)
+    body: JSON.stringify({ name })
   });
   if(!res.ok){
     addSystem(text || "Failed to create room.");
@@ -11825,10 +11669,8 @@ async function createRoomFlow(opts = {}){
   }
 
   await loadRooms();
-  joinRoom(finalName);
+  joinRoom(name);
 }
-
-
 
 function getSortedMasters({ includeTemporary = true } = {}){
   const masters = ensureDefaultMasters(roomStructure.masters || []);
@@ -12061,7 +11903,6 @@ function renderRoomManageRoomsList(){
       <div class="label">${escapeHtml(displayRoomName(room.name))}</div>
       <select class="roomManageMoveSelect">${optionsMarkup}</select>
       <div class="actions">
-        <button class="btn secondary" data-action="rename">Rename</button>
         <button class="btn secondary" data-action="up">Up</button>
         <button class="btn secondary" data-action="down">Down</button>
         <button class="btn secondary" data-action="move">Move</button>
@@ -12069,28 +11910,12 @@ function renderRoomManageRoomsList(){
     `;
     const moveSelect = row.querySelector(".roomManageMoveSelect");
     if(moveSelect) moveSelect.value = categoryId;
-    row.querySelector('.set-locked').checked = !!room.is_locked;
-    row.querySelector('.set-maint').checked = !!room.maintenance_mode;
-    row.querySelector('.set-vip').checked = !!room.vip_only;
-    row.querySelector('.set-staff').checked = !!room.staff_only;
-    row.querySelector('.set-minlvl').value = String(room.min_level || 0);
-    row.querySelector('.set-slow').value = String(room.slowmode_seconds || 0);
-    row.querySelector('.set-events').checked = room.events_enabled !== 0;
     const actions = row.querySelector(".actions");
     actions?.addEventListener("click", async (e) => {
       const btn = e.target.closest("button");
       if(!btn) return;
       const action = btn.dataset.action;
-            if(action === "rename"){
-        const next = prompt("Rename room (letters/numbers/dashes):", room.name);
-        if(!next) return;
-        await api(`/api/rooms/${encodeURIComponent(room.name)}`, {
-          method:"PATCH",
-          headers: { "Content-Type":"application/json" },
-          body: JSON.stringify({ name: next })
-        });
-      }
-if(action === "move"){
+      if(action === "move"){
         const target = moveSelect?.value || "";
         if(!target || target === String(categoryId)) return;
         await api(`/api/rooms/${encodeURIComponent(room.name)}/move`, {
@@ -12115,146 +11940,14 @@ if(action === "move"){
     });
     roomManageRoomList.appendChild(row);
   }
-}function populateRoomCreateSelects(){
-  if(!roomCreateMaster || !roomCreateCategory) return;
-  const masters = getSortedMasters();
-  roomCreateMaster.innerHTML = masters.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join("");
-  const masterId = roomCreateMaster.value || masters[0]?.id || "";
-  const cats = masterId ? getSortedCategories(masterId) : [];
-  roomCreateCategory.innerHTML = cats.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
 }
-
-function renderRoomCreateUi(){
-  if(!roomCreateForm) return;
-  populateRoomCreateSelects();
-  // permissions UI
-  const isAdminPlus = me && roleRank(me.role) >= roleRank("Admin");
-  roomCreateForm.querySelectorAll("[data-admin-only]").forEach(el => {
-    el.style.display = isAdminPlus ? "" : "none";
-  });
-}
-
-async function handleRoomCreateSubmit(e){
-  e?.preventDefault?.();
-  if(!me){ toast("Loading your profile — try again."); return; }
-  if(roleRank(me.role) < roleRank("Admin")) { toast("Room creation is Admin-only."); return; }
-  const name = sanitizeRoomNameClient(roomCreateName?.value || "");
-  if(!name){ toast("Enter a room name."); return; }
-  const body = {
-    name,
-    master_id: Number(roomCreateMaster?.value || 0) || null,
-    category_id: Number(roomCreateCategory?.value || 0) || null,
-    vip_only: roomCreateVipOnly?.checked ? 1 : 0,
-    staff_only: roomCreateStaffOnly?.checked ? 1 : 0,
-    min_level: Number(roomCreateMinLevel?.value || 0) || 0,
-    is_locked: roomCreateLocked?.checked ? 1 : 0,
-    maintenance_mode: roomCreateMaintenance?.checked ? 1 : 0,
-    events_enabled: roomCreateEventsEnabled?.checked ? 1 : 0,
-  };
-  try {
-    await api("/rooms", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
-    toast("Room created.");
-    await fetchRooms();
-    refreshRoomManageUi();
-    setRoomManageTab("rooms");
-  } catch(err){
-    toast(err?.message || "Failed to create room.");
-  }
-}
-
-function sanitizeRoomNameClient(name){
-  return String(name || "").trim().toLowerCase().replace(/\s+/g, "");
-}
-
-let __roomEventsSelectedRoom = null;
-
-function renderRoomManageEventsUi(){
-  if(!roomManageEventsTab) return;
-  const rooms = (window.__ROOM_STRUCTURE__?.rooms || window.roomStructure?.rooms || roomStructure?.rooms || []).filter(r => !r.is_user_room);
-  if(roomEventsRoomSelect){
-    const opts = rooms.map(r => `<option value="${escapeHtml(r.name)}">${escapeHtml(displayRoomName(r.name))}</option>`).join("");
-    roomEventsRoomSelect.innerHTML = opts || `<option value="main">main</option>`;
-    if(__roomEventsSelectedRoom) roomEventsRoomSelect.value = __roomEventsSelectedRoom;
-  }
-  if(roomEventsRoomSelect && !__roomEventsSelectedRoom) __roomEventsSelectedRoom = roomEventsRoomSelect.value || "main";
-  fetchAndRenderActiveRoomEvents();
-}
-
-async function fetchAndRenderActiveRoomEvents(){
-  if(!roomEventsActiveList || !roomEventsRoomSelect) return;
-  const roomName = roomEventsRoomSelect.value || "main";
-  __roomEventsSelectedRoom = roomName;
-  try{
-    const res = await api(`/api/rooms/${encodeURIComponent(roomName)}/events`);
-    const events = res?.events || [];
-    roomEventsActiveList.innerHTML = events.length ? "" : `<div class="muted">No active events.</div>`;
-    for(const ev of events){
-      const row = document.createElement("div");
-      row.className = "roomEventRow";
-      const ends = ev.endsAt ? new Date(ev.endsAt).toLocaleString() : "No end";
-      row.innerHTML = `
-        <div class="label"><strong>${escapeHtml(ev.type || "event")}</strong> <span class="muted">#${ev.id}</span></div>
-        <div class="meta muted">Ends: ${escapeHtml(ends)}</div>
-        <button class="btn danger small" data-stop="${ev.id}">Stop</button>
-      `;
-      row.querySelector("[data-stop]")?.addEventListener("click", async () => {
-        try{
-          await api(`/api/room-events/${ev.id}/stop`, { method:"POST" });
-          toast("Event stopped.");
-          fetchAndRenderActiveRoomEvents();
-        }catch(err){ toast(err?.message || "Failed to stop event."); }
-      });
-      roomEventsActiveList.appendChild(row);
-    }
-  }catch(err){
-    roomEventsActiveList.innerHTML = `<div class="muted">Failed to load events.</div>`;
-  }
-}
-
-async function startRoomEvent(){
-  if(!me){ toast("Loading your profile — try again."); return; }
-  if(roleRank(me.role) < roleRank("Admin")) { toast("Events are Admin-only."); return; }
-  const roomName = roomEventsRoomSelect?.value || "main";
-  const type = roomEventsType?.value || "announcement";
-  const duration = Number(roomEventsDuration?.value || 0) || 0;
-  const text = String(roomEventsText?.value || "").trim();
-  const xpMult = Number(roomEventsXpMult?.value || 0) || 0;
-  const payload = {};
-  if(text) payload.text = text;
-  if(type === "boost" && xpMult > 1) payload.xp_multiplier = xpMult;
-  try{
-    await api(`/api/rooms/${encodeURIComponent(roomName)}/events`, {
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ type, duration_seconds: duration, payload })
-    });
-    toast("Event started.");
-    roomEventsText && (roomEventsText.value = "");
-    fetchAndRenderActiveRoomEvents();
-  }catch(err){ toast(err?.message || "Failed to start event."); }
-}
-
-
 
 function refreshRoomManageUi(){
   populateManageMasterSelects();
   renderRoomMasterList();
   renderRoomCategoryList();
   renderRoomManageRoomsList();
-  renderRoomCreateUi();
-  renderRoomManageEventsUi();
 }
-
-
-function presetRoomCreateForm(preset = {}) {
-  if (!roomCreateForm) return;
-  if (preset.namePrefix && roomCreateName && !roomCreateName.value) roomCreateName.value = preset.namePrefix;
-  if (roomCreateVipOnly) roomCreateVipOnly.checked = !!preset.vipOnly;
-  if (roomCreateMinLevel && Number.isFinite(Number(preset.minLevel))) roomCreateMinLevel.value = String(Number(preset.minLevel));
-  // If VIP only, default min level to 25 unless user changes it
-  if (roomCreateVipOnly && roomCreateVipOnly.checked && roomCreateMinLevel && !roomCreateMinLevel.value) roomCreateMinLevel.value = "25";
-}
-
 
 function openRoomManageModal(){
   if(!roomManageModal) return;
@@ -12262,10 +11955,10 @@ function openRoomManageModal(){
     toast("Loading your profile — try again in a second.");
     return;
   }
-if(roleRank(me.role) < roleRank("Admin")){
-  toast("Room management is Admin-only.");
-  return;
-}
+  if(roleRank(me.role) < roleRank("Owner")){
+    toast("Room management is Owner-only.");
+    return;
+  }
   if(roomMasterMsg) roomMasterMsg.textContent = "";
   if(roomCategoryMsg) roomCategoryMsg.textContent = "";
   if(roomManageMsg) roomManageMsg.textContent = "";
@@ -13246,10 +12939,14 @@ function renderChangelogList(){
     title.textContent = (entry.title || "").trim() || "Update";
     left.appendChild(title);
 
+    const meta = document.createElement("div");
+    meta.className = "clMeta";
+    meta.textContent = formatChangelogDate(entry.created_at || entry.createdAt || entry.timestamp);
+    left.appendChild(meta);
 
     summary.appendChild(left);
 
-    // Reactions (shown only when expanded)
+    // Reactions (always visible, even when collapsed)
     const reactions = normalizeChangelogReactions(entry.reactions);
     const myReactions = normalizeMyChangelogReactions(entry.myReactions || entry.my_reactions || entry.mine);
     const reactionRow = document.createElement("div");
@@ -13278,6 +12975,8 @@ function renderChangelogList(){
       reactionRow.appendChild(btn);
     }
 
+    summary.appendChild(reactionRow);
+
     const chev = document.createElement("span");
     chev.className = "clChevron";
     chev.setAttribute("aria-hidden", "true");
@@ -13288,13 +12987,6 @@ function renderChangelogList(){
 
     const panel = document.createElement("div");
     panel.className = "clPanel";
-
-const meta = document.createElement("div");
-meta.className = "clMeta";
-meta.textContent = formatChangelogDate(entry.created_at || entry.createdAt || entry.timestamp);
-panel.appendChild(meta);
-
-panel.appendChild(reactionRow);
 
     const body = document.createElement("div");
     body.className = "clBody";
@@ -17351,34 +17043,7 @@ async function initChatApp(){
   setAuthUser(sessionUser);
   setView("chat");
 
-  
-
-function syncMembersAdminMenu(){
-  if(!membersAdminMenuBtn) return;
-  const mapping = [
-    { label:"Appeals", icon:"⚖️", btn: appealsPanelBtn },
-    { label:"Referrals", icon:"📨", btn: referralsPanelBtn },
-    { label:"Role debug", icon:"🧩", btn: roleDebugPanelBtn },
-    { label:"Flags", icon:"🚩", btn: featureFlagsPanelBtn },
-    { label:"Sessions", icon:"🗺️", btn: sessionsPanelBtn },
-  ];
-  const visible = mapping.filter(m => m.btn && !m.btn.hidden);
-  membersAdminMenuBtn.hidden = visible.length === 0;
-  if(membersAdminMenuBtn.__bound) return;
-  membersAdminMenuBtn.__bound = true;
-  membersAdminMenuBtn.addEventListener("click", (e)=>{
-    e.preventDefault();
-    e.stopPropagation();
-    const items = mapping.map(m => ({
-      label: m.label,
-      icon: m.icon,
-      visible: m.btn && !m.btn.hidden,
-      onClick: ()=> m.btn?.click()
-    }));
-    openActionMenu(membersAdminMenuBtn, items);
-  });
-}
-// Staff-only: show staff buttons in members drawer
+  // Staff-only: show staff buttons in members drawer
   if(appealsPanelBtn) appealsPanelBtn.hidden = !isStaffRole(me?.role);
   // Referrals are for Admin+ review (mods create them)
   if(referralsPanelBtn) referralsPanelBtn.hidden = !(me?.role==="Admin" || me?.role==="Co-owner" || me?.role==="Owner");
@@ -17387,7 +17052,6 @@ function syncMembersAdminMenu(){
   
   if(featureFlagsPanelBtn) featureFlagsPanelBtn.hidden = !(me?.role==="Owner");
   if(sessionsPanelBtn) sessionsPanelBtn.hidden = !(me?.role==="Owner");
-  try { syncMembersAdminMenu(); } catch(_){ }
 initAppealsDurationSelect();
 
   await loadVibeTags();
@@ -17621,14 +17285,9 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
     addRoomBtn.addEventListener("click", createRoomFlow);
   }
   if(manageRoomsBtn){
-    manageRoomsBtn.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); openRoomsOverflowMenu(manageRoomsBtn); });
+    manageRoomsBtn.addEventListener("click", openRoomManageModal);
   }
   roomManageCloseBtn?.addEventListener("click", closeRoomManageModal);
-
-roomCreateForm?.addEventListener("submit", handleRoomCreateSubmit);
-roomCreateMaster?.addEventListener("change", populateRoomCreateSelects);
-roomEventsRoomSelect?.addEventListener("change", fetchAndRenderActiveRoomEvents);
-roomEventsStartBtn?.addEventListener("click", (e)=>{ e.preventDefault(); startRoomEvent(); });
   roomManageModal?.addEventListener("click", (e)=>{ if(e.target === roomManageModal) closeRoomManageModal(); });
   roomCreateCloseBtn?.addEventListener("click", closeRoomCreateModal);
   roomCreateCancelBtn?.addEventListener("click", closeRoomCreateModal);
@@ -18785,96 +18444,4 @@ const composerForm = document.querySelector(".chat-composer form");
 composerForm?.addEventListener("submit", e => {
   e.preventDefault();
   e.stopPropagation();
-});
-
-function openRoomsOverflowMenu(anchor){
-  if(!me){
-    toast("Loading your profile — try again in a second.");
-    return;
-  }
-  const isAdminPlus = roleRank(me.role) >= roleRank("Admin");
-  const canSeeVip = canSeeVipRooms();
-  const canCreateVip = isAdminPlus && canSeeVip;
-
-  const items = [
-    {
-      label: "Add category",
-      icon: "📁",
-      visible: isAdminPlus,
-      onClick: ()=>{
-        openRoomManageModal();
-        try { setRoomManageTab("categories"); } catch(_){}
-      }
-    },
-    {
-      label: "Manage rooms",
-      icon: "🛠️",
-      visible: isAdminPlus,
-      onClick: ()=>{
-        openRoomManageModal();
-        try { setRoomManageTab("rooms"); } catch(_){}
-      }
-    },
-    {
-      label: "Add room",
-      icon: "＋",
-      visible: isAdminPlus,
-      onClick: ()=>{
-        openRoomManageModal();
-        try { setRoomManageTab("create"); } catch(_){}
-        try { presetRoomCreateForm({ vipOnly:false }); } catch(_){}
-      }
-    },
-    {
-      label: "Add VIP room",
-      icon: "⭐",
-      visible: canCreateVip,
-      title: canCreateVip ? "" : "Requires VIP + level 25",
-      onClick: ()=>{
-        openRoomManageModal();
-        try { setRoomManageTab("create"); } catch(_){}
-        try { presetRoomCreateForm({ vipOnly:true, minLevel:25, namePrefix:"vip_" }); } catch(_){}
-      }
-    },
-  ];
-  openActionMenu(anchor, items);
-}
-
-
-
-// ===== DM ACTIONS MENU =====
-function openDMActionMenu(anchor) {
-  const items = [
-    { label: "DM settings", icon: "⚙️", visible: true, onClick: () => { try { openDMSettings(); } catch(_){} } },
-    { label: "Group info", icon: "ℹ️", visible: typeof isGroupDM === "function" ? !!isGroupDM() : false, onClick: () => { try { openGroupInfo(); } catch(_){} } },
-    { label: "Play chess", icon: "♟", visible: true, onClick: () => { try { openChessFromDM(); } catch(_){} } },
-  ];
-  openActionMenu(anchor, items);
-}
-
-// DM Actions button wiring
-document.addEventListener("click", (e) => {
-  if (e.target && e.target.id === "dmActionsBtn") {
-    e.preventDefault();
-    e.stopPropagation();
-    openDMActionMenu(e.target);
-  }
-});
-
-// ===== TOPBAR MORE MENU =====
-function openTopbarMoreMenu(anchor) {
-  const items = [
-    { label: "Group DMs", icon: "👥", visible: true, onClick: () => { try { openGroupDMPanel(); } catch(_){} } },
-    { label: "Chess", icon: "♟", visible: true, onClick: () => { try { openChessLobby(); } catch(_){} } },
-    { label: "Notifications", icon: "🔔", visible: typeof openNotifications === "function", onClick: () => { try { openNotifications(); } catch(_){} } },
-  ];
-  openActionMenu(anchor, items);
-}
-
-document.addEventListener("click", (e) => {
-  if (e.target && e.target.id === "topbarMoreBtn") {
-    e.preventDefault();
-    e.stopPropagation();
-    openTopbarMoreMenu(e.target);
-  }
 });
