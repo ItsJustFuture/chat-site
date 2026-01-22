@@ -17343,8 +17343,17 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
     }
 
     const text = (payload && typeof payload === "object") ? payload.text : "";
-    const room = (payload && typeof payload === "object") ? payload.room : "";
+    const rawRoom = (payload && typeof payload === "object") ? payload.room : "";
+    const room = (String(rawRoom || "").startsWith("#")) ? String(rawRoom || "").slice(1) : String(rawRoom || "");
     const meta = (payload && typeof payload === "object") ? (payload.meta || null) : null;
+
+    // Extra safety: certain system kinds must ONLY ever render in their dedicated rooms.
+    // If a server-side misroute happens, this prevents "bleed" into other rooms.
+    try {
+      const kind = meta && typeof meta === "object" ? String(meta.kind || "") : "";
+      if (kind === "dice" && room !== "diceroom") return;
+      if (kind === "survival" && room !== "survivalsimulator") return;
+    } catch(_){ }
 
     // Global system messages should ONLY render when explicitly marked.
     // This prevents accidental room bleed if something is emitted with room="__global__".
@@ -17619,10 +17628,24 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
       messages = history.messages || history.history || history.items || [];
     }
     clearMsgs();
-    (messages||[]).forEach(m=>safeAddMessage(m));
+    // Hard room filter: never render messages from a different room.
+    // This protects against any accidental server-side room bleed.
+    const cur = String(currentRoom || "main");
+    const legacyCur = `#${cur}`;
+    (messages||[]).forEach(m=>{
+      const mr = String(m?.room || "");
+      if (mr && mr !== cur && mr !== legacyCur) return;
+      safeAddMessage(m);
+    });
     applySearch();
   });
   socket.on("chat message", (m)=>{
+    // Hard room filter: never render messages from a different room.
+    const cur = String(currentRoom || "main");
+    const legacyCur = `#${cur}`;
+    const mr = String(m?.room || "");
+    if (mr && mr !== cur && mr !== legacyCur) return;
+
     m.__fresh = true;
     safeAddMessage(m);
     applySearch();
