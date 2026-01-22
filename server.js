@@ -314,8 +314,12 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
   }
 
   function emitGlobalSystem(text, meta) {
+    // Global system messages must be explicitly marked as such so clients can
+    // safely ignore accidental global emissions (prevents room bleed).
     const payload = { room: "__global__", text: String(text ?? "") };
-    if (meta && typeof meta === "object") payload.meta = meta;
+    const m = (meta && typeof meta === "object") ? { ...meta } : {};
+    if (!m.kind) m.kind = "global";
+    payload.meta = m;
     io.emit("system", payload);
     if (DEBUG_ROOMS) {
       console.log("[rooms] system emit", { room: "__global__", text: payload.text, meta: payload.meta || null });
@@ -3734,7 +3738,7 @@ const commandRegistry = {
       if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
       const reason = args.slice(1).join(" ").slice(0, 180) || "No reason provided";
       const sid = socketIdByUserId.get(target.id);
-      if (sid) io.to(sid).emit("system", { room: "__global__", text: "You were warned by " + actor.username + ": " + reason });
+      if (sid) io.to(sid).emit("system", { room: "__global__", text: "You were warned by " + actor.username + ": " + reason, meta: { kind: "global" } });
       logModAction({ actor, action: "WARN_COMMAND", targetUserId: target.id, targetUsername: target.username, room: null, details: reason });
       return { ok: true, message: `Warned ${target.username}: ${reason}`, targets: target.id };
     },
@@ -8821,8 +8825,8 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
   io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
   // Mirror the narrative into the room as system messages.
   try {
-    emitRoomSystem(SURVIVAL_ROOM_ID, `🏟️ Survival season started: ${payload?.season?.title || title}`);
-    emitRoomSystem(SURVIVAL_ROOM_ID, `Day ${payload?.season?.day_index || 1} — ${String(payload?.season?.phase || "day").toUpperCase()}`);
+    emitRoomSystem(SURVIVAL_ROOM_ID, `🏟️ Survival season started: ${payload?.season?.title || title}`, { kind: "survival" });
+    emitRoomSystem(SURVIVAL_ROOM_ID, `Day ${payload?.season?.day_index || 1} — ${String(payload?.season?.phase || "day").toUpperCase()}`, { kind: "survival" });
   } catch {}
   return res.json(payload);
 });
@@ -9188,7 +9192,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
   try {
     for (const ev of events || []) {
       if (!ev || !ev.text) continue;
-      emitRoomSystem(SURVIVAL_ROOM_ID, `⚔️ ${ev.text}`);
+      emitRoomSystem(SURVIVAL_ROOM_ID, `⚔️ ${ev.text}`, { kind: "survival" });
     }
   } catch {}
 
@@ -12637,7 +12641,7 @@ io.on("connection", async (socket) => {
   if (socketIp) {
     const count = trackSocketConnection(socketIp);
     if (count > MAX_SOCKET_CONN_PER_IP) {
-      socket.emit("system", { room: "__global__", text: "Too many active connections. Try again shortly." });
+      socket.emit("system", { room: "__global__", text: "Too many active connections. Try again shortly.", meta: { kind: "global" } });
       socket.disconnect(true);
       return;
     }
@@ -12956,7 +12960,8 @@ socket.on("join room", ({ room, status }) => {
 
           emitRoomSystem(
             room,
-            formatDiceSystemMessage({ result: roll.result, breakdown: roll.breakdown, deltaGold, outcome: reward.outcome })
+            formatDiceSystemMessage({ result: roll.result, breakdown: roll.breakdown, deltaGold, outcome: reward.outcome }),
+            { kind: "dice" }
           );
 
           if (reward.isJackpot) {
@@ -13059,7 +13064,8 @@ socket.on("join room", ({ room, status }) => {
 
             emitRoomSystem(
               room,
-              formatDiceSystemMessage({ result: roll.result, breakdown: roll.breakdown, deltaGold, outcome: reward.outcome })
+              formatDiceSystemMessage({ result: roll.result, breakdown: roll.breakdown, deltaGold, outcome: reward.outcome }),
+              { kind: "dice" }
             );
 
             if (reward.isJackpot) {
@@ -14467,7 +14473,7 @@ socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300 } = 
     }
     invalidateSessionsForUserId(target.id);
 
-    emitRoomSystem(room, `${username} was kicked.`);
+    emitRoomSystem(room, `${username} was kicked.`, { kind: "mod" });
     logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: target.username, room, details: `duration=${dur}s reason=${why}` });
     respond({ ok: true, username: target.username, durationSeconds: dur });
   });
@@ -14503,7 +14509,7 @@ socket.on("mod unkick", async ({ username } = {}, ack) => {
     }
 
     emitOnlineUsers();
-    emitRoomSystem(room, "User " + (target && target.username ? target.username : "") + " has been un-kicked by " + actorName + ".");
+    emitRoomSystem(room, "User " + (target && target.username ? target.username : "") + " has been un-kicked by " + actorName + ".", { kind: "mod" });
     respond({ ok: true, username: target.username });
   });
 });
@@ -14531,7 +14537,7 @@ socket.on("mod unkick", async ({ username } = {}, ack) => {
          VALUES (?, 'mute', ?, ?, ?, ?)`,
         [target.id, expiresAt, String(reason || "").slice(0, 180), socket.user.id, Date.now()],
         () => {
-          emitRoomSystem(room, `${username} was muted for ${mins} minutes.`);
+          emitRoomSystem(room, `${username} was muted for ${mins} minutes.`, { kind: "mod" });
           logModAction({
             actor: socket.user,
             action: "MUTE",
@@ -14570,7 +14576,8 @@ socket.on("mod unkick", async ({ username } = {}, ack) => {
         () => {
           emitRoomSystem(
             room,
-            `${username} was banned${expiresAt ? ` for ${mins} minutes` : " permanently"}.`
+            `${username} was banned${expiresAt ? ` for ${mins} minutes` : " permanently"}.`,
+            { kind: "mod" }
           );
 const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
 const why = String(reason || "").slice(0, 180) || "Banned by staff";
@@ -14611,7 +14618,7 @@ invalidateSessionsForUserId(target.id);
       if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
       db.run("DELETE FROM punishments WHERE user_id=? AND type='mute'", [target.id], () => {
-        emitRoomSystem(room, `${username} was unmuted.`);
+        emitRoomSystem(room, `${username} was unmuted.`, { kind: "mod" });
         logModAction({
           actor: socket.user,
           action: "UNMUTE",
@@ -14639,7 +14646,7 @@ invalidateSessionsForUserId(target.id);
       if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
 
       db.run("DELETE FROM punishments WHERE user_id=? AND type='ban'", [target.id], () => {
-        emitRoomSystem(room, `${username} was unbanned.`);
+        emitRoomSystem(room, `${username} was unbanned.`, { kind: "mod" });
 // Clear persistent restriction as well
 const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
 clearRestrictionEverywhere(username, actorName, String(reason || "").slice(0, 180) || "unban").catch(()=>{});
@@ -14925,7 +14932,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
       if (!target) return;
       if (!canModerate(actorRole, target.role)) return;
 
-      emitRoomSystem(room, `${username} was warned: ${String(reason || "").slice(0, 120)}`);
+      emitRoomSystem(room, `${username} was warned: ${String(reason || "").slice(0, 120)}`, { kind: "mod" });
       logModAction({
         actor: socket.user,
         action: "WARN",
@@ -14999,7 +15006,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
           }
         }
 
-        emitRoomSystem(room, `${target.username} role set to ${role}.${reason ? "" : ""}`);
+        emitRoomSystem(room, `${target.username} role set to ${role}.${reason ? "" : ""}`, { kind: "mod" });
         emitUserList(room);
         respond({ ok: true, username: target.username, role });
       }).catch((e) => {
