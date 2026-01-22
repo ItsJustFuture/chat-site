@@ -770,6 +770,8 @@
 <button class="tab active" data-room-manage-tab="masters" type="button">Masters</button>
 <button class="tab" data-room-manage-tab="categories" type="button">Subcategories</button>
 <button class="tab" data-room-manage-tab="rooms" type="button">Rooms</button>
+<button class="tab" data-room-manage-tab="create" type="button">Create</button>
+<button class="tab" data-room-manage-tab="events" type="button">Room Events</button>
 </div>
 <div class="roomManageSection active" data-room-manage-section="masters">
 <div class="field">
@@ -809,9 +811,76 @@
 <div class="roomManageList" id="roomManageRoomList"></div>
 <div class="msgline" id="roomManageMsg"></div>
 </div>
+<div class="roomManageSection" data-room-manage-section="create" id="roomManageTab_create">
+  <form id="roomCreateForm">
+    <div class="field">
+      <label for="roomCreateName">Room name</label>
+      <input id="roomCreateName" maxlength="24" placeholder="room-name"/>
+    </div>
+    <div class="field">
+      <label for="roomCreateMaster">Master group</label>
+      <select id="roomCreateMaster"></select>
+    </div>
+    <div class="field">
+      <label for="roomCreateCategory">Subcategory</label>
+      <select id="roomCreateCategory"></select>
+    </div>
+
+    <div class="roomManageSettingsGrid" data-admin-only>
+      <label class="chk"><input type="checkbox" id="roomCreateVipOnly"> VIP only</label>
+      <label class="chk"><input type="checkbox" id="roomCreateStaffOnly"> Staff only</label>
+      <label class="chk"><input type="checkbox" id="roomCreateLocked"> Locked</label>
+      <label class="chk"><input type="checkbox" id="roomCreateMaintenance"> Maintenance</label>
+      <label class="chk"><input type="checkbox" id="roomCreateEventsEnabled" checked> Events enabled</label>
+      <label class="mini">Min level <input type="number" id="roomCreateMinLevel" min="0" max="999" value="0"></label>
+    </div>
+
+    <div class="row" style="gap:8px; flex-wrap:wrap; margin-top:10px;">
+      <button class="btn" type="submit">Create</button>
+    </div>
+  </form>
+</div>
+
+<div class="roomManageSection" data-room-manage-section="events" id="roomManageTab_events">
+  <div class="field">
+    <label for="roomEventsRoomSelect">Room</label>
+    <select id="roomEventsRoomSelect"></select>
+  </div>
+  <div class="field">
+    <label for="roomEventsType">Event type</label>
+    <select id="roomEventsType">
+      <option value="announcement">Announcement</option>
+      <option value="prompt">Prompt</option>
+      <option value="boost">XP Boost</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="roomEventsText">Text</label>
+    <textarea id="roomEventsText" rows="3" placeholder="What should appear as a system message?"></textarea>
+  </div>
+  <div class="row" style="gap:8px; flex-wrap:wrap;">
+    <div class="field" style="flex:1; min-width:160px;">
+      <label for="roomEventsDuration">Duration (seconds, 0 = no end)</label>
+      <input id="roomEventsDuration" type="number" min="0" max="86400" value="600"/>
+    </div>
+    <div class="field" style="flex:1; min-width:160px;">
+      <label for="roomEventsXpMult">XP multiplier (boost only)</label>
+      <input id="roomEventsXpMult" type="number" min="1" max="10" value="2"/>
+    </div>
+  </div>
+  <div class="row" style="gap:8px; flex-wrap:wrap; margin-top:10px;">
+    <button class="btn" id="roomEventsStartBtn" type="button">Start event</button>
+  </div>
+
+  <div class="roomEventsActive">
+    <div class="muted" style="margin:10px 0 6px;">Active events</div>
+    <div id="roomEventsActiveList" class="roomEventsList"></div>
+  </div>
 </div>
 </div>
 </div>
+</div>
+</div
 
 <div id="roomCreateModal" class="roomModal" hidden="">
 <div class="modalCard roomModalCard">

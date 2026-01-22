@@ -486,6 +486,10 @@ const pgInitPromise = (async () => {
         is_locked INTEGER NOT NULL DEFAULT 0,
         pinned_message_ids TEXT,
         maintenance_mode INTEGER NOT NULL DEFAULT 0,
+        vip_only INTEGER NOT NULL DEFAULT 0,
+        staff_only INTEGER NOT NULL DEFAULT 0,
+        min_level INTEGER NOT NULL DEFAULT 0,
+        events_enabled INTEGER NOT NULL DEFAULT 1,
         category_id INTEGER REFERENCES room_categories(id) ON DELETE SET NULL,
         room_sort_order INTEGER NOT NULL DEFAULT 0,
         created_by_user_id INTEGER,
@@ -502,6 +506,10 @@ const pgInitPromise = (async () => {
       `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS room_sort_order INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER`,
       `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_user_room INTEGER NOT NULL DEFAULT 0`,
+          `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS vip_only INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS staff_only INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS min_level INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS events_enabled INTEGER NOT NULL DEFAULT 1`,
     ];
     for (const q of roomCols) {
       try { await pgPool.query(q); } catch (_) {}
@@ -4281,6 +4289,26 @@ function isVipPlus(role) {
   return VIP_PLUS_ROLES.has(norm);
 }
 
+function roleRankServer(role) {
+  const order = ["Guest","User","VIP","VIP+","Moderator","Admin","Co-owner","Owner"];
+  const idx = order.findIndex(r => (r||"").toLowerCase() === (role||"").toLowerCase());
+  return idx === -1 ? 1 : idx;
+}
+
+function canAccessRoomBySettings(user, roomRow) {
+  if (!user || !roomRow) return true;
+  const role = user.role || "User";
+  const level = Number(user.level || 0);
+  const staffOnly = Number(roomRow.staff_only || 0) === 1;
+  const vipOnly = Number(roomRow.vip_only || 0) === 1;
+  const minLevel = Number(roomRow.min_level || 0) || 0;
+  if (staffOnly && roleRankServer(role) < roleRankServer("Moderator")) return false;
+  if (vipOnly && !isVipPlus(role)) return false;
+  if (minLevel > 0 && level < minLevel) return false;
+  return true;
+}
+
+
 function xpRatesForRole(role) {
   const vip = isVipPlus(role);
   return {
@@ -4530,7 +4558,7 @@ async function applyXpGain(userId, delta, opts = {}) {
   });
 }
 
-async function awardMessageXp(userId, roleHint) {
+async function awardMessageXp(userId, roleHint, roomName) {
   const now = Date.now();
   const row = await getProgressionRow(userId);
   if (!row) return;
@@ -4541,7 +4569,17 @@ async function awardMessageXp(userId, roleHint) {
   }
 
   const role = roleHint || row.role || "User";
-  const delta = xpRatesForRole(role).message;
+  let delta = xpRatesForRole(role).message;
+  try {
+    if (roomName) {
+      const events = getActiveEventsForRoom(roomName);
+      const boost = (events || []).find((e) => e.type === 'boost' && (e.payload?.xp_multiplier || e.payload?.xpMultiplier));
+      if (boost) {
+        const mult = Number(boost.payload?.xp_multiplier ?? boost.payload?.xpMultiplier ?? 1);
+        if (Number.isFinite(mult) && mult > 1 && mult <= 10) delta = Math.round(delta * mult);
+      }
+    }
+  } catch (_) {}
   const result = await applyXpGain(userId, delta, {
     baseRow: row,
     lastMessageXpAt: now,
@@ -5709,7 +5747,7 @@ async function buildRoomStructure() {
     `SELECT id, master_id, name, sort_order FROM room_categories ORDER BY sort_order ASC, name ASC`
   );
   const rooms = await dbAllAsync(
-    `SELECT name, category_id, room_sort_order, slowmode_seconds, is_locked, maintenance_mode,
+    `SELECT name, category_id, room_sort_order, slowmode_seconds, is_locked, maintenance_mode, vip_only, staff_only, min_level, events_enabled,
             created_by, created_by_user_id, is_user_room
        FROM rooms
       ORDER BY room_sort_order ASC, name ASC`
@@ -5725,6 +5763,10 @@ async function buildRoomStructure() {
       slowmode_seconds: Number(r.slowmode_seconds || 0),
       is_locked: Number(r.is_locked || 0),
       maintenance_mode: Number(r.maintenance_mode || 0),
+      vip_only: Number(r.vip_only || 0),
+      staff_only: Number(r.staff_only || 0),
+      min_level: Number(r.min_level || 0),
+      events_enabled: Number(r.events_enabled ?? 1),
       created_by: r.created_by ?? null,
       created_by_user_id: r.created_by_user_id ?? null,
       is_user_room: Number(r.is_user_room || 0),
@@ -5734,8 +5776,23 @@ async function buildRoomStructure() {
 
 async function buildRoomStructurePayload(userId) {
   const base = await buildRoomStructure();
+  let user = null;
+  try {
+    if (userId) user = await dbGetAsync(`SELECT id, role, level FROM users WHERE id = ?`, [userId]);
+  } catch (_) {}
+  const filteredRooms = (base.rooms || []).filter((room) => {
+    if (!room) return false;
+    // Legacy VIP prefix gate remains, but new settings gate applies too.
+    const isVipPrefix = /^vip[_-]/i.test(room.name || "");
+    if (isVipPrefix) {
+      if (!user) return false;
+      if (!isVipPlus(user.role)) return false;
+      if (Number(user.level || 0) < 25) return false;
+    }
+    return canAccessRoomBySettings(user, room);
+  });
   const userCollapse = await getUserRoomCollapseState(userId);
-  return { ...base, userCollapse };
+  return { ...base, rooms: filteredRooms, userCollapse };
 }
 
 async function emitRoomStructureUpdate() {
@@ -8513,9 +8570,16 @@ app.post("/rooms", strictLimiter, requireLogin, express.json({ limit: "16kb" }),
     const sortOrder = Number(nextSort?.maxSort || 0) + 1;
 
     await dbRunAsync(
-      `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [name, actor.id, Date.now(), categoryId, sortOrder, actor.id, isUserRoom]
+      `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, actor.id, Date.now(), categoryId, sortOrder, actor.id, isUserRoom,
+       Number(req.body?.vip_only)||0,
+       Number(req.body?.staff_only)||0,
+       Math.max(0, Math.min(999, Number(req.body?.min_level)||0)),
+       Number(req.body?.is_locked)||0,
+       Number(req.body?.maintenance_mode)||0,
+       (req.body?.events_enabled === 0 || req.body?.events_enabled === "0") ? 0 : 1,
+       Math.max(0, Math.min(3600, Number(req.body?.slowmode_seconds)||0))]
     );
 
     logModAction({ actor, action: "room.create", room: name, details: null });
@@ -9507,6 +9571,83 @@ app.patch("/api/rooms/:id/move", strictLimiter, requireAdminPlus, express.json({
     if (!roomRow) return res.status(404).send("Not found");
     const requestedCategoryId = Number(req.body?.category_id) || null;
     const resolved = await resolveRoomCategoryId({ categoryId: requestedCategoryId, isUserRoom: false });
+
+app.patch("/api/rooms/:id/settings", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
+  const roomName = sanitizeRoomName(req.params.id || "");
+  if (!roomName) return res.status(400).send("Invalid room");
+  const slowmode = Number(req.body?.slowmode_seconds ?? req.body?.slowmode ?? 0);
+  const isLocked = Number(req.body?.is_locked ?? 0) ? 1 : 0;
+  const maintenance = Number(req.body?.maintenance_mode ?? 0) ? 1 : 0;
+  const vipOnly = Number(req.body?.vip_only ?? 0) ? 1 : 0;
+  const staffOnly = Number(req.body?.staff_only ?? 0) ? 1 : 0;
+  const minLevel = Math.max(0, Math.min(999, Number(req.body?.min_level ?? 0) || 0));
+  const eventsEnabled = Number(req.body?.events_enabled ?? 1) ? 1 : 0;
+
+  if (!Number.isFinite(slowmode) || slowmode < 0 || slowmode > 3600) {
+    return res.status(400).send("Invalid slowmode");
+  }
+  try {
+    const roomRow = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
+    if (!roomRow) return res.status(404).send("Not found");
+    await dbRunAsync(
+      `UPDATE rooms
+          SET slowmode_seconds = ?,
+              is_locked = ?,
+              maintenance_mode = ?,
+              vip_only = ?,
+              staff_only = ?,
+              min_level = ?,
+              events_enabled = ?
+        WHERE name = ?`,
+      [slowmode, isLocked, maintenance, vipOnly, staffOnly, minLevel, eventsEnabled, roomName]
+    );
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true });
+
+app.get("/api/rooms/:id/events", strictLimiter, requireAdminPlus, async (req, res) => {
+  const roomName = sanitizeRoomName(req.params.id || "");
+  if (!roomName) return res.status(400).send("Invalid room");
+  return res.json({ ok: true, events: getActiveEventsForRoom(roomName) });
+});
+
+app.post("/api/rooms/:id/events", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
+  const roomName = sanitizeRoomName(req.params.id || "");
+  if (!roomName) return res.status(400).send("Invalid room");
+  const type = String(req.body?.type || "").trim();
+  const durationSec = Math.max(0, Math.min(24 * 60 * 60, Number(req.body?.duration_seconds ?? 0) || 0));
+  const payload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
+  const id = ROOM_EVENT_SEQ++;
+  const startedAt = Date.now();
+  const endsAt = durationSec ? startedAt + durationSec * 1000 : null;
+  const ev = { id, type, payload, startedAt, endsAt, createdBy: req.session?.user?.username || null };
+  addRoomEvent(roomName, ev);
+
+  // Broadcast a room-scoped system message
+  let text = "";
+  if (type === "announcement") text = payload?.text ? String(payload.text).slice(0, 500) : "📢 Announcement";
+  else if (type === "prompt") text = payload?.text ? String(payload.text).slice(0, 500) : "💬 Prompt event started.";
+  else if (type === "boost") text = `✨ Boost event started${durationSec ? ` for ${durationSec}s` : ""}.`;
+  else text = `🎉 Event started: ${type || "custom"}.`;
+  io.to(roomName).emit("system", { room: roomName, text });
+
+  return res.json({ ok: true, event: ev });
+});
+
+app.post("/api/room-events/:id/stop", strictLimiter, requireAdminPlus, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id < 1) return res.status(400).send("Invalid event");
+  const stopped = stopRoomEventById(id);
+  if (!stopped) return res.status(404).send("Not found");
+  io.to(stopped.room).emit("system", { room: stopped.room, text: "⛔ Room event ended." });
+  return res.json({ ok: true });
+});
+
+  } catch (e) {
+    console.warn("[rooms][settings]", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
     const categoryId = resolved?.categoryId ?? null;
     const categoryRow = categoryId
       ? await dbGetAsync(
@@ -12912,10 +13053,33 @@ enforceVipGate(desired, (allowed) => {
     return db.get(`SELECT name FROM rooms WHERE name=?`, ["main"], (_err2, row2) => doJoin(row2 ? "main" : "main", status));
   }
 
-  db.get(`SELECT name FROM rooms WHERE name=?`, [desired], (_err, row) => {
-    const finalRoom = row ? desired : "main";
-    doJoin(finalRoom, status);
-  });
+  db.get(
+  `SELECT name, vip_only, staff_only, min_level, is_locked, maintenance_mode FROM rooms WHERE name=?`,
+  [desired],
+  (_err, row) => {
+    if (!row) return doJoin("main", status);
+
+    // Enforce room visibility gates
+    if (!canAccessRoomBySettings(sessUser, row)) {
+      try { socket.emit("system", { room: "__global__", text: "You don't have access to that room.", meta: { kind: "global" } }); } catch (_) {}
+      return doJoin("main", status);
+    }
+
+    // Maintenance gate: Admin+ only
+    if (Number(row.maintenance_mode || 0) === 1 && roleRankServer(sessUser.role) < roleRankServer("Admin")) {
+      try { socket.emit("system", { room: "__global__", text: "That room is in maintenance.", meta: { kind: "global" } }); } catch (_) {}
+      return doJoin("main", status);
+    }
+
+    // Locked gate: Mod+ only
+    if (Number(row.is_locked || 0) === 1 && roleRankServer(sessUser.role) < roleRankServer("Moderator")) {
+      try { socket.emit("system", { room: "__global__", text: "That room is locked.", meta: { kind: "global" } }); } catch (_) {}
+      return doJoin("main", status);
+    }
+
+    doJoin(desired, status);
+  }
+);
 });
 
       });
@@ -12927,6 +13091,8 @@ enforceVipGate(desired, (allowed) => {
     if (requestedRoom && requestedRoom !== room) {
       socket.emit("dice:error", "Invalid room for dice roll.");
       return;
+
+
     }
     if (room !== "diceroom") {
       socket.emit("dice:error", "You can only roll dice in Dice Room.");
@@ -14229,7 +14395,7 @@ if (!room) {
                   replyText,
                 ],
                 function () {
-                  awardMessageXp(socket.user.id, socket.user.role).catch((e) => console.warn("[xp][msg]", e?.message || e));
+                  awardMessageXp(socket.user.id, socket.user.role, room).catch((e) => console.warn("[xp][msg]", e?.message || e));
                   awardMessageGold(socket.user.id);
                   const msg = {
                     messageId: this.lastID,
