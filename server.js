@@ -13091,6 +13091,7 @@ function doJoin(room, status) {
     }
 
     emitUserList(old);
+    try { socket.leave(old); } catch {}
   }
 
   socket.currentRoom = room;
@@ -14478,7 +14479,7 @@ socket.on("mod unkick", async ({ username } = {}, ack) => {
     }
 
     emitOnlineUsers();
-    emitRoomSystem(room, `${${target.username} has been un-kicked by ${actorName}.}`);
+    emitRoomSystem(room, "User " + (target && target.username ? target.username : "") + " has been un-kicked by " + actorName + ".");
     respond({ ok: true, username: target.username });
   });
 });
@@ -14939,7 +14940,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
 
     findUserByMention(lookupName, (_e, found) => {
       if (!found) {
-        io.to(socket.id).emit("system", `User not found: ${lookupName}`);
+        io.to(socket.id).emit("system", { room: socket.currentRoom || "main", text: "User not found: " + lookupName });
         return respond({ ok: false, error: "User not found." });
       }
 
