@@ -6166,6 +6166,13 @@ function requireCoOwner(req, res, next) {
   next();
 }
 
+
+
+function requireAdminPlus(req, res, next) {
+  if (!req.session?.user?.id) return res.status(401).send("Not logged in");
+  if (!requireMinRole(req.session.user.role, "Admin")) return res.status(403).send("Forbidden");
+  next();
+}
 function toChangelogPayload(row) {
   if (!row) return null;
   const normalizeEpoch = (v) => {
@@ -9349,7 +9356,7 @@ app.delete("/api/room-masters/:id", strictLimiter, requireOwner, async (req, res
   }
 });
 
-app.post("/api/room-categories", strictLimiter, requireOwner, express.json({ limit: "16kb" }), async (req, res) => {
+app.post("/api/room-categories", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
   const masterId = Number(req.body?.master_id);
   const name = sanitizeRoomGroupName(req.body?.name || "");
   if (!masterId) return res.status(400).send("Invalid master");
@@ -9380,7 +9387,7 @@ app.post("/api/room-categories", strictLimiter, requireOwner, express.json({ lim
   }
 });
 
-app.patch("/api/room-categories/reorder", strictLimiter, requireOwner, express.json({ limit: "32kb" }), async (req, res) => {
+app.patch("/api/room-categories/reorder", strictLimiter, requireAdminPlus, express.json({ limit: "32kb" }), async (req, res) => {
   const masterId = Number(req.body?.master_id);
   const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
   if (!masterId || !orderedIds?.length) return res.status(400).send("Invalid order");
@@ -12841,13 +12848,35 @@ socket.on("join room", ({ room, status }) => {
     });
     return;
   }
-  const desired = sanitizeRoomName(room) || "main";
+const desired = sanitizeRoomName(room) || "main";
+
+// VIP rooms: names prefixed with vip_ or vip- are only visible/accessible to VIP+ with level >= 25
+const desiredIsVip = /^vip[_-]/i.test(desired);
+const enforceVipGate = (roomName, cb) => {
+  if(!desiredIsVip) return cb(true);
+  const roleOk = isVipPlus(sessUser.role);
+  if(!roleOk) return cb(false);
+  db.get(`SELECT level FROM users WHERE id=? LIMIT 1`, [sessUser.id], (_e, urow) => {
+    const lvl = Number(urow?.level || 0);
+    cb(lvl >= 25);
+  });
+};
+
+enforceVipGate(desired, (allowed) => {
+  if(!allowed){
+    try {
+      socket.emit("system", { room: "__global__", text: "That VIP room is locked (VIP + level 25 required).", meta: { kind: "global" } });
+    } catch(_){}
+    return db.get(`SELECT name FROM rooms WHERE name=?`, ["main"], (_err2, row2) => doJoin(row2 ? "main" : "main", status));
+  }
 
   db.get(`SELECT name FROM rooms WHERE name=?`, [desired], (_err, row) => {
     const finalRoom = row ? desired : "main";
     doJoin(finalRoom, status);
   });
 });
+
+      });
 
   // Dice Room mini-game
   socket.on("dice:roll", (payload = {}) => {
