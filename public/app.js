@@ -12019,6 +12019,7 @@ function renderRoomManageRoomsList(){
       <div class="label">${escapeHtml(displayRoomName(room.name))}</div>
       <select class="roomManageMoveSelect">${optionsMarkup}</select>
       <div class="actions">
+        <button class="btn secondary" data-action="rename">Rename</button>
         <button class="btn secondary" data-action="up">Up</button>
         <button class="btn secondary" data-action="down">Down</button>
         <button class="btn secondary" data-action="move">Move</button>
@@ -12031,7 +12032,16 @@ function renderRoomManageRoomsList(){
       const btn = e.target.closest("button");
       if(!btn) return;
       const action = btn.dataset.action;
-      if(action === "move"){
+            if(action === "rename"){
+        const next = prompt("Rename room (letters/numbers/dashes):", room.name);
+        if(!next) return;
+        await api(`/api/rooms/${encodeURIComponent(room.name)}`, {
+          method:"PATCH",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({ name: next })
+        });
+      }
+if(action === "move"){
         const target = moveSelect?.value || "";
         if(!target || target === String(categoryId)) return;
         await api(`/api/rooms/${encodeURIComponent(room.name)}/move`, {
@@ -18608,6 +18618,15 @@ function openRoomsOverflowMenu(anchor){
       onClick: ()=>{
         openRoomManageModal();
         try { setRoomManageTab("categories"); } catch(_){}
+      }
+    },
+    {
+      label: "Manage rooms",
+      icon: "🛠️",
+      visible: isAdminPlus,
+      onClick: ()=>{
+        openRoomManageModal();
+        try { setRoomManageTab("rooms"); } catch(_){}
       }
     },
     {

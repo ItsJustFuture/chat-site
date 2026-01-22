@@ -9248,7 +9248,7 @@ app.post("/api/survival/seasons/:id/end", survivalLimiter, requireCoOwner, expre
 });
 
 // ---- Room structure management (Owner-only)
-app.post("/api/room-masters", strictLimiter, requireOwner, express.json({ limit: "16kb" }), async (req, res) => {
+app.post("/api/room-masters", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
   const name = sanitizeRoomGroupName(req.body?.name || "");
   if (!name) return res.status(400).send("Invalid name");
   try {
@@ -9269,7 +9269,7 @@ app.post("/api/room-masters", strictLimiter, requireOwner, express.json({ limit:
   }
 });
 
-app.patch("/api/room-masters/reorder", strictLimiter, requireOwner, express.json({ limit: "32kb" }), async (req, res) => {
+app.patch("/api/room-masters/reorder", strictLimiter, requireAdminPlus, express.json({ limit: "32kb" }), async (req, res) => {
   const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
   if (!orderedIds?.length) return res.status(400).send("Missing order");
   try {
@@ -9286,7 +9286,7 @@ app.patch("/api/room-masters/reorder", strictLimiter, requireOwner, express.json
   }
 });
 
-app.patch("/api/room-masters/:id", strictLimiter, requireOwner, express.json({ limit: "16kb" }), async (req, res) => {
+app.patch("/api/room-masters/:id", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).send("Invalid master");
   try {
@@ -9408,7 +9408,7 @@ app.patch("/api/room-categories/reorder", strictLimiter, requireAdminPlus, expre
   }
 });
 
-app.patch("/api/room-categories/:id", strictLimiter, requireOwner, express.json({ limit: "16kb" }), async (req, res) => {
+app.patch("/api/room-categories/:id", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).send("Invalid category");
   try {
@@ -9499,7 +9499,7 @@ app.delete("/api/room-categories/:id", strictLimiter, requireOwner, async (req, 
   }
 });
 
-app.patch("/api/rooms/:id/move", strictLimiter, requireOwner, express.json({ limit: "16kb" }), async (req, res) => {
+app.patch("/api/rooms/:id/move", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
   const roomName = sanitizeRoomName(req.params.id || "");
   if (!roomName) return res.status(400).send("Invalid room");
   try {
@@ -9539,7 +9539,49 @@ app.patch("/api/rooms/:id/move", strictLimiter, requireOwner, express.json({ lim
   }
 });
 
-app.patch("/api/rooms/reorder", strictLimiter, requireOwner, express.json({ limit: "32kb" }), async (req, res) => {
+
+app.patch("/api/rooms/:id", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
+  const oldName = sanitizeRoomName(req.params.id || "");
+  const nextName = sanitizeRoomName(req.body?.name || "");
+  if (!oldName || !nextName) return res.status(400).send("Invalid room");
+  if (oldName === nextName) return res.json({ ok: true, name: nextName });
+  try {
+    const roomRow = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [oldName]);
+    if (!roomRow) return res.status(404).send("Not found");
+    const exists = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [nextName]);
+    if (exists) return res.status(409).send("Room already exists");
+
+    // Update rooms primary key name + all references that store room name
+    await dbRunAsync(`UPDATE rooms SET name = ? WHERE name = ?`, [nextName, oldName]);
+
+    // Best-effort updates for related tables (some installs may not have all tables)
+    const safeUpdate = async (sql, params) => {
+      try { await dbRunAsync(sql, params); } catch (_) {}
+    };
+    await safeUpdate(`UPDATE messages SET room = ? WHERE room = ?`, [nextName, oldName]);
+    await safeUpdate(`UPDATE mod_logs SET room = ? WHERE room = ?`, [nextName, oldName]);
+    await safeUpdate(`UPDATE command_audit SET room = ? WHERE room = ?`, [nextName, oldName]);
+
+    // Move live sockets currently in the old room to the new room to prevent "ghost" rooms.
+    try {
+      const sockets = await io.in(oldName).fetchSockets();
+      for (const sock of sockets) {
+        try { sock.leave(oldName); } catch (_) {}
+        try { sock.join(nextName); } catch (_) {}
+        if (sock.currentRoom === oldName) sock.currentRoom = nextName;
+        if (sock.data?.currentRoom === oldName) sock.data.currentRoom = nextName;
+      }
+    } catch (_) {}
+
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true, name: nextName });
+  } catch (e) {
+    console.warn("[rooms] rename failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.patch("/api/rooms/reorder", strictLimiter, requireAdminPlus, express.json({ limit: "32kb" }), async (req, res) => {
   const categoryId = Number(req.body?.category_id);
   const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
   if (!categoryId || !orderedIds?.length) return res.status(400).send("Invalid order");
