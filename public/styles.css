@@ -1922,6 +1922,12 @@ main.chat{
   min-height:0;
   height:100%;
 }
+body.event-active main.chat{
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+body.event-active .roomTitle{
+  color: var(--accent);
+}
 
 .msgs{
   flex:1 1 auto;
@@ -2419,6 +2425,14 @@ body.keyboard-open .menuContent{ padding-bottom: calc(200px + var(--kb, 0px) + e
   font-weight:800;
   flex:1;
   min-width:120px;
+}
+.roomManageRow .tag{
+  font-size:11px;
+  padding:2px 6px;
+  border-radius:999px;
+  background:color-mix(in srgb, var(--panel) 75%, transparent);
+  border:1px solid var(--border);
+  color:var(--muted);
 }
 .roomManageRow .actions{
   display:flex;
@@ -5680,6 +5694,40 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
   padding:10px 12px;
   border-top:1px solid var(--line);
   border-bottom:1px solid var(--line);
+  position:relative;
+}
+.roomActionsWrap{ position:relative; display:inline-flex; align-items:center; }
+.roomActionsMenu{
+  position:absolute;
+  top:calc(100% + 6px);
+  right:0;
+  min-width:180px;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  padding:8px;
+  background:var(--panel2);
+  border:1px solid var(--border);
+  border-radius:12px;
+  box-shadow: var(--shadowMd);
+  z-index:200;
+}
+.roomActionsMenu[hidden]{ display:none; }
+.roomActionsMenu button{
+  width:100%;
+  text-align:left;
+  background:transparent;
+  border:1px solid transparent;
+  color:var(--text);
+  padding:8px 10px;
+  border-radius:10px;
+  cursor:pointer;
+  font-weight:600;
+}
+.roomActionsMenu button:hover{ background:var(--panel); }
+.roomActionsMenu button:disabled{
+  opacity:0.5;
+  cursor:not-allowed;
 }
 .smallIcon{
   width:32px;

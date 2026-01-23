@@ -860,6 +860,7 @@ let roomCollapseState = { master: {}, category: {} };
 const memoryCacheByFilter = new Map();
 const DICE_ROOM_ID = "diceroom";
 const SURVIVAL_ROOM_ID = "survivalsimulator";
+const CORE_ROOMS = new Set(["main", "music", "nsfw", "diceroom", "survivalsimulator"]);
 function isDiceRoom(activeRoom){
   const roomName = typeof activeRoom === "string"
     ? activeRoom
@@ -2793,6 +2794,7 @@ const appealsUnlockBtn = document.getElementById("appealsUnlockBtn");
 const app = document.getElementById("app");
 const addRoomBtn = document.getElementById("addRoomBtn");
 const manageRoomsBtn = document.getElementById("manageRoomsBtn");
+const roomActionsMenu = document.getElementById("roomActionsMenu");
 const menuToggleBtn = document.getElementById("menuToggleBtn");
 const chanHeaderTitle = document.getElementById("chanHeaderTitle");
 const roomsPanel = document.getElementById("roomsPanel");
@@ -2819,8 +2821,20 @@ const roomCategoryList = document.getElementById("roomCategoryList");
 const roomCategoryMsg = document.getElementById("roomCategoryMsg");
 const roomManageMasterSelect = document.getElementById("roomManageMasterSelect");
 const roomManageCategorySelect = document.getElementById("roomManageCategorySelect");
+const roomManageShowArchived = document.getElementById("roomManageShowArchived");
 const roomManageRoomList = document.getElementById("roomManageRoomList");
 const roomManageMsg = document.getElementById("roomManageMsg");
+const roomManageCreateForm = document.getElementById("roomCreateForm");
+const roomManageCreateNameInput = document.getElementById("roomCreateName");
+const roomManageCreateMasterSelect = document.getElementById("roomCreateMaster");
+const roomManageCreateCategorySelect = document.getElementById("roomCreateCategory");
+const roomManageCreateVipOnly = document.getElementById("roomCreateVipOnly");
+const roomManageCreateStaffOnly = document.getElementById("roomCreateStaffOnly");
+const roomManageCreateLocked = document.getElementById("roomCreateLocked");
+const roomManageCreateMaintenance = document.getElementById("roomCreateMaintenance");
+const roomManageCreateEventsEnabled = document.getElementById("roomCreateEventsEnabled");
+const roomManageCreateMinLevel = document.getElementById("roomCreateMinLevel");
+const roomManageCreateMsg = document.getElementById("roomManageCreateMsg");
 const roomCreateModal = document.getElementById("roomCreateModal");
 const roomCreateCloseBtn = document.getElementById("roomCreateCloseBtn");
 const roomCreateNameInput = document.getElementById("roomCreateNameInput");
@@ -2829,6 +2843,13 @@ const roomCreateCategorySelect = document.getElementById("roomCreateCategorySele
 const roomCreateSubmitBtn = document.getElementById("roomCreateSubmitBtn");
 const roomCreateCancelBtn = document.getElementById("roomCreateCancelBtn");
 const roomCreateMsg = document.getElementById("roomCreateMsg");
+const roomEventsRoomSelect = document.getElementById("roomEventsRoomSelect");
+const roomEventsType = document.getElementById("roomEventsType");
+const roomEventsText = document.getElementById("roomEventsText");
+const roomEventsDuration = document.getElementById("roomEventsDuration");
+const roomEventsStartBtn = document.getElementById("roomEventsStartBtn");
+const roomEventsActiveList = document.getElementById("roomEventsActiveList");
+const roomEventsMsg = document.getElementById("roomEventsMsg");
 
 // Shared date formatter for Changelog + FAQ.
 // IMPORTANT: keep this at top-level so it is in scope everywhere.
@@ -11167,6 +11188,9 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && couplesModal && couplesModal.style.display !== "none") {
     closeCouplesModal();
   }
+  if (e.key === "Escape" && roomActionsMenu && !roomActionsMenu.hidden) {
+    closeRoomActionsMenu();
+  }
   if (e.key === "Escape" && roomManageModal && roomManageModal.style.display !== "none") {
     closeRoomManageModal();
   }
@@ -11257,6 +11281,7 @@ function setActiveRoom(room){
   const wasDiceRoom = isDiceRoom(currentRoom);
   const wasSurvivalRoom = isSurvivalRoom(currentRoom);
   currentRoom = room;
+  setRoomEvent(null);
   const nowDiceRoom = isDiceRoom(room);
   const nowSurvivalRoom = isSurvivalRoom(room);
   document.body.classList.toggle("dice-room", nowDiceRoom);
@@ -11327,28 +11352,35 @@ let roomEventTimer = null;
 
 function updateRoomEventBanner(){
   if(!roomEventBanner) return;
-  if(!getFeatureFlag("roomEvents", true) || !activeRoomEvent || !activeRoomEvent.endsAt){
+  if(!getFeatureFlag("roomEvents", true) || !activeRoomEvent){
     roomEventBanner.hidden = true;
     roomEventBanner.innerHTML = "";
     if(roomEventTimer){ clearInterval(roomEventTimer); roomEventTimer=null; }
     return;
   }
   roomEventBanner.hidden = false;
-  const leftMs = Math.max(0, Number(activeRoomEvent.endsAt) - Date.now());
-  const leftSec = Math.ceil(leftMs/1000);
+  const hasEnds = activeRoomEvent.endsAt && Number.isFinite(Number(activeRoomEvent.endsAt));
+  const leftMs = hasEnds ? Math.max(0, Number(activeRoomEvent.endsAt) - Date.now()) : 0;
+  if(hasEnds && leftMs <= 0){
+    setRoomEvent(null);
+    return;
+  }
+  const leftSec = hasEnds ? Math.ceil(leftMs/1000) : 0;
   const mm = Math.floor(leftSec/60);
   const ss = String(leftSec%60).padStart(2,"0");
   roomEventBanner.innerHTML = `
     <div class="meta">
       <span class="tag">${escapeHtml(String(activeRoomEvent.type||"event"))}</span>
       <span>${escapeHtml(String(activeRoomEvent.title||"Room Event"))}</span>
-      <span class="count">• ${mm}:${ss}</span>
+      ${hasEnds ? `<span class="count">• ${mm}:${ss}</span>` : ""}
     </div>
   `;
 }
 
 function setRoomEvent(ev){
   activeRoomEvent = ev || null;
+  const isFlair = activeRoomEvent && String(activeRoomEvent.type || "") === "flair";
+  document.body.classList.toggle("event-active", Boolean(isFlair));
   updateRoomEventBanner();
   if(roomEventTimer){ clearInterval(roomEventTimer); roomEventTimer=null; }
   if(activeRoomEvent && activeRoomEvent.endsAt){
@@ -11437,6 +11469,8 @@ function setRoomStructure(payload, { updateCollapse = true } = {}){
   renderRoomsList(roomStructure);
   if(roomManageModal && roomManageModal.style.display !== "none" && !roomManageModal.hidden){
     refreshRoomManageUi();
+    const activeTab = document.querySelector("[data-room-manage-tab].active")?.dataset?.roomManageTab;
+    if(activeTab === "events") refreshRoomEventsUi();
   }
   return true;
 }
@@ -11490,7 +11524,7 @@ function renderRoomsList(structureOrRooms){
   const payload = normalizeRoomStructurePayload(structureOrRooms) || { masters: [], categories: [], rooms: [] };
   const masters = ensureDefaultMasters(payload.masters || []);
   const categories = payload.categories || [];
-  const rooms = payload.rooms || [];
+  const rooms = (payload.rooms || []).filter((room) => !room?.archived);
   const categoriesByMaster = new Map();
   const categoryById = new Map();
   for(const cat of categories){
@@ -11689,6 +11723,46 @@ async function submitCreateRoom(){
   joinRoom(name);
 }
 
+async function submitRoomManageCreate(e){
+  e?.preventDefault?.();
+  if(roomManageCreateMsg) roomManageCreateMsg.textContent = "";
+  const raw = String(roomManageCreateNameInput?.value || "");
+  const name = sanitizeRoomClient(raw);
+  if(!name){
+    if(roomManageCreateMsg) roomManageCreateMsg.textContent = "Invalid room name.";
+    return;
+  }
+  const masterId = roomManageCreateMasterSelect?.value || "";
+  const categoryId = roomManageCreateCategorySelect?.value || "";
+  const vipOnly = roomManageCreateVipOnly?.checked ? 1 : 0;
+  const staffOnly = roomManageCreateStaffOnly?.checked ? 1 : 0;
+  const minLevel = vipOnly ? Math.max(0, Math.min(999, Number(roomManageCreateMinLevel?.value || 0))) : 0;
+  const payload = {
+    name,
+    vip_only: vipOnly,
+    staff_only: staffOnly,
+    min_level: minLevel,
+    is_locked: roomManageCreateLocked?.checked ? 1 : 0,
+    maintenance_mode: roomManageCreateMaintenance?.checked ? 1 : 0,
+    events_enabled: roomManageCreateEventsEnabled?.checked ? 1 : 0,
+  };
+  if(categoryId) payload.category_id = Number(categoryId) || categoryId;
+  if(masterId) payload.master_id = Number(masterId) || masterId;
+
+  const {res, text} = await api("/rooms", {
+    method:"POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(payload),
+  });
+  if(!res.ok){
+    if(roomManageCreateMsg) roomManageCreateMsg.textContent = text || "Failed to create room.";
+    return;
+  }
+  if(roomManageCreateNameInput) roomManageCreateNameInput.value = "";
+  await loadRooms();
+  joinRoom(name);
+}
+
 async function createRoomFlow(){
   if(roomCreateModal){
     openRoomCreateModal();
@@ -11730,9 +11804,10 @@ function getSortedCategories(masterId, { includeTemporary = true } = {}){
   return list.filter((c) => !c.temporary && !String(c.id || "").startsWith("temp-"));
 }
 
-function getSortedRoomsForCategory(categoryId){
+function getSortedRoomsForCategory(categoryId, { includeArchived = true } = {}){
   const rooms = (roomStructure.rooms || []).filter((r) => String(r.category_id) === String(categoryId));
-  return [...rooms].sort((a, b) => sortByOrderThenName(a, b, "room_sort_order"));
+  const filtered = includeArchived ? rooms : rooms.filter((r) => Number(r.archived || 0) !== 1);
+  return [...filtered].sort((a, b) => sortByOrderThenName(a, b, "room_sort_order"));
 }
 
 function populateSelect(el, options, selectedValue){
@@ -11747,22 +11822,28 @@ function populateSelect(el, options, selectedValue){
   }
 }
 
-function populateRoomCreateSelects(){
+function populateRoomCreateSelectsFor(masterSelect, categorySelect){
+  if(!masterSelect || !categorySelect) return;
   const masters = getSortedMasters();
   const defaultMaster = masters.find((m) => m.name === "Site Rooms") || masters[0];
-  const masterId = roomCreateMasterSelect?.value || defaultMaster?.id || "";
+  const masterId = masterSelect.value || defaultMaster?.id || "";
   populateSelect(
-    roomCreateMasterSelect,
+    masterSelect,
     masters.map((m) => ({ value: m.id, label: m.name })),
     masterId
   );
   const categories = masterId ? getSortedCategories(masterId) : [];
   const defaultCategory = categories.find((c) => c.name === "Uncategorized") || categories[0];
   populateSelect(
-    roomCreateCategorySelect,
+    categorySelect,
     categories.map((c) => ({ value: c.id, label: c.name })),
     defaultCategory?.id || ""
   );
+}
+
+function populateRoomCreateSelects(){
+  populateRoomCreateSelectsFor(roomCreateMasterSelect, roomCreateCategorySelect);
+  populateRoomCreateSelectsFor(roomManageCreateMasterSelect, roomManageCreateCategorySelect);
 }
 
 function populateManageMasterSelects(){
@@ -11924,8 +12005,9 @@ function renderRoomManageRoomsList(){
   if(!roomManageRoomList) return;
   const masterId = roomManageMasterSelect?.value || "";
   const categoryId = roomManageCategorySelect?.value || "";
+  const showArchived = roomManageShowArchived?.checked;
   const categories = masterId ? getSortedCategories(masterId) : [];
-  const rooms = categoryId ? getSortedRoomsForCategory(categoryId) : [];
+  const rooms = categoryId ? getSortedRoomsForCategory(categoryId, { includeArchived: Boolean(showArchived) }) : [];
   const masterOptions = getSortedMasters().map((m) => ({
     master: m,
     categories: getSortedCategories(m.id),
@@ -11936,34 +12018,61 @@ function renderRoomManageRoomsList(){
       label: `${entry.master.name} / ${c.name}`,
     })));
   roomManageRoomList.innerHTML = "";
+  const isOwner = roleRank(me?.role || "User") >= roleRank("Owner");
   for(const room of rooms){
+    const isArchived = Number(room?.archived || 0) === 1;
+    const isCore = CORE_ROOMS.has(String(room?.name || ""));
+    const isProtected = isCore && !isOwner;
     const row = document.createElement("div");
     row.className = "roomManageRow";
     const optionsMarkup = moveOptions.map((opt) => `<option value="${opt.value}">${escapeHtml(opt.label)}</option>`).join("");
     row.innerHTML = `
-      <div class="label">${escapeHtml(displayRoomName(room.name))}</div>
+      <div class="label">${escapeHtml(displayRoomName(room.name))} ${isArchived ? "<span class='tag'>Archived</span>" : ""}</div>
       <select class="roomManageMoveSelect">${optionsMarkup}</select>
       <div class="actions">
+        <button class="btn secondary" data-action="rename">Rename</button>
         <button class="btn secondary" data-action="up">Up</button>
         <button class="btn secondary" data-action="down">Down</button>
         <button class="btn secondary" data-action="move">Move</button>
+        <button class="btn ${isArchived ? "secondary" : "danger"}" data-action="${isArchived ? "restore" : "archive"}">${isArchived ? "Restore" : "Archive"}</button>
       </div>
     `;
     const moveSelect = row.querySelector(".roomManageMoveSelect");
     if(moveSelect) moveSelect.value = categoryId;
+    if(isProtected){
+      row.querySelectorAll("[data-action='rename'], [data-action='archive'], [data-action='restore']").forEach((btn) => { btn.disabled = true; });
+    }
     const actions = row.querySelector(".actions");
     actions?.addEventListener("click", async (e) => {
       const btn = e.target.closest("button");
       if(!btn) return;
       const action = btn.dataset.action;
+      if(roomManageMsg) roomManageMsg.textContent = "";
+      if(action === "rename"){
+        const next = prompt("Rename room:", room.name);
+        if(!next) return;
+        const {res, text} = await api(`/api/rooms/${encodeURIComponent(room.name)}`, {
+          method:"PATCH",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({ name: next }),
+        });
+        if(!res.ok){
+          if(roomManageMsg) roomManageMsg.textContent = text || "Failed to rename room.";
+          return;
+        }
+      }
       if(action === "move"){
         const target = moveSelect?.value || "";
         if(!target || target === String(categoryId)) return;
-        await api(`/api/rooms/${encodeURIComponent(room.name)}/move`, {
+        const {res, text} = await api(`/api/rooms/${encodeURIComponent(room.name)}/move`, {
           method:"PATCH",
           headers: { "Content-Type":"application/json" },
           body: JSON.stringify({ category_id: Number(target) || target })
         });
+        if(!res.ok){
+          if(roomManageMsg) roomManageMsg.textContent = text || "Failed to move room.";
+          return;
+        }
       }
       if(action === "up" || action === "down"){
         const index = rooms.findIndex((r) => r.name === room.name);
@@ -11971,11 +12080,30 @@ function renderRoomManageRoomsList(){
         if(swapWith < 0 || swapWith >= rooms.length) return;
         const orderedIds = [...rooms].map((r) => r.name);
         [orderedIds[index], orderedIds[swapWith]] = [orderedIds[swapWith], orderedIds[index]];
-        await api("/api/rooms/reorder", {
+        const {res, text} = await api("/api/rooms/reorder", {
           method:"PATCH",
           headers: { "Content-Type":"application/json" },
           body: JSON.stringify({ category_id: Number(categoryId) || categoryId, orderedIds })
         });
+        if(!res.ok){
+          if(roomManageMsg) roomManageMsg.textContent = text || "Failed to reorder rooms.";
+          return;
+        }
+      }
+      if(action === "archive"){
+        if(!confirm(`Archive room "${displayRoomName(room.name)}"?`)) return;
+        const {res, text} = await api(`/api/rooms/${encodeURIComponent(room.name)}/archive`, { method:"PATCH" });
+        if(!res.ok){
+          if(roomManageMsg) roomManageMsg.textContent = text || "Failed to archive room.";
+          return;
+        }
+      }
+      if(action === "restore"){
+        const {res, text} = await api(`/api/rooms/${encodeURIComponent(room.name)}/restore`, { method:"PATCH" });
+        if(!res.ok){
+          if(roomManageMsg) roomManageMsg.textContent = text || "Failed to restore room.";
+          return;
+        }
       }
       await loadRooms();
     });
@@ -11984,32 +12112,118 @@ function renderRoomManageRoomsList(){
 }
 
 function refreshRoomManageUi(){
+  populateRoomCreateSelects();
   populateManageMasterSelects();
   renderRoomMasterList();
   renderRoomCategoryList();
   renderRoomManageRoomsList();
 }
 
-function openRoomManageModal(){
+function populateRoomEventsRoomSelect(){
+  if(!roomEventsRoomSelect) return;
+  const rooms = (roomStructure.rooms || []).filter((r) => Number(r?.archived || 0) !== 1);
+  const sorted = [...rooms].sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || ""), undefined, { sensitivity: "base" }));
+  if(!sorted.length){
+    roomEventsRoomSelect.innerHTML = "<option value=''>No rooms available</option>";
+    return;
+  }
+  const selected = roomEventsRoomSelect.value || sorted[0]?.name || "";
+  populateSelect(
+    roomEventsRoomSelect,
+    sorted.map((r) => ({ value: r.name, label: displayRoomName(r.name) })),
+    selected
+  );
+}
+
+function updateRoomEventsTypeHint(){
+  if(!roomEventsType || !roomEventsText) return;
+  const type = String(roomEventsType.value || "");
+  const isFlair = type === "flair";
+  roomEventsText.disabled = isFlair;
+  if(isFlair){
+    roomEventsText.placeholder = "Flair events apply a temporary visual highlight.";
+  }else if(type === "announcement"){
+    roomEventsText.placeholder = "Announcement text (required).";
+  }else{
+    roomEventsText.placeholder = "Prompt text (optional, leave blank for random).";
+  }
+}
+
+async function refreshRoomEventsActiveList(){
+  if(!roomEventsRoomSelect || !roomEventsActiveList) return;
+  const roomName = roomEventsRoomSelect.value || "";
+  if(!roomName){
+    roomEventsActiveList.innerHTML = "<div class='muted'>Select a room.</div>";
+    return;
+  }
+  if(roomEventsMsg) roomEventsMsg.textContent = "";
+  const {res, text} = await api(`/api/rooms/${encodeURIComponent(roomName)}/events`, { method:"GET" });
+  if(!res.ok){
+    if(roomEventsMsg) roomEventsMsg.textContent = text || "Failed to load events.";
+    return;
+  }
+  let data = {};
+  try {
+    data = JSON.parse(text || "{}");
+  } catch {}
+  const events = Array.isArray(data.events) ? data.events : [];
+  if(!events.length){
+    roomEventsActiveList.innerHTML = "<div class='muted'>No active events.</div>";
+    return;
+  }
+  roomEventsActiveList.innerHTML = "";
+  for(const ev of events){
+    const row = document.createElement("div");
+    row.className = "roomManageRow";
+    const endsAt = ev?.endsAt ? new Date(Number(ev.endsAt)).toLocaleTimeString() : "No end";
+    row.innerHTML = `
+      <div class="label">${escapeHtml(String(ev?.title || ev?.type || "Event"))}</div>
+      <div class="tag">${escapeHtml(String(ev?.type || "event"))}</div>
+      <div class="muted" style="font-size:12px;">${escapeHtml(endsAt)}</div>
+      <div class="actions">
+        <button class="btn danger" data-action="stop">Stop</button>
+      </div>
+    `;
+    row.querySelector("[data-action='stop']")?.addEventListener("click", async () => {
+      const {res: stopRes, text: stopText} = await api(`/api/room-events/${encodeURIComponent(ev.id)}/stop`, { method:"POST" });
+      if(!stopRes.ok){
+        if(roomEventsMsg) roomEventsMsg.textContent = stopText || "Failed to stop event.";
+        return;
+      }
+      await refreshRoomEventsActiveList();
+    });
+    roomEventsActiveList.appendChild(row);
+  }
+}
+
+function refreshRoomEventsUi(){
+  populateRoomEventsRoomSelect();
+  updateRoomEventsTypeHint();
+  refreshRoomEventsActiveList();
+}
+
+function openRoomManageModal(options = {}){
   // Prevent overlay stacking: close drawers / other modals before opening room modals
   try{ closeDrawers(); }catch{}
   try{ if(typeof closeMemberMenu==="function") closeMemberMenu(); }catch{}
   try{ if(typeof closeActionMenu==="function") closeActionMenu(); }catch{}
   try{ if(typeof closeModal==="function" && modal && modal.style && modal.style.display !== "none") closeModal(); }catch{}
   try{ if(typeof closeCouplesModal==="function") closeCouplesModal(); }catch{}
+  closeRoomActionsMenu();
   if(!roomManageModal) return;
   if(!me){
     toast("Loading your profile — try again in a second.");
     return;
   }
-  if(roleRank(me.role) < roleRank("Owner")){
-    toast("Room management is Owner-only.");
+  if(roleRank(me.role) < roleRank("Admin")){
+    toast("Room management is Admin-only.");
     return;
   }
   if(roomMasterMsg) roomMasterMsg.textContent = "";
   if(roomCategoryMsg) roomCategoryMsg.textContent = "";
   if(roomManageMsg) roomManageMsg.textContent = "";
-  const activeTab = document.querySelector("[data-room-manage-tab].active")?.dataset?.roomManageTab || "masters";
+  if(roomManageCreateMsg) roomManageCreateMsg.textContent = "";
+  const activeTab = options.tab || document.querySelector("[data-room-manage-tab].active")?.dataset?.roomManageTab || "masters";
   setRoomManageTab(activeTab);
   roomManageModal.hidden = false;
   roomManageModal.style.display = "flex";
@@ -12018,6 +12232,9 @@ function openRoomManageModal(){
     roomManageModal.classList.add("modal-visible");
   }else{
     requestAnimationFrame(()=> roomManageModal.classList.add("modal-visible"));
+  }
+  if(options.focusEl){
+    requestAnimationFrame(()=> options.focusEl?.focus?.());
   }
 }
 
@@ -12037,6 +12254,18 @@ function closeRoomManageModal(){
   }, 140);
 }
 
+function openRoomManageModalAtTab(tab, options = {}){
+  openRoomManageModal({ ...options, tab });
+}
+
+function applyRoomCreatePreset({ vipOnly = false, minLevel = 0, staffOnly = false } = {}){
+  if(roomManageCreateVipOnly) roomManageCreateVipOnly.checked = Boolean(vipOnly);
+  if(roomManageCreateStaffOnly) roomManageCreateStaffOnly.checked = Boolean(staffOnly);
+  if(roomManageCreateMinLevel){
+    roomManageCreateMinLevel.value = String(vipOnly ? Math.max(Number(minLevel) || 0, 0) : 0);
+  }
+}
+
 function setRoomManageTab(tab){
   const next = tab || "masters";
   document.querySelectorAll("[data-room-manage-tab]").forEach((btn) => {
@@ -12046,6 +12275,7 @@ function setRoomManageTab(tab){
     section.classList.toggle("active", section.dataset.roomManageSection === next);
   });
   refreshRoomManageUi();
+  if(next === "events") refreshRoomEventsUi();
 }
 
 async function persistRoomMasterCollapse(masterId, collapsed){
@@ -12068,14 +12298,42 @@ async function persistRoomCategoryCollapse(categoryId, collapsed){
 
 function updateRoomControlsVisibility(){
   if(addRoomBtn){
-    const canCreate = me && roleRank(me.role) >= roleRank("Co-owner");
+    const canCreate = me && roleRank(me.role) >= roleRank("Admin");
     addRoomBtn.style.display = rightPanelMode === "rooms" && canCreate ? "inline-flex" : "none";
   }
   if(manageRoomsBtn){
-    const isOwner = me && roleRank(me.role) >= roleRank("Owner");
-    manageRoomsBtn.style.display = rightPanelMode === "rooms" && isOwner ? "inline-flex" : "none";
-    if(!isOwner) closeRoomManageModal();
+    const isAdmin = me && roleRank(me.role) >= roleRank("Admin");
+    const isVipEligible = me && roleRank(me.role) >= roleRank("VIP") && Number(me.level || 0) >= 25;
+    const shouldShow = rightPanelMode === "rooms" && (isAdmin || isVipEligible);
+    manageRoomsBtn.style.display = shouldShow ? "inline-flex" : "none";
+    if(!isAdmin) closeRoomManageModal();
+    if(!shouldShow) closeRoomActionsMenu();
   }
+  updateRoomActionsMenu();
+}
+
+function updateRoomActionsMenu(){
+  if(!roomActionsMenu) return;
+  const isAdmin = me && roleRank(me.role) >= roleRank("Admin");
+  const isVipEligible = me && roleRank(me.role) >= roleRank("VIP") && Number(me.level || 0) >= 25;
+  roomActionsMenu.querySelectorAll("[data-room-action]").forEach((btn) => {
+    const action = btn.dataset.roomAction;
+    if(action === "add-vip-room"){
+      btn.hidden = !isVipEligible;
+      return;
+    }
+    btn.hidden = !isAdmin;
+  });
+}
+
+function closeRoomActionsMenu(){
+  if(roomActionsMenu) roomActionsMenu.hidden = true;
+}
+
+function toggleRoomActionsMenu(){
+  if(!roomActionsMenu) return;
+  updateRoomActionsMenu();
+  roomActionsMenu.hidden = !roomActionsMenu.hidden;
 }
 
 function ensureChangelogLoaded(force = false){
@@ -17376,13 +17634,51 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   ensureRoomModeSwitch();
   await loadDmThreads();
 
-  // show Create Room button only for Co-owner+
+  // show Create Room button only for Admin+
   if(addRoomBtn){
     addRoomBtn.addEventListener("click", createRoomFlow);
   }
   if(manageRoomsBtn){
-    manageRoomsBtn.addEventListener("click", openRoomManageModal);
+    manageRoomsBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleRoomActionsMenu();
+    });
   }
+  roomActionsMenu?.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-room-action]");
+    if(!btn) return;
+    const action = btn.dataset.roomAction;
+    const isAdmin = me && roleRank(me.role) >= roleRank("Admin");
+    const isVipEligible = me && roleRank(me.role) >= roleRank("VIP") && Number(me.level || 0) >= 25;
+    closeRoomActionsMenu();
+    if(action === "add-category"){
+      if(!isAdmin) return toast("Admin+ required.");
+      openRoomManageModalAtTab("categories", { focusEl: roomCategoryCreateInput });
+      return;
+    }
+    if(action === "add-room"){
+      if(!isAdmin) return toast("Admin+ required.");
+      applyRoomCreatePreset({ vipOnly: false, minLevel: 0 });
+      openRoomManageModalAtTab("create", { focusEl: roomManageCreateNameInput });
+      return;
+    }
+    if(action === "add-vip-room"){
+      if(!isVipEligible) return;
+      if(!isAdmin) return toast("Admin+ required to create VIP rooms.");
+      applyRoomCreatePreset({ vipOnly: true, minLevel: 25 });
+      openRoomManageModalAtTab("create", { focusEl: roomManageCreateNameInput });
+      return;
+    }
+    if(action === "manage-rooms"){
+      if(!isAdmin) return toast("Admin+ required.");
+      openRoomManageModalAtTab("rooms");
+    }
+  });
+  document.addEventListener("click", (e) => {
+    if(!roomActionsMenu || roomActionsMenu.hidden) return;
+    if(roomActionsMenu.contains(e.target) || manageRoomsBtn?.contains(e.target)) return;
+    closeRoomActionsMenu();
+  });
   roomManageCloseBtn?.addEventListener("click", closeRoomManageModal);
   roomManageModal?.addEventListener("click", (e)=>{ if(e.target === roomManageModal) closeRoomManageModal(); });
   roomCreateCloseBtn?.addEventListener("click", closeRoomCreateModal);
@@ -17390,12 +17686,23 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   roomCreateModal?.addEventListener("click", (e)=>{ if(e.target === roomCreateModal) closeRoomCreateModal(); });
   roomCreateSubmitBtn?.addEventListener("click", submitCreateRoom);
   roomCreateMasterSelect?.addEventListener("change", populateRoomCreateSelects);
+  roomManageCreateForm?.addEventListener("submit", submitRoomManageCreate);
+  roomManageCreateMasterSelect?.addEventListener("change", () => {
+    populateRoomCreateSelectsFor(roomManageCreateMasterSelect, roomManageCreateCategorySelect);
+  });
+  roomManageCreateVipOnly?.addEventListener("change", () => {
+    if(roomManageCreateVipOnly.checked && roomManageCreateMinLevel){
+      const next = Math.max(25, Number(roomManageCreateMinLevel.value || 0));
+      roomManageCreateMinLevel.value = String(next);
+    }
+  });
   roomCategoryMasterSelect?.addEventListener("change", renderRoomCategoryList);
   roomManageMasterSelect?.addEventListener("change", () => {
     populateManageCategorySelects();
     renderRoomManageRoomsList();
   });
   roomManageCategorySelect?.addEventListener("change", renderRoomManageRoomsList);
+  roomManageShowArchived?.addEventListener("change", renderRoomManageRoomsList);
   document.querySelectorAll("[data-room-manage-tab]").forEach((btn)=>{
     btn.addEventListener("click", ()=> setRoomManageTab(btn.dataset.roomManageTab));
   });
@@ -17429,6 +17736,32 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
     });
     if(roomCategoryCreateInput) roomCategoryCreateInput.value = "";
     await loadRooms();
+  });
+  roomEventsRoomSelect?.addEventListener("change", refreshRoomEventsActiveList);
+  roomEventsType?.addEventListener("change", updateRoomEventsTypeHint);
+  roomEventsStartBtn?.addEventListener("click", async () => {
+    if(!roomEventsRoomSelect) return;
+    if(roomEventsMsg) roomEventsMsg.textContent = "";
+    const roomName = roomEventsRoomSelect.value || "";
+    if(!roomName){
+      if(roomEventsMsg) roomEventsMsg.textContent = "Select a room.";
+      return;
+    }
+    const type = String(roomEventsType?.value || "");
+    const duration = Math.max(0, Math.min(86400, Number(roomEventsDuration?.value || 0)));
+    const text = type === "flair" ? "" : String(roomEventsText?.value || "").trim();
+    const payload = { text };
+    const {res, text: resText} = await api(`/api/rooms/${encodeURIComponent(roomName)}/events`, {
+      method:"POST",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify({ type, duration_seconds: duration, payload }),
+    });
+    if(!res.ok){
+      if(roomEventsMsg) roomEventsMsg.textContent = resText || "Failed to start event.";
+      return;
+    }
+    if(roomEventsText) roomEventsText.value = "";
+    await refreshRoomEventsActiveList();
   });
   updateRoomControlsVisibility();
 
