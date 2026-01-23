@@ -17918,9 +17918,7 @@ socket.on("dm history", (payload = {}) => {
   };
   handleProfileHash();
   window.addEventListener("hashchange", ()=>{ handleProfileHash(); });
-  erProfile(u);
-    }
-  });
+
 }
 
 // boot: auth gate
