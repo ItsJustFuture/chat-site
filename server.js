@@ -492,6 +492,11 @@ const pgInitPromise = (async () => {
         sess JSON NOT NULL,
         expire TIMESTAMP NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `);
 
     await pgPool.query(`
@@ -525,7 +530,8 @@ const pgInitPromise = (async () => {
         category_id INTEGER REFERENCES room_categories(id) ON DELETE SET NULL,
         room_sort_order INTEGER NOT NULL DEFAULT 0,
         created_by_user_id INTEGER,
-        is_user_room INTEGER NOT NULL DEFAULT 0
+        is_user_room INTEGER NOT NULL DEFAULT 0,
+        is_system INTEGER NOT NULL DEFAULT 0
       );
     `);
 
@@ -543,6 +549,7 @@ const pgInitPromise = (async () => {
       `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS min_level INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS events_enabled INTEGER NOT NULL DEFAULT 1`,
       `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS archived INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_system INTEGER NOT NULL DEFAULT 0`,
     ];
     for (const q of roomCols) {
       try { await pgPool.query(q); } catch (_) {}
@@ -575,6 +582,82 @@ const pgInitPromise = (async () => {
       }
     } catch (e) {
       console.warn("[pg-init] room hierarchy seed failed:", e?.message || e);
+    }
+
+    try {
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_categories_master_sort ON room_categories(master_id, sort_order)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_rooms_category_sort ON rooms(category_id, room_sort_order)`);
+    } catch (e) {
+      console.warn("[pg-init] room hierarchy indexes failed:", e?.message || e);
+    }
+
+    try {
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS mod_cases (
+          id SERIAL PRIMARY KEY,
+          type TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'open',
+          priority TEXT NOT NULL DEFAULT 'normal',
+          subject_user_id INTEGER,
+          created_by_user_id INTEGER,
+          assigned_to_user_id INTEGER,
+          room_id TEXT,
+          title TEXT,
+          summary TEXT,
+          created_at BIGINT NOT NULL,
+          updated_at BIGINT NOT NULL,
+          closed_at BIGINT,
+          closed_reason TEXT
+        );
+        CREATE TABLE IF NOT EXISTS mod_case_events (
+          id SERIAL PRIMARY KEY,
+          case_id INTEGER NOT NULL REFERENCES mod_cases(id) ON DELETE CASCADE,
+          actor_user_id INTEGER,
+          event_type TEXT NOT NULL,
+          event_payload JSONB,
+          created_at BIGINT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS mod_case_notes (
+          id SERIAL PRIMARY KEY,
+          case_id INTEGER NOT NULL REFERENCES mod_cases(id) ON DELETE CASCADE,
+          author_user_id INTEGER,
+          body TEXT NOT NULL,
+          created_at BIGINT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS mod_case_evidence (
+          id SERIAL PRIMARY KEY,
+          case_id INTEGER NOT NULL REFERENCES mod_cases(id) ON DELETE CASCADE,
+          evidence_type TEXT NOT NULL,
+          room_id TEXT,
+          message_id INTEGER,
+          message_excerpt TEXT,
+          url TEXT,
+          text TEXT,
+          created_by_user_id INTEGER,
+          created_at BIGINT NOT NULL
+        );
+      `);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_mod_cases_status ON mod_cases(status)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_mod_cases_type ON mod_cases(type)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_mod_case_events_case ON mod_case_events(case_id)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_mod_case_notes_case ON mod_case_notes(case_id)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_mod_case_evidence_case ON mod_case_evidence(case_id)`);
+    } catch (e) {
+      console.warn("[pg-init] mod cases tables failed:", e?.message || e);
+    }
+
+    try {
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS room_structure_audit (
+          id SERIAL PRIMARY KEY,
+          action TEXT NOT NULL,
+          actor_user_id INTEGER,
+          payload JSONB,
+          created_at BIGINT NOT NULL
+        );
+      `);
+    } catch (e) {
+      console.warn("[pg-init] room audit table failed:", e?.message || e);
     }
 
     // Changelog tables (Postgres) — ensures changelog persists across restarts
@@ -2631,6 +2714,56 @@ async function setConfigValue(key, value) {
   return v;
 }
 
+async function getConfigValuePg(key) {
+  if (!(await pgUsersEnabled())) return null;
+  try {
+    const { rows } = await pgPool.query(`SELECT value FROM config WHERE key = $1 LIMIT 1`, [key]);
+    return rows?.[0]?.value ?? null;
+  } catch (e) {
+    console.warn("[config][pg] read failed:", e?.message || e);
+    return null;
+  }
+}
+
+async function setConfigValuePg(key, value) {
+  if (!(await pgUsersEnabled())) return null;
+  const v = value == null ? "" : String(value);
+  try {
+    await pgPool.query(
+      `INSERT INTO config (key, value) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [key, v]
+    );
+    return v;
+  } catch (e) {
+    console.warn("[config][pg] write failed:", e?.message || e);
+    return null;
+  }
+}
+
+async function getRoomStructureVersion() {
+  const key = "room_structure_version";
+  const pgValue = await getConfigValuePg(key);
+  if (pgValue != null) return Number(pgValue) || 0;
+  const sqliteValue = await getConfigValue(key, null);
+  return Number(sqliteValue) || 0;
+}
+
+async function setRoomStructureVersion(version) {
+  const key = "room_structure_version";
+  const next = String(Number(version) || 0);
+  await setConfigValue(key, next);
+  await setConfigValuePg(key, next);
+  return Number(next) || 0;
+}
+
+async function bumpRoomStructureVersion() {
+  const current = await getRoomStructureVersion();
+  const next = current + 1;
+  await setRoomStructureVersion(next);
+  return next;
+}
+
 function safeJsonParse(str, fallback) {
   try {
     return JSON.parse(str);
@@ -3910,6 +4043,23 @@ const commandRegistry = {
       if (roleRank(target.role) >= roleRank(actorRole)) return { ok: false, message: "Permission denied" };
       const reason = args.slice(1).join(" ").slice(0, 180) || "No reason";
       logModAction({ actor, action: "REPORT", targetUserId: target.id, targetUsername: target.username, room: null, details: reason });
+      try {
+        const caseRow = await createModCase({
+          type: "flag",
+          subjectUserId: target.id,
+          createdByUserId: actor?.id || null,
+          title: `Report: @${target.username}`,
+          summary: reason,
+        });
+        if (caseRow?.id) {
+          await addModCaseEvent(caseRow.id, {
+            actorUserId: actor?.id || null,
+            eventType: "flag_created",
+            payload: { reportedUserId: target.id, reason },
+          });
+          emitToStaff("mod:case_created", { id: caseRow.id, type: caseRow.type, status: caseRow.status });
+        }
+      } catch {}
       return { ok: true, message: `Reported ${target.username}: ${reason}` };
     },
   },
@@ -4001,18 +4151,41 @@ const commandRegistry = {
       if (!name) return { ok: false, message: "Invalid room" };
       const resolved = await resolveRoomCategoryId({ isUserRoom: false });
       const categoryId = resolved?.categoryId ?? null;
-      const nextSort = categoryId
-        ? await dbGetAsync(`SELECT COALESCE(MAX(room_sort_order), 0) as maxSort FROM rooms WHERE category_id = ?`, [
-          categoryId,
-        ])
-        : { maxSort: 0 };
-      const sortOrder = Number(nextSort?.maxSort || 0) + 1;
-      await dbRunAsync(
-        `INSERT OR IGNORE INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room)
-         VALUES (?, ?, ?, ?, ?, ?, 0)`,
-        [name, actor.id, Date.now(), categoryId, sortOrder, actor.id]
-      );
-      await emitRoomStructureUpdate();
+      let nextSort = { maxSort: 0, maxsort: 0 };
+      if (categoryId) {
+        if (await pgUsersEnabled()) {
+          const { rows } = await pgPool.query(
+            `SELECT COALESCE(MAX(room_sort_order), 0) as maxsort FROM rooms WHERE category_id = $1`,
+            [categoryId]
+          );
+          nextSort = rows?.[0] || nextSort;
+        } else {
+          nextSort = await dbGetAsync(
+            `SELECT COALESCE(MAX(room_sort_order), 0) as maxSort FROM rooms WHERE category_id = ?`,
+            [categoryId]
+          );
+        }
+      }
+      const sortOrder = Number(nextSort?.maxsort || nextSort?.maxSort || 0) + 1;
+      if (await pgUsersEnabled()) {
+        await pgPool.query(
+          `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room, is_system)
+           VALUES ($1, $2, $3, $4, $5, $6, 0, 0)
+           ON CONFLICT (name) DO NOTHING`,
+          [name, actor.id, Date.now(), categoryId, sortOrder, actor.id]
+        );
+      } else {
+        await dbRunAsync(
+          `INSERT OR IGNORE INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room, is_system)
+           VALUES (?, ?, ?, ?, ?, ?, 0, 0)`,
+          [name, actor.id, Date.now(), categoryId, sortOrder, actor.id]
+        );
+      }
+      await applyRoomStructureChange({
+        action: "room.create",
+        actorUserId: actor?.id,
+        auditPayload: { name, category_id: categoryId },
+      });
       return { ok: true, message: `Created room #${name}` };
     },
   },
@@ -4024,9 +4197,18 @@ const commandRegistry = {
     handler: async ({ args }) => {
       const name = sanitizeRoomName(args[0] || "");
       if (!name) return { ok: false, message: "Invalid room" };
-      await dbRunAsync(`DELETE FROM rooms WHERE name=?`, [name]);
-      await dbRunAsync(`DELETE FROM messages WHERE room=?`, [name]);
-      await emitRoomStructureUpdate();
+      if (await pgUsersEnabled()) {
+        await pgPool.query(`DELETE FROM rooms WHERE name=$1`, [name]);
+        await pgPool.query(`DELETE FROM messages WHERE room=$1`, [name]).catch(() => {});
+      } else {
+        await dbRunAsync(`DELETE FROM rooms WHERE name=?`, [name]);
+        await dbRunAsync(`DELETE FROM messages WHERE room=?`, [name]);
+      }
+      await applyRoomStructureChange({
+        action: "room.delete",
+        actorUserId: null,
+        auditPayload: { name },
+      });
       return { ok: true, message: `Deleted room #${name}` };
     },
   },
@@ -5859,15 +6041,54 @@ async function getUserRoomCollapseState(userId) {
 }
 
 async function buildRoomStructure() {
+  // Discovery: room structure is sourced from room_master_categories/room_categories/rooms tables.
+  if (await pgUsersEnabled()) {
+    const mastersRes = await pgPool.query(
+      `SELECT id, name, sort_order FROM room_master_categories ORDER BY sort_order ASC, id ASC`
+    );
+    const categoriesRes = await pgPool.query(
+      `SELECT id, master_id, name, sort_order FROM room_categories ORDER BY sort_order ASC, id ASC`
+    );
+    const roomsRes = await pgPool.query(
+      `SELECT name, category_id, room_sort_order, slowmode_seconds, is_locked, maintenance_mode, vip_only, staff_only, min_level, events_enabled, archived,
+              created_by, created_by_user_id, is_user_room, is_system
+         FROM rooms
+        ORDER BY room_sort_order ASC, name ASC`
+    );
+    const rooms = roomsRes.rows || [];
+    return {
+      masters: mastersRes.rows || [],
+      categories: categoriesRes.rows || [],
+      rooms: (rooms || []).map((r) => ({
+        id: r.name,
+        name: r.name,
+        category_id: r.category_id,
+        room_sort_order: Number(r.room_sort_order || 0),
+        slowmode_seconds: Number(r.slowmode_seconds || 0),
+        is_locked: Number(r.is_locked || 0),
+        maintenance_mode: Number(r.maintenance_mode || 0),
+        vip_only: Number(r.vip_only || 0),
+        staff_only: Number(r.staff_only || 0),
+        min_level: Number(r.min_level || 0),
+        events_enabled: Number(r.events_enabled ?? 1),
+        archived: Number(r.archived || 0),
+        created_by: r.created_by ?? null,
+        created_by_user_id: r.created_by_user_id ?? null,
+        is_user_room: Number(r.is_user_room || 0),
+        is_system: Number(r.is_system || 0),
+      })),
+    };
+  }
+
   const masters = await dbAllAsync(
-    `SELECT id, name, sort_order FROM room_master_categories ORDER BY sort_order ASC, name ASC`
+    `SELECT id, name, sort_order FROM room_master_categories ORDER BY sort_order ASC, id ASC`
   );
   const categories = await dbAllAsync(
-    `SELECT id, master_id, name, sort_order FROM room_categories ORDER BY sort_order ASC, name ASC`
+    `SELECT id, master_id, name, sort_order FROM room_categories ORDER BY sort_order ASC, id ASC`
   );
   const rooms = await dbAllAsync(
     `SELECT name, category_id, room_sort_order, slowmode_seconds, is_locked, maintenance_mode, vip_only, staff_only, min_level, events_enabled, archived,
-            created_by, created_by_user_id, is_user_room
+            created_by, created_by_user_id, is_user_room, is_system
        FROM rooms
       ORDER BY room_sort_order ASC, name ASC`
   );
@@ -5890,12 +6111,14 @@ async function buildRoomStructure() {
       created_by: r.created_by ?? null,
       created_by_user_id: r.created_by_user_id ?? null,
       is_user_room: Number(r.is_user_room || 0),
+      is_system: Number(r.is_system || 0),
     })),
   };
 }
 
 async function buildRoomStructurePayload(userId) {
   const base = await buildRoomStructure();
+  const version = await getRoomStructureVersion();
   let user = null;
   try {
     if (userId) user = await dbGetAsync(`SELECT id, role, level FROM users WHERE id = ?`, [userId]);
@@ -5914,16 +6137,75 @@ async function buildRoomStructurePayload(userId) {
     return canAccessRoomBySettings(user, room);
   });
   const userCollapse = await getUserRoomCollapseState(userId);
-  return { ...base, rooms: filteredRooms, userCollapse };
+  return { ...base, rooms: filteredRooms, userCollapse, version };
 }
 
-async function emitRoomStructureUpdate() {
+async function logRoomStructureAudit({ action, actorUserId, payload }) {
+  const now = Date.now();
+  const serialized = payload ? JSON.stringify(payload) : null;
+  if (await pgUsersEnabled()) {
+    try {
+      await pgPool.query(
+        `INSERT INTO room_structure_audit (action, actor_user_id, payload, created_at)
+         VALUES ($1, $2, $3, $4)`,
+        [action, actorUserId || null, serialized ? JSON.parse(serialized) : null, now]
+      );
+      return;
+    } catch (e) {
+      console.warn("[room-audit][pg] failed:", e?.message || e);
+    }
+  }
+  try {
+    await dbRunAsync(
+      `INSERT INTO room_structure_audit (action, actor_user_id, payload, created_at)
+       VALUES (?, ?, ?, ?)`,
+      [action, actorUserId || null, serialized, now]
+    );
+  } catch (e) {
+    console.warn("[room-audit][sqlite] failed:", e?.message || e);
+  }
+}
+
+async function emitRoomStructureUpdate({ bumpVersion = false } = {}) {
+  const version = bumpVersion ? await bumpRoomStructureVersion() : await getRoomStructureVersion();
   const payload = await buildRoomStructure();
-  io.emit("roomStructure:update", payload);
+  io.emit("roomStructure:update", { ...payload, version });
+  io.emit("rooms:structure_updated", { version });
   io.emit("rooms update", (payload.rooms || []).map((r) => r.name));
 }
 
+async function ensureRoomStructureVersionMatch(expectedVersion) {
+  if (!Number.isFinite(expectedVersion)) return { ok: true };
+  const current = await getRoomStructureVersion();
+  if (Number(expectedVersion) !== Number(current)) {
+    return { ok: false, version: current };
+  }
+  return { ok: true, version: current };
+}
+
+async function applyRoomStructureChange({ action, actorUserId, auditPayload }) {
+  await logRoomStructureAudit({ action, actorUserId, payload: auditPayload });
+  await emitRoomStructureUpdate({ bumpVersion: true });
+}
+
+function extractExpectedRoomVersion(req) {
+  const raw = req?.body?.expectedVersion ?? req?.query?.expectedVersion;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 async function getDefaultMasterIds() {
+  if (await pgUsersEnabled()) {
+    const { rows } = await pgPool.query(
+      `SELECT id, name FROM room_master_categories WHERE name = ANY($1::text[])`,
+      [DEFAULT_ROOM_MASTERS]
+    );
+    const map = new Map((rows || []).map((row) => [row.name, row.id]));
+    return {
+      site: map.get("Site Rooms") || null,
+      user: map.get("User Rooms") || null,
+    };
+  }
   const rows = await dbAllAsync(
     `SELECT id, name FROM room_master_categories WHERE name IN (?, ?)`,
     DEFAULT_ROOM_MASTERS
@@ -5939,6 +6221,13 @@ async function resolveSiteUncategorizedCategoryId() {
   try {
     const ids = await getDefaultMasterIds();
     if (!ids.site) return null;
+    if (await pgUsersEnabled()) {
+      const { rows } = await pgPool.query(
+        `SELECT id FROM room_categories WHERE master_id = $1 AND lower(name) = lower('Uncategorized') LIMIT 1`,
+        [ids.site]
+      );
+      return rows?.[0]?.id ?? null;
+    }
     const row = await dbGetAsync(
       `SELECT id FROM room_categories WHERE master_id = ? AND lower(name) = lower('Uncategorized') LIMIT 1`,
       [ids.site]
@@ -5957,8 +6246,8 @@ async function ensureCoreRoomsExist() {
     if (!existing) {
       await dbRunAsync(
         `INSERT OR IGNORE INTO rooms
-          (name, created_by, created_at, category_id, room_sort_order, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived)
-         VALUES (?, NULL, ?, ?, ?, 0, 0, 0, 0, 0, 0, 1, 0, 0)`,
+          (name, created_by, created_at, category_id, room_sort_order, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived, is_system)
+         VALUES (?, NULL, ?, ?, ?, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1)`,
         [room.name, now, categoryId, room.sortOrder ?? 0]
       );
     } else {
@@ -5966,7 +6255,8 @@ async function ensureCoreRoomsExist() {
         `UPDATE rooms
             SET category_id = COALESCE(category_id, ?),
                 room_sort_order = COALESCE(room_sort_order, ?),
-                archived = 0
+                archived = 0,
+                is_system = 1
           WHERE name = ?`,
         [categoryId, room.sortOrder ?? 0, room.name]
       ).catch(() => {});
@@ -5995,8 +6285,8 @@ async function ensureCoreRoomsExist() {
       if (!existing) {
         await pgPool.query(
           `INSERT INTO rooms
-            (name, created_by, created_at, category_id, room_sort_order, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived)
-           VALUES ($1, NULL, $2, $3, $4, 0, 0, 0, 0, 0, 0, 1, 0, 0)
+            (name, created_by, created_at, category_id, room_sort_order, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived, is_system)
+           VALUES ($1, NULL, $2, $3, $4, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1)
            ON CONFLICT (name) DO NOTHING`,
           [room.name, now, pgCategoryId, room.sortOrder ?? 0]
         );
@@ -6005,7 +6295,8 @@ async function ensureCoreRoomsExist() {
           `UPDATE rooms
               SET category_id = COALESCE(category_id, $1),
                   room_sort_order = COALESCE(room_sort_order, $2),
-                  archived = 0
+                  archived = 0,
+                  is_system = 1
             WHERE name = $3`,
           [pgCategoryId, room.sortOrder ?? 0, room.name]
         );
@@ -6018,6 +6309,13 @@ async function ensureCoreRoomsExist() {
 
 async function getUncategorizedCategoryId(masterId) {
   if (!masterId) return null;
+  if (await pgUsersEnabled()) {
+    const { rows } = await pgPool.query(
+      `SELECT id FROM room_categories WHERE master_id = $1 AND lower(name) = lower($2) LIMIT 1`,
+      [masterId, DEFAULT_ROOM_CATEGORY]
+    );
+    return rows?.[0]?.id ?? null;
+  }
   const row = await dbGetAsync(
     `SELECT id FROM room_categories WHERE master_id = ? AND lower(name) = lower(?) LIMIT 1`,
     [masterId, DEFAULT_ROOM_CATEGORY]
@@ -6028,10 +6326,18 @@ async function getUncategorizedCategoryId(masterId) {
 async function resolveRoomCategoryId({ categoryId, masterId, isUserRoom }) {
   let categoryRow = null;
   if (categoryId) {
-    categoryRow = await dbGetAsync(
-      `SELECT id, master_id FROM room_categories WHERE id = ? LIMIT 1`,
-      [categoryId]
-    );
+    if (await pgUsersEnabled()) {
+      const { rows } = await pgPool.query(
+        `SELECT id, master_id FROM room_categories WHERE id = $1 LIMIT 1`,
+        [categoryId]
+      );
+      categoryRow = rows?.[0] || null;
+    } else {
+      categoryRow = await dbGetAsync(
+        `SELECT id, master_id FROM room_categories WHERE id = ? LIMIT 1`,
+        [categoryId]
+      );
+    }
   }
   if (!categoryRow && masterId) {
     const fallbackId = await getUncategorizedCategoryId(masterId);
@@ -6266,6 +6572,147 @@ function logModAction({ actor, action, targetUserId, targetUsername, room, detai
       details || null,
     ]
   );
+}
+
+// Discovery: moderation actions are stored in mod_logs; cases unify flags/appeals/referrals.
+function isStaffRole(role) {
+  return requireMinRole(role, "Moderator");
+}
+
+function canViewAllCases(role) {
+  return requireMinRole(role, "Admin") || requireMinRole(role, "Co-owner") || requireMinRole(role, "Owner");
+}
+
+function emitToStaff(event, payload) {
+  try {
+    for (const sock of io.sockets.sockets.values()) {
+      const role = sock?.user?.role || sock?.request?.session?.user?.role;
+      if (!role || !isStaffRole(role)) continue;
+      sock.emit(event, payload);
+    }
+  } catch (e) {
+    console.warn("[staff-emit] failed:", e?.message || e);
+  }
+}
+
+async function findUserIdByUsername(username) {
+  const clean = String(username || "").trim();
+  if (!clean) return null;
+  if (await pgUsersEnabled()) {
+    try {
+      const { rows } = await pgPool.query(
+        `SELECT id FROM users WHERE lower(username) = lower($1) LIMIT 1`,
+        [clean]
+      );
+      return rows?.[0]?.id ?? null;
+    } catch {
+      return null;
+    }
+  }
+  const row = await dbGetAsync(`SELECT id FROM users WHERE lower(username) = lower(?) LIMIT 1`, [clean]).catch(() => null);
+  return row?.id ?? null;
+}
+
+async function createModCase({
+  type,
+  status = "open",
+  priority = "normal",
+  subjectUserId = null,
+  createdByUserId = null,
+  assignedToUserId = null,
+  roomId = null,
+  title = null,
+  summary = null,
+}) {
+  const now = Date.now();
+  if (await pgUsersEnabled()) {
+    const { rows } = await pgPool.query(
+      `INSERT INTO mod_cases
+        (type, status, priority, subject_user_id, created_by_user_id, assigned_to_user_id, room_id, title, summary, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING *`,
+      [type, status, priority, subjectUserId, createdByUserId, assignedToUserId, roomId, title, summary, now, now]
+    );
+    return rows?.[0] || null;
+  }
+  const result = await dbRunAsync(
+    `INSERT INTO mod_cases
+      (type, status, priority, subject_user_id, created_by_user_id, assigned_to_user_id, room_id, title, summary, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [type, status, priority, subjectUserId, createdByUserId, assignedToUserId, roomId, title, summary, now, now]
+  );
+  return dbGetAsync(`SELECT * FROM mod_cases WHERE id = ?`, [result.lastID]);
+}
+
+async function addModCaseEvent(caseId, { actorUserId = null, eventType, payload = null }) {
+  const now = Date.now();
+  if (await pgUsersEnabled()) {
+    await pgPool.query(
+      `INSERT INTO mod_case_events (case_id, actor_user_id, event_type, event_payload, created_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [caseId, actorUserId, eventType, payload ?? null, now]
+    );
+    await pgPool.query(`UPDATE mod_cases SET updated_at = $1 WHERE id = $2`, [now, caseId]).catch(() => {});
+    return;
+  }
+  await dbRunAsync(
+    `INSERT INTO mod_case_events (case_id, actor_user_id, event_type, event_payload, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [caseId, actorUserId, eventType, payload ? JSON.stringify(payload) : null, now]
+  );
+  await dbRunAsync(`UPDATE mod_cases SET updated_at = ? WHERE id = ?`, [now, caseId]).catch(() => {});
+}
+
+async function addModCaseNote(caseId, { authorUserId = null, body }) {
+  const now = Date.now();
+  if (await pgUsersEnabled()) {
+    const { rows } = await pgPool.query(
+      `INSERT INTO mod_case_notes (case_id, author_user_id, body, created_at)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [caseId, authorUserId, body, now]
+    );
+    await pgPool.query(`UPDATE mod_cases SET updated_at = $1 WHERE id = $2`, [now, caseId]).catch(() => {});
+    return rows?.[0] || null;
+  }
+  const result = await dbRunAsync(
+    `INSERT INTO mod_case_notes (case_id, author_user_id, body, created_at)
+     VALUES (?, ?, ?, ?)`,
+    [caseId, authorUserId, body, now]
+  );
+  await dbRunAsync(`UPDATE mod_cases SET updated_at = ? WHERE id = ?`, [now, caseId]).catch(() => {});
+  return dbGetAsync(`SELECT * FROM mod_case_notes WHERE id = ?`, [result.lastID]);
+}
+
+async function addModCaseEvidence(caseId, { createdByUserId = null, evidenceType, roomId = null, messageId = null, messageExcerpt = null, url = null, text = null }) {
+  const now = Date.now();
+  if (await pgUsersEnabled()) {
+    const { rows } = await pgPool.query(
+      `INSERT INTO mod_case_evidence
+        (case_id, evidence_type, room_id, message_id, message_excerpt, url, text, created_by_user_id, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       RETURNING *`,
+      [caseId, evidenceType, roomId, messageId, messageExcerpt, url, text, createdByUserId, now]
+    );
+    await pgPool.query(`UPDATE mod_cases SET updated_at = $1 WHERE id = $2`, [now, caseId]).catch(() => {});
+    return rows?.[0] || null;
+  }
+  const result = await dbRunAsync(
+    `INSERT INTO mod_case_evidence
+      (case_id, evidence_type, room_id, message_id, message_excerpt, url, text, created_by_user_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [caseId, evidenceType, roomId, messageId, messageExcerpt, url, text, createdByUserId, now]
+  );
+  await dbRunAsync(`UPDATE mod_cases SET updated_at = ? WHERE id = ?`, [now, caseId]).catch(() => {});
+  return dbGetAsync(`SELECT * FROM mod_case_evidence WHERE id = ?`, [result.lastID]);
+}
+
+async function fetchModCaseById(caseId) {
+  if (await pgUsersEnabled()) {
+    const { rows } = await pgPool.query(`SELECT * FROM mod_cases WHERE id = $1`, [caseId]);
+    return rows?.[0] || null;
+  }
+  return dbGetAsync(`SELECT * FROM mod_cases WHERE id = ?`, [caseId]);
 }
 
 function shouldLogSecurityEvent(key, limit = 5, windowMs = 60_000) {
@@ -8658,6 +9105,16 @@ app.get("/rooms", requireLogin, async (req, res) => {
   }
 });
 
+app.get("/api/rooms/structure", requireLogin, async (req, res) => {
+  try {
+    const payload = await buildRoomStructurePayload(req.session?.user?.id);
+    return res.json(payload);
+  } catch (e) {
+    console.warn("[rooms] failed to load room structure", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
 async function buildSurvivalHistoryPayload() {
   const seasons = await fetchSurvivalHistory(10);
   const result = [];
@@ -8739,11 +9196,19 @@ app.post("/rooms", strictLimiter, requireAdminPlus, express.json({ limit: "16kb"
   const actor = req.session.user;
   if (!requireMinRole(actor.role, "Admin")) return res.status(403).send("Forbidden");
 
+  const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+  if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+
   const name = sanitizeRoomName(req.body?.name || req.body?.room || "");
   if (!name) return res.status(400).send("Invalid room name");
 
   try {
-    const row = await dbGetAsync(`SELECT name FROM rooms WHERE name=?`, [name]);
+    const row = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [name]);
+        return rows?.[0] || null;
+      })()
+      : await dbGetAsync(`SELECT name FROM rooms WHERE name=?`, [name]);
     if (row) return res.status(409).send("Room already exists");
 
     const requestedCategoryId = Number(req.body?.category_id) || null;
@@ -8755,39 +9220,83 @@ app.post("/rooms", strictLimiter, requireAdminPlus, express.json({ limit: "16kb"
       isUserRoom: requestedUserRoom,
     });
     const categoryId = resolved?.categoryId ?? null;
-    const categoryRow = categoryId
-      ? await dbGetAsync(
-        `SELECT c.id, c.master_id, m.name as master_name
-           FROM room_categories c
-           JOIN room_master_categories m ON m.id = c.master_id
-          WHERE c.id = ? LIMIT 1`,
-        [categoryId]
-      )
-      : null;
+    let categoryRow = null;
+    if (categoryId) {
+      if (await pgUsersEnabled()) {
+        const { rows } = await pgPool.query(
+          `SELECT c.id, c.master_id, m.name as master_name
+             FROM room_categories c
+             JOIN room_master_categories m ON m.id = c.master_id
+            WHERE c.id = $1 LIMIT 1`,
+          [categoryId]
+        );
+        categoryRow = rows?.[0] || null;
+      } else {
+        categoryRow = await dbGetAsync(
+          `SELECT c.id, c.master_id, m.name as master_name
+             FROM room_categories c
+             JOIN room_master_categories m ON m.id = c.master_id
+            WHERE c.id = ? LIMIT 1`,
+          [categoryId]
+        );
+      }
+    }
     const isUserRoom = categoryRow?.master_name === "User Rooms" ? 1 : 0;
-    const nextSort = categoryId
-      ? await dbGetAsync(`SELECT COALESCE(MAX(room_sort_order), 0) as maxSort FROM rooms WHERE category_id = ?`, [
-        categoryId,
-      ])
-      : { maxSort: 0 };
-    const sortOrder = Number(nextSort?.maxSort || 0) + 1;
+    let nextSort = { maxSort: 0, maxsort: 0 };
+    if (categoryId) {
+      if (await pgUsersEnabled()) {
+        const { rows } = await pgPool.query(
+          `SELECT COALESCE(MAX(room_sort_order), 0) as maxsort FROM rooms WHERE category_id = $1`,
+          [categoryId]
+        );
+        nextSort = rows?.[0] || nextSort;
+      } else {
+        nextSort = await dbGetAsync(
+          `SELECT COALESCE(MAX(room_sort_order), 0) as maxSort FROM rooms WHERE category_id = ?`,
+          [categoryId]
+        );
+      }
+    }
+    const sortOrder = Number(nextSort?.maxsort || nextSort?.maxSort || 0) + 1;
 
-    await dbRunAsync(
-      `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, actor.id, Date.now(), categoryId, sortOrder, actor.id, isUserRoom,
-       Number(req.body?.vip_only)||0,
-       Number(req.body?.staff_only)||0,
-       Math.max(0, Math.min(999, Number(req.body?.min_level)||0)),
-       Number(req.body?.is_locked)||0,
-       Number(req.body?.maintenance_mode)||0,
-       (req.body?.events_enabled === 0 || req.body?.events_enabled === "0") ? 0 : 1,
-       Math.max(0, Math.min(3600, Number(req.body?.slowmode_seconds)||0)),
-       0]
-    );
+    if (await pgUsersEnabled()) {
+      await pgPool.query(
+        `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived, is_system)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+        [name, actor.id, Date.now(), categoryId, sortOrder, actor.id, isUserRoom,
+         Number(req.body?.vip_only)||0,
+         Number(req.body?.staff_only)||0,
+         Math.max(0, Math.min(999, Number(req.body?.min_level)||0)),
+         Number(req.body?.is_locked)||0,
+         Number(req.body?.maintenance_mode)||0,
+         (req.body?.events_enabled === 0 || req.body?.events_enabled === "0") ? 0 : 1,
+         Math.max(0, Math.min(3600, Number(req.body?.slowmode_seconds)||0)),
+         0,
+         0]
+      );
+    } else {
+      await dbRunAsync(
+        `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived, is_system)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [name, actor.id, Date.now(), categoryId, sortOrder, actor.id, isUserRoom,
+         Number(req.body?.vip_only)||0,
+         Number(req.body?.staff_only)||0,
+         Math.max(0, Math.min(999, Number(req.body?.min_level)||0)),
+         Number(req.body?.is_locked)||0,
+         Number(req.body?.maintenance_mode)||0,
+         (req.body?.events_enabled === 0 || req.body?.events_enabled === "0") ? 0 : 1,
+         Math.max(0, Math.min(3600, Number(req.body?.slowmode_seconds)||0)),
+         0,
+         0]
+      );
+    }
 
     logModAction({ actor, action: "room.create", room: name, details: null });
-    await emitRoomStructureUpdate();
+    await applyRoomStructureChange({
+      action: "room.create",
+      actorUserId: actor.id,
+      auditPayload: { name, category_id: categoryId, is_user_room: isUserRoom },
+    });
 
     return res.json({ ok: true, name });
   } catch (e) {
@@ -9525,17 +10034,41 @@ app.post("/api/room-masters", strictLimiter, requireAdminPlus, express.json({ li
   const name = sanitizeRoomGroupName(req.body?.name || "");
   if (!name) return res.status(400).send("Invalid name");
   try {
-    const existing = await dbGetAsync(`SELECT id FROM room_master_categories WHERE lower(name) = lower(?)`, [name]);
-    if (existing) return res.status(409).send("Master exists");
-    const maxRow = await dbGetAsync(`SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_master_categories`);
-    const sortOrder = Number(maxRow?.maxSort || 0) + 1;
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+    let sortOrder = 0;
+    let insertedId = null;
     const now = Date.now();
-    const ins = await dbRunAsync(
-      `INSERT INTO room_master_categories (name, sort_order, created_at) VALUES (?, ?, ?)`,
-      [name, sortOrder, now]
-    );
-    await emitRoomStructureUpdate();
-    return res.json({ ok: true, id: ins?.lastID || null, name, sort_order: sortOrder });
+    if (await pgUsersEnabled()) {
+      const { rows: exists } = await pgPool.query(
+        `SELECT id FROM room_master_categories WHERE lower(name) = lower($1)`,
+        [name]
+      );
+      if (exists?.[0]) return res.status(409).send("Master exists");
+      const { rows: maxRows } = await pgPool.query(`SELECT COALESCE(MAX(sort_order), 0) as maxsort FROM room_master_categories`);
+      sortOrder = Number(maxRows?.[0]?.maxsort || 0) + 1;
+      const { rows } = await pgPool.query(
+        `INSERT INTO room_master_categories (name, sort_order, created_at) VALUES ($1, $2, $3) RETURNING id`,
+        [name, sortOrder, now]
+      );
+      insertedId = rows?.[0]?.id ?? null;
+    } else {
+      const existing = await dbGetAsync(`SELECT id FROM room_master_categories WHERE lower(name) = lower(?)`, [name]);
+      if (existing) return res.status(409).send("Master exists");
+      const maxRow = await dbGetAsync(`SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_master_categories`);
+      sortOrder = Number(maxRow?.maxSort || 0) + 1;
+      const ins = await dbRunAsync(
+        `INSERT INTO room_master_categories (name, sort_order, created_at) VALUES (?, ?, ?)`,
+        [name, sortOrder, now]
+      );
+      insertedId = ins?.lastID || null;
+    }
+    await applyRoomStructureChange({
+      action: "room_master.create",
+      actorUserId: req.session?.user?.id,
+      auditPayload: { id: insertedId, name, sort_order: sortOrder },
+    });
+    return res.json({ ok: true, id: insertedId, name, sort_order: sortOrder });
   } catch (e) {
     console.warn("[room-masters] create failed", e?.message || e);
     return res.status(500).send("Failed");
@@ -9546,12 +10079,26 @@ app.patch("/api/room-masters/reorder", strictLimiter, requireAdminPlus, express.
   const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
   if (!orderedIds?.length) return res.status(400).send("Missing order");
   try {
-    for (let i = 0; i < orderedIds.length; i += 1) {
-      const id = Number(orderedIds[i]);
-      if (!id) continue;
-      await dbRunAsync(`UPDATE room_master_categories SET sort_order = ? WHERE id = ?`, [i, id]);
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+    if (await pgUsersEnabled()) {
+      for (let i = 0; i < orderedIds.length; i += 1) {
+        const id = Number(orderedIds[i]);
+        if (!id) continue;
+        await pgPool.query(`UPDATE room_master_categories SET sort_order = $1 WHERE id = $2`, [i, id]);
+      }
+    } else {
+      for (let i = 0; i < orderedIds.length; i += 1) {
+        const id = Number(orderedIds[i]);
+        if (!id) continue;
+        await dbRunAsync(`UPDATE room_master_categories SET sort_order = ? WHERE id = ?`, [i, id]);
+      }
     }
-    await emitRoomStructureUpdate();
+    await applyRoomStructureChange({
+      action: "room_master.reorder",
+      actorUserId: req.session?.user?.id,
+      auditPayload: { orderedIds },
+    });
     return res.json({ ok: true });
   } catch (e) {
     console.warn("[room-masters] reorder failed", e?.message || e);
@@ -9563,7 +10110,14 @@ app.patch("/api/room-masters/:id", strictLimiter, requireAdminPlus, express.json
   const id = Number(req.params.id);
   if (!id) return res.status(400).send("Invalid master");
   try {
-    const row = await dbGetAsync(`SELECT id, name FROM room_master_categories WHERE id = ?`, [id]);
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+    const row = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(`SELECT id, name FROM room_master_categories WHERE id = $1`, [id]);
+        return rows?.[0] || null;
+      })()
+      : await dbGetAsync(`SELECT id, name FROM room_master_categories WHERE id = ?`, [id]);
     if (!row) return res.status(404).send("Not found");
     const updates = [];
     const params = [];
@@ -9573,10 +10127,18 @@ app.patch("/api/room-masters/:id", strictLimiter, requireAdminPlus, express.json
       if (DEFAULT_ROOM_MASTERS.includes(row.name) && name !== row.name) {
         return res.status(400).send("Cannot rename default master");
       }
-      const existing = await dbGetAsync(
-        `SELECT id FROM room_master_categories WHERE lower(name) = lower(?) AND id != ?`,
-        [name, id]
-      );
+      const existing = await (await pgUsersEnabled())
+        ? (async () => {
+          const { rows } = await pgPool.query(
+            `SELECT id FROM room_master_categories WHERE lower(name) = lower($1) AND id != $2`,
+            [name, id]
+          );
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(
+          `SELECT id FROM room_master_categories WHERE lower(name) = lower(?) AND id != ?`,
+          [name, id]
+        );
       if (existing) return res.status(409).send("Name exists");
       updates.push("name = ?");
       params.push(name);
@@ -9589,9 +10151,19 @@ app.patch("/api/room-masters/:id", strictLimiter, requireAdminPlus, express.json
       }
     }
     if (!updates.length) return res.json({ ok: true });
-    params.push(id);
-    await dbRunAsync(`UPDATE room_master_categories SET ${updates.join(", ")} WHERE id = ?`, params);
-    await emitRoomStructureUpdate();
+    if (await pgUsersEnabled()) {
+      const pgUpdates = updates.map((item, idx) => item.replace("?", `$${idx + 1}`));
+      const pgParams = [...params, id];
+      await pgPool.query(`UPDATE room_master_categories SET ${pgUpdates.join(", ")} WHERE id = $${pgParams.length}`, pgParams);
+    } else {
+      params.push(id);
+      await dbRunAsync(`UPDATE room_master_categories SET ${updates.join(", ")} WHERE id = ?`, params);
+    }
+    await applyRoomStructureChange({
+      action: "room_master.update",
+      actorUserId: req.session?.user?.id,
+      auditPayload: { id, updates: req.body || {} },
+    });
     return res.json({ ok: true });
   } catch (e) {
     console.warn("[room-masters] patch failed", e?.message || e);
@@ -9603,25 +10175,49 @@ app.delete("/api/room-masters/:id", strictLimiter, requireOwner, async (req, res
   const id = Number(req.params.id);
   if (!id) return res.status(400).send("Invalid master");
   try {
-    const row = await dbGetAsync(`SELECT id, name FROM room_master_categories WHERE id = ?`, [id]);
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+    const row = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(`SELECT id, name FROM room_master_categories WHERE id = $1`, [id]);
+        return rows?.[0] || null;
+      })()
+      : await dbGetAsync(`SELECT id, name FROM room_master_categories WHERE id = ?`, [id]);
     if (!row) return res.status(404).send("Not found");
     if (DEFAULT_ROOM_MASTERS.includes(row.name)) {
       return res.status(400).send("Cannot delete default master");
     }
     const defaults = await getDefaultMasterIds();
     const fallbackCategoryId = await getUncategorizedCategoryId(defaults.site);
-    const categories = await dbAllAsync(`SELECT id FROM room_categories WHERE master_id = ?`, [id]);
-    const categoryIds = categories.map((c) => c.id).filter(Boolean);
-    if (categoryIds.length && fallbackCategoryId) {
-      const placeholders = categoryIds.map(() => "?").join(",");
-      await dbRunAsync(
-        `UPDATE rooms SET category_id = ? WHERE category_id IN (${placeholders})`,
-        [fallbackCategoryId, ...categoryIds]
-      );
+    if (await pgUsersEnabled()) {
+      const { rows: categories } = await pgPool.query(`SELECT id FROM room_categories WHERE master_id = $1`, [id]);
+      const categoryIds = (categories || []).map((c) => c.id).filter(Boolean);
+      if (categoryIds.length && fallbackCategoryId) {
+        await pgPool.query(
+          `UPDATE rooms SET category_id = $1 WHERE category_id = ANY($2::int[])`,
+          [fallbackCategoryId, categoryIds]
+        );
+      }
+      await pgPool.query(`DELETE FROM room_categories WHERE master_id = $1`, [id]);
+      await pgPool.query(`DELETE FROM room_master_categories WHERE id = $1`, [id]);
+    } else {
+      const categories = await dbAllAsync(`SELECT id FROM room_categories WHERE master_id = ?`, [id]);
+      const categoryIds = categories.map((c) => c.id).filter(Boolean);
+      if (categoryIds.length && fallbackCategoryId) {
+        const placeholders = categoryIds.map(() => "?").join(",");
+        await dbRunAsync(
+          `UPDATE rooms SET category_id = ? WHERE category_id IN (${placeholders})`,
+          [fallbackCategoryId, ...categoryIds]
+        );
+      }
+      await dbRunAsync(`DELETE FROM room_categories WHERE master_id = ?`, [id]);
+      await dbRunAsync(`DELETE FROM room_master_categories WHERE id = ?`, [id]);
     }
-    await dbRunAsync(`DELETE FROM room_categories WHERE master_id = ?`, [id]);
-    await dbRunAsync(`DELETE FROM room_master_categories WHERE id = ?`, [id]);
-    await emitRoomStructureUpdate();
+    await applyRoomStructureChange({
+      action: "room_master.delete",
+      actorUserId: req.session?.user?.id,
+      auditPayload: { id, name: row.name },
+    });
     return res.json({ ok: true });
   } catch (e) {
     console.warn("[room-masters] delete failed", e?.message || e);
@@ -9635,25 +10231,57 @@ app.post("/api/room-categories", strictLimiter, requireAdminPlus, express.json({
   if (!masterId) return res.status(400).send("Invalid master");
   if (!name) return res.status(400).send("Invalid name");
   try {
-    const master = await dbGetAsync(`SELECT id FROM room_master_categories WHERE id = ?`, [masterId]);
-    if (!master) return res.status(404).send("Master not found");
-    const existing = await dbGetAsync(
-      `SELECT id FROM room_categories WHERE master_id = ? AND lower(name) = lower(?)`,
-      [masterId, name]
-    );
-    if (existing) return res.status(409).send("Category exists");
-    const maxRow = await dbGetAsync(
-      `SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_categories WHERE master_id = ?`,
-      [masterId]
-    );
-    const sortOrder = Number(maxRow?.maxSort || 0) + 1;
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+    let sortOrder = 0;
+    let insertedId = null;
     const now = Date.now();
-    const ins = await dbRunAsync(
-      `INSERT INTO room_categories (master_id, name, sort_order, created_at) VALUES (?, ?, ?, ?)`,
-      [masterId, name, sortOrder, now]
-    );
-    await emitRoomStructureUpdate();
-    return res.json({ ok: true, id: ins?.lastID || null, master_id: masterId, name });
+    if (await pgUsersEnabled()) {
+      const { rows: masterRows } = await pgPool.query(
+        `SELECT id FROM room_master_categories WHERE id = $1`,
+        [masterId]
+      );
+      if (!masterRows?.[0]) return res.status(404).send("Master not found");
+      const { rows: existingRows } = await pgPool.query(
+        `SELECT id FROM room_categories WHERE master_id = $1 AND lower(name) = lower($2)`,
+        [masterId, name]
+      );
+      if (existingRows?.[0]) return res.status(409).send("Category exists");
+      const { rows: maxRows } = await pgPool.query(
+        `SELECT COALESCE(MAX(sort_order), 0) as maxsort FROM room_categories WHERE master_id = $1`,
+        [masterId]
+      );
+      sortOrder = Number(maxRows?.[0]?.maxsort || 0) + 1;
+      const { rows } = await pgPool.query(
+        `INSERT INTO room_categories (master_id, name, sort_order, created_at) VALUES ($1, $2, $3, $4) RETURNING id`,
+        [masterId, name, sortOrder, now]
+      );
+      insertedId = rows?.[0]?.id ?? null;
+    } else {
+      const master = await dbGetAsync(`SELECT id FROM room_master_categories WHERE id = ?`, [masterId]);
+      if (!master) return res.status(404).send("Master not found");
+      const existing = await dbGetAsync(
+        `SELECT id FROM room_categories WHERE master_id = ? AND lower(name) = lower(?)`,
+        [masterId, name]
+      );
+      if (existing) return res.status(409).send("Category exists");
+      const maxRow = await dbGetAsync(
+        `SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_categories WHERE master_id = ?`,
+        [masterId]
+      );
+      sortOrder = Number(maxRow?.maxSort || 0) + 1;
+      const ins = await dbRunAsync(
+        `INSERT INTO room_categories (master_id, name, sort_order, created_at) VALUES (?, ?, ?, ?)`,
+        [masterId, name, sortOrder, now]
+      );
+      insertedId = ins?.lastID || null;
+    }
+    await applyRoomStructureChange({
+      action: "room_category.create",
+      actorUserId: req.session?.user?.id,
+      auditPayload: { id: insertedId, master_id: masterId, name, sort_order: sortOrder },
+    });
+    return res.json({ ok: true, id: insertedId, master_id: masterId, name });
   } catch (e) {
     console.warn("[room-categories] create failed", e?.message || e);
     return res.status(500).send("Failed");
@@ -9665,15 +10293,32 @@ app.patch("/api/room-categories/reorder", strictLimiter, requireAdminPlus, expre
   const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
   if (!masterId || !orderedIds?.length) return res.status(400).send("Invalid order");
   try {
-    for (let i = 0; i < orderedIds.length; i += 1) {
-      const id = Number(orderedIds[i]);
-      if (!id) continue;
-      await dbRunAsync(
-        `UPDATE room_categories SET sort_order = ? WHERE id = ? AND master_id = ?`,
-        [i, id, masterId]
-      );
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+    if (await pgUsersEnabled()) {
+      for (let i = 0; i < orderedIds.length; i += 1) {
+        const id = Number(orderedIds[i]);
+        if (!id) continue;
+        await pgPool.query(
+          `UPDATE room_categories SET sort_order = $1 WHERE id = $2 AND master_id = $3`,
+          [i, id, masterId]
+        );
+      }
+    } else {
+      for (let i = 0; i < orderedIds.length; i += 1) {
+        const id = Number(orderedIds[i]);
+        if (!id) continue;
+        await dbRunAsync(
+          `UPDATE room_categories SET sort_order = ? WHERE id = ? AND master_id = ?`,
+          [i, id, masterId]
+        );
+      }
     }
-    await emitRoomStructureUpdate();
+    await applyRoomStructureChange({
+      action: "room_category.reorder",
+      actorUserId: req.session?.user?.id,
+      auditPayload: { master_id: masterId, orderedIds },
+    });
     return res.json({ ok: true });
   } catch (e) {
     console.warn("[room-categories] reorder failed", e?.message || e);
@@ -9685,7 +10330,14 @@ app.patch("/api/room-categories/:id", strictLimiter, requireAdminPlus, express.j
   const id = Number(req.params.id);
   if (!id) return res.status(400).send("Invalid category");
   try {
-    const row = await dbGetAsync(`SELECT id, name, master_id FROM room_categories WHERE id = ?`, [id]);
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+    const row = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(`SELECT id, name, master_id FROM room_categories WHERE id = $1`, [id]);
+        return rows?.[0] || null;
+      })()
+      : await dbGetAsync(`SELECT id, name, master_id FROM room_categories WHERE id = ?`, [id]);
     if (!row) return res.status(404).send("Not found");
     const updates = [];
     const params = [];
@@ -9697,10 +10349,18 @@ app.patch("/api/room-categories/:id", strictLimiter, requireAdminPlus, express.j
         return res.status(400).send("Cannot rename Uncategorized");
       }
       const targetMaster = Number(req.body?.master_id) || row.master_id;
-      const existing = await dbGetAsync(
-        `SELECT id FROM room_categories WHERE master_id = ? AND lower(name) = lower(?) AND id != ?`,
-        [targetMaster, name, id]
-      );
+      const existing = await (await pgUsersEnabled())
+        ? (async () => {
+          const { rows } = await pgPool.query(
+            `SELECT id FROM room_categories WHERE master_id = $1 AND lower(name) = lower($2) AND id != $3`,
+            [targetMaster, name, id]
+          );
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(
+          `SELECT id FROM room_categories WHERE master_id = ? AND lower(name) = lower(?) AND id != ?`,
+          [targetMaster, name, id]
+        );
       if (existing) return res.status(409).send("Name exists");
       updates.push("name = ?");
       params.push(name);
@@ -9713,7 +10373,12 @@ app.patch("/api/room-categories/:id", strictLimiter, requireAdminPlus, express.j
       if (normalizeRoomGroupName(row.name) === normalizeRoomGroupName(DEFAULT_ROOM_CATEGORY) && masterId !== row.master_id) {
         return res.status(400).send("Cannot move Uncategorized");
       }
-      const masterRow = await dbGetAsync(`SELECT id FROM room_master_categories WHERE id = ?`, [masterId]);
+      const masterRow = await (await pgUsersEnabled())
+        ? (async () => {
+          const { rows } = await pgPool.query(`SELECT id FROM room_master_categories WHERE id = $1`, [masterId]);
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(`SELECT id FROM room_master_categories WHERE id = ?`, [masterId]);
       if (!masterRow) return res.status(404).send("Master not found");
       nextMasterId = masterId;
       updates.push("master_id = ?");
@@ -9731,18 +10396,36 @@ app.patch("/api/room-categories/:id", strictLimiter, requireAdminPlus, express.j
     if (!updates.length) return res.json({ ok: true });
 
     if (nextMasterId !== row.master_id && !Object.prototype.hasOwnProperty.call(req.body || {}, "sort_order")) {
-      const maxRow = await dbGetAsync(
-        `SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_categories WHERE master_id = ?`,
-        [nextMasterId]
-      );
-      const sortOrder = Number(maxRow?.maxSort || 0) + 1;
+      const maxRow = await (await pgUsersEnabled())
+        ? (async () => {
+          const { rows } = await pgPool.query(
+            `SELECT COALESCE(MAX(sort_order), 0) as maxsort FROM room_categories WHERE master_id = $1`,
+            [nextMasterId]
+          );
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(
+          `SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_categories WHERE master_id = ?`,
+          [nextMasterId]
+        );
+      const sortOrder = Number(maxRow?.maxsort || maxRow?.maxSort || 0) + 1;
       updates.push("sort_order = ?");
       params.push(sortOrder);
     }
 
-    params.push(id);
-    await dbRunAsync(`UPDATE room_categories SET ${updates.join(", ")} WHERE id = ?`, params);
-    await emitRoomStructureUpdate();
+    if (await pgUsersEnabled()) {
+      const pgUpdates = updates.map((item, idx) => item.replace("?", `$${idx + 1}`));
+      const pgParams = [...params, id];
+      await pgPool.query(`UPDATE room_categories SET ${pgUpdates.join(", ")} WHERE id = $${pgParams.length}`, pgParams);
+    } else {
+      params.push(id);
+      await dbRunAsync(`UPDATE room_categories SET ${updates.join(", ")} WHERE id = ?`, params);
+    }
+    await applyRoomStructureChange({
+      action: "room_category.update",
+      actorUserId: req.session?.user?.id,
+      auditPayload: { id, updates: req.body || {} },
+    });
     return res.json({ ok: true });
   } catch (e) {
     console.warn("[room-categories] patch failed", e?.message || e);
@@ -9754,15 +10437,35 @@ app.delete("/api/room-categories/:id", strictLimiter, requireAdminPlus, async (r
   const id = Number(req.params.id);
   if (!id) return res.status(400).send("Invalid category");
   try {
-    const row = await dbGetAsync(`SELECT id, name, master_id FROM room_categories WHERE id = ?`, [id]);
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+    const row = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(`SELECT id, name, master_id FROM room_categories WHERE id = $1`, [id]);
+        return rows?.[0] || null;
+      })()
+      : await dbGetAsync(`SELECT id, name, master_id FROM room_categories WHERE id = ?`, [id]);
     if (!row) return res.status(404).send("Not found");
     if (normalizeRoomGroupName(row.name) === normalizeRoomGroupName(DEFAULT_ROOM_CATEGORY)) {
       return res.status(400).send("Cannot delete Uncategorized");
     }
-    const rooms = await dbAllAsync(`SELECT name FROM rooms WHERE category_id = ?`, [id]);
+    const rooms = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE category_id = $1`, [id]);
+        return rows || [];
+      })()
+      : await dbAllAsync(`SELECT name FROM rooms WHERE category_id = ?`, [id]);
     if (rooms?.length) return res.status(409).send("Category must be empty to delete");
-    await dbRunAsync(`DELETE FROM room_categories WHERE id = ?`, [id]);
-    await emitRoomStructureUpdate();
+    if (await pgUsersEnabled()) {
+      await pgPool.query(`DELETE FROM room_categories WHERE id = $1`, [id]);
+    } else {
+      await dbRunAsync(`DELETE FROM room_categories WHERE id = ?`, [id]);
+    }
+    await applyRoomStructureChange({
+      action: "room_category.delete",
+      actorUserId: req.session?.user?.id,
+      auditPayload: { id, name: row.name },
+    });
     return res.json({ ok: true });
   } catch (e) {
     console.warn("[room-categories] delete failed", e?.message || e);
@@ -9774,35 +10477,75 @@ app.patch("/api/rooms/:id/move", strictLimiter, requireAdminPlus, express.json({
   const roomName = sanitizeRoomName(req.params.id || "");
   if (!roomName) return res.status(400).send("Invalid room");
   try {
-    const roomRow = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+    const roomRow = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+        return rows?.[0] || null;
+      })()
+      : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
     if (!roomRow) return res.status(404).send("Not found");
     const requestedCategoryId = Number(req.body?.category_id) || null;
     const resolved = await resolveRoomCategoryId({ categoryId: requestedCategoryId, isUserRoom: false });
     const categoryId = resolved?.categoryId ?? null;
-    const categoryRow = categoryId
-      ? await dbGetAsync(
-        `SELECT c.id, m.name as master_name
-           FROM room_categories c
-           JOIN room_master_categories m ON m.id = c.master_id
-          WHERE c.id = ? LIMIT 1`,
-        [categoryId]
-      )
-      : null;
+    let categoryRow = null;
+    if (categoryId) {
+      if (await pgUsersEnabled()) {
+        const { rows } = await pgPool.query(
+          `SELECT c.id, m.name as master_name
+             FROM room_categories c
+             JOIN room_master_categories m ON m.id = c.master_id
+            WHERE c.id = $1 LIMIT 1`,
+          [categoryId]
+        );
+        categoryRow = rows?.[0] || null;
+      } else {
+        categoryRow = await dbGetAsync(
+          `SELECT c.id, m.name as master_name
+             FROM room_categories c
+             JOIN room_master_categories m ON m.id = c.master_id
+            WHERE c.id = ? LIMIT 1`,
+          [categoryId]
+        );
+      }
+    }
     const isUserRoom = categoryRow?.master_name === "User Rooms" ? 1 : 0;
     let sortOrder = Number(req.body?.room_sort_order);
     if (!Number.isFinite(sortOrder)) {
-      const maxRow = categoryId
-        ? await dbGetAsync(`SELECT COALESCE(MAX(room_sort_order), 0) as maxSort FROM rooms WHERE category_id = ?`, [
-          categoryId,
-        ])
-        : { maxSort: 0 };
-      sortOrder = Number(maxRow?.maxSort || 0) + 1;
+      let maxRow = { maxSort: 0, maxsort: 0 };
+      if (categoryId) {
+        if (await pgUsersEnabled()) {
+          const { rows } = await pgPool.query(
+            `SELECT COALESCE(MAX(room_sort_order), 0) as maxsort FROM rooms WHERE category_id = $1`,
+            [categoryId]
+          );
+          maxRow = rows?.[0] || maxRow;
+        } else {
+          maxRow = await dbGetAsync(
+            `SELECT COALESCE(MAX(room_sort_order), 0) as maxSort FROM rooms WHERE category_id = ?`,
+            [categoryId]
+          );
+        }
+      }
+      sortOrder = Number(maxRow?.maxsort || maxRow?.maxSort || 0) + 1;
     }
-    await dbRunAsync(
-      `UPDATE rooms SET category_id = ?, room_sort_order = ?, is_user_room = ? WHERE name = ?`,
-      [categoryId, sortOrder, isUserRoom, roomName]
-    );
-    await emitRoomStructureUpdate();
+    if (await pgUsersEnabled()) {
+      await pgPool.query(
+        `UPDATE rooms SET category_id = $1, room_sort_order = $2, is_user_room = $3 WHERE name = $4`,
+        [categoryId, sortOrder, isUserRoom, roomName]
+      );
+    } else {
+      await dbRunAsync(
+        `UPDATE rooms SET category_id = ?, room_sort_order = ?, is_user_room = ? WHERE name = ?`,
+        [categoryId, sortOrder, isUserRoom, roomName]
+      );
+    }
+    await applyRoomStructureChange({
+      action: "room.move",
+      actorUserId: req.session?.user?.id,
+      auditPayload: { name: roomName, category_id: categoryId, room_sort_order: sortOrder },
+    });
     return res.json({ ok: true });
   } catch (e) {
     console.warn("[rooms] move failed", e?.message || e);
@@ -9825,20 +10568,40 @@ app.patch("/api/rooms/:id/settings", strictLimiter, requireAdminPlus, express.js
     return res.status(400).send("Invalid slowmode");
   }
   try {
-    const roomRow = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
+    const roomRow = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+        return rows?.[0] || null;
+      })()
+      : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
     if (!roomRow) return res.status(404).send("Not found");
-    await dbRunAsync(
-      `UPDATE rooms
-          SET slowmode_seconds = ?,
-              is_locked = ?,
-              maintenance_mode = ?,
-              vip_only = ?,
-              staff_only = ?,
-              min_level = ?,
-              events_enabled = ?
-        WHERE name = ?`,
-      [slowmode, isLocked, maintenance, vipOnly, staffOnly, minLevel, eventsEnabled, roomName]
-    );
+    if (await pgUsersEnabled()) {
+      await pgPool.query(
+        `UPDATE rooms
+            SET slowmode_seconds = $1,
+                is_locked = $2,
+                maintenance_mode = $3,
+                vip_only = $4,
+                staff_only = $5,
+                min_level = $6,
+                events_enabled = $7
+          WHERE name = $8`,
+        [slowmode, isLocked, maintenance, vipOnly, staffOnly, minLevel, eventsEnabled, roomName]
+      );
+    } else {
+      await dbRunAsync(
+        `UPDATE rooms
+            SET slowmode_seconds = ?,
+                is_locked = ?,
+                maintenance_mode = ?,
+                vip_only = ?,
+                staff_only = ?,
+                min_level = ?,
+                events_enabled = ?
+          WHERE name = ?`,
+        [slowmode, isLocked, maintenance, vipOnly, staffOnly, minLevel, eventsEnabled, roomName]
+      );
+    }
     await emitRoomStructureUpdate();
     return res.json({ ok: true });
   } catch (e) {
@@ -9855,10 +10618,25 @@ app.patch("/api/rooms/:id/archive", strictLimiter, requireAdminPlus, async (req,
     return res.status(403).send("Core rooms can only be archived by the Owner");
   }
   try {
-    const row = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+    const row = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+        return rows?.[0] || null;
+      })()
+      : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
     if (!row) return res.status(404).send("Not found");
-    await dbRunAsync(`UPDATE rooms SET archived = 1 WHERE name = ?`, [roomName]);
-    await emitRoomStructureUpdate();
+    if (await pgUsersEnabled()) {
+      await pgPool.query(`UPDATE rooms SET archived = 1 WHERE name = $1`, [roomName]);
+    } else {
+      await dbRunAsync(`UPDATE rooms SET archived = 1 WHERE name = ?`, [roomName]);
+    }
+    await applyRoomStructureChange({
+      action: "room.archive",
+      actorUserId: req.session?.user?.id,
+      auditPayload: { name: roomName },
+    });
     return res.json({ ok: true });
   } catch (e) {
     console.warn("[rooms] archive failed", e?.message || e);
@@ -9870,10 +10648,25 @@ app.patch("/api/rooms/:id/restore", strictLimiter, requireAdminPlus, async (req,
   const roomName = sanitizeRoomName(req.params.id || "");
   if (!roomName) return res.status(400).send("Invalid room");
   try {
-    const row = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+    const row = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+        return rows?.[0] || null;
+      })()
+      : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
     if (!row) return res.status(404).send("Not found");
-    await dbRunAsync(`UPDATE rooms SET archived = 0 WHERE name = ?`, [roomName]);
-    await emitRoomStructureUpdate();
+    if (await pgUsersEnabled()) {
+      await pgPool.query(`UPDATE rooms SET archived = 0 WHERE name = $1`, [roomName]);
+    } else {
+      await dbRunAsync(`UPDATE rooms SET archived = 0 WHERE name = ?`, [roomName]);
+    }
+    await applyRoomStructureChange({
+      action: "room.restore",
+      actorUserId: req.session?.user?.id,
+      auditPayload: { name: roomName },
+    });
     return res.json({ ok: true });
   } catch (e) {
     console.warn("[rooms] restore failed", e?.message || e);
@@ -9939,13 +10732,29 @@ app.patch("/api/rooms/:id", strictLimiter, requireAdminPlus, express.json({ limi
     return res.status(403).send("Core rooms can only be renamed by the Owner");
   }
   try {
-    const roomRow = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [oldName]);
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+    const roomRow = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [oldName]);
+        return rows?.[0] || null;
+      })()
+      : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [oldName]);
     if (!roomRow) return res.status(404).send("Not found");
-    const exists = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [nextName]);
+    const exists = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [nextName]);
+        return rows?.[0] || null;
+      })()
+      : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [nextName]);
     if (exists) return res.status(409).send("Room already exists");
 
     // Update rooms primary key name + all references that store room name
-    await dbRunAsync(`UPDATE rooms SET name = ? WHERE name = ?`, [nextName, oldName]);
+    if (await pgUsersEnabled()) {
+      await pgPool.query(`UPDATE rooms SET name = $1 WHERE name = $2`, [nextName, oldName]);
+    } else {
+      await dbRunAsync(`UPDATE rooms SET name = ? WHERE name = ?`, [nextName, oldName]);
+    }
 
     // Best-effort updates for related tables (some installs may not have all tables)
     const safeUpdate = async (sql, params) => {
@@ -9954,6 +10763,15 @@ app.patch("/api/rooms/:id", strictLimiter, requireAdminPlus, express.json({ limi
     await safeUpdate(`UPDATE messages SET room = ? WHERE room = ?`, [nextName, oldName]);
     await safeUpdate(`UPDATE mod_logs SET room = ? WHERE room = ?`, [nextName, oldName]);
     await safeUpdate(`UPDATE command_audit SET room = ? WHERE room = ?`, [nextName, oldName]);
+
+    if (await pgUsersEnabled()) {
+      const safeUpdatePg = async (sql, params) => {
+        try { await pgPool.query(sql, params); } catch (_) {}
+      };
+      await safeUpdatePg(`UPDATE messages SET room = $1 WHERE room = $2`, [nextName, oldName]);
+      await safeUpdatePg(`UPDATE mod_logs SET room = $1 WHERE room = $2`, [nextName, oldName]);
+      await safeUpdatePg(`UPDATE command_audit SET room = $1 WHERE room = $2`, [nextName, oldName]);
+    }
 
     // Move live sockets currently in the old room to the new room to prevent "ghost" rooms.
     try {
@@ -9966,7 +10784,11 @@ app.patch("/api/rooms/:id", strictLimiter, requireAdminPlus, express.json({ limi
       }
     } catch (_) {}
 
-    await emitRoomStructureUpdate();
+    await applyRoomStructureChange({
+      action: "room.rename",
+      actorUserId: actor?.id,
+      auditPayload: { from: oldName, to: nextName },
+    });
     return res.json({ ok: true, name: nextName });
   } catch (e) {
     console.warn("[rooms] rename failed", e?.message || e);
@@ -9979,19 +10801,349 @@ app.patch("/api/rooms/reorder", strictLimiter, requireAdminPlus, express.json({ 
   const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
   if (!categoryId || !orderedIds?.length) return res.status(400).send("Invalid order");
   try {
-    for (let i = 0; i < orderedIds.length; i += 1) {
-      const roomName = sanitizeRoomName(orderedIds[i] || "");
-      if (!roomName) continue;
-      await dbRunAsync(
-        `UPDATE rooms SET room_sort_order = ? WHERE name = ? AND category_id = ?`,
-        [i, roomName, categoryId]
-      );
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+    if (await pgUsersEnabled()) {
+      for (let i = 0; i < orderedIds.length; i += 1) {
+        const roomName = sanitizeRoomName(orderedIds[i] || "");
+        if (!roomName) continue;
+        await pgPool.query(
+          `UPDATE rooms SET room_sort_order = $1 WHERE name = $2 AND category_id = $3`,
+          [i, roomName, categoryId]
+        );
+      }
+    } else {
+      for (let i = 0; i < orderedIds.length; i += 1) {
+        const roomName = sanitizeRoomName(orderedIds[i] || "");
+        if (!roomName) continue;
+        await dbRunAsync(
+          `UPDATE rooms SET room_sort_order = ? WHERE name = ? AND category_id = ?`,
+          [i, roomName, categoryId]
+        );
+      }
     }
-    await emitRoomStructureUpdate();
+    await applyRoomStructureChange({
+      action: "room.reorder",
+      actorUserId: req.session?.user?.id,
+      auditPayload: { category_id: categoryId, orderedIds },
+    });
     return res.json({ ok: true });
   } catch (e) {
     console.warn("[rooms] reorder failed", e?.message || e);
     return res.status(500).send("Failed");
+  }
+});
+
+app.post("/api/rooms/reset_defaults", strictLimiter, requireAdminPlus, async (req, res) => {
+  try {
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+    await ensureCoreRoomsExist();
+    await applyRoomStructureChange({
+      action: "room.reset_defaults",
+      actorUserId: req.session?.user?.id,
+      auditPayload: { restored: "missing_system_rooms" },
+    });
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn("[rooms] reset defaults failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+// ---- Moderation Cases API
+app.get("/api/mod/cases", strictLimiter, requireLogin, async (req, res) => {
+  const actor = req.session?.user;
+  if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
+
+  const status = String(req.query?.status || "").trim();
+  const type = String(req.query?.type || "").trim();
+  const assigned = String(req.query?.assigned || "").trim();
+  const isAdmin = canViewAllCases(actor.role);
+  const limit = Math.min(200, Math.max(1, Number(req.query?.limit || 200)));
+
+  try {
+    if (await pgUsersEnabled()) {
+      const where = [];
+      const params = [];
+      if (!isAdmin) {
+        where.push("(status = 'open' OR assigned_to_user_id = $1 OR created_by_user_id = $2)");
+        params.push(actor.id, actor.id);
+      }
+      if (status) { params.push(status); where.push(`status = $${params.length}`); }
+      if (type) { params.push(type); where.push(`type = $${params.length}`); }
+      if (assigned === "me") { params.push(actor.id); where.push(`assigned_to_user_id = $${params.length}`); }
+      if (assigned === "unassigned") { where.push("assigned_to_user_id IS NULL"); }
+      if (assigned && assigned !== "me" && assigned !== "unassigned") {
+        const assignedId = Number(assigned);
+        if (Number.isFinite(assignedId) && assignedId > 0) {
+          params.push(assignedId);
+          where.push(`assigned_to_user_id = $${params.length}`);
+        }
+      }
+      const sql = `SELECT * FROM mod_cases ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY updated_at DESC LIMIT ${limit}`;
+      const { rows } = await pgPool.query(sql, params);
+      return res.json({ ok: true, items: rows || [] });
+    }
+
+    const where = [];
+    const params = [];
+    if (!isAdmin) {
+      where.push("(status = 'open' OR assigned_to_user_id = ? OR created_by_user_id = ?)");
+      params.push(actor.id, actor.id);
+    }
+    if (status) { where.push("status = ?"); params.push(status); }
+    if (type) { where.push("type = ?"); params.push(type); }
+    if (assigned === "me") { where.push("assigned_to_user_id = ?"); params.push(actor.id); }
+    if (assigned === "unassigned") { where.push("assigned_to_user_id IS NULL"); }
+    if (assigned && assigned !== "me" && assigned !== "unassigned") {
+      const assignedId = Number(assigned);
+      if (Number.isFinite(assignedId) && assignedId > 0) {
+        where.push("assigned_to_user_id = ?");
+        params.push(assignedId);
+      }
+    }
+    const sql = `SELECT * FROM mod_cases ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY updated_at DESC LIMIT ${limit}`;
+    const items = await dbAllAsync(sql, params);
+    return res.json({ ok: true, items });
+  } catch (e) {
+    console.warn("[mod-cases] list failed", e?.message || e);
+    return res.status(500).json({ ok: false, error: "failed_to_list" });
+  }
+});
+
+app.get("/api/mod/cases/:id", strictLimiter, requireLogin, async (req, res) => {
+  const actor = req.session?.user;
+  if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).send("Invalid case");
+
+  try {
+    const caseRow = await fetchModCaseById(id);
+    if (!caseRow) return res.status(404).send("Not found");
+    const isAdmin = canViewAllCases(actor.role);
+    if (!isAdmin) {
+      const allowed =
+        caseRow.status === "open" ||
+        Number(caseRow.assigned_to_user_id || 0) === Number(actor.id) ||
+        Number(caseRow.created_by_user_id || 0) === Number(actor.id);
+      if (!allowed) return res.status(403).send("Forbidden");
+    }
+
+    const events = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(
+          `SELECT * FROM mod_case_events WHERE case_id = $1 ORDER BY created_at ASC`,
+          [id]
+        );
+        return rows || [];
+      })()
+      : await dbAllAsync(`SELECT * FROM mod_case_events WHERE case_id = ? ORDER BY created_at ASC`, [id]);
+    const notes = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(
+          `SELECT * FROM mod_case_notes WHERE case_id = $1 ORDER BY created_at ASC`,
+          [id]
+        );
+        return rows || [];
+      })()
+      : await dbAllAsync(`SELECT * FROM mod_case_notes WHERE case_id = ? ORDER BY created_at ASC`, [id]);
+    const evidence = await (await pgUsersEnabled())
+      ? (async () => {
+        const { rows } = await pgPool.query(
+          `SELECT * FROM mod_case_evidence WHERE case_id = $1 ORDER BY created_at ASC`,
+          [id]
+        );
+        return rows || [];
+      })()
+      : await dbAllAsync(`SELECT * FROM mod_case_evidence WHERE case_id = ? ORDER BY created_at ASC`, [id]);
+
+    const parsedEvents = (events || []).map((ev) => ({
+      ...ev,
+      event_payload: typeof ev.event_payload === "string" ? safeJsonParse(ev.event_payload, {}) : ev.event_payload,
+    }));
+
+    return res.json({ ok: true, case: caseRow, events: parsedEvents, notes, evidence });
+  } catch (e) {
+    console.warn("[mod-cases] fetch failed", e?.message || e);
+    return res.status(500).json({ ok: false, error: "failed_to_fetch" });
+  }
+});
+
+app.post("/api/mod/cases", strictLimiter, requireLogin, express.json({ limit: "32kb" }), async (req, res) => {
+  const actor = req.session?.user;
+  if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
+  const type = String(req.body?.type || "").trim();
+  const allowedTypes = new Set(["flag", "appeal", "referral", "investigation"]);
+  if (!allowedTypes.has(type)) return res.status(400).send("Invalid type");
+
+  try {
+    const caseRow = await createModCase({
+      type,
+      status: "open",
+      priority: String(req.body?.priority || "normal"),
+      subjectUserId: Number(req.body?.subject_user_id) || null,
+      createdByUserId: actor.id,
+      assignedToUserId: Number(req.body?.assigned_to_user_id) || null,
+      roomId: req.body?.room_id ? String(req.body.room_id) : null,
+      title: req.body?.title ? String(req.body.title).slice(0, 160) : null,
+      summary: req.body?.summary ? String(req.body.summary).slice(0, 2000) : null,
+    });
+    if (!caseRow?.id) return res.status(500).json({ ok: false, error: "create_failed" });
+    await addModCaseEvent(caseRow.id, { actorUserId: actor.id, eventType: "created", payload: { type } });
+    emitToStaff("mod:case_created", { id: caseRow.id, type: caseRow.type, status: caseRow.status });
+    return res.json({ ok: true, case: caseRow });
+  } catch (e) {
+    console.warn("[mod-cases] create failed", e?.message || e);
+    return res.status(500).json({ ok: false, error: "create_failed" });
+  }
+});
+
+app.patch("/api/mod/cases/:id", strictLimiter, requireLogin, express.json({ limit: "32kb" }), async (req, res) => {
+  const actor = req.session?.user;
+  if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).send("Invalid case");
+
+  try {
+    const caseRow = await fetchModCaseById(id);
+    if (!caseRow) return res.status(404).send("Not found");
+    const isAdmin = canViewAllCases(actor.role);
+    const isOwnerOrAssignee =
+      Number(caseRow.assigned_to_user_id || 0) === Number(actor.id) ||
+      Number(caseRow.created_by_user_id || 0) === Number(actor.id);
+    if (!isAdmin && !isOwnerOrAssignee) return res.status(403).send("Forbidden");
+
+    const updates = [];
+    const params = [];
+    const fields = [
+      ["assigned_to_user_id", "assigned_to_user_id"],
+      ["priority", "priority"],
+      ["title", "title"],
+      ["summary", "summary"],
+      ["room_id", "room_id"],
+      ["subject_user_id", "subject_user_id"],
+    ];
+    for (const [key, col] of fields) {
+      if (!Object.prototype.hasOwnProperty.call(req.body || {}, key)) continue;
+      updates.push(col);
+      params.push(req.body[key] == null ? null : req.body[key]);
+    }
+    if (!updates.length) return res.json({ ok: true, case: caseRow });
+
+    const now = Date.now();
+    if (await pgUsersEnabled()) {
+      const setParts = updates.map((col, idx) => `${col} = $${idx + 1}`);
+      const pgParams = [...params, now, id];
+      await pgPool.query(
+        `UPDATE mod_cases SET ${setParts.join(", ")}, updated_at = $${pgParams.length - 1} WHERE id = $${pgParams.length}`,
+        pgParams
+      );
+    } else {
+      const setParts = updates.map(() => "?");
+      await dbRunAsync(
+        `UPDATE mod_cases SET ${updates.map((col, idx) => `${col} = ${setParts[idx]}`).join(", ")}, updated_at = ? WHERE id = ?`,
+        [...params, now, id]
+      );
+    }
+    await addModCaseEvent(id, { actorUserId: actor.id, eventType: "updated", payload: { updates: req.body || {} } });
+    emitToStaff("mod:case_updated", { id, updates: req.body || {} });
+    const updated = await fetchModCaseById(id);
+    return res.json({ ok: true, case: updated });
+  } catch (e) {
+    console.warn("[mod-cases] update failed", e?.message || e);
+    return res.status(500).json({ ok: false, error: "update_failed" });
+  }
+});
+
+app.post("/api/mod/cases/:id/status", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
+  const actor = req.session?.user;
+  if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
+  const id = Number(req.params.id);
+  const status = String(req.body?.status || "").trim();
+  if (!Number.isFinite(id) || !status) return res.status(400).send("Invalid status");
+  const allowedStatuses = new Set(["open", "closed", "resolved", "pending"]);
+  if (!allowedStatuses.has(status)) return res.status(400).send("Invalid status");
+
+  try {
+    const caseRow = await fetchModCaseById(id);
+    if (!caseRow) return res.status(404).send("Not found");
+    const isAdmin = canViewAllCases(actor.role);
+    const isOwnerOrAssignee =
+      Number(caseRow.assigned_to_user_id || 0) === Number(actor.id) ||
+      Number(caseRow.created_by_user_id || 0) === Number(actor.id);
+    if (!isAdmin && !isOwnerOrAssignee) return res.status(403).send("Forbidden");
+
+    const now = Date.now();
+    const closedAt = status === "closed" ? now : null;
+    const closedReason = req.body?.closed_reason ? String(req.body.closed_reason).slice(0, 400) : null;
+    if (await pgUsersEnabled()) {
+      await pgPool.query(
+        `UPDATE mod_cases SET status = $1, updated_at = $2, closed_at = $3, closed_reason = $4 WHERE id = $5`,
+        [status, now, closedAt, closedReason, id]
+      );
+    } else {
+      await dbRunAsync(
+        `UPDATE mod_cases SET status = ?, updated_at = ?, closed_at = ?, closed_reason = ? WHERE id = ?`,
+        [status, now, closedAt, closedReason, id]
+      );
+    }
+    await addModCaseEvent(id, { actorUserId: actor.id, eventType: "status_changed", payload: { status, closed_reason: closedReason } });
+    emitToStaff("mod:case_updated", { id, status });
+    const updated = await fetchModCaseById(id);
+    return res.json({ ok: true, case: updated });
+  } catch (e) {
+    console.warn("[mod-cases] status update failed", e?.message || e);
+    return res.status(500).json({ ok: false, error: "status_failed" });
+  }
+});
+
+app.post("/api/mod/cases/:id/notes", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
+  const actor = req.session?.user;
+  if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
+  const id = Number(req.params.id);
+  const body = String(req.body?.body || "").trim();
+  if (!Number.isFinite(id) || !body) return res.status(400).send("Invalid note");
+  try {
+    const caseRow = await fetchModCaseById(id);
+    if (!caseRow) return res.status(404).send("Not found");
+    const note = await addModCaseNote(id, { authorUserId: actor.id, body: body.slice(0, 2000) });
+    await addModCaseEvent(id, { actorUserId: actor.id, eventType: "note_added" });
+    emitToStaff("mod:case_event", { caseId: id, eventType: "note_added" });
+    return res.json({ ok: true, note });
+  } catch (e) {
+    console.warn("[mod-cases] note failed", e?.message || e);
+    return res.status(500).json({ ok: false, error: "note_failed" });
+  }
+});
+
+app.post("/api/mod/cases/:id/evidence", strictLimiter, requireLogin, express.json({ limit: "32kb" }), async (req, res) => {
+  const actor = req.session?.user;
+  if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).send("Invalid case");
+  const evidenceType = String(req.body?.evidence_type || "").trim();
+  const allowedTypes = new Set(["message", "text", "link"]);
+  if (!allowedTypes.has(evidenceType)) return res.status(400).send("Invalid evidence type");
+
+  try {
+    const caseRow = await fetchModCaseById(id);
+    if (!caseRow) return res.status(404).send("Not found");
+    const evidence = await addModCaseEvidence(id, {
+      createdByUserId: actor.id,
+      evidenceType,
+      roomId: req.body?.room_id ? String(req.body.room_id) : null,
+      messageId: Number(req.body?.message_id) || null,
+      messageExcerpt: req.body?.message_excerpt ? String(req.body.message_excerpt).slice(0, 500) : null,
+      url: req.body?.url ? String(req.body.url).slice(0, 600) : null,
+      text: req.body?.text ? String(req.body.text).slice(0, 2000) : null,
+    });
+    await addModCaseEvent(id, { actorUserId: actor.id, eventType: "evidence_added", payload: { evidence_type: evidenceType } });
+    emitToStaff("mod:case_event", { caseId: id, eventType: "evidence_added" });
+    return res.json({ ok: true, evidence });
+  } catch (e) {
+    console.warn("[mod-cases] evidence failed", e?.message || e);
+    return res.status(500).json({ ok: false, error: "evidence_failed" });
   }
 });
 
@@ -12541,7 +13693,22 @@ async function createAppeal(username, restrictionType, reasonAtTime){
        VALUES (?, ?, ?, 'open', ?, ?, NULL, ?)`,
       [u, t === "ban" ? "ban" : "kick", r, now, now, now]
     );
-    return { id: res.lastID, username: u, restriction_type: t, reason_at_time: r, status:"open", created_at: now, updated_at: now };
+    const appeal = { id: res.lastID, username: u, restriction_type: t, reason_at_time: r, status:"open", created_at: now, updated_at: now };
+    try {
+      const subjectUserId = await findUserIdByUsername(u);
+      const caseRow = await createModCase({
+        type: "appeal",
+        subjectUserId,
+        createdByUserId: subjectUserId,
+        title: `Appeal #${appeal.id}`,
+        summary: r,
+      });
+      if (caseRow?.id) {
+        await addModCaseEvent(caseRow.id, { actorUserId: subjectUserId, eventType: "appeal_created", payload: { appealId: appeal.id } });
+        emitToStaff("mod:case_created", { id: caseRow.id, type: caseRow.type, status: caseRow.status });
+      }
+    } catch {}
+    return appeal;
   } catch (e) {
     // If it failed (maybe due to partial unique index in PG only), just fall back to find open
   }
@@ -12554,7 +13721,24 @@ async function createAppeal(username, restrictionType, reasonAtTime){
          RETURNING *`,
         [u, t === "ban" ? "ban" : "kick", r, now, now, now]
       );
-      return rows?.[0] || null;
+      const appeal = rows?.[0] || null;
+      if (appeal?.id) {
+        try {
+          const subjectUserId = await findUserIdByUsername(u);
+          const caseRow = await createModCase({
+            type: "appeal",
+            subjectUserId,
+            createdByUserId: subjectUserId,
+            title: `Appeal #${appeal.id}`,
+            summary: r,
+          });
+          if (caseRow?.id) {
+            await addModCaseEvent(caseRow.id, { actorUserId: subjectUserId, eventType: "appeal_created", payload: { appealId: appeal.id } });
+            emitToStaff("mod:case_created", { id: caseRow.id, type: caseRow.type, status: caseRow.status });
+          }
+        } catch {}
+      }
+      return appeal;
     }
   } catch {}
   return await findOpenAppeal(u);
@@ -14953,7 +16137,7 @@ if (!room) {
 
   // ---- Kick / Mute / Ban + Unmute/Unban/Warn + Set role
   
-socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300 } = {}, ack) => {
+socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300, caseId = null } = {}, ack) => {
   const respond = (payload) => { if (typeof ack === "function") ack(payload); };
   if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
   const room = socket.currentRoom;
@@ -14990,11 +16174,18 @@ socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300 } = 
 
     emitRoomSystem(room, `${username} was kicked.`, { kind: "mod" });
     logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: target.username, room, details: `duration=${dur}s reason=${why}` });
+    if (caseId) {
+      addModCaseEvent(Number(caseId), {
+        actorUserId: socket.user?.id || null,
+        eventType: "kick",
+        payload: { targetUserId: target.id, durationSeconds: dur, reason: why },
+      }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "kick" })).catch(() => {});
+    }
     respond({ ok: true, username: target.username, durationSeconds: dur });
   });
 });
 
-socket.on("mod unkick", async ({ username } = {}, ack) => {
+socket.on("mod unkick", async ({ username, caseId = null } = {}, ack) => {
   const respond = (payload) => { if (typeof ack === "function") ack(payload); };
   if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
   const room = socket.currentRoom;
@@ -15025,12 +16216,19 @@ socket.on("mod unkick", async ({ username } = {}, ack) => {
 
     emitOnlineUsers();
     emitRoomSystem(room, "User " + (target && target.username ? target.username : "") + " has been un-kicked by " + actorName + ".", { kind: "mod" });
+    if (caseId) {
+      addModCaseEvent(Number(caseId), {
+        actorUserId: socket.user?.id || null,
+        eventType: "unkick",
+        payload: { targetUserId: target.id },
+      }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "unkick" })).catch(() => {});
+    }
     respond({ ok: true, username: target.username });
   });
 });
 
 
-  socket.on("mod mute", ({ username, minutes = 10, reason = "" } = {}, ack) => {
+  socket.on("mod mute", ({ username, minutes = 10, reason = "", caseId = null } = {}, ack) => {
     const respond = (payload) => { if (typeof ack === "function") ack(payload); };
     if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
     const room = socket.currentRoom;
@@ -15061,13 +16259,20 @@ socket.on("mod unkick", async ({ username } = {}, ack) => {
             room,
             details: `minutes=${mins} reason=${String(reason || "").slice(0, 180)}`,
           });
+          if (caseId) {
+            addModCaseEvent(Number(caseId), {
+              actorUserId: socket.user?.id || null,
+              eventType: "mute",
+              payload: { targetUserId: target.id, minutes: mins, reason: String(reason || "").slice(0, 180) },
+            }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "mute" })).catch(() => {});
+          }
           respond({ ok: true, username: target.username, minutes: mins });
         }
       );
     });
   });
 
-  socket.on("mod ban", ({ username, minutes = 0, reason = "" } = {}, ack) => {
+  socket.on("mod ban", ({ username, minutes = 0, reason = "", caseId = null } = {}, ack) => {
     const respond = (payload) => { if (typeof ack === "function") ack(payload); };
     if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
     const room = socket.currentRoom;
@@ -15113,13 +16318,20 @@ invalidateSessionsForUserId(target.id);
             room,
             details: expiresAt ? `minutes=${mins}` : `permanent reason=${String(reason || "").slice(0, 180)}`,
           });
+          if (caseId) {
+            addModCaseEvent(Number(caseId), {
+              actorUserId: socket.user?.id || null,
+              eventType: "ban",
+              payload: { targetUserId: target.id, minutes: mins, reason: String(reason || "").slice(0, 180) },
+            }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "ban" })).catch(() => {});
+          }
           respond({ ok: true, username, minutes: mins });
         }
       );
     });
   });
 
-  socket.on("mod unmute", ({ username, reason = "" } = {}, ack) => {
+  socket.on("mod unmute", ({ username, reason = "", caseId = null } = {}, ack) => {
     const respond = (payload) => { if (typeof ack === "function") ack(payload); };
     if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
     const room = socket.currentRoom;
@@ -15142,12 +16354,19 @@ invalidateSessionsForUserId(target.id);
           room,
           details: String(reason || "").slice(0, 180),
         });
+        if (caseId) {
+          addModCaseEvent(Number(caseId), {
+            actorUserId: socket.user?.id || null,
+            eventType: "unmute",
+            payload: { targetUserId: target.id, reason: String(reason || "").slice(0, 180) },
+          }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "unmute" })).catch(() => {});
+        }
         respond({ ok: true, username: target.username });
       });
     });
   });
 
-  socket.on("mod unban", ({ username, reason = "" } = {}, ack) => {
+  socket.on("mod unban", ({ username, reason = "", caseId = null } = {}, ack) => {
     const respond = (payload) => { if (typeof ack === "function") ack(payload); };
     if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
     const room = socket.currentRoom;
@@ -15177,6 +16396,13 @@ if (sid) {
           room,
           details: String(reason || "").slice(0, 180),
         });
+        if (caseId) {
+          addModCaseEvent(Number(caseId), {
+            actorUserId: socket.user?.id || null,
+            eventType: "unban",
+            payload: { targetUserId: target.id, reason: String(reason || "").slice(0, 180) },
+          }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "unban" })).catch(() => {});
+        }
         respond({ ok: true, username: target.username });
       });
     });
@@ -15257,11 +16483,30 @@ function canCreateReferral(role){
 
 async function createReferral({ username, referredBy, referredByRole, reason }){
   const now = Date.now();
-  await dbRunAsync(
+  const result = await dbRunAsync(
     `INSERT INTO referrals (username, referred_by, reason, notes, status, action_by, action_type, action_minutes, action_reason, created_at, updated_at)
      VALUES (?, ?, ?, NULL, 'open', NULL, NULL, NULL, NULL, ?, ?)`,
     [username, referredBy, reason, now, now]
   );
+  try {
+    const subjectUserId = await findUserIdByUsername(username);
+    const actorUserId = await findUserIdByUsername(referredBy);
+    const caseRow = await createModCase({
+      type: "referral",
+      subjectUserId,
+      createdByUserId: actorUserId,
+      title: `Referral #${result?.lastID || ""}`.trim(),
+      summary: String(reason || "").slice(0, 800),
+    });
+    if (caseRow?.id) {
+      await addModCaseEvent(caseRow.id, {
+        actorUserId,
+        eventType: "referral_created",
+        payload: { referralId: result?.lastID || null, fromRole: referredByRole || null },
+      });
+      emitToStaff("mod:case_created", { id: caseRow.id, type: caseRow.type, status: caseRow.status });
+    }
+  } catch {}
 }
 async function listOpenReferrals(){
   return dbAllAsync(

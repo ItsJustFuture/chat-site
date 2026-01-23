@@ -857,6 +857,7 @@ let memorySettingsLoaded = false;
 let memoryFilter = "all";
 let memoryLoading = false;
 let roomStructure = { masters: [], categories: [], rooms: [] };
+let roomStructureVersion = 0;
 let roomCollapseState = { master: {}, category: {} };
 const memoryCacheByFilter = new Map();
 const DICE_ROOM_ID = "diceroom";
@@ -2743,11 +2744,13 @@ const appealStatusText = document.getElementById("appealStatusText");
 
 const appealsPanelBtn = document.getElementById("appealsPanelBtn");
 const referralsPanelBtn = document.getElementById("referralsPanelBtn");
+const adminMenuCasesBtn = document.getElementById("adminMenuCasesBtn");
 const roleDebugPanelBtn = document.getElementById("roleDebugPanelBtn");
 const featureFlagsPanelBtn = document.getElementById("featureFlagsPanelBtn");
 const sessionsPanelBtn = document.getElementById("sessionsPanelBtn");
 const appealsPanel = document.getElementById("appealsPanel");
 const referralsPanel = document.getElementById("referralsPanel");
+const casesPanel = document.getElementById("casesPanel");
 const roleDebugPanel = document.getElementById("roleDebugPanel");
 const featureFlagsPanel = document.getElementById("featureFlagsPanel");
 const sessionsPanel = document.getElementById("sessionsPanel");
@@ -2757,6 +2760,31 @@ const appealsList = document.getElementById("appealsList");
 const referralsCloseBtn = document.getElementById("referralsCloseBtn");
 const referralsRefreshBtn = document.getElementById("referralsRefreshBtn");
 const referralsList = document.getElementById("referralsList");
+const casesCloseBtn = document.getElementById("casesCloseBtn");
+const casesRefreshBtn = document.getElementById("casesRefreshBtn");
+const casesList = document.getElementById("casesList");
+const casesDetail = document.getElementById("casesDetail");
+const casesDetailTitle = document.getElementById("casesDetailTitle");
+const casesDetailMeta = document.getElementById("casesDetailMeta");
+const casesDetailSummary = document.getElementById("casesDetailSummary");
+const casesStatusSelect = document.getElementById("casesStatusSelect");
+const casesAssignInput = document.getElementById("casesAssignInput");
+const casesAssignBtn = document.getElementById("casesAssignBtn");
+const casesStatusBtn = document.getElementById("casesStatusBtn");
+const casesActionMsg = document.getElementById("casesActionMsg");
+const casesNotes = document.getElementById("casesNotes");
+const casesNoteInput = document.getElementById("casesNoteInput");
+const casesNoteBtn = document.getElementById("casesNoteBtn");
+const casesEvidence = document.getElementById("casesEvidence");
+const casesEvidenceType = document.getElementById("casesEvidenceType");
+const casesEvidenceUrl = document.getElementById("casesEvidenceUrl");
+const casesEvidenceMessageId = document.getElementById("casesEvidenceMessageId");
+const casesEvidenceText = document.getElementById("casesEvidenceText");
+const casesEvidenceBtn = document.getElementById("casesEvidenceBtn");
+const casesTimeline = document.getElementById("casesTimeline");
+const casesFilterStatus = document.getElementById("casesFilterStatus");
+const casesFilterType = document.getElementById("casesFilterType");
+const casesFilterAssigned = document.getElementById("casesFilterAssigned");
 const referralsDetailUser = document.getElementById("referralsDetailUser");
 const referralsDetailMeta = document.getElementById("referralsDetailMeta");
 const referralsDetailReason = document.getElementById("referralsDetailReason");
@@ -6892,6 +6920,14 @@ function renderThemeCatalog(){
   if (!themesAllGrid || !themesPinnedGrid) return;
   renderFilterPills(themesModalFilters);
   renderFilterPills(themesFiltersSheetBody);
+  if (!Array.isArray(THEME_LIST) || THEME_LIST.length === 0) {
+    themesPinnedGrid.innerHTML = "";
+    themesAllGrid.innerHTML = "";
+    if (themesPinnedSection) themesPinnedSection.style.display = "none";
+    if (themesEmptyState) themesEmptyState.classList.add("show");
+    if (themesPreviewName) themesPreviewName.textContent = "Themes loading…";
+    return;
+  }
   const filtered = sortThemes(applyThemeFilters(THEME_LIST));
   const pinnedThemes = themePinnedIds.map((id) => THEME_BY_ID.get(id)).filter(Boolean);
   const shouldShowPinned = themeActiveFilter === "all" && pinnedThemes.length > 0;
@@ -8818,7 +8854,7 @@ function ensureAdminModalRoot(){
   return adminModalRoot;
 }
 function getAdminModals(){
-  return [appealsPanel, referralsPanel, roleDebugPanel, featureFlagsPanel, sessionsPanel].filter(Boolean);
+  return [appealsPanel, referralsPanel, casesPanel, roleDebugPanel, featureFlagsPanel, sessionsPanel].filter(Boolean);
 }
 function mountAdminModal(panel){
   if (!panel) return;
@@ -8827,7 +8863,7 @@ function mountAdminModal(panel){
 }
 function focusAdminModal(panel){
   if (!panel) return;
-  const closeBtn = panel.querySelector("#appealsCloseBtn, #referralsCloseBtn, #roleDebugCloseBtn, #featureFlagsCloseBtn, #sessionsCloseBtn, .appealsPanelHeader .iconBtn, .ownerPanelHeader .iconBtn");
+  const closeBtn = panel.querySelector("#appealsCloseBtn, #referralsCloseBtn, #casesCloseBtn, #roleDebugCloseBtn, #featureFlagsCloseBtn, #sessionsCloseBtn, .appealsPanelHeader .iconBtn, .ownerPanelHeader .iconBtn");
   const focusable = closeBtn || panel.querySelector("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])");
   focusable?.focus?.();
 }
@@ -9029,6 +9065,7 @@ membersAdminMenuBtn?.addEventListener("click", (e) => {
 });
 bindAdminMenuAction(adminMenuAppealsBtn, openAppealsPanel);
 bindAdminMenuAction(adminMenuReferralsBtn, openReferralsPanel);
+bindAdminMenuAction(adminMenuCasesBtn, openCasesPanel);
 bindAdminMenuAction(adminMenuRoleDebugBtn, openRoleDebugPanel);
 bindAdminMenuAction(adminMenuFeatureFlagsBtn, openFeatureFlagsPanel);
 bindAdminMenuAction(adminMenuSessionsBtn, openSessionsPanel);
@@ -11746,7 +11783,8 @@ function normalizeRoomStructurePayload(payload){
   const categories = Array.isArray(payload.categories) ? payload.categories : [];
   const rooms = Array.isArray(payload.rooms) ? payload.rooms : [];
   const userCollapse = payload.userCollapse && typeof payload.userCollapse === "object" ? payload.userCollapse : null;
-  return { masters, categories, rooms, userCollapse };
+  const version = Number(payload.version || 0);
+  return { masters, categories, rooms, userCollapse, version };
 }
 
 function cleanCollapseMap(raw){
@@ -11766,6 +11804,7 @@ function setRoomStructure(payload, { updateCollapse = true } = {}){
     categories: normalized.categories,
     rooms: normalized.rooms,
   };
+  roomStructureVersion = Number(normalized.version || 0);
   if(updateCollapse && normalized.userCollapse){
     roomCollapseState = {
       master: cleanCollapseMap(normalized.userCollapse.master),
@@ -11785,24 +11824,6 @@ function sortByOrderThenName(a, b, orderKey){
   const diff = Number(a?.[orderKey] || 0) - Number(b?.[orderKey] || 0);
   if(diff !== 0) return diff;
   return String(a?.name || "").localeCompare(String(b?.name || ""), undefined, { sensitivity: "base" });
-}
-
-function ensureDefaultMasters(masters){
-  const out = [...masters];
-  const byName = new Map(out.map((m) => [String(m.name || ""), m]));
-  if(!byName.has("Site Rooms")){
-    out.push({ id: "temp-site", name: "Site Rooms", sort_order: 0, temporary: true });
-  }
-  if(!byName.has("User Rooms")){
-    out.push({ id: "temp-user", name: "User Rooms", sort_order: 1, temporary: true });
-  }
-  return out;
-}
-
-function ensureUncategorized(categories, masterId){
-  const existing = categories.find((c) => String(c.master_id) === String(masterId) && String(c.name || "") === "Uncategorized");
-  if(existing) return existing;
-  return { id: `temp-uncat-${masterId}`, master_id: masterId, name: "Uncategorized", sort_order: 0, temporary: true };
 }
 
 function getDefaultMasterIds(masters){
@@ -11828,7 +11849,7 @@ function renderRoomsList(structureOrRooms){
   }
 
   const payload = normalizeRoomStructurePayload(structureOrRooms) || { masters: [], categories: [], rooms: [] };
-  const masters = ensureDefaultMasters(payload.masters || []);
+  const masters = payload.masters || [];
   const categories = payload.categories || [];
   const rooms = (payload.rooms || []).filter((room) => !room?.archived);
   const categoriesByMaster = new Map();
@@ -11841,15 +11862,6 @@ function renderRoomsList(structureOrRooms){
     categoryById.set(String(cat.id), cat);
   }
 
-  const masterIds = getDefaultMasterIds(masters);
-  const fallbackCategories = new Map();
-  for(const master of masters){
-    const ensured = ensureUncategorized(categories, master.id);
-    fallbackCategories.set(String(master.id), ensured);
-    if(!categoriesByMaster.has(master.id)) categoriesByMaster.set(master.id, []);
-    if(ensured.temporary) categoriesByMaster.get(master.id).push(ensured);
-  }
-
   const roomsByCategory = new Map();
   for(const room of rooms){
     const categoryId = room?.category_id;
@@ -11858,14 +11870,6 @@ function renderRoomsList(structureOrRooms){
       roomsByCategory.get(String(categoryId)).push(room);
       continue;
     }
-
-    const isUserRoom = Number(room?.is_user_room || 0) === 1;
-    const fallbackMasterId = isUserRoom ? masterIds.user : masterIds.site;
-    const fallbackCategory = fallbackCategories.get(String(fallbackMasterId));
-    if(!fallbackCategory) continue;
-    const fallbackId = String(fallbackCategory.id);
-    if(!roomsByCategory.has(fallbackId)) roomsByCategory.set(fallbackId, []);
-    roomsByCategory.get(fallbackId).push({ ...room, category_id: fallbackCategory.id });
   }
 
   withFlip(chanList, "data-flip-key", () => {
@@ -11949,10 +11953,12 @@ function renderRoomsList(structureOrRooms){
   });
 }
 
-async function loadRooms(){
-  const {res, text} = await api("/rooms", { method:"GET" });
+async function loadRooms({ silent = false } = {}){
+  const {res, text} = await api("/api/rooms/structure", { method:"GET" });
   if(!res.ok){
-    renderRoomsList((roomStructure.rooms || []).map((r) => r?.name || r).filter(Boolean));
+    if(!silent){
+      renderRoomsList((roomStructure.rooms || []).map((r) => r?.name || r).filter(Boolean));
+    }
     return;
   }
   try{
@@ -11960,8 +11966,15 @@ async function loadRooms(){
     const applied = setRoomStructure(payload);
     if(!applied && Array.isArray(payload)) renderRoomsList(payload);
   }catch{
-    renderRoomsList((roomStructure.rooms || []).map((r) => r?.name || r).filter(Boolean));
+    if(!silent) renderRoomsList((roomStructure.rooms || []).map((r) => r?.name || r).filter(Boolean));
   }
+}
+
+async function handleRoomVersionConflict(res){
+  if(res?.status !== 409) return false;
+  toast?.("Room structure updated elsewhere. Refreshing…");
+  await loadRooms({ silent: true });
+  return true;
 }
 
 function openRoomCreateModal(){
@@ -12014,6 +12027,7 @@ async function submitCreateRoom(){
   const payload = { name };
   if(categoryId) payload.category_id = Number(categoryId) || categoryId;
   if(masterId) payload.master_id = Number(masterId) || masterId;
+  payload.expectedVersion = roomStructureVersion;
 
   const {res, text} = await api("/rooms", {
     method:"POST",
@@ -12021,6 +12035,7 @@ async function submitCreateRoom(){
     body: JSON.stringify(payload),
   });
   if(!res.ok){
+    if(await handleRoomVersionConflict(res)) return;
     if(roomCreateMsg) roomCreateMsg.textContent = text || "Failed to create room.";
     return;
   }
@@ -12051,6 +12066,7 @@ async function submitRoomManageCreate(e){
     is_locked: roomManageCreateLocked?.checked ? 1 : 0,
     maintenance_mode: roomManageCreateMaintenance?.checked ? 1 : 0,
     events_enabled: roomManageCreateEventsEnabled?.checked ? 1 : 0,
+    expectedVersion: roomStructureVersion,
   };
   if(categoryId) payload.category_id = Number(categoryId) || categoryId;
   if(masterId) payload.master_id = Number(masterId) || masterId;
@@ -12061,6 +12077,7 @@ async function submitRoomManageCreate(e){
     body: JSON.stringify(payload),
   });
   if(!res.ok){
+    if(await handleRoomVersionConflict(res)) return;
     if(roomManageCreateMsg) roomManageCreateMsg.textContent = text || "Failed to create room.";
     return;
   }
@@ -12082,9 +12099,10 @@ async function createRoomFlow(){
   const {res, text} = await api("/rooms", {
     method:"POST",
     headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({ name })
+    body: JSON.stringify({ name, expectedVersion: roomStructureVersion })
   });
   if(!res.ok){
+    if(await handleRoomVersionConflict(res)) return;
     addSystem(text || "Failed to create room.");
     return;
   }
@@ -12093,21 +12111,14 @@ async function createRoomFlow(){
   joinRoom(name);
 }
 
-function getSortedMasters({ includeTemporary = true } = {}){
-  const masters = ensureDefaultMasters(roomStructure.masters || []);
-  const sorted = [...masters].sort((a, b) => sortByOrderThenName(a, b, "sort_order"));
-  if(includeTemporary) return sorted;
-  return sorted.filter((m) => !m.temporary && !String(m.id || "").startsWith("temp-"));
+function getSortedMasters(){
+  const masters = roomStructure.masters || [];
+  return [...masters].sort((a, b) => sortByOrderThenName(a, b, "sort_order"));
 }
 
-function getSortedCategories(masterId, { includeTemporary = true } = {}){
+function getSortedCategories(masterId){
   const categories = (roomStructure.categories || []).filter((c) => String(c.master_id) === String(masterId));
-  let list = [...categories].sort((a, b) => sortByOrderThenName(a, b, "sort_order"));
-  const ensured = ensureUncategorized(list, masterId);
-  if(!list.find((c) => String(c.name || "") === "Uncategorized")) list = [...list, ensured];
-  list.sort((a, b) => sortByOrderThenName(a, b, "sort_order"));
-  if(includeTemporary) return list;
-  return list.filter((c) => !c.temporary && !String(c.id || "").startsWith("temp-"));
+  return [...categories].sort((a, b) => sortByOrderThenName(a, b, "sort_order"));
 }
 
 function getSortedRoomsForCategory(categoryId, { includeArchived = true } = {}){
@@ -12153,7 +12164,7 @@ function populateRoomCreateSelects(){
 }
 
 function populateManageMasterSelects(){
-  const masters = getSortedMasters({ includeTemporary: false });
+  const masters = getSortedMasters();
   populateSelect(
     roomCategoryMasterSelect,
     masters.map((m) => ({ value: m.id, label: m.name })),
@@ -12169,7 +12180,7 @@ function populateManageMasterSelects(){
 
 function populateManageCategorySelects(){
   const masterId = roomManageMasterSelect?.value || "";
-  const categories = masterId ? getSortedCategories(masterId, { includeTemporary: false }) : [];
+  const categories = masterId ? getSortedCategories(masterId) : [];
   populateSelect(
     roomManageCategorySelect,
     categories.map((c) => ({ value: c.id, label: c.name })),
@@ -12179,7 +12190,7 @@ function populateManageCategorySelects(){
 
 function renderRoomMasterList(){
   if(!roomMasterList) return;
-  const masters = getSortedMasters({ includeTemporary: false });
+  const masters = getSortedMasters();
   roomMasterList.innerHTML = "";
   for(const master of masters){
     const row = document.createElement("div");
@@ -12205,15 +12216,17 @@ function renderRoomMasterList(){
       if(action === "rename"){
         const next = prompt("Rename master:", master.name);
         if(!next) return;
-        await api(`/api/room-masters/${master.id}`, {
+        const { res } = await api(`/api/room-masters/${master.id}`, {
           method:"PATCH",
           headers: { "Content-Type":"application/json" },
-          body: JSON.stringify({ name: next })
+          body: JSON.stringify({ name: next, expectedVersion: roomStructureVersion })
         });
+        if(await handleRoomVersionConflict(res)) return;
       }
       if(action === "delete"){
         if(!confirm(`Delete master "${master.name}"? Rooms will move to Site Rooms.`)) return;
-        await api(`/api/room-masters/${master.id}`, { method:"DELETE" });
+        const { res } = await api(`/api/room-masters/${master.id}?expectedVersion=${encodeURIComponent(roomStructureVersion)}`, { method:"DELETE" });
+        if(await handleRoomVersionConflict(res)) return;
       }
       if(action === "up" || action === "down"){
         const index = masters.findIndex((m) => String(m.id) === String(master.id));
@@ -12221,11 +12234,12 @@ function renderRoomMasterList(){
         if(swapWith < 0 || swapWith >= masters.length) return;
         const orderedIds = [...masters].map((m) => m.id);
         [orderedIds[index], orderedIds[swapWith]] = [orderedIds[swapWith], orderedIds[index]];
-        await api("/api/room-masters/reorder", {
+        const { res } = await api("/api/room-masters/reorder", {
           method:"PATCH",
           headers: { "Content-Type":"application/json" },
-          body: JSON.stringify({ orderedIds })
+          body: JSON.stringify({ orderedIds, expectedVersion: roomStructureVersion })
         });
+        if(await handleRoomVersionConflict(res)) return;
       }
       await loadRooms();
     });
@@ -12236,8 +12250,8 @@ function renderRoomMasterList(){
 function renderRoomCategoryList(){
   if(!roomCategoryList) return;
   const masterId = roomCategoryMasterSelect?.value || "";
-  const masters = getSortedMasters({ includeTemporary: false });
-  const categories = masterId ? getSortedCategories(masterId, { includeTemporary: false }) : [];
+  const masters = getSortedMasters();
+  const categories = masterId ? getSortedCategories(masterId) : [];
   roomCategoryList.innerHTML = "";
   for(const category of categories){
     const row = document.createElement("div");
@@ -12270,24 +12284,27 @@ function renderRoomCategoryList(){
       if(action === "rename"){
         const next = prompt("Rename subcategory:", category.name);
         if(!next) return;
-        await api(`/api/room-categories/${category.id}`, {
+        const { res } = await api(`/api/room-categories/${category.id}`, {
           method:"PATCH",
           headers: { "Content-Type":"application/json" },
-          body: JSON.stringify({ name: next })
+          body: JSON.stringify({ name: next, expectedVersion: roomStructureVersion })
         });
+        if(await handleRoomVersionConflict(res)) return;
       }
       if(action === "delete"){
         if(!confirm(`Delete subcategory "${category.name}"?`)) return;
-        await api(`/api/room-categories/${category.id}`, { method:"DELETE" });
+        const { res } = await api(`/api/room-categories/${category.id}?expectedVersion=${encodeURIComponent(roomStructureVersion)}`, { method:"DELETE" });
+        if(await handleRoomVersionConflict(res)) return;
       }
       if(action === "move"){
         const targetMaster = moveSelect?.value || "";
         if(!targetMaster || targetMaster === String(masterId)) return;
-        await api(`/api/room-categories/${category.id}`, {
+        const { res } = await api(`/api/room-categories/${category.id}`, {
           method:"PATCH",
           headers: { "Content-Type":"application/json" },
-          body: JSON.stringify({ master_id: Number(targetMaster) || targetMaster })
+          body: JSON.stringify({ master_id: Number(targetMaster) || targetMaster, expectedVersion: roomStructureVersion })
         });
+        if(await handleRoomVersionConflict(res)) return;
       }
       if(action === "up" || action === "down"){
         const index = categories.findIndex((c) => String(c.id) === String(category.id));
@@ -12295,11 +12312,12 @@ function renderRoomCategoryList(){
         if(swapWith < 0 || swapWith >= categories.length) return;
         const orderedIds = [...categories].map((c) => c.id);
         [orderedIds[index], orderedIds[swapWith]] = [orderedIds[swapWith], orderedIds[index]];
-        await api("/api/room-categories/reorder", {
+        const { res } = await api("/api/room-categories/reorder", {
           method:"PATCH",
           headers: { "Content-Type":"application/json" },
-          body: JSON.stringify({ master_id: Number(masterId) || masterId, orderedIds })
+          body: JSON.stringify({ master_id: Number(masterId) || masterId, orderedIds, expectedVersion: roomStructureVersion })
         });
+        if(await handleRoomVersionConflict(res)) return;
       }
       await loadRooms();
     });
@@ -12360,9 +12378,10 @@ function renderRoomManageRoomsList(){
         const {res, text} = await api(`/api/rooms/${encodeURIComponent(room.name)}`, {
           method:"PATCH",
           headers: { "Content-Type":"application/json" },
-          body: JSON.stringify({ name: next }),
+          body: JSON.stringify({ name: next, expectedVersion: roomStructureVersion }),
         });
         if(!res.ok){
+          if(await handleRoomVersionConflict(res)) return;
           if(roomManageMsg) roomManageMsg.textContent = text || "Failed to rename room.";
           return;
         }
@@ -12373,9 +12392,10 @@ function renderRoomManageRoomsList(){
         const {res, text} = await api(`/api/rooms/${encodeURIComponent(room.name)}/move`, {
           method:"PATCH",
           headers: { "Content-Type":"application/json" },
-          body: JSON.stringify({ category_id: Number(target) || target })
+          body: JSON.stringify({ category_id: Number(target) || target, expectedVersion: roomStructureVersion })
         });
         if(!res.ok){
+          if(await handleRoomVersionConflict(res)) return;
           if(roomManageMsg) roomManageMsg.textContent = text || "Failed to move room.";
           return;
         }
@@ -12389,24 +12409,27 @@ function renderRoomManageRoomsList(){
         const {res, text} = await api("/api/rooms/reorder", {
           method:"PATCH",
           headers: { "Content-Type":"application/json" },
-          body: JSON.stringify({ category_id: Number(categoryId) || categoryId, orderedIds })
+          body: JSON.stringify({ category_id: Number(categoryId) || categoryId, orderedIds, expectedVersion: roomStructureVersion })
         });
         if(!res.ok){
+          if(await handleRoomVersionConflict(res)) return;
           if(roomManageMsg) roomManageMsg.textContent = text || "Failed to reorder rooms.";
           return;
         }
       }
       if(action === "archive"){
         if(!confirm(`Archive room "${displayRoomName(room.name)}"?`)) return;
-        const {res, text} = await api(`/api/rooms/${encodeURIComponent(room.name)}/archive`, { method:"PATCH" });
+        const {res, text} = await api(`/api/rooms/${encodeURIComponent(room.name)}/archive?expectedVersion=${encodeURIComponent(roomStructureVersion)}`, { method:"PATCH" });
         if(!res.ok){
+          if(await handleRoomVersionConflict(res)) return;
           if(roomManageMsg) roomManageMsg.textContent = text || "Failed to archive room.";
           return;
         }
       }
       if(action === "restore"){
-        const {res, text} = await api(`/api/rooms/${encodeURIComponent(room.name)}/restore`, { method:"PATCH" });
+        const {res, text} = await api(`/api/rooms/${encodeURIComponent(room.name)}/restore?expectedVersion=${encodeURIComponent(roomStructureVersion)}`, { method:"PATCH" });
         if(!res.ok){
+          if(await handleRoomVersionConflict(res)) return;
           if(roomManageMsg) roomManageMsg.textContent = text || "Failed to restore room.";
           return;
         }
@@ -15178,6 +15201,253 @@ function bindReferralsUI(){
   referralsMarkDoneBtn?.addEventListener("click", resolveReferral);
 }
 
+// ---- Cases (unified moderation)
+let activeCaseId = null;
+let casesCache = [];
+
+function openCasesPanel(){
+  if(!casesPanel) return;
+  openAdminModal(casesPanel);
+  activeCaseId = null;
+  if(casesDetail) casesDetail.hidden = true;
+  if(casesDetailTitle) casesDetailTitle.textContent = "Select a case";
+  if(casesActionMsg) casesActionMsg.textContent = "";
+  loadCasesList();
+}
+
+function closeCasesPanel(){
+  if(!casesPanel) return;
+  closeAdminModal(casesPanel, { focusReturn: true });
+  activeCaseId = null;
+}
+
+function formatCaseMeta(item){
+  const parts = [];
+  if(item?.type) parts.push(String(item.type));
+  if(item?.status) parts.push(String(item.status));
+  if(item?.priority) parts.push(String(item.priority));
+  return parts.join(" • ");
+}
+
+function renderCasesList(items = []){
+  if(!casesList) return;
+  casesList.innerHTML = "";
+  if(!items.length){
+    const empty = document.createElement("div");
+    empty.className = "card muted";
+    empty.textContent = "No cases match those filters.";
+    casesList.appendChild(empty);
+    return;
+  }
+  for(const item of items){
+    const card = document.createElement("div");
+    card.className = "appealListItem";
+    const title = item.title || `${item.type || "Case"} #${item.id}`;
+    const meta = formatCaseMeta(item);
+    card.innerHTML = `
+      <div class="appealListTop">
+        <div class="appealListUser">${escapeHtml(String(title))}</div>
+        <div class="small muted">${escapeHtml(meta)}</div>
+      </div>
+      <div class="small muted">ID #${escapeHtml(String(item.id))}</div>
+    `;
+    card.addEventListener("click", ()=> loadCaseDetail(item.id));
+    casesList.appendChild(card);
+  }
+}
+
+async function loadCasesList(){
+  if(!casesList) return;
+  casesList.innerHTML = "<div class='small muted'>Loading cases…</div>";
+  const params = new URLSearchParams();
+  if(casesFilterStatus?.value) params.set("status", casesFilterStatus.value);
+  if(casesFilterType?.value) params.set("type", casesFilterType.value);
+  if(casesFilterAssigned?.value) params.set("assigned", casesFilterAssigned.value);
+  const url = `/api/mod/cases${params.toString() ? `?${params}` : ""}`;
+  const {res, text} = await api(url, { method:"GET" });
+  if(!res.ok){
+    casesList.innerHTML = "<div class='card muted'>Failed to load cases.</div>";
+    return;
+  }
+  try{
+    const data = JSON.parse(text || "{}");
+    casesCache = Array.isArray(data.items) ? data.items : [];
+    renderCasesList(casesCache);
+  }catch{
+    casesList.innerHTML = "<div class='card muted'>Failed to parse cases.</div>";
+  }
+}
+
+function renderCaseTimeline(events = []){
+  if(!casesTimeline) return;
+  casesTimeline.innerHTML = "";
+  if(!events.length){
+    casesTimeline.innerHTML = "<div class='small muted'>No events yet.</div>";
+    return;
+  }
+  for(const ev of events){
+    const row = document.createElement("div");
+    row.className = "appealMsgRow";
+    const when = ev?.created_at ? new Date(Number(ev.created_at)).toLocaleString() : "";
+    const payload = ev?.event_payload ? JSON.stringify(ev.event_payload) : "";
+    row.innerHTML = `
+      <div class="appealMsgMeta">${escapeHtml(String(ev.event_type || "event"))} • ${escapeHtml(when)}</div>
+      <div class="appealMsgBody">${escapeHtml(payload)}</div>
+    `;
+    casesTimeline.appendChild(row);
+  }
+}
+
+function renderCaseNotes(notes = []){
+  if(!casesNotes) return;
+  casesNotes.innerHTML = "";
+  if(!notes.length){
+    casesNotes.innerHTML = "<div class='small muted'>No notes yet.</div>";
+    return;
+  }
+  for(const note of notes){
+    const row = document.createElement("div");
+    row.className = "appealMsgRow";
+    const when = note?.created_at ? new Date(Number(note.created_at)).toLocaleString() : "";
+    row.innerHTML = `
+      <div class="appealMsgMeta">Note • ${escapeHtml(when)}</div>
+      <div class="appealMsgBody">${escapeHtml(String(note.body || ""))}</div>
+    `;
+    casesNotes.appendChild(row);
+  }
+}
+
+function renderCaseEvidence(list = []){
+  if(!casesEvidence) return;
+  casesEvidence.innerHTML = "";
+  if(!list.length){
+    casesEvidence.innerHTML = "<div class='small muted'>No evidence yet.</div>";
+    return;
+  }
+  for(const ev of list){
+    const row = document.createElement("div");
+    row.className = "appealMsgRow";
+    const parts = [];
+    if(ev?.evidence_type) parts.push(ev.evidence_type);
+    if(ev?.message_id) parts.push(`msg:${ev.message_id}`);
+    if(ev?.url) parts.push(ev.url);
+    row.innerHTML = `
+      <div class="appealMsgMeta">${escapeHtml(parts.join(" • ") || "Evidence")}</div>
+      <div class="appealMsgBody">${escapeHtml(String(ev.text || ev.message_excerpt || ""))}</div>
+    `;
+    casesEvidence.appendChild(row);
+  }
+}
+
+async function loadCaseDetail(caseId){
+  activeCaseId = Number(caseId);
+  if(!casesDetail) return;
+  if(casesDetailTitle) casesDetailTitle.textContent = "Loading…";
+  const {res, text} = await api(`/api/mod/cases/${caseId}`, { method:"GET" });
+  if(!res.ok){
+    if(casesDetailTitle) casesDetailTitle.textContent = "Failed to load case.";
+    return;
+  }
+  try{
+    const data = JSON.parse(text || "{}");
+    const item = data.case || null;
+    if(!item) return;
+    casesDetail.hidden = false;
+    if(casesDetailTitle) casesDetailTitle.textContent = item.title || `${item.type || "Case"} #${item.id}`;
+    if(casesDetailMeta) casesDetailMeta.textContent = formatCaseMeta(item);
+    if(casesDetailSummary) casesDetailSummary.textContent = item.summary || "—";
+    if(casesStatusSelect) casesStatusSelect.value = item.status || "open";
+    if(casesAssignInput) casesAssignInput.value = item.assigned_to_user_id ? String(item.assigned_to_user_id) : "";
+    if(casesActionMsg) casesActionMsg.textContent = "";
+    renderCaseTimeline(data.events || []);
+    renderCaseNotes(data.notes || []);
+    renderCaseEvidence(data.evidence || []);
+  }catch{
+    if(casesDetailTitle) casesDetailTitle.textContent = "Failed to parse case.";
+  }
+}
+
+casesAssignBtn?.addEventListener("click", async () => {
+  if(!activeCaseId) return;
+  const assignedTo = Number(casesAssignInput?.value || 0) || null;
+  const {res, text} = await api(`/api/mod/cases/${activeCaseId}`, {
+    method:"PATCH",
+    headers: { "Content-Type":"application/json" },
+    body: JSON.stringify({ assigned_to_user_id: assignedTo })
+  });
+  if(!res.ok){
+    if(casesActionMsg) casesActionMsg.textContent = text || "Failed to assign.";
+    return;
+  }
+  if(casesActionMsg) casesActionMsg.textContent = "Assignment updated.";
+  await loadCaseDetail(activeCaseId);
+});
+
+casesStatusBtn?.addEventListener("click", async () => {
+  if(!activeCaseId) return;
+  const status = casesStatusSelect?.value || "open";
+  const {res, text} = await api(`/api/mod/cases/${activeCaseId}/status`, {
+    method:"POST",
+    headers: { "Content-Type":"application/json" },
+    body: JSON.stringify({ status })
+  });
+  if(!res.ok){
+    if(casesActionMsg) casesActionMsg.textContent = text || "Failed to update status.";
+    return;
+  }
+  if(casesActionMsg) casesActionMsg.textContent = "Status updated.";
+  await loadCaseDetail(activeCaseId);
+});
+
+casesNoteBtn?.addEventListener("click", async () => {
+  if(!activeCaseId) return;
+  const body = String(casesNoteInput?.value || "").trim();
+  if(!body) return;
+  const {res, text} = await api(`/api/mod/cases/${activeCaseId}/notes`, {
+    method:"POST",
+    headers: { "Content-Type":"application/json" },
+    body: JSON.stringify({ body })
+  });
+  if(!res.ok){
+    if(casesActionMsg) casesActionMsg.textContent = text || "Failed to add note.";
+    return;
+  }
+  if(casesNoteInput) casesNoteInput.value = "";
+  await loadCaseDetail(activeCaseId);
+});
+
+casesEvidenceBtn?.addEventListener("click", async () => {
+  if(!activeCaseId) return;
+  const evidenceType = casesEvidenceType?.value || "text";
+  const payload = {
+    evidence_type: evidenceType,
+    url: String(casesEvidenceUrl?.value || "").trim() || null,
+    message_id: Number(casesEvidenceMessageId?.value || 0) || null,
+    text: String(casesEvidenceText?.value || "").trim() || null,
+  };
+  const {res, text} = await api(`/api/mod/cases/${activeCaseId}/evidence`, {
+    method:"POST",
+    headers: { "Content-Type":"application/json" },
+    body: JSON.stringify(payload)
+  });
+  if(!res.ok){
+    if(casesActionMsg) casesActionMsg.textContent = text || "Failed to add evidence.";
+    return;
+  }
+  if(casesEvidenceUrl) casesEvidenceUrl.value = "";
+  if(casesEvidenceMessageId) casesEvidenceMessageId.value = "";
+  if(casesEvidenceText) casesEvidenceText.value = "";
+  await loadCaseDetail(activeCaseId);
+});
+
+function bindCasesUI(){
+  casesCloseBtn?.addEventListener("click", closeCasesPanel);
+  casesRefreshBtn?.addEventListener("click", loadCasesList);
+  casesFilterStatus?.addEventListener("change", loadCasesList);
+  casesFilterType?.addEventListener("change", loadCasesList);
+  casesFilterAssigned?.addEventListener("change", loadCasesList);
+}
+
 // Role Debug (quick role setter)
 function openRoleDebugPanel(){
   if(!roleDebugPanel) return;
@@ -17723,6 +17993,7 @@ async function initChatApp(){
   if(membersAdminMenu) membersAdminMenu.hidden = true;
   if(appealsPanelBtn) appealsPanelBtn.hidden = !isStaff;
   if(adminMenuAppealsBtn) adminMenuAppealsBtn.hidden = !isStaff;
+  if(adminMenuCasesBtn) adminMenuCasesBtn.hidden = !isStaff;
   // Referrals are for Admin+ review (mods create them)
   const canReviewReferrals = me?.role==="Admin" || me?.role==="Co-owner" || me?.role==="Owner";
   if(referralsPanelBtn) referralsPanelBtn.hidden = !canReviewReferrals;
@@ -17923,8 +18194,27 @@ window.addEventListener("online", () => {
   }
 });
 socket.on("roomStructure:update", (payload)=>setRoomStructure(payload, { updateCollapse: false }));
+socket.on("rooms:structure_updated", async (payload = {}) => {
+  const nextVersion = Number(payload?.version || 0);
+  if (nextVersion && nextVersion === roomStructureVersion) return;
+  await loadRooms({ silent: true });
+});
 socket.on("rooms update", () => {
   loadRooms();
+});
+socket.on("mod:case_created", () => {
+  if (casesPanel && !casesPanel.hidden) loadCasesList();
+});
+socket.on("mod:case_updated", (payload = {}) => {
+  if (casesPanel && !casesPanel.hidden) {
+    loadCasesList();
+    if (payload?.id && Number(payload.id) === Number(activeCaseId)) loadCaseDetail(activeCaseId);
+  }
+});
+socket.on("mod:case_event", (payload = {}) => {
+  if (casesPanel && !casesPanel.hidden && payload?.caseId && Number(payload.caseId) === Number(activeCaseId)) {
+    loadCaseDetail(activeCaseId);
+  }
 });
   socket.on("changelog updated", ()=>{
     changelogDirty = true;
@@ -18043,11 +18333,12 @@ socket.on("rooms update", () => {
       if(roomMasterMsg) roomMasterMsg.textContent = "Enter a master name.";
       return;
     }
-    await api("/api/room-masters", {
+    const { res } = await api("/api/room-masters", {
       method:"POST",
       headers: { "Content-Type":"application/json" },
-      body: JSON.stringify({ name })
+      body: JSON.stringify({ name, expectedVersion: roomStructureVersion })
     });
+    if(await handleRoomVersionConflict(res)) return;
     if(roomMasterCreateInput) roomMasterCreateInput.value = "";
     await loadRooms();
   });
@@ -18059,11 +18350,12 @@ socket.on("rooms update", () => {
       if(roomCategoryMsg) roomCategoryMsg.textContent = "Select a master and name.";
       return;
     }
-    await api("/api/room-categories", {
+    const { res } = await api("/api/room-categories", {
       method:"POST",
       headers: { "Content-Type":"application/json" },
-      body: JSON.stringify({ master_id: Number(masterId) || masterId, name })
+      body: JSON.stringify({ master_id: Number(masterId) || masterId, name, expectedVersion: roomStructureVersion })
     });
+    if(await handleRoomVersionConflict(res)) return;
     if(roomCategoryCreateInput) roomCategoryCreateInput.value = "";
     await loadRooms();
   });
@@ -18693,6 +18985,7 @@ async function bootApp(){
   bindRestrictedUI();
   bindStaffAppealsUI();
   bindReferralsUI();
+  bindCasesUI();
   bindRoleDebugUI();
   bindOwnerPanels();
   initPasswordUpgradeUI();

@@ -577,6 +577,7 @@
   <div class="adminDropdownHeader">Admin Tools</div>
   <button class="adminDropdownItem" id="adminMenuAppealsBtn" type="button" role="menuitem">Appeals</button>
   <button class="adminDropdownItem" id="adminMenuReferralsBtn" type="button" role="menuitem">Referrals</button>
+  <button class="adminDropdownItem" id="adminMenuCasesBtn" type="button" role="menuitem">Cases</button>
   <button class="adminDropdownItem" id="adminMenuRoleDebugBtn" type="button" role="menuitem">Role debug</button>
   <button class="adminDropdownItem" id="adminMenuFeatureFlagsBtn" type="button" role="menuitem">Flags</button>
   <button class="adminDropdownItem" id="adminMenuSessionsBtn" type="button" role="menuitem">Sessions</button>
@@ -1121,6 +1122,12 @@
 <div class="cardTitle">Chat &amp; Identity</div>
 <div class="cardHint">Bubbles, fonts, name color, and message text.</div>
 <div class="cardPreview chatPreview"></div>
+</button>
+
+<button class="customizeCard" data-category="themes" data-search="themes appearance color palette mode light dark" id="openThemesModalBtn" type="button">
+<div class="cardTitle">Themes</div>
+<div class="cardHint">Choose a theme for chat and profiles.</div>
+<div class="cardPreview themesPreview"></div>
 </button>
 
 <button class="customizeCard" data-category="profile" data-search="profile appearance header gradient avatar aura" type="button">
@@ -2034,6 +2041,97 @@
 <button class="btn secondary small" id="referralsMarkDoneBtn" type="button">Mark done</button>
 </div>
 <div class="msgline" id="referralsActionMsg" style="margin-top:8px;"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- STAFF: Cases Panel -->
+<div class="appealsPanel" hidden="" id="casesPanel">
+<div class="appealsPanelHeader">
+<div>
+<div class="title">Cases</div>
+<div class="small muted">Unified moderation cases (flags, appeals, referrals).</div>
+</div>
+<div class="appealsPanelHeaderActions">
+<select class="select small" id="casesFilterStatus">
+<option value="">All statuses</option>
+<option value="open">Open</option>
+<option value="pending">Pending</option>
+<option value="resolved">Resolved</option>
+<option value="closed">Closed</option>
+</select>
+<select class="select small" id="casesFilterType">
+<option value="">All types</option>
+<option value="flag">Flag</option>
+<option value="appeal">Appeal</option>
+<option value="referral">Referral</option>
+<option value="investigation">Investigation</option>
+</select>
+<select class="select small" id="casesFilterAssigned">
+<option value="">All assignments</option>
+<option value="me">Assigned to me</option>
+<option value="unassigned">Unassigned</option>
+</select>
+<button class="btn secondary small" id="casesRefreshBtn" type="button">Refresh</button>
+<button class="iconBtn" id="casesCloseBtn" title="Close" type="button">✕</button>
+</div>
+</div>
+<div class="appealsPanelBody">
+<div class="appealsSplit">
+<div class="appealsList" id="casesList"></div>
+<div class="appealsDetail" id="casesDetail" hidden="">
+<div class="card">
+<div class="title" id="casesDetailTitle">Select a case</div>
+<div class="small muted" id="casesDetailMeta"></div>
+</div>
+<div class="card">
+<div class="small muted">Summary</div>
+<div id="casesDetailSummary" style="margin-top:6px;"></div>
+</div>
+<div class="card">
+<div class="title">Assignment &amp; status</div>
+<div class="row" style="gap:10px; flex-wrap:wrap;">
+<select id="casesStatusSelect">
+<option value="open">Open</option>
+<option value="pending">Pending</option>
+<option value="resolved">Resolved</option>
+<option value="closed">Closed</option>
+</select>
+<input class="input" id="casesAssignInput" placeholder="Assign to user ID…" style="max-width:160px;"/>
+<button class="btn secondary" id="casesAssignBtn" type="button">Assign</button>
+<button class="btn secondary" id="casesStatusBtn" type="button">Update status</button>
+</div>
+<div class="msgline" id="casesActionMsg" style="margin-top:8px;"></div>
+</div>
+<div class="card">
+<div class="title">Notes</div>
+<div id="casesNotes"></div>
+<textarea id="casesNoteInput" maxlength="2000" placeholder="Add a note…" rows="3"></textarea>
+<div class="row" style="gap:10px; flex-wrap:wrap; margin-top:10px;">
+<button class="btn" id="casesNoteBtn" type="button">Add note</button>
+</div>
+</div>
+<div class="card">
+<div class="title">Evidence</div>
+<div id="casesEvidence"></div>
+<div class="row" style="gap:10px; flex-wrap:wrap;">
+<select id="casesEvidenceType">
+<option value="text">Text</option>
+<option value="link">Link</option>
+<option value="message">Message</option>
+</select>
+<input class="input" id="casesEvidenceUrl" placeholder="URL (optional)" style="max-width:200px;"/>
+<input class="input" id="casesEvidenceMessageId" placeholder="Message ID" style="max-width:140px;"/>
+</div>
+<textarea id="casesEvidenceText" maxlength="2000" placeholder="Evidence details…" rows="2"></textarea>
+<div class="row" style="gap:10px; flex-wrap:wrap; margin-top:10px;">
+<button class="btn" id="casesEvidenceBtn" type="button">Add evidence</button>
+</div>
+</div>
+<div class="card">
+<div class="title">Timeline</div>
+<div id="casesTimeline"></div>
 </div>
 </div>
 </div>
