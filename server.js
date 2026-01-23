@@ -41,6 +41,14 @@ const DICE_ROLL_MIN_INTERVAL_MS = 1000;
 const diceRollRateByUserId = new Map();
 const SURVIVAL_ROOM_ID = "survivalsimulator";
 const SURVIVAL_ROOM_DB_ID = 1;
+const CORE_ROOMS = [
+  { name: "main", sortOrder: 0 },
+  { name: "music", sortOrder: 1 },
+  { name: "nsfw", sortOrder: 2 },
+  { name: "diceroom", sortOrder: 3 },
+  { name: "survivalsimulator", sortOrder: 4 },
+];
+const CORE_ROOM_NAMES = new Set(CORE_ROOMS.map((room) => room.name));
 const SURVIVAL_SEASON_COOLDOWN_MS = 2 * 60 * 1000;
 const SURVIVAL_ADVANCE_COOLDOWN_MS = 2000;
 const CHESS_DEFAULT_ELO = 1200;
@@ -85,6 +93,16 @@ const lastReactionByUserId = new Map(); // userId -> ts
 
 // --- Room events (in-memory, roomName -> {type,title,endsAt,startedBy})
 const ACTIVE_ROOM_EVENTS = new Map();
+let ROOM_EVENT_SEQ = 1;
+const ROOM_PROMPT_TEMPLATES = [
+  "What’s a small win you had this week?",
+  "Share a comfort movie or show you love.",
+  "What song do you have on repeat right now?",
+  "What’s a simple joy you want more of lately?",
+  "Drop a cozy weekend plan in one sentence.",
+  "What’s something new you want to try this month?",
+  "Describe today in three words.",
+];
 
 function pruneWindowTimestamps(list, now, windowMs) {
   const cutoff = now - windowMs;
@@ -490,6 +508,7 @@ const pgInitPromise = (async () => {
         staff_only INTEGER NOT NULL DEFAULT 0,
         min_level INTEGER NOT NULL DEFAULT 0,
         events_enabled INTEGER NOT NULL DEFAULT 1,
+        archived INTEGER NOT NULL DEFAULT 0,
         category_id INTEGER REFERENCES room_categories(id) ON DELETE SET NULL,
         room_sort_order INTEGER NOT NULL DEFAULT 0,
         created_by_user_id INTEGER,
@@ -506,10 +525,11 @@ const pgInitPromise = (async () => {
       `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS room_sort_order INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER`,
       `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_user_room INTEGER NOT NULL DEFAULT 0`,
-          `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS vip_only INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS vip_only INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS staff_only INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS min_level INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS events_enabled INTEGER NOT NULL DEFAULT 1`,
+      `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS archived INTEGER NOT NULL DEFAULT 0`,
     ];
     for (const q of roomCols) {
       try { await pgPool.query(q); } catch (_) {}
@@ -2539,11 +2559,15 @@ db.get(`SELECT value FROM config WHERE key='maintenance'`, [], (_e, row) => {
 db.get(`SELECT value FROM config WHERE key='active_room_events'`, [], (_e, row) => {
   try {
     const obj = safeJsonParse(row?.value || "{}", {});
+    let maxId = 0;
     for (const [room, ev] of Object.entries(obj || {})) {
       if (!ev || typeof ev !== "object") continue;
       if (ev.endsAt && Number(ev.endsAt) < Date.now()) continue;
       ACTIVE_ROOM_EVENTS.set(room, ev);
+      const evId = Number(ev.id);
+      if (Number.isFinite(evId) && evId > maxId) maxId = evId;
     }
+    ROOM_EVENT_SEQ = Math.max(ROOM_EVENT_SEQ, maxId + 1);
   } catch {}
 });
 
@@ -2613,6 +2637,53 @@ async function setConfigJson(key, obj) {
   const raw = JSON.stringify(obj ?? {});
   await setConfigValue(key, raw);
   return obj;
+}
+
+function selectPromptText() {
+  const pool = ROOM_PROMPT_TEMPLATES.filter(Boolean);
+  if (!pool.length) return "💬 Prompt event started.";
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function pruneExpiredRoomEvent(roomName) {
+  const existing = ACTIVE_ROOM_EVENTS.get(roomName);
+  if (!existing) return null;
+  if (existing.endsAt && Number(existing.endsAt) < Date.now()) {
+    ACTIVE_ROOM_EVENTS.delete(roomName);
+    return null;
+  }
+  return existing;
+}
+
+function getActiveEventsForRoom(roomName) {
+  const key = String(roomName || "");
+  const existing = pruneExpiredRoomEvent(key);
+  if (!existing) return [];
+  return [existing];
+}
+
+async function syncActiveRoomEvents() {
+  await setConfigJson("active_room_events", Object.fromEntries(ACTIVE_ROOM_EVENTS.entries()));
+}
+
+async function addRoomEvent(roomName, ev) {
+  const room = String(roomName || "");
+  const payload = ev && typeof ev === "object" ? ev : {};
+  const next = { ...payload, room };
+  ACTIVE_ROOM_EVENTS.set(room, next);
+  await syncActiveRoomEvents();
+  return next;
+}
+
+async function stopRoomEventById(id) {
+  for (const [room, ev] of ACTIVE_ROOM_EVENTS.entries()) {
+    if (Number(ev?.id) === Number(id)) {
+      ACTIVE_ROOM_EVENTS.delete(room);
+      await syncActiveRoomEvents();
+      return { ...ev, room };
+    }
+  }
+  return null;
 }
 
 function createChessInstance(fen) {
@@ -4112,37 +4183,48 @@ const commandRegistry = {
     },
   },
   event: {
-    minRole: "Moderator",
-    description: "Start/stop a room event banner (mods+)",
-    usage: "/event start <type> <minutes> <title...> | /event stop",
-    example: "/event start trivia 10 Quick Trivia",
+    minRole: "Admin",
+    description: "Start/stop a room event (admin+)",
+    usage: "/event start <announcement|prompt|flair> <minutes> <text...> | /event stop",
+    example: "/event start prompt 10 Quick Trivia",
     handler: async ({ args, actor }) => {
       const sub = String(args[0] || "").toLowerCase();
       if (!room) return { ok: false, message: "Join a room first." };
 
       if (sub === "stop") {
+        const existing = ACTIVE_ROOM_EVENTS.get(room);
+        if (!existing) return { ok: false, message: "No active room event." };
         ACTIVE_ROOM_EVENTS.delete(room);
-        await setConfigJson("active_room_events", Object.fromEntries(ACTIVE_ROOM_EVENTS.entries()));
+        await syncActiveRoomEvents();
         io.to(room).emit("room:event", { room, active: null, at: Date.now() });
         return { ok: true, message: "Room event cleared." };
       }
 
       if (sub !== "start") return { ok: false, message: "Use /event start ... or /event stop" };
 
-      const type = String(args[1] || "event").slice(0, 24);
+      const type = String(args[1] || "").toLowerCase();
+      const allowed = new Set(["announcement", "prompt", "flair"]);
+      if (!allowed.has(type)) return { ok: false, message: "Type must be announcement, prompt, or flair." };
       const mins = Math.max(1, Math.min(120, Math.floor(Number(args[2]) || 10)));
-      const title = String(args.slice(3).join(" ") || "").slice(0, 80) || "Room Event";
+      const rawText = String(args.slice(3).join(" ") || "").trim();
+      if (type === "announcement" && !rawText) return { ok: false, message: "Announcement text required." };
+      const resolvedText = type === "prompt" ? (rawText || selectPromptText()) : rawText;
+      const title = resolvedText ? resolvedText.slice(0, 80) : type === "flair" ? "Visual Flair" : "Room Event";
       const ev = {
+        id: ROOM_EVENT_SEQ++,
         type,
         title,
+        payload: { text: resolvedText },
         startedBy: actor?.username || "",
         startedAt: Date.now(),
         endsAt: Date.now() + mins * 60_000,
       };
-      ACTIVE_ROOM_EVENTS.set(room, ev);
-      await setConfigJson("active_room_events", Object.fromEntries(ACTIVE_ROOM_EVENTS.entries()));
+      await addRoomEvent(room, ev);
       io.to(room).emit("room:event", { room, active: ev, at: Date.now() });
-      return { ok: true, message: `Event started for ${mins} min.` };
+      if (type === "announcement" || type === "prompt") {
+        io.to(room).emit("system", { room, text: resolvedText || "💬 Prompt event started." });
+      }
+      return { ok: true, message: `Room event '${title}' started.` };
     },
   },
 
@@ -4306,6 +4388,10 @@ function canAccessRoomBySettings(user, roomRow) {
   if (vipOnly && !isVipPlus(role)) return false;
   if (minLevel > 0 && level < minLevel) return false;
   return true;
+}
+
+function isCoreRoomName(name) {
+  return CORE_ROOM_NAMES.has(String(name || "").toLowerCase());
 }
 
 
@@ -4570,16 +4656,6 @@ async function awardMessageXp(userId, roleHint, roomName) {
 
   const role = roleHint || row.role || "User";
   let delta = xpRatesForRole(role).message;
-  try {
-    if (roomName) {
-      const events = getActiveEventsForRoom(roomName);
-      const boost = (events || []).find((e) => e.type === 'boost' && (e.payload?.xp_multiplier || e.payload?.xpMultiplier));
-      if (boost) {
-        const mult = Number(boost.payload?.xp_multiplier ?? boost.payload?.xpMultiplier ?? 1);
-        if (Number.isFinite(mult) && mult > 1 && mult <= 10) delta = Math.round(delta * mult);
-      }
-    }
-  } catch (_) {}
   const result = await applyXpGain(userId, delta, {
     baseRow: row,
     lastMessageXpAt: now,
@@ -5747,7 +5823,7 @@ async function buildRoomStructure() {
     `SELECT id, master_id, name, sort_order FROM room_categories ORDER BY sort_order ASC, name ASC`
   );
   const rooms = await dbAllAsync(
-    `SELECT name, category_id, room_sort_order, slowmode_seconds, is_locked, maintenance_mode, vip_only, staff_only, min_level, events_enabled,
+    `SELECT name, category_id, room_sort_order, slowmode_seconds, is_locked, maintenance_mode, vip_only, staff_only, min_level, events_enabled, archived,
             created_by, created_by_user_id, is_user_room
        FROM rooms
       ORDER BY room_sort_order ASC, name ASC`
@@ -5767,6 +5843,7 @@ async function buildRoomStructure() {
       staff_only: Number(r.staff_only || 0),
       min_level: Number(r.min_level || 0),
       events_enabled: Number(r.events_enabled ?? 1),
+      archived: Number(r.archived || 0),
       created_by: r.created_by ?? null,
       created_by_user_id: r.created_by_user_id ?? null,
       is_user_room: Number(r.is_user_room || 0),
@@ -5780,8 +5857,10 @@ async function buildRoomStructurePayload(userId) {
   try {
     if (userId) user = await dbGetAsync(`SELECT id, role, level FROM users WHERE id = ?`, [userId]);
   } catch (_) {}
+  const isAdmin = user && roleRankServer(user.role) >= roleRankServer("Admin");
   const filteredRooms = (base.rooms || []).filter((room) => {
     if (!room) return false;
+    if (Number(room.archived || 0) === 1 && !isAdmin) return false;
     // Legacy VIP prefix gate remains, but new settings gate applies too.
     const isVipPrefix = /^vip[_-]/i.test(room.name || "");
     if (isVipPrefix) {
@@ -5811,6 +5890,87 @@ async function getDefaultMasterIds() {
     site: map.get("Site Rooms") || null,
     user: map.get("User Rooms") || null,
   };
+}
+
+async function resolveSiteUncategorizedCategoryId() {
+  try {
+    const ids = await getDefaultMasterIds();
+    if (!ids.site) return null;
+    const row = await dbGetAsync(
+      `SELECT id FROM room_categories WHERE master_id = ? AND lower(name) = lower('Uncategorized') LIMIT 1`,
+      [ids.site]
+    );
+    return row?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureCoreRoomsExist() {
+  const now = Date.now();
+  const categoryId = await resolveSiteUncategorizedCategoryId();
+  for (const room of CORE_ROOMS) {
+    const existing = await dbGetAsync(`SELECT name, category_id FROM rooms WHERE name = ?`, [room.name]).catch(() => null);
+    if (!existing) {
+      await dbRunAsync(
+        `INSERT OR IGNORE INTO rooms
+          (name, created_by, created_at, category_id, room_sort_order, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived)
+         VALUES (?, NULL, ?, ?, ?, 0, 0, 0, 0, 0, 0, 1, 0, 0)`,
+        [room.name, now, categoryId, room.sortOrder ?? 0]
+      );
+    } else {
+      await dbRunAsync(
+        `UPDATE rooms
+            SET category_id = COALESCE(category_id, ?),
+                room_sort_order = COALESCE(room_sort_order, ?),
+                archived = 0
+          WHERE name = ?`,
+        [categoryId, room.sortOrder ?? 0, room.name]
+      ).catch(() => {});
+    }
+  }
+
+  if (!PG_READY) return;
+  const pgCategoryId = await (async () => {
+    try {
+      const { rows } = await pgPool.query(
+        `SELECT c.id
+           FROM room_categories c
+           JOIN room_master_categories m ON m.id = c.master_id
+          WHERE m.name = 'Site Rooms' AND lower(c.name) = lower('Uncategorized')
+          LIMIT 1`
+      );
+      return rows?.[0]?.id ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  for (const room of CORE_ROOMS) {
+    try {
+      const { rows } = await pgPool.query(`SELECT name, category_id FROM rooms WHERE name = $1 LIMIT 1`, [room.name]);
+      const existing = rows?.[0] || null;
+      if (!existing) {
+        await pgPool.query(
+          `INSERT INTO rooms
+            (name, created_by, created_at, category_id, room_sort_order, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived)
+           VALUES ($1, NULL, $2, $3, $4, 0, 0, 0, 0, 0, 0, 1, 0, 0)
+           ON CONFLICT (name) DO NOTHING`,
+          [room.name, now, pgCategoryId, room.sortOrder ?? 0]
+        );
+      } else {
+        await pgPool.query(
+          `UPDATE rooms
+              SET category_id = COALESCE(category_id, $1),
+                  room_sort_order = COALESCE(room_sort_order, $2),
+                  archived = 0
+            WHERE name = $3`,
+          [pgCategoryId, room.sortOrder ?? 0, room.name]
+        );
+      }
+    } catch (e) {
+      console.warn("[rooms] core room seed failed:", e?.message || e);
+    }
+  }
 }
 
 async function getUncategorizedCategoryId(masterId) {
@@ -8531,10 +8691,10 @@ async function buildSurvivalPayload(season, { beforeId = null, limit = 200 } = {
   };
 }
 
-// Co-owner+ can create rooms
-app.post("/rooms", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
+// Admin+ can create rooms
+app.post("/rooms", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
   const actor = req.session.user;
-  if (!requireMinRole(actor.role, "Co-owner")) return res.status(403).send("Forbidden");
+  if (!requireMinRole(actor.role, "Admin")) return res.status(403).send("Forbidden");
 
   const name = sanitizeRoomName(req.body?.name || req.body?.room || "");
   if (!name) return res.status(400).send("Invalid room name");
@@ -8570,8 +8730,8 @@ app.post("/rooms", strictLimiter, requireLogin, express.json({ limit: "16kb" }),
     const sortOrder = Number(nextSort?.maxSort || 0) + 1;
 
     await dbRunAsync(
-      `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [name, actor.id, Date.now(), categoryId, sortOrder, actor.id, isUserRoom,
        Number(req.body?.vip_only)||0,
        Number(req.body?.staff_only)||0,
@@ -8579,7 +8739,8 @@ app.post("/rooms", strictLimiter, requireLogin, express.json({ limit: "16kb" }),
        Number(req.body?.is_locked)||0,
        Number(req.body?.maintenance_mode)||0,
        (req.body?.events_enabled === 0 || req.body?.events_enabled === "0") ? 0 : 1,
-       Math.max(0, Math.min(3600, Number(req.body?.slowmode_seconds)||0))]
+       Math.max(0, Math.min(3600, Number(req.body?.slowmode_seconds)||0)),
+       0]
     );
 
     logModAction({ actor, action: "room.create", room: name, details: null });
@@ -9541,7 +9702,7 @@ app.patch("/api/room-categories/:id", strictLimiter, requireAdminPlus, express.j
   }
 });
 
-app.delete("/api/room-categories/:id", strictLimiter, requireOwner, async (req, res) => {
+app.delete("/api/room-categories/:id", strictLimiter, requireAdminPlus, async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).send("Invalid category");
   try {
@@ -9550,10 +9711,8 @@ app.delete("/api/room-categories/:id", strictLimiter, requireOwner, async (req, 
     if (normalizeRoomGroupName(row.name) === normalizeRoomGroupName(DEFAULT_ROOM_CATEGORY)) {
       return res.status(400).send("Cannot delete Uncategorized");
     }
-    const fallbackCategoryId = await getUncategorizedCategoryId(row.master_id);
-    if (fallbackCategoryId) {
-      await dbRunAsync(`UPDATE rooms SET category_id = ? WHERE category_id = ?`, [fallbackCategoryId, id]);
-    }
+    const rooms = await dbAllAsync(`SELECT name FROM rooms WHERE category_id = ?`, [id]);
+    if (rooms?.length) return res.status(409).send("Category must be empty to delete");
     await dbRunAsync(`DELETE FROM room_categories WHERE id = ?`, [id]);
     await emitRoomStructureUpdate();
     return res.json({ ok: true });
@@ -9571,83 +9730,6 @@ app.patch("/api/rooms/:id/move", strictLimiter, requireAdminPlus, express.json({
     if (!roomRow) return res.status(404).send("Not found");
     const requestedCategoryId = Number(req.body?.category_id) || null;
     const resolved = await resolveRoomCategoryId({ categoryId: requestedCategoryId, isUserRoom: false });
-
-app.patch("/api/rooms/:id/settings", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
-  const roomName = sanitizeRoomName(req.params.id || "");
-  if (!roomName) return res.status(400).send("Invalid room");
-  const slowmode = Number(req.body?.slowmode_seconds ?? req.body?.slowmode ?? 0);
-  const isLocked = Number(req.body?.is_locked ?? 0) ? 1 : 0;
-  const maintenance = Number(req.body?.maintenance_mode ?? 0) ? 1 : 0;
-  const vipOnly = Number(req.body?.vip_only ?? 0) ? 1 : 0;
-  const staffOnly = Number(req.body?.staff_only ?? 0) ? 1 : 0;
-  const minLevel = Math.max(0, Math.min(999, Number(req.body?.min_level ?? 0) || 0));
-  const eventsEnabled = Number(req.body?.events_enabled ?? 1) ? 1 : 0;
-
-  if (!Number.isFinite(slowmode) || slowmode < 0 || slowmode > 3600) {
-    return res.status(400).send("Invalid slowmode");
-  }
-  try {
-    const roomRow = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
-    if (!roomRow) return res.status(404).send("Not found");
-    await dbRunAsync(
-      `UPDATE rooms
-          SET slowmode_seconds = ?,
-              is_locked = ?,
-              maintenance_mode = ?,
-              vip_only = ?,
-              staff_only = ?,
-              min_level = ?,
-              events_enabled = ?
-        WHERE name = ?`,
-      [slowmode, isLocked, maintenance, vipOnly, staffOnly, minLevel, eventsEnabled, roomName]
-    );
-    await emitRoomStructureUpdate();
-    return res.json({ ok: true });
-
-app.get("/api/rooms/:id/events", strictLimiter, requireAdminPlus, async (req, res) => {
-  const roomName = sanitizeRoomName(req.params.id || "");
-  if (!roomName) return res.status(400).send("Invalid room");
-  return res.json({ ok: true, events: getActiveEventsForRoom(roomName) });
-});
-
-app.post("/api/rooms/:id/events", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
-  const roomName = sanitizeRoomName(req.params.id || "");
-  if (!roomName) return res.status(400).send("Invalid room");
-  const type = String(req.body?.type || "").trim();
-  const durationSec = Math.max(0, Math.min(24 * 60 * 60, Number(req.body?.duration_seconds ?? 0) || 0));
-  const payload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
-  const id = ROOM_EVENT_SEQ++;
-  const startedAt = Date.now();
-  const endsAt = durationSec ? startedAt + durationSec * 1000 : null;
-  const ev = { id, type, payload, startedAt, endsAt, createdBy: req.session?.user?.username || null };
-  addRoomEvent(roomName, ev);
-
-  // Broadcast a room-scoped system message
-  let text = "";
-  if (type === "announcement") text = payload?.text ? String(payload.text).slice(0, 500) : "📢 Announcement";
-  else if (type === "prompt") text = payload?.text ? String(payload.text).slice(0, 500) : "💬 Prompt event started.";
-  else if (type === "boost") text = `✨ Boost event started${durationSec ? ` for ${durationSec}s` : ""}.`;
-  else text = `🎉 Event started: ${type || "custom"}.`;
-  io.to(roomName).emit("system", { room: roomName, text });
-
-  return res.json({ ok: true, event: ev });
-});
-
-app.post("/api/room-events/:id/stop", strictLimiter, requireAdminPlus, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id) || id < 1) return res.status(400).send("Invalid event");
-  const stopped = stopRoomEventById(id);
-  if (!stopped) return res.status(404).send("Not found");
-  io.to(stopped.room).emit("system", { room: stopped.room, text: "⛔ Room event ended." });
-  return res.json({ ok: true });
-});
-
-  } catch (e) {
-    console.warn("[rooms][settings]", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
     const categoryId = resolved?.categoryId ?? null;
     const categoryRow = categoryId
       ? await dbGetAsync(
@@ -9680,12 +9762,134 @@ app.post("/api/room-events/:id/stop", strictLimiter, requireAdminPlus, async (re
   }
 });
 
+app.patch("/api/rooms/:id/settings", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
+  const roomName = sanitizeRoomName(req.params.id || "");
+  if (!roomName) return res.status(400).send("Invalid room");
+  const slowmode = Number(req.body?.slowmode_seconds ?? req.body?.slowmode ?? 0);
+  const isLocked = Number(req.body?.is_locked ?? 0) ? 1 : 0;
+  const maintenance = Number(req.body?.maintenance_mode ?? 0) ? 1 : 0;
+  const vipOnly = Number(req.body?.vip_only ?? 0) ? 1 : 0;
+  const staffOnly = Number(req.body?.staff_only ?? 0) ? 1 : 0;
+  const minLevel = Math.max(0, Math.min(999, Number(req.body?.min_level ?? 0) || 0));
+  const eventsEnabled = Number(req.body?.events_enabled ?? 1) ? 1 : 0;
+
+  if (!Number.isFinite(slowmode) || slowmode < 0 || slowmode > 3600) {
+    return res.status(400).send("Invalid slowmode");
+  }
+  try {
+    const roomRow = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
+    if (!roomRow) return res.status(404).send("Not found");
+    await dbRunAsync(
+      `UPDATE rooms
+          SET slowmode_seconds = ?,
+              is_locked = ?,
+              maintenance_mode = ?,
+              vip_only = ?,
+              staff_only = ?,
+              min_level = ?,
+              events_enabled = ?
+        WHERE name = ?`,
+      [slowmode, isLocked, maintenance, vipOnly, staffOnly, minLevel, eventsEnabled, roomName]
+    );
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn("[rooms][settings]", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.patch("/api/rooms/:id/archive", strictLimiter, requireAdminPlus, async (req, res) => {
+  const roomName = sanitizeRoomName(req.params.id || "");
+  if (!roomName) return res.status(400).send("Invalid room");
+  const actor = req.session?.user;
+  if (isCoreRoomName(roomName) && !requireMinRole(actor?.role, "Owner")) {
+    return res.status(403).send("Core rooms can only be archived by the Owner");
+  }
+  try {
+    const row = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
+    if (!row) return res.status(404).send("Not found");
+    await dbRunAsync(`UPDATE rooms SET archived = 1 WHERE name = ?`, [roomName]);
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn("[rooms] archive failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.patch("/api/rooms/:id/restore", strictLimiter, requireAdminPlus, async (req, res) => {
+  const roomName = sanitizeRoomName(req.params.id || "");
+  if (!roomName) return res.status(400).send("Invalid room");
+  try {
+    const row = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
+    if (!row) return res.status(404).send("Not found");
+    await dbRunAsync(`UPDATE rooms SET archived = 0 WHERE name = ?`, [roomName]);
+    await emitRoomStructureUpdate();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.warn("[rooms] restore failed", e?.message || e);
+    return res.status(500).send("Failed");
+  }
+});
+
+app.get("/api/rooms/:id/events", strictLimiter, requireAdminPlus, async (req, res) => {
+  const roomName = sanitizeRoomName(req.params.id || "");
+  if (!roomName) return res.status(400).send("Invalid room");
+  return res.json({ ok: true, events: getActiveEventsForRoom(roomName) });
+});
+
+app.post("/api/rooms/:id/events", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
+  const roomName = sanitizeRoomName(req.params.id || "");
+  if (!roomName) return res.status(400).send("Invalid room");
+  const type = String(req.body?.type || "").trim();
+  const allowedTypes = new Set(["announcement", "prompt", "flair"]);
+  if (!allowedTypes.has(type)) return res.status(400).send("Invalid event type");
+  const roomRow = await dbGetAsync(`SELECT events_enabled, archived FROM rooms WHERE name = ?`, [roomName]);
+  if (!roomRow) return res.status(404).send("Not found");
+  if (Number(roomRow.archived || 0) === 1) return res.status(400).send("Room is archived");
+  if (Number(roomRow.events_enabled ?? 1) === 0) return res.status(400).send("Events are disabled for this room");
+  const durationSec = Math.max(0, Math.min(24 * 60 * 60, Number(req.body?.duration_seconds ?? 0) || 0));
+  const payload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
+  const id = ROOM_EVENT_SEQ++;
+  const startedAt = Date.now();
+  const endsAt = durationSec ? startedAt + durationSec * 1000 : null;
+  const rawText = String(payload?.text || "").trim();
+  if (type === "announcement" && !rawText) return res.status(400).send("Text required");
+  const resolvedText = type === "prompt" ? (rawText || selectPromptText()) : rawText;
+  const title = resolvedText ? resolvedText.slice(0, 80) : type === "flair" ? "Visual Flair" : "Room Event";
+  const ev = { id, type, title, payload: { ...payload, text: resolvedText }, startedAt, endsAt, createdBy: req.session?.user?.username || null };
+  await addRoomEvent(roomName, ev);
+  io.to(roomName).emit("room:event", { room: roomName, active: ev, at: Date.now() });
+
+  if (type === "announcement" || type === "prompt") {
+    const text = resolvedText ? String(resolvedText).slice(0, 500) : "💬 Prompt event started.";
+    io.to(roomName).emit("system", { room: roomName, text });
+  }
+
+  return res.json({ ok: true, event: ev });
+});
+
+app.post("/api/room-events/:id/stop", strictLimiter, requireAdminPlus, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id < 1) return res.status(400).send("Invalid event");
+  const stopped = await stopRoomEventById(id);
+  if (!stopped) return res.status(404).send("Not found");
+  io.to(stopped.room).emit("system", { room: stopped.room, text: "⛔ Room event ended." });
+  io.to(stopped.room).emit("room:event", { room: stopped.room, active: null, at: Date.now() });
+  return res.json({ ok: true });
+});
+
 
 app.patch("/api/rooms/:id", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
   const oldName = sanitizeRoomName(req.params.id || "");
   const nextName = sanitizeRoomName(req.body?.name || "");
   if (!oldName || !nextName) return res.status(400).send("Invalid room");
   if (oldName === nextName) return res.json({ ok: true, name: nextName });
+  const actor = req.session?.user;
+  if (isCoreRoomName(oldName) && !requireMinRole(actor?.role, "Owner")) {
+    return res.status(403).send("Core rooms can only be renamed by the Owner");
+  }
   try {
     const roomRow = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [oldName]);
     if (!roomRow) return res.status(404).send("Not found");
@@ -13054,7 +13258,7 @@ enforceVipGate(desired, (allowed) => {
   }
 
   db.get(
-  `SELECT name, vip_only, staff_only, min_level, is_locked, maintenance_mode FROM rooms WHERE name=?`,
+  `SELECT name, vip_only, staff_only, min_level, is_locked, maintenance_mode, archived FROM rooms WHERE name=?`,
   [desired],
   (_err, row) => {
     if (!row) return doJoin("main", status);
@@ -13068,6 +13272,11 @@ enforceVipGate(desired, (allowed) => {
     // Maintenance gate: Admin+ only
     if (Number(row.maintenance_mode || 0) === 1 && roleRankServer(sessUser.role) < roleRankServer("Admin")) {
       try { socket.emit("system", { room: "__global__", text: "That room is in maintenance.", meta: { kind: "global" } }); } catch (_) {}
+      return doJoin("main", status);
+    }
+
+    if (Number(row.archived || 0) === 1) {
+      try { socket.emit("system", { room: "__global__", text: "That room is archived.", meta: { kind: "global" } }); } catch (_) {}
       return doJoin("main", status);
     }
 
@@ -14348,11 +14557,16 @@ if (!room) {
         }
 
         db.get(
-          `SELECT slowmode_seconds, is_locked FROM rooms WHERE name=?`,
+          `SELECT slowmode_seconds, is_locked, archived FROM rooms WHERE name=?`,
           [room],
           (_err, settings) => {
             const slowSeconds = Number(settings?.slowmode_seconds || 0);
             const locked = Number(settings?.is_locked || 0) === 1;
+            const archived = Number(settings?.archived || 0) === 1;
+            if (archived) {
+              socket.emit("command response", { ok: false, message: "Room is archived" });
+              return;
+            }
             if (locked && !requireMinRole(socket.user.role, "Moderator")) {
               socket.emit("command response", { ok: false, message: "Room is locked" });
               return;
@@ -15340,6 +15554,12 @@ async function startServer() {
   }
   if (pgResult.status === "rejected") {
     console.error("[startup] Postgres init failed", pgResult.reason);
+  }
+
+  try {
+    await ensureCoreRoomsExist();
+  } catch (e) {
+    console.warn("[startup] core room ensure failed", e?.message || e);
   }
 
   await new Promise((resolve) => {

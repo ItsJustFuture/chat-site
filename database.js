@@ -188,6 +188,11 @@ async function runSqliteMigrations() {
     ["is_locked", "is_locked INTEGER NOT NULL DEFAULT 0"],
     ["pinned_message_ids", "pinned_message_ids TEXT"],
     ["maintenance_mode", "maintenance_mode INTEGER NOT NULL DEFAULT 0"],
+    ["vip_only", "vip_only INTEGER NOT NULL DEFAULT 0"],
+    ["staff_only", "staff_only INTEGER NOT NULL DEFAULT 0"],
+    ["min_level", "min_level INTEGER NOT NULL DEFAULT 0"],
+    ["events_enabled", "events_enabled INTEGER NOT NULL DEFAULT 1"],
+    ["archived", "archived INTEGER NOT NULL DEFAULT 0"],
   ]);
 
   await ensureRoomHierarchySqlite();

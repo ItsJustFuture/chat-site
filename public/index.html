@@ -150,7 +150,15 @@
 <div class="row" style="gap:6px;">
 <button class="iconBtn smallIcon" id="channelsCloseBtn" title="Close" type="button">✕</button>
 <button class="iconBtn smallIcon" id="menuToggleBtn" title="Menu" type="button">☰</button>
+<div class="roomActionsWrap">
 <button class="iconBtn smallIcon" id="manageRoomsBtn" title="Manage rooms" type="button">⋯</button>
+<div class="roomActionsMenu" id="roomActionsMenu" hidden="">
+<button type="button" data-room-action="add-category">Add category</button>
+<button type="button" data-room-action="add-room">Add room</button>
+<button type="button" data-room-action="add-vip-room">Add VIP room</button>
+<button type="button" data-room-action="manage-rooms">Manage rooms</button>
+</div>
+</div>
 </div>
 </div>
 <div class="roomsPanel" id="roomsPanel">
@@ -2355,6 +2363,7 @@
           <label for="roomManageCategorySelect">Subcategory</label>
           <select id="roomManageCategorySelect"></select>
         </div>
+        <label class="chk"><input type="checkbox" id="roomManageShowArchived"> Show archived rooms</label>
         <div class="roomManageList" id="roomManageRoomList"></div>
         <div class="msgline" id="roomManageMsg"></div>
       </div>
@@ -2384,6 +2393,7 @@
 
           <div class="row" style="gap:8px; flex-wrap:wrap; margin-top:10px;">
             <button class="btn" type="submit">Create</button>
+            <div class="msgline" id="roomManageCreateMsg"></div>
           </div>
         </form>
       </div>
@@ -2397,25 +2407,22 @@
           <select id="roomEventsType">
             <option value="announcement">Announcement</option>
             <option value="prompt">Prompt</option>
-            <option value="boost">XP Boost</option>
+            <option value="flair">Visual Flair</option>
           </select>
         </div>
         <div class="field">
           <label for="roomEventsText">Text</label>
-          <textarea id="roomEventsText" rows="3" placeholder="What should appear as a system message?"></textarea>
+          <textarea id="roomEventsText" rows="3" placeholder="Announcement or prompt text (optional for prompts)."></textarea>
         </div>
         <div class="row" style="gap:8px; flex-wrap:wrap;">
           <div class="field" style="flex:1; min-width:160px;">
             <label for="roomEventsDuration">Duration (seconds, 0 = no end)</label>
             <input id="roomEventsDuration" type="number" min="0" max="86400" value="600"/>
           </div>
-          <div class="field" style="flex:1; min-width:160px;">
-            <label for="roomEventsXpMult">XP multiplier (boost only)</label>
-            <input id="roomEventsXpMult" type="number" min="1" max="10" value="2"/>
-          </div>
         </div>
         <div class="row" style="gap:8px; flex-wrap:wrap; margin-top:10px;">
           <button class="btn" id="roomEventsStartBtn" type="button">Start event</button>
+          <div class="msgline" id="roomEventsMsg"></div>
         </div>
 
         <div class="roomEventsActive">
