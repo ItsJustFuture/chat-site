@@ -585,7 +585,15 @@
 <aside class="members drawer" id="membersPane">
 <div class="drawerHeader">
 <h3>Members</h3>
-<button class="btn secondary small" hidden="" id="membersAdminMenuBtn" type="button">Admin</button>
+<button class="btn secondary small" hidden="" id="membersAdminMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false">Admin</button>
+<div class="adminDropdown" hidden="" id="membersAdminMenu" role="menu" aria-label="Admin tools">
+  <div class="adminDropdownHeader">Admin Tools</div>
+  <button class="adminDropdownItem" id="adminMenuAppealsBtn" type="button" role="menuitem">Appeals</button>
+  <button class="adminDropdownItem" id="adminMenuReferralsBtn" type="button" role="menuitem">Referrals</button>
+  <button class="adminDropdownItem" id="adminMenuRoleDebugBtn" type="button" role="menuitem">Role debug</button>
+  <button class="adminDropdownItem" id="adminMenuFeatureFlagsBtn" type="button" role="menuitem">Flags</button>
+  <button class="adminDropdownItem" id="adminMenuSessionsBtn" type="button" role="menuitem">Sessions</button>
+</div>
 <button class="btn secondary small legacyAdminBtn" hidden="" id="appealsPanelBtn" type="button">Appeals</button>
 <button class="btn secondary small legacyAdminBtn" hidden="" id="referralsPanelBtn" type="button">Referrals</button>
 <button class="btn secondary small legacyAdminBtn" hidden="" id="roleDebugPanelBtn" type="button">Role debug</button>

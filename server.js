@@ -320,11 +320,23 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
   //
   // For room-scoped system messages, we now emit an explicit payload
   // { room, text, meta? } so the client can route it correctly.
+  function buildSystemPayload(room, text, meta) {
+    const ts = Date.now();
+    const payload = {
+      id: `sys-${ts}-${Math.random().toString(36).slice(2, 8)}`,
+      ts,
+      room: String(room || ""),
+      type: "system",
+      text: String(text ?? ""),
+    };
+    if (meta && typeof meta === "object") payload.meta = meta;
+    return payload;
+  }
+
   function emitRoomSystem(room, text, meta) {
     const r = typeof room === "string" ? room : "";
     if (!r) return;
-    const payload = { room: r, text: String(text ?? "") };
-    if (meta && typeof meta === "object") payload.meta = meta;
+    const payload = buildSystemPayload(r, text, meta);
     // IMPORTANT: Some historical code paths can leave a socket joined to a room
     // even after its "currentRoom" changes (e.g., legacy "#room" mismatches or
     // reconnect races). If we emit to the Socket.IO room directly, those stale
@@ -350,10 +362,9 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
   function emitGlobalSystem(text, meta) {
     // Global system messages must be explicitly marked as such so clients can
     // safely ignore accidental global emissions (prevents room bleed).
-    const payload = { room: "__global__", text: String(text ?? "") };
     const m = (meta && typeof meta === "object") ? { ...meta } : {};
     if (!m.kind) m.kind = "global";
-    payload.meta = m;
+    const payload = buildSystemPayload("__global__", text, m);
     io.emit("system", payload);
     if (DEBUG_ROOMS) {
       console.log("[rooms] system emit", { room: "__global__", text: payload.text, meta: payload.meta || null });
@@ -3833,7 +3844,7 @@ const commandRegistry = {
       if (!canModerate(actorRole, target.role)) return { ok: false, message: "Permission denied" };
       const reason = args.slice(1).join(" ").slice(0, 180) || "No reason provided";
       const sid = socketIdByUserId.get(target.id);
-      if (sid) io.to(sid).emit("system", { room: "__global__", text: "You were warned by " + actor.username + ": " + reason, meta: { kind: "global" } });
+      if (sid) io.to(sid).emit("system", buildSystemPayload("__global__", "You were warned by " + actor.username + ": " + reason, { kind: "global" }));
       logModAction({ actor, action: "WARN_COMMAND", targetUserId: target.id, targetUsername: target.username, room: null, details: reason });
       return { ok: true, message: `Warned ${target.username}: ${reason}`, targets: target.id };
     },
@@ -4222,7 +4233,7 @@ const commandRegistry = {
       await addRoomEvent(room, ev);
       io.to(room).emit("room:event", { room, active: ev, at: Date.now() });
       if (type === "announcement" || type === "prompt") {
-        io.to(room).emit("system", { room, text: resolvedText || "💬 Prompt event started." });
+        emitRoomSystem(room, resolvedText || "💬 Prompt event started.");
       }
       return { ok: true, message: `Room event '${title}' started.` };
     },
@@ -9864,7 +9875,7 @@ app.post("/api/rooms/:id/events", strictLimiter, requireAdminPlus, express.json(
 
   if (type === "announcement" || type === "prompt") {
     const text = resolvedText ? String(resolvedText).slice(0, 500) : "💬 Prompt event started.";
-    io.to(roomName).emit("system", { room: roomName, text });
+    emitRoomSystem(roomName, text);
   }
 
   return res.json({ ok: true, event: ev });
@@ -9875,7 +9886,7 @@ app.post("/api/room-events/:id/stop", strictLimiter, requireAdminPlus, async (re
   if (!Number.isFinite(id) || id < 1) return res.status(400).send("Invalid event");
   const stopped = await stopRoomEventById(id);
   if (!stopped) return res.status(404).send("Not found");
-  io.to(stopped.room).emit("system", { room: stopped.room, text: "⛔ Room event ended." });
+  emitRoomSystem(stopped.room, "⛔ Room event ended.");
   io.to(stopped.room).emit("room:event", { room: stopped.room, active: null, at: Date.now() });
   return res.json({ ok: true });
 });
@@ -13051,7 +13062,7 @@ io.on("connection", async (socket) => {
   if (socketIp) {
     const count = trackSocketConnection(socketIp);
     if (count > MAX_SOCKET_CONN_PER_IP) {
-      socket.emit("system", { room: "__global__", text: "Too many active connections. Try again shortly.", meta: { kind: "global" } });
+      socket.emit("system", buildSystemPayload("__global__", "Too many active connections. Try again shortly.", { kind: "global" }));
       socket.disconnect(true);
       return;
     }
@@ -13252,7 +13263,7 @@ const enforceVipGate = (roomName, cb) => {
 enforceVipGate(desired, (allowed) => {
   if(!allowed){
     try {
-      socket.emit("system", { room: "__global__", text: "That VIP room is locked (VIP + level 25 required).", meta: { kind: "global" } });
+      socket.emit("system", buildSystemPayload("__global__", "That VIP room is locked (VIP + level 25 required).", { kind: "global" }));
     } catch(_){}
     return db.get(`SELECT name FROM rooms WHERE name=?`, ["main"], (_err2, row2) => doJoin(row2 ? "main" : "main", status));
   }
@@ -13265,24 +13276,24 @@ enforceVipGate(desired, (allowed) => {
 
     // Enforce room visibility gates
     if (!canAccessRoomBySettings(sessUser, row)) {
-      try { socket.emit("system", { room: "__global__", text: "You don't have access to that room.", meta: { kind: "global" } }); } catch (_) {}
+      try { socket.emit("system", buildSystemPayload("__global__", "You don't have access to that room.", { kind: "global" })); } catch (_) {}
       return doJoin("main", status);
     }
 
     // Maintenance gate: Admin+ only
     if (Number(row.maintenance_mode || 0) === 1 && roleRankServer(sessUser.role) < roleRankServer("Admin")) {
-      try { socket.emit("system", { room: "__global__", text: "That room is in maintenance.", meta: { kind: "global" } }); } catch (_) {}
+      try { socket.emit("system", buildSystemPayload("__global__", "That room is in maintenance.", { kind: "global" })); } catch (_) {}
       return doJoin("main", status);
     }
 
     if (Number(row.archived || 0) === 1) {
-      try { socket.emit("system", { room: "__global__", text: "That room is archived.", meta: { kind: "global" } }); } catch (_) {}
+      try { socket.emit("system", buildSystemPayload("__global__", "That room is archived.", { kind: "global" })); } catch (_) {}
       return doJoin("main", status);
     }
 
     // Locked gate: Mod+ only
     if (Number(row.is_locked || 0) === 1 && roleRankServer(sessUser.role) < roleRankServer("Moderator")) {
-      try { socket.emit("system", { room: "__global__", text: "That room is locked.", meta: { kind: "global" } }); } catch (_) {}
+      try { socket.emit("system", buildSystemPayload("__global__", "That room is locked.", { kind: "global" })); } catch (_) {}
       return doJoin("main", status);
     }
 
@@ -13690,7 +13701,7 @@ function doJoin(room, status) {
     }
   );
 
-  socket.emit("system", { room, text: "Joined " + room });
+  socket.emit("system", buildSystemPayload(room, "Joined " + room));
   emitUserList(room);
 }
 
@@ -14512,7 +14523,7 @@ if (!room) {
     }
 
     if (!allowSocketEvent(socket, "chat_message", 16, 4000)) {
-      socket.emit("system", { room: socket.currentRoom || "main", text: "You are sending messages too quickly." });
+      socket.emit("system", buildSystemPayload(socket.currentRoom || "main", "You are sending messages too quickly."));
       return;
     }
 
@@ -14534,7 +14545,7 @@ if (!room) {
 
         const rawText = safeString(payload.text, "");
         if (rawText.length > MAX_CHAT_MESSAGE_CHARS) {
-      socket.emit("system", { room: socket.currentRoom || "main", text: "Message too long (max " + MAX_CHAT_MESSAGE_CHARS + " characters)." });
+      socket.emit("system", buildSystemPayload(socket.currentRoom || "main", "Message too long (max " + MAX_CHAT_MESSAGE_CHARS + " characters)."));
           return;
         }
         const text = rawText.slice(0, MAX_CHAT_MESSAGE_CHARS);
@@ -15438,7 +15449,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
 
     findUserByMention(lookupName, (_e, found) => {
       if (!found) {
-        io.to(socket.id).emit("system", { room: socket.currentRoom || "main", text: "User not found: " + lookupName });
+        io.to(socket.id).emit("system", buildSystemPayload(socket.currentRoom || "main", "User not found: " + lookupName));
         return respond({ ok: false, error: "User not found." });
       }
 

@@ -2998,6 +2998,13 @@ const memberGold = document.getElementById("memberGold");
 const memberPills = document.getElementById("memberPills");
 const memberPillRoom = document.getElementById("memberPillRoom");
 const memberPillFriends = document.getElementById("memberPillFriends");
+const membersAdminMenuBtn = document.getElementById("membersAdminMenuBtn");
+const membersAdminMenu = document.getElementById("membersAdminMenu");
+const adminMenuAppealsBtn = document.getElementById("adminMenuAppealsBtn");
+const adminMenuReferralsBtn = document.getElementById("adminMenuReferralsBtn");
+const adminMenuRoleDebugBtn = document.getElementById("adminMenuRoleDebugBtn");
+const adminMenuFeatureFlagsBtn = document.getElementById("adminMenuFeatureFlagsBtn");
+const adminMenuSessionsBtn = document.getElementById("adminMenuSessionsBtn");
 const memberMenu = document.getElementById("memberMenu");
 const memberMenuName = document.getElementById("memberMenuName");
 const memberViewProfileBtn = document.getElementById("memberViewProfileBtn");
@@ -4078,6 +4085,7 @@ function isHighRoll(variant, result){
 function updateDiceSessionStats(payload){
   if (!payload || payload.userId !== me?.id) return;
   const now = Date.now();
+  const inDiceRoom = isDiceRoom(currentRoom);
   if (diceSessionStats.lastRollAt && now - diceSessionStats.lastRollAt > 5 * 60 * 1000) {
     diceSessionStats.consecutiveRolls = 0;
     diceSessionStats.luckyStreak = 0;
@@ -4088,7 +4096,7 @@ function updateDiceSessionStats(payload){
   const result = Number(payload.result ?? payload.value ?? 0);
   if (result > diceSessionStats.highestRoll) {
     diceSessionStats.highestRoll = result;
-    toast?.(`🎯 New high: ${result}`);
+    if (inDiceRoom) toast?.(`🎯 New high: ${result}`);
   }
 
   if (isHighRoll(payload.variant, result)) {
@@ -4098,11 +4106,11 @@ function updateDiceSessionStats(payload){
   }
 
   if (diceSessionStats.luckyStreak === 3) {
-    toast?.("🔥 Lucky Streak x3");
+    if (inDiceRoom) toast?.("🔥 Lucky Streak x3");
   }
 
   if (diceSessionStats.consecutiveRolls === 5 || diceSessionStats.consecutiveRolls === 10) {
-    toast?.(`🔥 ${diceSessionStats.consecutiveRolls} roll streak!`);
+    if (inDiceRoom) toast?.(`🔥 ${diceSessionStats.consecutiveRolls} roll streak!`);
   }
 }
 
@@ -8689,6 +8697,19 @@ function isMobileDrawerMode(){
   return window.matchMedia('(max-width: 980px)').matches;
 }
 
+function closeMembersAdminMenu(){
+  if (!membersAdminMenu) return;
+  membersAdminMenu.hidden = true;
+  membersAdminMenuBtn?.setAttribute("aria-expanded", "false");
+}
+
+function toggleMembersAdminMenu(force){
+  if (!membersAdminMenu) return;
+  const shouldOpen = typeof force === "boolean" ? force : membersAdminMenu.hidden;
+  membersAdminMenu.hidden = !shouldOpen;
+  membersAdminMenuBtn?.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+}
+
 function closeDrawers(){
   channelsPane?.classList.remove("open");
   membersPane?.classList.remove("open");
@@ -8697,6 +8718,7 @@ function closeDrawers(){
   document.body.classList.remove("drawer-left-open", "drawer-right-open");
   setDrawerTypingMode(false);
   closeMemberMenu();
+  closeMembersAdminMenu();
   syncDesktopMembersWidth();
 }
 
@@ -8764,6 +8786,36 @@ openChannelsBtn?.addEventListener("click", openChannels);
 openMembersBtn?.addEventListener("click", openMembers);
 channelsPane?.addEventListener("focusin", handleDrawerFocusIn, true);
 channelsPane?.addEventListener("focusout", handleDrawerFocusOut, true);
+membersAdminMenuBtn?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleMembersAdminMenu();
+});
+adminMenuAppealsBtn?.addEventListener("click", () => {
+  closeMembersAdminMenu();
+  openAppealsPanel();
+});
+adminMenuReferralsBtn?.addEventListener("click", () => {
+  closeMembersAdminMenu();
+  openReferralsPanel();
+});
+adminMenuRoleDebugBtn?.addEventListener("click", () => {
+  closeMembersAdminMenu();
+  openRoleDebugPanel();
+});
+adminMenuFeatureFlagsBtn?.addEventListener("click", () => {
+  closeMembersAdminMenu();
+  openFeatureFlagsPanel();
+});
+adminMenuSessionsBtn?.addEventListener("click", () => {
+  closeMembersAdminMenu();
+  openSessionsPanel();
+});
+document.addEventListener("click", (e) => {
+  if (!membersAdminMenu || membersAdminMenu.hidden) return;
+  const target = e.target;
+  if (membersAdminMenu.contains(target) || membersAdminMenuBtn?.contains(target)) return;
+  closeMembersAdminMenu();
+});
 
 /* Outside tap close: use pointerdown (better on mobile) */
 /* Outside tap close: only when the user taps the overlay itself (never the drawers). */
@@ -11282,6 +11334,7 @@ function setActiveRoom(room){
   const wasSurvivalRoom = isSurvivalRoom(currentRoom);
   currentRoom = room;
   setRoomEvent(null);
+  closeMembersAdminMenu();
   const nowDiceRoom = isDiceRoom(room);
   const nowSurvivalRoom = isSurvivalRoom(room);
   document.body.classList.toggle("dice-room", nowDiceRoom);
@@ -17398,14 +17451,25 @@ async function initChatApp(){
   hardHideProfileModal();
 
   // Staff-only: show staff buttons in members drawer
-  if(appealsPanelBtn) appealsPanelBtn.hidden = !isStaffRole(me?.role);
+  const isStaff = isStaffRole(me?.role);
+  if(membersAdminMenuBtn) membersAdminMenuBtn.hidden = !isStaff;
+  if(membersAdminMenu) membersAdminMenu.hidden = true;
+  if(appealsPanelBtn) appealsPanelBtn.hidden = !isStaff;
+  if(adminMenuAppealsBtn) adminMenuAppealsBtn.hidden = !isStaff;
   // Referrals are for Admin+ review (mods create them)
-  if(referralsPanelBtn) referralsPanelBtn.hidden = !(me?.role==="Admin" || me?.role==="Co-owner" || me?.role==="Owner");
+  const canReviewReferrals = me?.role==="Admin" || me?.role==="Co-owner" || me?.role==="Owner";
+  if(referralsPanelBtn) referralsPanelBtn.hidden = !canReviewReferrals;
+  if(adminMenuReferralsBtn) adminMenuReferralsBtn.hidden = !canReviewReferrals;
   // Role debug is for Owner/Co-Owner (and Admin as fallback)
-  if(roleDebugPanelBtn) roleDebugPanelBtn.hidden = !(me?.role==="Owner" || me?.role==="Co-owner" || me?.role==="Admin");
+  const canRoleDebug = me?.role==="Owner" || me?.role==="Co-owner" || me?.role==="Admin";
+  if(roleDebugPanelBtn) roleDebugPanelBtn.hidden = !canRoleDebug;
+  if(adminMenuRoleDebugBtn) adminMenuRoleDebugBtn.hidden = !canRoleDebug;
   
-  if(featureFlagsPanelBtn) featureFlagsPanelBtn.hidden = !(me?.role==="Owner");
-  if(sessionsPanelBtn) sessionsPanelBtn.hidden = !(me?.role==="Owner");
+  const isOwner = me?.role==="Owner";
+  if(featureFlagsPanelBtn) featureFlagsPanelBtn.hidden = !isOwner;
+  if(adminMenuFeatureFlagsBtn) adminMenuFeatureFlagsBtn.hidden = !isOwner;
+  if(sessionsPanelBtn) sessionsPanelBtn.hidden = !isOwner;
+  if(adminMenuSessionsBtn) adminMenuSessionsBtn.hidden = !isOwner;
 initAppealsDurationSelect();
 
   await loadVibeTags();
@@ -17772,7 +17836,9 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
     }
 
     const text = (payload && typeof payload === "object") ? payload.text : "";
-    const rawRoom = (payload && typeof payload === "object") ? payload.room : "";
+    const rawRoom = (payload && typeof payload === "object")
+      ? (payload.room ?? payload.roomId ?? payload.roomName ?? "")
+      : "";
     const room = (String(rawRoom || "").startsWith("#")) ? String(rawRoom || "").slice(1) : String(rawRoom || "");
     const meta = (payload && typeof payload === "object") ? (payload.meta || null) : null;
 
@@ -17932,23 +17998,26 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   }
 
   socket.on("dice:result", (payload = {}) => {
+    const inDiceRoom = isDiceRoom(currentRoom);
     const result = payload.result ?? payload.value;
     const variant = payload.variant || "d6";
     const won = !!payload.won;
-    showDiceAnimation({
-      result,
-      variant,
-      won,
-      deltaGold: payload.deltaGold,
-      breakdown: payload.breakdown,
-      outcome: payload.outcome,
-    });
+    if (inDiceRoom) {
+      showDiceAnimation({
+        result,
+        variant,
+        won,
+        deltaGold: payload.deltaGold,
+        breakdown: payload.breakdown,
+        outcome: payload.outcome,
+      });
+    }
     if (payload.userId === me?.id) {
       diceCooldownUntil = Date.now() + DICE_ROLL_COOLDOWN_MS;
       updateDiceSessionStats(payload);
       if (typeof refreshMe === "function") refreshMe();
     }
-    if (payload.username) noteDiceRoll(payload.username, result);
+    if (inDiceRoom && payload.username) noteDiceRoll(payload.username, result);
   });
   socket.on("dice:error", (msg)=> {
     const m = String(msg||"");
@@ -17960,6 +18029,7 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
     addSystem(msg);
   });
   socket.on("luck:update", (payload = {}) => {
+    if (!isDiceRoom(currentRoom)) return;
     if (payload && typeof payload.luck === "number") {
       luckState.luck = payload.luck;
       luckState.rollStreak = Number(payload.rollStreak || 0);
