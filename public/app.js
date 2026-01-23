@@ -5476,7 +5476,7 @@ function setVibeTagDefs(payload){
 async function loadVibeTags(){
   try{
     const res = await fetch("/api/vibes");
-    if(!res.ok) return;
+    if(!res.ok){ hardHideProfileModal(); return; }
     const data = await res.json();
     setVibeTagDefs(data);
   }catch(err){
@@ -6491,7 +6491,7 @@ async function loadChatFxPrefs({ force = false } = {}){
   chatFxPrefsLoading = true;
   try{
     const res = await fetch("/api/me/prefs");
-    if(!res.ok) return;
+    if(!res.ok){ hardHideProfileModal(); return; }
     const data = await res.json();
     const prefs = data?.prefs || {};
     applyChatFxPrefsFromServer(prefs.chatFx || {});
@@ -6504,7 +6504,7 @@ async function loadChatFxPrefs({ force = false } = {}){
 async function loadUserPrefs(){
   try{
     const res = await fetch("/api/me/prefs");
-    if(!res.ok) return;
+    if(!res.ok){ hardHideProfileModal(); return; }
     const data = await res.json();
     const prefs = data?.prefs || {};
     if(prefs.dmBadgePrefs && typeof prefs.dmBadgePrefs === "object"){
@@ -8561,7 +8561,7 @@ function noteDiceRoll(username, value){
 async function loadProgression(){
   try{
     const res = await fetch("/api/me/progression");
-    if(!res.ok) return;
+    if(!res.ok){ hardHideProfileModal(); return; }
     const data = await res.json();
     applyProgressionPayload(data);
   }catch{}
@@ -11012,21 +11012,20 @@ tabActions?.addEventListener("click", async ()=>{
   if (viewModeration?.style.display !== "none") await refreshLogs();
 });
 
-// modal open/close
 
+function hardHideProfileModal(){
+  try{
+    if(!modal) return;
+    modal.classList.remove("modal-visible");
+    modal.classList.remove("modal-closing");
+    modal.style.display="none";
+  }catch{}
+  modalTargetUsername=null;
+  modalTargetUserId=null;
+}
+// modal open/close
 function openModal(){
   if (!modal) return;
-  // Guard: never open an empty profile modal (prevents app from being blocked)
-  const nameText = (modalName && modalName.textContent) ? modalName.textContent.trim() : "";
-  if (!modalTargetUsername && !nameText) {
-    try { closeModal(); } catch {}
-    // Hard hide just in case
-    try {
-      modal.style.display = "none";
-      modal.classList.remove("modal-visible", "modal-closing");
-    } catch {}
-    return;
-  }
   modal.style.display="flex";
   modal.classList.remove("modal-closing");
   if (PREFERS_REDUCED_MOTION) {
@@ -11037,8 +11036,7 @@ function openModal(){
     modal.classList.add("modal-visible");
   });
 }
-function closeModal(
-){
+function closeModal(){
   if (!modal) return;
   modal.classList.remove("modal-visible");
   modal.classList.add("modal-closing");
@@ -13623,7 +13621,7 @@ async function loadFaq(force = false){
 async function loadLatestUpdateSnippet(){
   if(latestUpdate) latestUpdate.style.display = "none";
   const {res, text} = await api("/api/changelog?limit=1", { method:"GET" });
-  if(!res.ok) return;
+  if(!res.ok){ hardHideProfileModal(); return; }
   try{
     const rows = JSON.parse(text || "[]");
     latestChangelogEntry = Array.isArray(rows) && rows.length ? rows[0] : null;
@@ -14885,7 +14883,7 @@ memberPillFriends?.addEventListener('click', () => setMembersViewMode('friends')
 async function loadMyProfile(){
   const priorRole = me?.role;
   const res=await fetch("/profile");
-  if(!res.ok) return;
+  if(!res.ok){ hardHideProfileModal(); return; }
   const p=await res.json();
   updateRoleCache(p.username, p.role);
   modalTargetUserId = Number(p?.id) || null;
@@ -16466,7 +16464,7 @@ async function openMyProfile(){
     // Fallback to member profile route if /profile fails for any reason
     try { await openMemberProfile(me.username); return; } catch {}
   }
-  if(!res.ok) return;
+  if(!res.ok){ hardHideProfileModal(); return; }
   const p = await res.json();
   updateRoleCache(p.username, p.role);
   modalTargetUsername = p.username;
@@ -16598,7 +16596,7 @@ async function openMemberProfile(username){
   closeDrawers();
 
   const res=await fetch("/profile/" + encodeURIComponent(username));
-  if(!res.ok) return;
+  if(!res.ok){ hardHideProfileModal(); return; }
   const p=await res.json();
   modalTargetUserId = Number(p?.id) || null;
   const isSelf = isSelfProfile(p);
@@ -17067,6 +17065,8 @@ async function initChatApp(){
   me = sessionUser;
   setAuthUser(sessionUser);
   setView("chat");
+  // Fail-safe: never start with profile modal stuck open
+  hardHideProfileModal();
 
   // Staff-only: show staff buttons in members drawer
   if(appealsPanelBtn) appealsPanelBtn.hidden = !isStaffRole(me?.role);
@@ -17904,25 +17904,29 @@ socket.on("dm history", (payload = {}) => {
   meStatusText.textContent = normalizeStatusLabel(statusSelect.value, "Online");
   resetIdle();
 
-  // hash profile links
-  if(location.hash.startsWith("#profile:")){
-    const u = decodeURIComponent(location.hash.slice("#profile:".length));
-    if(u) openMemberProfile(u);
-  }
-  window.addEventListener("hashchange", ()=>{
+  // hash profile links (clear hash after handling to avoid "stuck" profile overlays on reload)
+  const handleProfileHash = async () => {
     if(location.hash.startsWith("#profile:")){
       const u = decodeURIComponent(location.hash.slice("#profile:".length));
-      if(u) openMemberProfile(u);
+      if(u){
+        try{ await openMemberProfile(u); }catch{ hardHideProfileModal(); }
+      }else{
+        hardHideProfileModal();
+      }
+      try{ history.replaceState(null, "", location.pathname + location.search); }catch{}
+    }
+  };
+  handleProfileHash();
+  window.addEventListener("hashchange", ()=>{ handleProfileHash(); });
+  erProfile(u);
     }
   });
 }
 
 // boot: auth gate
 
-async function bootApp()
-{
+async function bootApp(){
   setView("loading");
-  try{ if(modal){ modal.style.display='none'; modal.classList.remove('modal-visible','modal-closing'); } }catch{}
   bindRestrictedUI();
   bindStaffAppealsUI();
   bindReferralsUI();
