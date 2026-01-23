@@ -335,7 +335,7 @@
 <button class="iconBtn withBadge" id="groupDmToggleBtn" title="Group DMs" type="button">👥<span class="notifDot" id="groupDmBadgeDot" title="New group DMs"></span></button>
 <button aria-label="Notifications" class="iconBtn withBadge" id="notificationsBtn" title="Notifications" type="button">🔔<span class="notifDot" id="notificationsDot" title="New notifications"></span></button>
 <button class="iconBtn" id="roomChessBtn" title="Chess Table" type="button">♟</button>
-<button class="btn secondary small survivalOpenBtn" hidden id="survivalOpenBtn" type="button">Open Simulator</button>
+<button aria-label="Open Simulator" class="btn secondary small survivalOpenBtn" hidden id="survivalOpenBtn" title="Open Simulator" type="button">🧭</button>
 <button class="iconBtn mobOnly" id="openMembersBtn" title="Members" type="button">👥</button>
 </div>
 </div>
@@ -581,8 +581,6 @@
   <button class="adminDropdownItem" id="adminMenuFeatureFlagsBtn" type="button" role="menuitem">Flags</button>
   <button class="adminDropdownItem" id="adminMenuSessionsBtn" type="button" role="menuitem">Sessions</button>
 </div>
-<button class="btn secondary small legacyAdminBtn" hidden="" id="appealsPanelBtn" type="button">Appeals</button>
-<button class="btn secondary small legacyAdminBtn" hidden="" id="referralsPanelBtn" type="button">Referrals</button>
 <button class="btn secondary small legacyAdminBtn" hidden="" id="roleDebugPanelBtn" type="button">Role debug</button>
 <button class="btn secondary small legacyAdminBtn" hidden="" id="featureFlagsPanelBtn" type="button">Flags</button>
 <button class="btn secondary small legacyAdminBtn" hidden="" id="sessionsPanelBtn" type="button">Sessions</button>
@@ -785,13 +783,6 @@
 </div>
 <div class="profileHeaderActions">
 <button aria-label="Edit profile" class="iconBtn smallIcon" id="profileEditBtn" style="display:none;" title="Edit profile" type="button">✏️</button>
-<div class="profileSettingsWrap" id="profileSettingsWrap">
-<button aria-label="Preferences" aria-expanded="false" aria-haspopup="menu" class="iconBtn smallIcon" id="profileSettingsBtn" style="display:none;" title="Preferences" type="button">⚙️</button>
-<div class="profileSettingsMenu" hidden id="profileSettingsMenu" role="menu">
-<button class="profileSettingsItem" data-profile-menu="customize" role="menuitem" type="button">Customize</button>
-<button class="profileSettingsItem" data-profile-menu="themes" role="menuitem" type="button">Themes</button>
-</div>
-</div>
 <button aria-label="Moderation actions" class="iconBtn smallIcon" id="actionsBtn" style="display:none;" title="Moderation actions" type="button">🛡️</button>
 <button aria-label="Close profile" class="iconBtn smallIcon" id="closeModalBtn" type="button">✕</button>
 </div>

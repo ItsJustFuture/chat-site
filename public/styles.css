@@ -2700,6 +2700,13 @@ body.survival-room .survivalPanel{
 
 .survivalOpenBtn{
   white-space:nowrap;
+  min-width:32px;
+  width:32px;
+  height:32px;
+  padding:0;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
 }
 .survivalModalShell{
   width:min(1100px, 100%);
@@ -11122,13 +11129,25 @@ body[data-theme="Iris & Lola Neon"] .irisLolaDrawerEasterStar{
   gap:10px;
   margin-bottom:10px;
 }
-.survivalMapSvg{
+.survivalMapGraphic{
+  position:relative;
   width:100%;
   max-width:860px;
+}
+.survivalMapGraphic img{
+  display:block;
+  width:100%;
   height:auto;
   border-radius:14px;
   border:1px solid rgba(255,255,255,.12);
-  background:rgba(0,0,0,.14);
+}
+.survivalMapSvg{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  border-radius:14px;
+  background:rgba(0,0,0,.18);
 }
 .survivalMapZone rect{
   fill:rgba(255,255,255,.06);
