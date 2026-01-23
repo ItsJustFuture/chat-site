@@ -6,10 +6,13 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
+    "dev": "LOCAL_DEV=1 node server.js",
+    "dev:seed": "LOCAL_DEV=1 node scripts/dev-seed.js",
     "test": "echo \"No tests yet\" && exit 0",
     "test:dice": "node scripts/dice-variant-smoke.js",
     "test:couples": "node scripts/couples-regression.js",
     "test:chess": "node scripts/chess-elo-smoke.js",
+    "test:smoke": "LOCAL_DEV=1 node scripts/smoke-test.js",
     "test:memory": "node scripts/memory-sanity.js",
     "check": "node --check server.js && node --check public/app.js && node --check public/theme-init.js && node --check database.js",
     "audit": "npm audit --audit-level=high",
