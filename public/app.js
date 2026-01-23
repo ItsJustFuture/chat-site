@@ -4,6 +4,7 @@
 window.__TAP_DEBUG__ = window.__TAP_DEBUG__ ?? false;
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const PREFERS_REDUCED_MOTION = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const IS_DEV = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 const DELETE_ANIM_MS = PREFERS_REDUCED_MOTION ? 1 : 200;
 
 function safeJsonParse(raw, fallback) {
@@ -5937,26 +5938,6 @@ function isDiceResultSystemMessage(text){
 
 // ---- Room-scoped system message routing
 // Server can send { room, text } for room-scoped system messages.
-// Buffer off-room system messages so they don't appear in the wrong room.
-const pendingSystemByRoom = new Map(); // room -> Array<string>
-function bufferSystemForRoom(room, text){
-  const r = String(room || "").trim();
-  if(!r) return;
-  const arr = pendingSystemByRoom.get(r) || [];
-  arr.push(String(text ?? ""));
-  if(arr.length > 80) arr.splice(0, arr.length - 80);
-  pendingSystemByRoom.set(r, arr);
-}
-function flushBufferedSystem(room){
-  const r = String(room || "").trim();
-  if(!r) return;
-  const arr = pendingSystemByRoom.get(r);
-  if(!arr || !arr.length) return;
-  pendingSystemByRoom.delete(r);
-  for(const msg of arr){
-    addSystem(msg, { className: isDiceResultSystemMessage(msg) ? "diceResult" : "" });
-  }
-}
 
 function addSystem(text, options = {}){
   const div=document.createElement("div");
@@ -11485,6 +11466,13 @@ function setActiveRoom(room){
     renderLuckMeter();
     requestLuckState();
   }
+  try {
+    if (nowDiceRoom) {
+      mountDiceFx();
+    } else {
+      unmountDiceFx();
+    }
+  } catch {}
   if (wasSurvivalRoom && !nowSurvivalRoom) {
     stopSurvivalAutoRun();
   }
@@ -11546,7 +11534,6 @@ function joinRoom(room){
 
   setActiveRoom(room);
   clearMsgs();
-  try { flushBufferedSystem(room); } catch(_){ }
   socket?.emit("join room", { room, status: normalizeStatusLabel(statusSelect.value, "Online") });
   closeDrawers();
 }
@@ -17940,6 +17927,11 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
       : "";
     const room = (String(rawRoom || "").startsWith("#")) ? String(rawRoom || "").slice(1) : String(rawRoom || "");
     const meta = (payload && typeof payload === "object") ? (payload.meta || null) : null;
+    const scope = (payload && typeof payload === "object") ? String(payload.scope || "") : "";
+
+    if (IS_DEV && !room && !scope) {
+      console.warn("[system] Missing roomId or scope", payload);
+    }
 
     // Extra safety: certain system kinds must ONLY ever render in their dedicated rooms.
     // If a server-side misroute happens, this prevents "bleed" into other rooms.
@@ -17952,16 +17944,13 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
     // Global system messages should ONLY render when explicitly marked.
     // This prevents accidental room bleed if something is emitted with room="__global__".
     if (room === "__global__") {
-      if (meta && typeof meta === "object" && meta.kind === "global") {
+      if ((meta && typeof meta === "object" && meta.kind === "global") || scope === "global") {
         addSystem(text, { className: isDiceResultSystemMessage(text) ? "diceResult" : "" });
       }
       return;
     }
     if (!room) return;
-    if (room !== currentRoom) {
-      bufferSystemForRoom(room, text);
-      return;
-    }
+    if (room !== currentRoom) return;
 
     addSystem(text, { className: isDiceResultSystemMessage(text) ? "diceResult" : "" });
   });
@@ -17988,11 +17977,25 @@ socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
   confettiLayer.id = "confettiLayer";
   confettiLayer.style.display = "none";
 
-  // attach overlays to chat area
-  const chatMain = document.querySelector("main.chat") || document.getElementById("chatMain") || document.body;
-  chatMain.style.position = chatMain.style.position || "relative";
-  chatMain.appendChild(diceOverlay);
-  chatMain.appendChild(confettiLayer);
+  let diceFxMounted = false;
+  function mountDiceFx(){
+    if (diceFxMounted) return;
+    const chatMain = document.querySelector("main.chat") || document.getElementById("chatMain") || document.body;
+    chatMain.style.position = chatMain.style.position || "relative";
+    if (!chatMain.contains(diceOverlay)) chatMain.appendChild(diceOverlay);
+    if (!chatMain.contains(confettiLayer)) chatMain.appendChild(confettiLayer);
+    diceFxMounted = true;
+  }
+  function unmountDiceFx(){
+    if (!diceFxMounted) return;
+    diceOverlay.style.display = "none";
+    confettiLayer.style.display = "none";
+    confettiLayer.innerHTML = "";
+    restoreDiceOverlayLift();
+    diceOverlay.remove();
+    confettiLayer.remove();
+    diceFxMounted = false;
+  }
 
   function restoreDiceOverlayLift(){
     try {
