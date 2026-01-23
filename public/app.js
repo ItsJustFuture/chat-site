@@ -3607,7 +3607,7 @@ function renderSurvivalLog(targetEl, events) {
     icon.textContent = getSurvivalEventIcon(event.outcome || {});
     const text = document.createElement("div");
     text.className = "survivalLogText";
-    const zone = event?.outcome?.zone || null;
+    const zone = normalizeSurvivalZoneName(event?.outcome?.zone) || null;
     const scope = event?.outcome?.scope || null;
     const baseText = event.text || "";
     text.innerHTML = applyMentions(baseText, { linkifyText: false });
@@ -3626,15 +3626,41 @@ function renderSurvivalLog(targetEl, events) {
 }
 
 const SURVIVAL_ARENA_ZONES = [
-  "Open Field",
   "Pine Woods",
-  "Rocky Ridge",
-  "Ruins",
-  "River Bend",
-  "Caves",
-  "Swamp",
-  "Cornucopia",
+  "Old Ruins",
+  "Ridge",
+  "Shimmer Lake",
+  "Central Plaza",
+  "Cave Mouth",
+  "Mossy Swamp",
+  "Supply Drop Zone",
 ];
+const SURVIVAL_ZONE_ALIASES = new Map([
+  ["open field", "Central Plaza"],
+  ["rocky ridge", "Ridge"],
+  ["ruins", "Old Ruins"],
+  ["river bend", "Shimmer Lake"],
+  ["caves", "Cave Mouth"],
+  ["swamp", "Mossy Swamp"],
+  ["cornucopia", "Supply Drop Zone"],
+  ["pine woods", "Pine Woods"],
+  ["old ruins", "Old Ruins"],
+  ["ridge", "Ridge"],
+  ["shimmer lake", "Shimmer Lake"],
+  ["central plaza", "Central Plaza"],
+  ["cave mouth", "Cave Mouth"],
+  ["mossy swamp", "Mossy Swamp"],
+  ["supply drop zone", "Supply Drop Zone"],
+]);
+
+function normalizeSurvivalZoneName(zone) {
+  const raw = String(zone || "").trim();
+  if (!raw) return null;
+  const key = raw.toLowerCase();
+  if (SURVIVAL_ZONE_ALIASES.has(key)) return SURVIVAL_ZONE_ALIASES.get(key);
+  const direct = SURVIVAL_ARENA_ZONES.find((z) => z.toLowerCase() === key);
+  return direct || raw;
+}
 
 function renderSurvivalArena() {
   if (!survivalArenaGrid) return;
@@ -3643,13 +3669,13 @@ function renderSurvivalArena() {
   const byZone = new Map();
   zones.forEach((z)=>byZone.set(z, []));
   participants.forEach((p) => {
-    const zRaw = (p?.location || "Open Field").toString();
-    const z = zones.find((n) => n.toLowerCase() === zRaw.toLowerCase()) || "Open Field";
+    const zRaw = normalizeSurvivalZoneName(p?.location) || SURVIVAL_ARENA_ZONES[0];
+    const z = zones.find((n) => n.toLowerCase() === zRaw.toLowerCase()) || SURVIVAL_ARENA_ZONES[0];
     byZone.get(z).push(p);
   });
 
   // Selected zone for inspecting + filtering.
-  const selected = survivalState?.arena?.selectedZone || null;
+  const selected = normalizeSurvivalZoneName(survivalState?.arena?.selectedZone) || null;
 
   const dangerLevels = survivalState.arena?.dangerLevels || {};
   const zoneMeta = zones.map((z) => {
@@ -3665,20 +3691,21 @@ function renderSurvivalArena() {
   const wrap = document.createElement("div");
   wrap.className = "survivalMapWrap";
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 400 220");
+  svg.setAttribute("viewBox", "0 0 1536 1024");
   svg.setAttribute("class", "survivalMapSvg");
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", "Arena map");
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
 
   const layout = [
-    { z: "Pine Woods", x: 20, y: 20, w: 140, h: 70 },
-    { z: "Rocky Ridge", x: 170, y: 20, w: 120, h: 70 },
-    { z: "Ruins", x: 300, y: 20, w: 80, h: 70 },
-    { z: "River Bend", x: 20, y: 100, w: 150, h: 60 },
-    { z: "Open Field", x: 180, y: 100, w: 120, h: 60 },
-    { z: "Cornucopia", x: 310, y: 100, w: 70, h: 60 },
-    { z: "Caves", x: 20, y: 170, w: 180, h: 40 },
-    { z: "Swamp", x: 210, y: 170, w: 170, h: 40 },
+    { z: "Pine Woods", x: 70, y: 130, w: 520, h: 250 },
+    { z: "Old Ruins", x: 560, y: 170, w: 500, h: 230 },
+    { z: "Ridge", x: 1080, y: 170, w: 400, h: 230 },
+    { z: "Shimmer Lake", x: 70, y: 380, w: 520, h: 280 },
+    { z: "Central Plaza", x: 540, y: 370, w: 520, h: 300 },
+    { z: "Cave Mouth", x: 1040, y: 470, w: 450, h: 270 },
+    { z: "Mossy Swamp", x: 150, y: 680, w: 540, h: 260 },
+    { z: "Supply Drop Zone", x: 620, y: 740, w: 650, h: 220 },
   ];
 
   layout.forEach((cell) => {
@@ -3877,21 +3904,47 @@ async function loadSurvivalSeason(seasonId, { beforeId = null } = {}) {
 }
 
 function applySurvivalPayload(payload, { replaceEvents = false } = {}) {
+  const normalizeZone = (zone) => normalizeSurvivalZoneName(zone) || zone;
   if (payload.season) survivalState.season = payload.season;
-  if (Array.isArray(payload.participants)) survivalState.participants = payload.participants;
+  if (Array.isArray(payload.participants)) {
+    survivalState.participants = payload.participants.map((p) => ({
+      ...p,
+      location: normalizeZone(p?.location),
+    }));
+  }
   if (Array.isArray(payload.alliances)) survivalState.alliances = payload.alliances;
   if (payload.winner !== undefined) survivalState.winner = payload.winner;
   if (Array.isArray(payload.history)) survivalState.history = payload.history;
   if (Array.isArray(payload.events)) {
+    const normalizedEvents = payload.events.map((ev) => {
+      const outcome = ev?.outcome && typeof ev.outcome === "object"
+        ? { ...ev.outcome, zone: normalizeZone(ev.outcome.zone) }
+        : ev?.outcome;
+      return { ...ev, outcome };
+    });
     if (replaceEvents) {
-      survivalState.events = payload.events;
+      survivalState.events = normalizedEvents;
     } else {
-      survivalState.events = [...payload.events];
+      survivalState.events = [...normalizedEvents];
     }
     survivalState.logBeforeId = payload.events?.[0]?.id || survivalState.logBeforeId;
   }
   if (payload.arena && typeof payload.arena === "object") {
-    survivalState.arena = payload.arena;
+    const arenaZones = Array.isArray(payload.arena.zones)
+      ? payload.arena.zones.map((z) => normalizeZone(z)).filter(Boolean)
+      : null;
+    const dangerLevels = payload.arena.dangerLevels && typeof payload.arena.dangerLevels === "object"
+      ? Object.entries(payload.arena.dangerLevels).reduce((acc, [key, val]) => {
+        const normalized = normalizeZone(key) || key;
+        acc[normalized] = val;
+        return acc;
+      }, {})
+      : payload.arena.dangerLevels;
+    survivalState.arena = {
+      ...payload.arena,
+      zones: arenaZones || payload.arena.zones,
+      dangerLevels,
+    };
     if (Array.isArray(payload.arena.lobbyUserIds)) {
       survivalState.lobbyUserIds = payload.arena.lobbyUserIds.map((x) => Number(x)).filter((x) => x > 0);
     }
@@ -8772,14 +8825,29 @@ function toggleMembersAdminMenu(force){
 function bindTapAction(btn, handler){
   if(!btn || typeof handler !== "function") return;
   let touchActivated = false;
+  const markTouch = () => {
+    touchActivated = true;
+    setTimeout(() => { touchActivated = false; }, 450);
+  };
+  const run = () => {
+    handler();
+    markTouch();
+  };
   btn.addEventListener("pointerup", (e) => {
     if (e.pointerType !== "touch") return;
-    touchActivated = true;
-    handler();
-    setTimeout(() => { touchActivated = false; }, 450);
-  });
-  btn.addEventListener("click", () => {
+    e.preventDefault();
+    e.stopPropagation();
+    run();
+  }, { passive: false });
+  btn.addEventListener("touchend", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (touchActivated) return;
+    run();
+  }, { passive: false });
+  btn.addEventListener("click", (e) => {
+    if (touchActivated) return;
+    e.preventDefault();
     handler();
   });
 }
@@ -15430,12 +15498,27 @@ function getHeaderGradientInputValues(){
 }
 
 function closeFeatureFlagsPanel(){
-  if(featureFlagsPanel) featureFlagsPanel.hidden = true;
+  if(featureFlagsPanel){
+    featureFlagsPanel.hidden = true;
+    featureFlagsPanel.style.display = "";
+    featureFlagsPanel.classList.remove("open");
+  }
   if(featureFlagsMsg) featureFlagsMsg.textContent = "";
 }
 function closeSessionsPanel(){
-  if(sessionsPanel) sessionsPanel.hidden = true;
+  if(sessionsPanel){
+    sessionsPanel.hidden = true;
+    sessionsPanel.style.display = "";
+    sessionsPanel.classList.remove("open");
+  }
   if(sessionsMsg) sessionsMsg.textContent = "";
+}
+
+function forceShowOwnerPanel(panel){
+  if(!panel) return;
+  panel.hidden = false;
+  panel.style.display = "flex";
+  panel.classList.add("open");
 }
 
 async function loadFeatureFlags(){
@@ -15507,7 +15590,7 @@ function renderFeatureFlagsGrid(){
 
 function openFeatureFlagsPanel(){
   if(!me || roleRank(me.role) < roleRank("Owner")) return;
-  if(featureFlagsPanel) featureFlagsPanel.hidden = false;
+  forceShowOwnerPanel(featureFlagsPanel);
   loadFeatureFlags();
 }
 
@@ -15547,7 +15630,7 @@ function renderSessions(rows){
 
 function openSessionsPanel(){
   if(!me || roleRank(me.role) < roleRank("Owner")) return;
-  if(sessionsPanel) sessionsPanel.hidden = false;
+  forceShowOwnerPanel(sessionsPanel);
   loadSessions();
 }
 
@@ -17758,7 +17841,9 @@ window.addEventListener("online", () => {
   }
 });
 socket.on("roomStructure:update", (payload)=>setRoomStructure(payload, { updateCollapse: false }));
-socket.on("rooms update", (rooms)=>renderRoomsList(rooms));
+socket.on("rooms update", () => {
+  loadRooms();
+});
   socket.on("changelog updated", ()=>{
     changelogDirty = true;
     if(rightPanelMode === "menu" && activeMenuTab === "changelog") loadChangelog(true);
