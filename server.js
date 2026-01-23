@@ -320,7 +320,7 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
   //
   // For room-scoped system messages, we now emit an explicit payload
   // { room, text, meta? } so the client can route it correctly.
-  function buildSystemPayload(room, text, meta) {
+  function buildSystemPayload(room, text, meta, scope) {
     const ts = Date.now();
     const payload = {
       id: `sys-${ts}-${Math.random().toString(36).slice(2, 8)}`,
@@ -329,6 +329,8 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
       type: "system",
       text: String(text ?? ""),
     };
+    const resolvedScope = String(scope || (payload.room === "__global__" ? "global" : (payload.room ? "room" : "")));
+    if (resolvedScope) payload.scope = resolvedScope;
     if (meta && typeof meta === "object") payload.meta = meta;
     return payload;
   }
@@ -336,7 +338,7 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
   function emitRoomSystem(room, text, meta) {
     const r = typeof room === "string" ? room : "";
     if (!r) return;
-    const payload = buildSystemPayload(r, text, meta);
+    const payload = buildSystemPayload(r, text, meta, "room");
     // IMPORTANT: Some historical code paths can leave a socket joined to a room
     // even after its "currentRoom" changes (e.g., legacy "#room" mismatches or
     // reconnect races). If we emit to the Socket.IO room directly, those stale
@@ -364,7 +366,7 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
     // safely ignore accidental global emissions (prevents room bleed).
     const m = (meta && typeof meta === "object") ? { ...meta } : {};
     if (!m.kind) m.kind = "global";
-    const payload = buildSystemPayload("__global__", text, m);
+    const payload = buildSystemPayload("__global__", text, m, "global");
     io.emit("system", payload);
     if (DEBUG_ROOMS) {
       console.log("[rooms] system emit", { room: "__global__", text: payload.text, meta: payload.meta || null });

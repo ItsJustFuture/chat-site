@@ -2565,6 +2565,12 @@ body.keyboard-open .menuContent{ padding-bottom: calc(200px + var(--kb, 0px) + e
   align-self:center; color:var(--messageSystemText); font-size:12px;
   padding:6px 10px; border-radius:999px;
   background:var(--messageSystemBg); border:1px solid var(--border);
+  max-width:min(90%, 640px);
+  overflow-wrap:anywhere;
+  word-break:break-word;
+  margin:2px 0;
+  position:relative;
+  z-index:2;
 }
 
 .dmMessages,
