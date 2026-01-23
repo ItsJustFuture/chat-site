@@ -1952,6 +1952,7 @@
 <script src="/socket.io/socket.io.js"></script>
 <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
 <script defer="" src="/app.js"></script>
+<div id="modalRoot">
 <!-- STAFF: Kick/Ban Appeals Panel -->
 <div class="appealsPanel" hidden="" id="appealsPanel">
 <div class="appealsPanelHeader">
@@ -2042,7 +2043,40 @@
 <div class="roleDebugPanel" hidden="" id="roleDebugPanel">
 <div class="appealsPanelHeader">
 <div>
-<div class="title">Role debug
+<div class="title">Role debug</div>
+<div class="small muted">Quickly set a user's role (Owner/Co-Owner/Admin/Moderator/VIP/User/Guest).</div>
+</div>
+<div class="appealsPanelHeaderActions">
+<button class="iconBtn" id="roleDebugCloseBtn" title="Close" type="button">✕</button>
+</div>
+</div>
+<div class="appealsPanelBody">
+<div class="card">
+<div class="small muted">Target user</div>
+<input autocomplete="off" class="input" id="roleDebugTarget" placeholder="username" style="margin-top:6px;"/>
+<div class="small muted" style="margin-top:10px;">Role</div>
+<select class="select" id="roleDebugRole" style="margin-top:6px;">
+<option value="">Choose role…</option>
+<option>Owner</option>
+<option>Co-owner</option>
+<option>Admin</option>
+<option>Moderator</option>
+<option>VIP</option>
+<option>User</option>
+<option>Guest</option>
+</select>
+<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+<button class="btn btnPrimary" id="roleDebugApplyBtn" type="button">Apply</button>
+<button class="btn btnSecondary" id="roleDebugUseSelectedBtn" type="button">Use selected member</button>
+</div>
+<div class="msgline" id="roleDebugMsg" style="margin-top:8px;"></div>
+</div>
+<div class="card">
+<div class="title">Tip</div>
+<div class="small muted">This uses the same server-side permissions as normal moderation tools, so only authorized roles can make changes.</div>
+</div>
+</div>
+</div>
 <!-- START: Owner Feature Flags Panel -->
 <div class="ownerPanel" hidden="" id="featureFlagsPanel">
   <div class="ownerPanelHeader">
@@ -2087,39 +2121,6 @@
   </div>
 </div>
 <!-- END: Owner Sessions Panel -->
-</div>
-<div class="small muted">Quickly set a user's role (Owner/Co-Owner/Admin/Moderator/VIP/User/Guest).</div>
-</div>
-<div class="appealsPanelHeaderActions">
-<button class="iconBtn" id="roleDebugCloseBtn" title="Close" type="button">✕</button>
-</div>
-</div>
-<div class="appealsPanelBody">
-<div class="card">
-<div class="small muted">Target user</div>
-<input autocomplete="off" class="input" id="roleDebugTarget" placeholder="username" style="margin-top:6px;"/>
-<div class="small muted" style="margin-top:10px;">Role</div>
-<select class="select" id="roleDebugRole" style="margin-top:6px;">
-<option value="">Choose role…</option>
-<option>Owner</option>
-<option>Co-owner</option>
-<option>Admin</option>
-<option>Moderator</option>
-<option>VIP</option>
-<option>User</option>
-<option>Guest</option>
-</select>
-<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
-<button class="btn btnPrimary" id="roleDebugApplyBtn" type="button">Apply</button>
-<button class="btn btnSecondary" id="roleDebugUseSelectedBtn" type="button">Use selected member</button>
-</div>
-<div class="msgline" id="roleDebugMsg" style="margin-top:8px;"></div>
-</div>
-<div class="card">
-<div class="title">Tip</div>
-<div class="small muted">This uses the same server-side permissions as normal moderation tools, so only authorized roles can make changes.</div>
-</div>
-</div>
 </div>
 <!-- === Media Bottom Sheet === -->
 <div id="mediaSheetBackdrop" class="media-sheet-backdrop hidden"></div>

@@ -2749,6 +2749,9 @@ const sessionsPanelBtn = document.getElementById("sessionsPanelBtn");
 const appealsPanel = document.getElementById("appealsPanel");
 const referralsPanel = document.getElementById("referralsPanel");
 const roleDebugPanel = document.getElementById("roleDebugPanel");
+const featureFlagsPanel = document.getElementById("featureFlagsPanel");
+const sessionsPanel = document.getElementById("sessionsPanel");
+let adminModalRoot = document.getElementById("modalRoot");
 const appealsCloseBtn = document.getElementById("appealsCloseBtn");
 const appealsList = document.getElementById("appealsList");
 const referralsCloseBtn = document.getElementById("referralsCloseBtn");
@@ -8803,6 +8806,91 @@ function toggleMembersAdminMenu(force){
   membersAdminMenu.hidden = !shouldOpen;
   membersAdminMenuBtn?.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
 }
+let adminModalReturnFocusEl = null;
+function ensureAdminModalRoot(){
+  if (adminModalRoot) return adminModalRoot;
+  adminModalRoot = document.getElementById("modalRoot");
+  if (adminModalRoot) return adminModalRoot;
+  const root = document.createElement("div");
+  root.id = "modalRoot";
+  document.body.appendChild(root);
+  adminModalRoot = root;
+  return adminModalRoot;
+}
+function getAdminModals(){
+  return [appealsPanel, referralsPanel, roleDebugPanel, featureFlagsPanel, sessionsPanel].filter(Boolean);
+}
+function mountAdminModal(panel){
+  if (!panel) return;
+  const root = ensureAdminModalRoot();
+  if (root && panel.parentElement !== root) root.appendChild(panel);
+}
+function focusAdminModal(panel){
+  if (!panel) return;
+  const closeBtn = panel.querySelector("#appealsCloseBtn, #referralsCloseBtn, #roleDebugCloseBtn, #featureFlagsCloseBtn, #sessionsCloseBtn, .appealsPanelHeader .iconBtn, .ownerPanelHeader .iconBtn");
+  const focusable = closeBtn || panel.querySelector("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])");
+  focusable?.focus?.();
+}
+function focusAdminReturnTarget(){
+  const target = (adminModalReturnFocusEl && document.contains(adminModalReturnFocusEl)) ? adminModalReturnFocusEl : membersAdminMenuBtn;
+  target?.focus?.();
+  adminModalReturnFocusEl = null;
+}
+function closeAdminModal(panel, { focusReturn = false } = {}){
+  if (!panel) return;
+  panel.hidden = true;
+  panel.style.display = "";
+  panel.classList.remove("open");
+  panel.setAttribute("aria-hidden", "true");
+  if (focusReturn) focusAdminReturnTarget();
+}
+function closeAdminModals(){
+  getAdminModals().forEach((panel) => closeAdminModal(panel));
+}
+function cleanupModalOverlays(){
+  try{
+    if (typeof closeNotificationsModal === "function" && notificationsModal && !notificationsModal.hidden) closeNotificationsModal();
+  }catch{}
+  try{
+    if (typeof closeSurvivalModal === "function" && survivalModal && survivalModal.style.display !== "none") closeSurvivalModal();
+  }catch{}
+  try{
+    if (typeof closeModal === "function" && modal && modal.style.display !== "none") closeModal();
+  }catch{}
+  try{
+    if (typeof closeCouplesModal === "function" && couplesModal && couplesModal.style.display !== "none") closeCouplesModal();
+  }catch{}
+  try{
+    if (typeof closeRoomCreateModal === "function" && roomCreateModal && roomCreateModal.style.display !== "none") closeRoomCreateModal();
+  }catch{}
+  try{
+    if (typeof closeRoomManageModal === "function" && roomManageModal && roomManageModal.style.display !== "none") closeRoomManageModal();
+  }catch{}
+}
+function openAdminModal(panelOrId){
+  const panel = typeof panelOrId === "string" ? document.getElementById(panelOrId) : panelOrId;
+  if (!panel) return;
+  const activeEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  if (membersAdminMenu && activeEl && membersAdminMenu.contains(activeEl)) {
+    adminModalReturnFocusEl = membersAdminMenuBtn || activeEl;
+  } else {
+    adminModalReturnFocusEl = activeEl;
+  }
+  closeMembersAdminMenu();
+  closeDrawers();
+  cleanupModalOverlays();
+  closeAdminModals();
+  mountAdminModal(panel);
+  panel.hidden = false;
+  panel.setAttribute("aria-hidden", "false");
+  if (panel.classList.contains("ownerPanel")) {
+    panel.style.display = "flex";
+    panel.classList.add("open");
+  } else {
+    panel.style.display = "";
+  }
+  requestAnimationFrame(() => focusAdminModal(panel));
+}
 function bindTapAction(btn, handler){
   if(!btn || typeof handler !== "function") return;
   let touchActivated = false;
@@ -8830,6 +8918,32 @@ function bindTapAction(btn, handler){
     if (touchActivated) return;
     e.preventDefault();
     handler();
+  });
+}
+function bindAdminMenuAction(btn, handler){
+  if (!btn || typeof handler !== "function") return;
+  let touchActivated = false;
+  const markTouch = () => {
+    touchActivated = true;
+    setTimeout(() => { touchActivated = false; }, 450);
+  };
+  const run = (e) => {
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
+    handler();
+    markTouch();
+  };
+  btn.addEventListener("pointerup", (e) => {
+    if (e.pointerType !== "touch") return;
+    run(e);
+  }, { passive: false });
+  btn.addEventListener("touchend", (e) => {
+    if (touchActivated) return;
+    run(e);
+  }, { passive: false });
+  btn.addEventListener("click", (e) => {
+    if (touchActivated) return;
+    run(e);
   });
 }
 
@@ -8913,26 +9027,11 @@ membersAdminMenuBtn?.addEventListener("click", (e) => {
   e.stopPropagation();
   toggleMembersAdminMenu();
 });
-adminMenuAppealsBtn?.addEventListener("click", () => {
-  closeMembersAdminMenu();
-  openAppealsPanel();
-});
-adminMenuReferralsBtn?.addEventListener("click", () => {
-  closeMembersAdminMenu();
-  openReferralsPanel();
-});
-adminMenuRoleDebugBtn?.addEventListener("click", () => {
-  closeMembersAdminMenu();
-  openRoleDebugPanel();
-});
-bindTapAction(adminMenuFeatureFlagsBtn, () => {
-  closeMembersAdminMenu();
-  openFeatureFlagsPanel();
-});
-bindTapAction(adminMenuSessionsBtn, () => {
-  closeMembersAdminMenu();
-  openSessionsPanel();
-});
+bindAdminMenuAction(adminMenuAppealsBtn, openAppealsPanel);
+bindAdminMenuAction(adminMenuReferralsBtn, openReferralsPanel);
+bindAdminMenuAction(adminMenuRoleDebugBtn, openRoleDebugPanel);
+bindAdminMenuAction(adminMenuFeatureFlagsBtn, openFeatureFlagsPanel);
+bindAdminMenuAction(adminMenuSessionsBtn, openSessionsPanel);
 document.addEventListener("click", (e) => {
   if (!membersAdminMenu || membersAdminMenu.hidden) return;
   const target = e.target;
@@ -14857,12 +14956,12 @@ function initAppealsDurationSelect(){
 
 function openAppealsPanel(){
   if(!appealsPanel) return;
-  appealsPanel.hidden = false;
+  openAdminModal(appealsPanel);
   loadAppealsList();
 }
 function closeAppealsPanel(){
   if(!appealsPanel) return;
-  appealsPanel.hidden = true;
+  closeAdminModal(appealsPanel, { focusReturn: true });
   activeAppealId = null;
   if(appealsDetail) appealsDetail.hidden = true;
 }
@@ -14998,12 +15097,12 @@ let activeReferralId = null;
 
 function openReferralsPanel(){
   if(!referralsPanel) return;
-  referralsPanel.hidden = false;
+  openAdminModal(referralsPanel);
   loadReferralsList();
 }
 function closeReferralsPanel(){
   if(!referralsPanel) return;
-  referralsPanel.hidden = true;
+  closeAdminModal(referralsPanel, { focusReturn: true });
   activeReferralId = null;
   if(referralsActionMsg) referralsActionMsg.textContent = "";
 }
@@ -15082,12 +15181,12 @@ function bindReferralsUI(){
 // Role Debug (quick role setter)
 function openRoleDebugPanel(){
   if(!roleDebugPanel) return;
-  roleDebugPanel.hidden = false;
+  openAdminModal(roleDebugPanel);
   if(roleDebugMsg) roleDebugMsg.textContent = "";
 }
 function closeRoleDebugPanel(){
   if(!roleDebugPanel) return;
-  roleDebugPanel.hidden = true;
+  closeAdminModal(roleDebugPanel, { focusReturn: true });
   if(roleDebugMsg) roleDebugMsg.textContent = "";
 }
 function bindRoleDebugUI(){
@@ -15486,17 +15585,13 @@ function getHeaderGradientInputValues(){
 
 function closeFeatureFlagsPanel(){
   if(featureFlagsPanel){
-    featureFlagsPanel.hidden = true;
-    featureFlagsPanel.style.display = "";
-    featureFlagsPanel.classList.remove("open");
+    closeAdminModal(featureFlagsPanel, { focusReturn: true });
   }
   if(featureFlagsMsg) featureFlagsMsg.textContent = "";
 }
 function closeSessionsPanel(){
   if(sessionsPanel){
-    sessionsPanel.hidden = true;
-    sessionsPanel.style.display = "";
-    sessionsPanel.classList.remove("open");
+    closeAdminModal(sessionsPanel, { focusReturn: true });
   }
   if(sessionsMsg) sessionsMsg.textContent = "";
 }
@@ -15577,7 +15672,7 @@ function renderFeatureFlagsGrid(){
 
 function openFeatureFlagsPanel(){
   if(!me || roleRank(me.role) < roleRank("Owner")) return;
-  forceShowOwnerPanel(featureFlagsPanel);
+  openAdminModal(featureFlagsPanel);
   loadFeatureFlags();
 }
 
@@ -15617,7 +15712,7 @@ function renderSessions(rows){
 
 function openSessionsPanel(){
   if(!me || roleRank(me.role) < roleRank("Owner")) return;
-  forceShowOwnerPanel(sessionsPanel);
+  openAdminModal(sessionsPanel);
   loadSessions();
 }
 
