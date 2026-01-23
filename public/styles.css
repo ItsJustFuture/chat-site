@@ -4014,9 +4014,13 @@ body:not(.polish-pack) .tonePicker{
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding: 18px;
-  z-index: 400;
+  z-index: 900;
+  pointer-events: none;
 }
-#modal.modal-visible{ opacity: 1; }
+#modal.modal-visible{
+  opacity: 1;
+  pointer-events: auto;
+}
 .modal{
   position: fixed;
   inset: 0;
@@ -4030,7 +4034,7 @@ body:not(.polish-pack) .tonePicker{
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding: calc(18px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
-  z-index: 410;
+  z-index: 920;
 }
 .modal.modal-visible{ opacity: 1; }
 
@@ -4047,7 +4051,7 @@ body:not(.polish-pack) .tonePicker{
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding: 18px;
-  z-index: 401; /* above main modal */
+  z-index: 910; /* above main modal */
 }
 #couplesModal.modal-visible{ opacity: 1; }
 .roomModal{
@@ -4063,7 +4067,7 @@ body:not(.polish-pack) .tonePicker{
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding: 18px;
-  z-index: 1200;
+  z-index: 930;
 }
 .roomModal.modal-visible{ opacity: 1; }
 .roomModalCard{
@@ -4144,6 +4148,46 @@ body:not(.polish-pack) .tonePicker{
 }
 .profileModalCard .modalBody{
   padding: 0 12px 12px;
+}
+
+.profileSections{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.profileSection{
+  border:1px solid var(--border);
+  border-radius:12px;
+  background: var(--panel);
+  overflow:hidden;
+}
+.profileSection summary{
+  list-style:none;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding: 12px 14px;
+  font-weight: 700;
+  cursor:pointer;
+  min-height: 44px;
+}
+.profileSection summary::-webkit-details-marker{ display:none; }
+.profileSection summary::after{
+  content:"▾";
+  font-size: 12px;
+  opacity: 0.7;
+  transition: transform 140ms ease;
+}
+.profileSection[open] summary::after{
+  transform: rotate(180deg);
+}
+.profileSectionBody{
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--border);
+  display:flex;
+  flex-direction:column;
+  gap:12px;
 }
 .notificationsModal{
   position: fixed;
