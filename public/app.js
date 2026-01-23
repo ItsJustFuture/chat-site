@@ -2684,6 +2684,22 @@ const AUDIO_UPLOAD_ALLOWED_MIME = new Set(["audio/mpeg", "audio/mp4"]);
 const AUDIO_UPLOAD_ALLOWED_EXT = new Set(["mp3", "m4a"]);
 
 let modalTargetUsername = null;
+const DEBUG_PROFILE_MODAL = false;
+let profileModalTraceEmitted = false;
+const logProfileModal = (...args) => {
+  if (!DEBUG_PROFILE_MODAL) return;
+  console.log("[profile-modal]", ...args);
+};
+const traceProfileModalOnce = (label) => {
+  if (!DEBUG_PROFILE_MODAL || profileModalTraceEmitted) return;
+  profileModalTraceEmitted = true;
+  console.trace(`[profile-modal] ${label}`);
+};
+const setModalTargetUsername = (username, source) => {
+  modalTargetUsername = username;
+  if (!DEBUG_PROFILE_MODAL) return;
+  console.log("[profile-modal] modalTargetUsername set", { username, source });
+};
 let modalTargetUserId = null;
 let pendingFile = null;
 let roomPendingAttachment = null;
@@ -11016,31 +11032,39 @@ tabActions?.addEventListener("click", async ()=>{
 function hardHideProfileModal(){
   try{
     if(!modal) return;
+    logProfileModal("hardHideProfileModal");
     modal.classList.remove("modal-visible");
     modal.classList.remove("modal-closing");
     modal.style.display="none";
   }catch{}
-  modalTargetUsername=null;
+  setModalTargetUsername(null, "hardHideProfileModal");
   modalTargetUserId=null;
 }
 // modal open/close
 function openModal(){
   if (!modal) return;
+  logProfileModal("openModal");
   modal.style.display="flex";
   modal.classList.remove("modal-closing");
+  logProfileModal("openModal display set", { display: modal.style.display });
   if (PREFERS_REDUCED_MOTION) {
     modal.classList.add("modal-visible");
+    logProfileModal("openModal visible (reduced motion)");
+    traceProfileModalOnce("modal visible (reduced motion)");
     return;
   }
   requestAnimationFrame(() => {
     modal.classList.add("modal-visible");
+    logProfileModal("openModal visible (animated)");
+    traceProfileModalOnce("modal visible (animated)");
   });
 }
 function closeModal(){
   if (!modal) return;
+  logProfileModal("closeModal");
   modal.classList.remove("modal-visible");
   modal.classList.add("modal-closing");
-  modalTargetUsername=null;
+  setModalTargetUsername(null, "closeModal");
   modalTargetUserId=null;
   setProfileEditMode(false);
   setCustomizePage(null);
@@ -16454,20 +16478,44 @@ async function toggleMemoryPin(memory){
   }
 }
 
+function notifyProfileOpenError(message){
+  const msg = message || "Could not load profile.";
+  if (typeof showToast === "function") {
+    showToast(msg);
+  } else {
+    toast?.(msg);
+  }
+}
+
 async function openMyProfile(){
+  logProfileModal("openMyProfile");
   closeDrawers();
   clearAvatarPreview();
 
   // Try the self profile endpoint first (includes edit fields)
-  let res = await fetch("/profile");
+  let res;
+  try {
+    res = await fetch("/profile");
+  } catch (err) {
+    console.error("Failed to load profile", err);
+    notifyProfileOpenError("Could not load your profile.");
+    hardHideProfileModal();
+    return false;
+  }
   if (!res.ok && me?.username){
     // Fallback to member profile route if /profile fails for any reason
-    try { await openMemberProfile(me.username); return; } catch {}
+    const opened = await openMemberProfile(me.username);
+    if (opened) return true;
   }
-  if(!res.ok){ hardHideProfileModal(); return; }
+  if(!res.ok){
+    const t = await res.text().catch(()=> "");
+    notifyProfileOpenError(t || "Could not load your profile.");
+    hardHideProfileModal();
+    return false;
+  }
   const p = await res.json();
   updateRoleCache(p.username, p.role);
-  modalTargetUsername = p.username;
+  setModalTargetUsername(p.username, "openMyProfile");
   applyProgressionPayload(p);
 
   modalTitle.textContent="My Profile";
@@ -16507,6 +16555,7 @@ async function openMyProfile(){
   updateProfileActions({ isSelf: true, canModerate: canMod });
   setTab("profile");
   openModal();
+  return true;
 }
 profileBtn?.addEventListener("click", openMyProfile);
 
@@ -16592,12 +16641,33 @@ memoryEnabledToggle?.addEventListener("change", async () => {
 });
 
 async function openMemberProfile(username){
-  modalTargetUsername = username;
+  const cleanUsername = String(username || "").trim();
+  logProfileModal("openMemberProfile", cleanUsername);
+  if (!cleanUsername) {
+    notifyProfileOpenError("Profile not found.");
+    hardHideProfileModal();
+    return false;
+  }
+  setModalTargetUsername(cleanUsername, "openMemberProfile");
   closeDrawers();
 
-  const res=await fetch("/profile/" + encodeURIComponent(username));
-  if(!res.ok){ hardHideProfileModal(); return; }
+  let res;
+  try {
+    res = await fetch("/profile/" + encodeURIComponent(cleanUsername));
+  } catch (err) {
+    console.error("Failed to load member profile", err);
+    notifyProfileOpenError("Could not load profile.");
+    hardHideProfileModal();
+    return false;
+  }
+  if(!res.ok){
+    const t = await res.text().catch(()=> "");
+    notifyProfileOpenError(t || "Profile not found.");
+    hardHideProfileModal();
+    return false;
+  }
   const p=await res.json();
+  setModalTargetUsername(p.username || cleanUsername, "openMemberProfile:resolved");
   modalTargetUserId = Number(p?.id) || null;
   const isSelf = isSelfProfile(p);
   if (isSelf) applyProgressionPayload(p);
@@ -16641,6 +16711,7 @@ async function openMemberProfile(username){
   setCustomizePage(null);
   setTab("profile");
   openModal();
+  return true;
 }
 
 let likeToggleInFlight = false;
@@ -17907,10 +17978,15 @@ socket.on("dm history", (payload = {}) => {
   // hash profile links (clear hash after handling to avoid "stuck" profile overlays on reload)
   const handleProfileHash = async () => {
     if(location.hash.startsWith("#profile:")){
-      const u = decodeURIComponent(location.hash.slice("#profile:".length));
-      if(u){
-        try{ await openMemberProfile(u); }catch{ hardHideProfileModal(); }
-      }else{
+      const raw = decodeURIComponent(location.hash.slice("#profile:".length));
+      const u = raw.trim();
+      if(!u){
+        hardHideProfileModal();
+        try{ history.replaceState(null, "", location.pathname + location.search); }catch{}
+        return;
+      }
+      const opened = await openMemberProfile(u);
+      if (!opened) {
         hardHideProfileModal();
       }
       try{ history.replaceState(null, "", location.pathname + location.search); }catch{}
@@ -17918,6 +17994,10 @@ socket.on("dm history", (payload = {}) => {
   };
   handleProfileHash();
   window.addEventListener("hashchange", ()=>{ handleProfileHash(); });
+  if (modal?.classList.contains("modal-visible") && !modalTargetUsername) {
+    logProfileModal("initChatApp cleanup: modal visible without target");
+    hardHideProfileModal();
+  }
 
 }
 
