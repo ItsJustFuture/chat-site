@@ -4238,7 +4238,7 @@ body:not(.polish-pack) .tonePicker{
   display:none;
   align-items:stretch;
   justify-content:center;
-  z-index:420;
+  z-index:960;
   padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 .themesModal.show{ display:flex; }
@@ -4531,7 +4531,7 @@ body:not(.polish-pack) .tonePicker{
   display:none;
   align-items:flex-end;
   background:rgba(0,0,0,0.4);
-  z-index:430;
+  z-index:970;
 }
 .themesFiltersSheet.show,
 .themesActionSheet.show{ display:flex; }
