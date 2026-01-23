@@ -4563,6 +4563,9 @@ const copyUsernameBtn = document.getElementById("copyUsernameBtn");
 const mediaMsg = document.getElementById("mediaMsg");
 const profileActionMsg = document.getElementById("profileActionMsg");
 const customizeMsg = document.getElementById("customizeMsg");
+const profileSections = document.getElementById("profileSections");
+const profileModerationSection = document.getElementById("profileModerationSection");
+const profileModerationOpenBtn = document.getElementById("profileModerationOpenBtn");
 const levelPanel = document.getElementById("levelPanel");
 const levelBadge = document.getElementById("levelBadge");
 const xpText = document.getElementById("xpText");
@@ -4790,10 +4793,6 @@ function closeMemberActionsOverlay(){
 }
 
 // Actions button wiring (staff quick menu)
-if (actionsBtn && !actionsBtn._wired){
-  actionsBtn._wired = true;
-  actionsBtn.addEventListener("click", openMemberActionsOverlay);
-}
 if (closeMemberActionsBtn && !closeMemberActionsBtn._wired){
   closeMemberActionsBtn._wired = true;
   closeMemberActionsBtn.addEventListener("click", closeMemberActionsOverlay);
@@ -9158,8 +9157,11 @@ function threadLabel(t){
   return others[0] || otherUser || "Direct Message";
 }
 
+let bodyLockCount = 0;
 function lockBodyScroll(lock){
-  document.body.classList.toggle("bodyLocked", !!lock);
+  if (lock) bodyLockCount += 1;
+  else bodyLockCount = Math.max(0, bodyLockCount - 1);
+  document.body.classList.toggle("bodyLocked", bodyLockCount > 0);
 }
 
 function formatDmTime(ts){
@@ -10781,29 +10783,6 @@ dmText?.addEventListener("keydown", (e) => {
 });
 dmText?.addEventListener("input", ()=>renderMentionDropdown(dmMentionDropdown, dmText));
 
-// "Message" button on profile -> always direct DM
-dmUserBtn?.addEventListener("click", () => {
-  if (modalTargetUsername) {
-    closeModal();
-    startDirectMessage(modalTargetUsername, modalTargetUserId);
-  }
-});
-dmChessQuickBtn?.addEventListener("click", () => {
-  if (modalTargetUsername && modalTargetUserId) {
-    pendingChessChallenge = { userId: modalTargetUserId, username: modalTargetUsername };
-    closeModal();
-    startDirectMessage(modalTargetUsername, modalTargetUserId);
-  }
-});
-profileEditBtn?.addEventListener("click", () => {
-  if (!currentProfileIsSelf) return;
-  setProfileEditMode(true);
-  setTab("profile");
-});
-profileEditToggleBtn?.addEventListener("click", () => {
-  if (!currentProfileIsSelf) return;
-  setProfileEditMode(!profileEditMode);
-});
 function closeProfileSettingsMenu(){
   if (!profileSettingsMenu) return;
   profileSettingsMenu.hidden = true;
@@ -11393,6 +11372,16 @@ tabActions?.addEventListener("click", async ()=>{
   if (viewModeration?.style.display !== "none") await refreshLogs();
 });
 
+profileSections?.addEventListener("toggle", (e) => {
+  const details = e.target;
+  if (!(details instanceof HTMLDetailsElement)) return;
+  if (!details.open) return;
+  if (!window.matchMedia("(max-width: 760px)").matches) return;
+  profileSections.querySelectorAll(".profileSection").forEach((section) => {
+    if (section !== details) section.open = false;
+  });
+});
+
 
 function hardHideProfileModal(){
   try{
@@ -11404,6 +11393,7 @@ function hardHideProfileModal(){
   }catch{}
   setModalTargetUsername(null, "hardHideProfileModal");
   modalTargetUserId=null;
+  lockBodyScroll(false);
 }
 // modal open/close
 function openModal(){
@@ -11414,17 +11404,26 @@ function openModal(){
   logProfileModal("openModal");
   modal.style.display="flex";
   modal.classList.remove("modal-closing");
+  lockBodyScroll(true);
+  if (profileSections && window.matchMedia("(max-width: 760px)").matches) {
+    const sections = profileSections.querySelectorAll(".profileSection");
+    sections.forEach((section, index) => {
+      section.open = index === 0;
+    });
+  }
   logProfileModal("openModal display set", { display: modal.style.display });
   if (PREFERS_REDUCED_MOTION) {
     modal.classList.add("modal-visible");
     logProfileModal("openModal visible (reduced motion)");
     traceProfileModalOnce("modal visible (reduced motion)");
+    try { closeModalBtn?.focus({ preventScroll: true }); } catch {}
     return;
   }
   requestAnimationFrame(() => {
     modal.classList.add("modal-visible");
     logProfileModal("openModal visible (animated)");
     traceProfileModalOnce("modal visible (animated)");
+    try { closeModalBtn?.focus({ preventScroll: true }); } catch {}
   });
 }
 function closeModal(){
@@ -11442,15 +11441,120 @@ function closeModal(){
   logsMsg.textContent="";
   setMsgline(mediaMsg, "");
   if (customizeMsg) customizeMsg.textContent = "";
-  if (PREFERS_REDUCED_MOTION) {
+  const finalizeClose = () => {
     modal.style.display="none";
     modal.classList.remove("modal-closing");
+    lockBodyScroll(false);
+  };
+  if (PREFERS_REDUCED_MOTION) {
+    finalizeClose();
     return;
   }
-  setTimeout(() => {
-    modal.style.display="none";
-    modal.classList.remove("modal-closing");
-  }, 220);
+  setTimeout(finalizeClose, 220);
+}
+
+async function handleAddFriendAction(){
+  if (addFriendBtn?.disabled) return;
+  const st = String(modalFriendInfo?.status || 'none');
+  const rid = Number(addFriendBtn?.dataset?.requestId || modalFriendInfo?.requestId || 0);
+  if (!modalTargetUsername) return;
+  setMsgline(profileActionMsg, "");
+  try {
+    if (st === 'incoming' && rid) {
+      const res = await fetch('/api/friends/respond', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId: rid, action: 'accept' }) });
+      if (!res.ok) throw new Error(await res.text());
+      modalFriendInfo = { status: 'friends', requestId: null };
+      friendsDirty = true;
+      setMsgline(profileActionMsg, 'Friend request accepted.');
+    } else if (st === 'none') {
+      const res = await fetch('/api/friends/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: modalTargetUsername }) });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json().catch(()=>({}));
+      modalFriendInfo = { status: data?.autoAccepted ? 'friends' : 'outgoing', requestId: null };
+      friendsDirty = true;
+      setMsgline(profileActionMsg, data?.autoAccepted ? 'Friend added.' : 'Friend request sent.');
+    }
+  } catch (e) {
+    setMsgline(profileActionMsg, e?.message || 'Could not update friend.');
+  } finally {
+    updateProfileActions({ isSelf: false, canModerate: (roleRank(me.role) >= roleRank("Moderator")) });
+  }
+}
+
+async function handleDeclineFriendAction(){
+  if (!modalTargetUsername) return;
+  const st = String(modalFriendInfo?.status || 'none');
+  const rid = Number(declineFriendBtn?.dataset?.requestId || modalFriendInfo?.requestId || 0);
+  if (st !== 'incoming' || !rid) return;
+  setMsgline(profileActionMsg, "");
+  try {
+    const res = await fetch('/api/friends/respond', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId: rid, action: 'decline' }) });
+    if (!res.ok) throw new Error(await res.text());
+    modalFriendInfo = { status: 'none', requestId: null };
+    friendsDirty = true;
+    setMsgline(profileActionMsg, 'Friend request declined.');
+  } catch (e) {
+    setMsgline(profileActionMsg, e?.message || 'Could not decline.');
+  } finally {
+    updateProfileActions({ isSelf: false, canModerate: (roleRank(me.role) >= roleRank("Moderator")) });
+  }
+}
+
+async function handleProfileModalAction(action, btn){
+  switch(action){
+    case "profile:close":
+      closeModal();
+      return;
+    case "profile:message":
+      if (modalTargetUsername) {
+        closeModal();
+        startDirectMessage(modalTargetUsername, modalTargetUserId);
+      }
+      return;
+    case "profile:chess":
+      if (modalTargetUsername && modalTargetUserId) {
+        pendingChessChallenge = { userId: modalTargetUserId, username: modalTargetUsername };
+        closeModal();
+        startDirectMessage(modalTargetUsername, modalTargetUserId);
+      }
+      return;
+    case "profile:edit":
+      if (!currentProfileIsSelf) return;
+      setProfileEditMode(true);
+      setTab("profile");
+      return;
+    case "profile:toggle-edit":
+      if (!currentProfileIsSelf) return;
+      setProfileEditMode(!profileEditMode);
+      return;
+    case "profile:like":
+      await toggleProfileLike();
+      return;
+    case "profile:friend":
+      await handleAddFriendAction();
+      return;
+    case "profile:friend-decline":
+      await handleDeclineFriendAction();
+      return;
+    case "profile:customize":
+      if (!currentProfileIsSelf) return;
+      setTab("customize");
+      return;
+    case "profile:themes":
+      if (!currentProfileIsSelf) return;
+      openThemesModal();
+      return;
+    case "profile:moderation":
+      if (tabActions?.style.display === "none") return;
+      setTab("actions");
+      if (viewModeration?.style.display !== "none") await refreshLogs();
+      return;
+    case "profile:moderation-overlay":
+      openMemberActionsOverlay();
+      return;
+    default:
+      return;
+  }
 }
 
 // Couples popout modal (reuses the existing Couples nodes from the profile editor)
@@ -11559,8 +11663,17 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-closeModalBtn.addEventListener("click", closeModal);
 modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
+modal.addEventListener("click", (e) => {
+  const actionBtn = e.target.closest("[data-profile-action]");
+  if (!actionBtn || !modal.contains(actionBtn)) return;
+  if (actionBtn.disabled) return;
+  const action = actionBtn.dataset.profileAction;
+  if (!action) return;
+  e.preventDefault();
+  e.stopPropagation();
+  void handleProfileModalAction(action, actionBtn);
+});
 
 survivalNewSeasonBtn?.addEventListener("click", openSurvivalNewSeasonModal);
 survivalNewSeasonClose?.addEventListener("click", closeSurvivalNewSeasonModal);
@@ -16316,6 +16429,12 @@ function updateProfileActions({ isSelf = false, canModerate = false } = {}){
   const showActionsTab = canModerate && !isSelf;
   if (viewModeration) viewModeration.style.display = canModerate ? "" : "none";
   if (tabActions) tabActions.style.display = showActionsTab ? "" : "none";
+  if (profileModerationSection) profileModerationSection.style.display = showActionsTab ? "" : "none";
+  if (profileModerationOpenBtn) profileModerationOpenBtn.disabled = !modalCanModerate;
+  modal?.querySelectorAll("[data-profile-action='profile:customize'], [data-profile-action='profile:themes']").forEach((btn) => {
+    if (!(btn instanceof HTMLButtonElement)) return;
+    btn.disabled = !isSelf;
+  });
   [actionMuteBtn, actionKickBtn, actionBanBtn, actionAppealsBtn].forEach((btn) => {
     if (!btn) return;
     btn.style.display = showActionsTab ? "" : "none";
@@ -17590,56 +17709,61 @@ async function toggleProfileLike() {
   }
 }
 
-likeProfileBtn?.addEventListener("click", async () => {
-  await toggleProfileLike();
-});
-
-declineFriendBtn?.addEventListener("click", async () => {
-  if (!modalTargetUsername) return;
-  const st = String(modalFriendInfo?.status || 'none');
-  const rid = Number(declineFriendBtn.dataset.requestId || modalFriendInfo?.requestId || 0);
-  if (st !== 'incoming' || !rid) return;
-  setMsgline(profileActionMsg, "");
-  try {
-    const res = await fetch('/api/friends/respond', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId: rid, action: 'decline' }) });
-    if (!res.ok) throw new Error(await res.text());
-    modalFriendInfo = { status: 'none', requestId: null };
-    friendsDirty = true;
-    setMsgline(profileActionMsg, 'Friend request declined.');
-  } catch (e) {
-    setMsgline(profileActionMsg, e?.message || 'Could not decline.');
-  } finally {
-    updateProfileActions({ isSelf: false, canModerate: (roleRank(me.role) >= roleRank("Moderator")) });
+window.runProfileModalSelfTest = async function runProfileModalSelfTest(targetUsername = null){
+  const target = String(targetUsername || modalTargetUsername || me?.username || "").trim();
+  const results = [];
+  const wait = (ms = 160) => new Promise((resolve) => setTimeout(resolve, ms));
+  const log = (label, ok, detail = "") => {
+    results.push({ label, ok, detail });
+    const msg = `[profile-modal-test] ${label}: ${ok ? "PASS" : "FAIL"}${detail ? ` (${detail})` : ""}`;
+    if (ok) console.log(msg);
+    else console.warn(msg);
+  };
+  if (!target) {
+    log("open", false, "No target username");
+    return results;
   }
-});
+  const opened = target === me?.username ? await openMyProfile() : await openMemberProfile(target);
+  log("open", !!opened, opened ? "" : "Open failed");
+  if (!opened) return results;
 
-addFriendBtn?.addEventListener("click", async () => {
-  if (addFriendBtn.disabled) return;
-  const st = String(modalFriendInfo?.status || 'none');
-  const rid = Number(addFriendBtn.dataset.requestId || modalFriendInfo?.requestId || 0);
-  if (!modalTargetUsername) return;
-  setMsgline(profileActionMsg, "");
-  try {
-    if (st === 'incoming' && rid) {
-      const res = await fetch('/api/friends/respond', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId: rid, action: 'accept' }) });
-      if (!res.ok) throw new Error(await res.text());
-      modalFriendInfo = { status: 'friends', requestId: null };
-      friendsDirty = true;
-      setMsgline(profileActionMsg, 'Friend request accepted.');
-    } else if (st === 'none') {
-      const res = await fetch('/api/friends/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: modalTargetUsername }) });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json().catch(()=>({}));
-      modalFriendInfo = { status: data?.autoAccepted ? 'friends' : 'outgoing', requestId: null };
-      friendsDirty = true;
-      setMsgline(profileActionMsg, data?.autoAccepted ? 'Friend added.' : 'Friend request sent.');
+  const clickAction = async (action, label, { expectTab = null, expectEditToggle = false } = {}) => {
+    const btn = modal?.querySelector(`[data-profile-action="${action}"]`);
+    if (!btn) return log(label, false, "Missing button");
+    if (btn.disabled) return log(label, false, "Disabled");
+    const beforeEdit = profileEditMode;
+    btn.click();
+    await wait(220);
+    if (expectTab && activeProfileTab !== expectTab) {
+      return log(label, false, `Expected tab ${expectTab}`);
     }
-  } catch (e) {
-    setMsgline(profileActionMsg, e?.message || 'Could not update friend.');
-  } finally {
-    updateProfileActions({ isSelf: false, canModerate: (roleRank(me.role) >= roleRank("Moderator")) });
+    if (expectEditToggle && profileEditMode === beforeEdit) {
+      return log(label, false, "Edit mode did not toggle");
+    }
+    log(label, true);
+  };
+
+  await clickAction("profile:like", "like");
+  if (currentProfileIsSelf) {
+    await clickAction("profile:toggle-edit", "toggle-edit", { expectEditToggle: true });
+    await clickAction("profile:customize", "customize", { expectTab: "customize" });
+    await clickAction("profile:themes", "themes");
+    try { closeThemesModal(); } catch {}
   }
-});
+
+  const closeBtn = modal?.querySelector(`[data-profile-action="profile:close"]`);
+  if (closeBtn && !closeBtn.disabled) {
+    closeBtn.click();
+    await wait(280);
+    const closed = modal?.style.display === "none";
+    const unlocked = !document.body.classList.contains("bodyLocked");
+    log("close", !!closed && unlocked, closed ? "" : "Modal still visible");
+  } else {
+    log("close", false, "Missing close button");
+  }
+  return results;
+};
+
 
 likeCount?.addEventListener("click", async () => {
   if (profileLikeState.isSelf) return;

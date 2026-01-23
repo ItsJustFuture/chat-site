@@ -780,9 +780,9 @@
 </div>
 </div>
 <div class="profileHeaderActions">
-<button aria-label="Edit profile" class="iconBtn smallIcon" id="profileEditBtn" style="display:none;" title="Edit profile" type="button">✏️</button>
-<button aria-label="Moderation actions" class="iconBtn smallIcon" id="actionsBtn" style="display:none;" title="Moderation actions" type="button">🛡️</button>
-<button aria-label="Close profile" class="iconBtn smallIcon" id="closeModalBtn" type="button">✕</button>
+<button aria-label="Edit profile" class="iconBtn smallIcon" data-profile-action="profile:edit" id="profileEditBtn" style="display:none;" title="Edit profile" type="button">✏️</button>
+<button aria-label="Moderation actions" class="iconBtn smallIcon" data-profile-action="profile:moderation-overlay" id="actionsBtn" style="display:none;" title="Moderation actions" type="button">🛡️</button>
+<button aria-label="Close profile" class="iconBtn smallIcon" data-profile-action="profile:close" id="closeModalBtn" type="button">✕</button>
 </div>
 </div>
 </div>
@@ -804,16 +804,25 @@
 </div>
 <div class="modalContent" id="modalContent">
 <div id="viewProfile">
+<div class="profileSections" id="profileSections">
+<details class="profileSection" data-section="actions" open="">
+<summary>Actions</summary>
+<div class="profileSectionBody">
 <div class="profileQuickActions" id="profileQuickActions">
 <div class="quickActionGroup">
-<button class="btn btnSecondary" id="dmUserBtn" type="button">Message</button>
-<button class="btn btnSecondary" id="dmChessQuickBtn" type="button">Play Chess</button>
-<button class="btn btnSecondary" id="addFriendBtn" style="display:none;" type="button">🤝 Add Friend</button>
-<button class="btn btnSecondary" id="declineFriendBtn" style="display:none;" type="button">✖ Decline</button>
-<button class="btn btnSecondary" id="likeProfileBtn" type="button">❤️ Like</button>
-<button class="btn btnSecondary" id="profileEditToggleBtn" style="display:none;" type="button">Edit profile</button>
+<button class="btn btnSecondary" data-profile-action="profile:message" id="dmUserBtn" type="button">Message</button>
+<button class="btn btnSecondary" data-profile-action="profile:chess" id="dmChessQuickBtn" type="button">Play Chess</button>
+<button class="btn btnSecondary" data-profile-action="profile:friend" id="addFriendBtn" style="display:none;" type="button">🤝 Add Friend</button>
+<button class="btn btnSecondary" data-profile-action="profile:friend-decline" id="declineFriendBtn" style="display:none;" type="button">✖ Decline</button>
+<button class="btn btnSecondary" data-profile-action="profile:like" id="likeProfileBtn" type="button">❤️ Like</button>
+<button class="btn btnSecondary" data-profile-action="profile:toggle-edit" id="profileEditToggleBtn" style="display:none;" type="button">Edit profile</button>
 </div>
 </div>
+</div>
+</details>
+<details class="profileSection" data-section="stats">
+<summary>Stats</summary>
+<div class="profileSectionBody">
 <div class="profileInfoGrid">
 <div class="profileInfoCard">
 <div class="infoLabel">Age</div>
@@ -861,9 +870,26 @@
 <span class="coupleChip" id="profileCoupleChip" style="display:none;"></span>
 </div>
 </div>
+</div>
+</details>
+<details class="profileSection" data-section="about">
+<summary>About</summary>
+<div class="profileSectionBody">
 <div class="profileBioCard" id="viewAbout">
 <div class="sectionTitle">Bio</div>
 <div class="bioRender" id="bioRender">(no bio)</div>
+</div>
+</div>
+</details>
+<details class="profileSection" data-section="customize">
+<summary>Customization</summary>
+<div class="profileSectionBody">
+<div class="panelBox">
+<div class="small">Jump into the full customization panel or apply a theme.</div>
+<div class="row" style="margin-top:10px; gap:8px; flex-wrap:wrap;">
+<button class="btn btnSecondary" data-profile-action="profile:customize" type="button">Open customize panel</button>
+<button class="btn btnSecondary" data-profile-action="profile:themes" type="button">Themes</button>
+</div>
 </div>
 <div class="panelBox profileEditSection" id="profileEditSection" style="display:none;">
 <div id="myProfileEdit" style="display:none;">
@@ -1079,6 +1105,19 @@
 <div class="msgline" id="profileMsg"></div>
 </div>
 </div>
+</div>
+</details>
+<details class="profileSection" data-section="moderation" id="profileModerationSection" style="display:none;">
+<summary>Moderation</summary>
+<div class="profileSectionBody">
+<div class="panelBox">
+<div class="small">Moderator tools for this member.</div>
+<div class="row" style="margin-top:10px; gap:8px; flex-wrap:wrap;">
+<button class="btn btnSecondary" data-profile-action="profile:moderation" id="profileModerationOpenBtn" type="button">Open moderation panel</button>
+</div>
+</div>
+</div>
+</details>
 </div>
 </div>
 <div id="viewTimeline" style="display:none;">
