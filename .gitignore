@@ -4,3 +4,4 @@ chat.db
 uploads/
 public/avatars/
 sessions.sqlite
+data/

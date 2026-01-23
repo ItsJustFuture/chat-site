@@ -240,7 +240,7 @@ process.on("uncaughtException", (err) => {
   console.error("[uncaughtException]", err);
 });
 const { Server } = require("socket.io");
-const { db, migrationsReady } = require("./database");
+const { db, migrationsReady, seedDevUser, DB_FILE } = require("./database");
 const { VIBE_TAGS, VIBE_TAG_LIMIT } = require("./vibe-tags");
 
 const MEMORY_SYSTEM_ENABLED = process.env.MEMORY_SYSTEM_ENABLED === "1";
@@ -264,8 +264,11 @@ const ALLOWED_ORIGINS = new Set(
     .filter(Boolean)
 );
 
+const LOCAL_DEV = process.env.LOCAL_DEV === "1";
+const NODE_ENV = process.env.NODE_ENV || "development";
 // ---- Startup sanity checks (fail fast in production)
-const IS_PROD = process.env.NODE_ENV === "production";
+const IS_PROD = NODE_ENV === "production" && !LOCAL_DEV;
+const IS_DEV_MODE = LOCAL_DEV || NODE_ENV === "development" || NODE_ENV === "test";
 if (IS_PROD) {
   if (!process.env.SESSION_SECRET || String(process.env.SESSION_SECRET).trim().length < 16) {
     console.error("FATAL: SESSION_SECRET is missing/too short. Set a strong secret in your environment.");
@@ -372,12 +375,20 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
       console.log("[rooms] system emit", { room: "__global__", text: payload.text, meta: payload.meta || null });
     }
   }
-  const pgPool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === "production"
-    ? { rejectUnauthorized: false }
-    : false
-});// ---- Postgres: helpers to keep legacy schemas compatible
+const PG_ENABLED = Boolean(process.env.DATABASE_URL);
+const pgPool = PG_ENABLED
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: NODE_ENV === "production"
+        ? { rejectUnauthorized: false }
+        : false,
+    })
+  : null;
+if (!PG_ENABLED && IS_DEV_MODE) {
+  console.warn("[db] PG unavailable, using SQLite dev fallback:", DB_FILE);
+}
+let DB_BACKEND = "sqlite";
+// ---- Postgres: helpers to keep legacy schemas compatible
 async function pgGetColumnType(tableName, columnName) {
   const { rows } = await pgPool.query(
     `SELECT udt_name, data_type
@@ -450,7 +461,7 @@ let FRIENDS_READY = false;
 let PG_INIT_ERROR = null;
 // ---- Postgres table setup
 // Run once on boot, and start the server only after this finishes (so schema/type fixes apply before /register).
-const pgInitPromise = (async () => {
+const pgInitPromise = PG_ENABLED ? (async () => {
   try {
     // Base tables (SQL only)
     await pgPool.query(`
@@ -1176,20 +1187,26 @@ try {
     console.warn('[pg-init] survival tables failed:', e?.message || e);
   }
 
-PG_READY = true;
+    PG_READY = true;
     PG_INIT_ERROR = null;
+    DB_BACKEND = "postgres";
     console.log("Postgres tables ready");
   } catch (err) {
     PG_READY = false;
     PG_INIT_ERROR = err;
+    if (IS_DEV_MODE) {
+      console.warn("[db] PG unavailable, using SQLite dev fallback:", err?.message || err);
+      return false;
+    }
     console.error("Postgres init error:", err);
     throw err;
   }
-})();
+})() : Promise.resolve(null);
 // IMPORTANT for Render/any reverse proxy so secure cookies work
 app.set("trust proxy", 1);
 // ---- DB
 async function pgUserExists(userId) {
+  if (!pgPool || !PG_READY) return false;
   const { rows } = await pgPool.query("SELECT 1 FROM users WHERE id=$1 LIMIT 1", [userId]);
   return !!rows[0];
 }
@@ -1716,14 +1733,17 @@ app.use((req, res, next) => {
 });
 
 // ---- Sessions (Postgres-backed; survives redeploys)
+const sessionStore = pgPool
+  ? new PgSession({
+      pool: pgPool,
+      tableName: "session",
+      // Prevent cold-start / deploy races where the session table isn't ready yet.
+      // connect-pg-simple will create it on demand if missing.
+      createTableIfMissing: true,
+    })
+  : new session.MemoryStore();
 const sessionMiddleware = session({
-  store: new PgSession({
-    pool: pgPool,
-    tableName: "session",
-    // Prevent cold-start / deploy races where the session table isn't ready yet.
-    // connect-pg-simple will create it on demand if missing.
-    createTableIfMissing: true,
-  }),
+  store: sessionStore,
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
@@ -1731,12 +1751,16 @@ const sessionMiddleware = session({
   cookie: {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: NODE_ENV === "production",
     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
   },
 });
 
 app.use(sessionMiddleware);
+
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", db: DB_BACKEND });
+});
 
 const genericRateLimitHandler = (_req, res) => {
   res.status(429).json({ message: "Too many requests, please try again later." });
@@ -5123,12 +5147,43 @@ function emitProgressionUpdate(userId) {
 
 
 async function pgUsersEnabled() {
-  if (!process.env.DATABASE_URL) return false;
+  if (!PG_ENABLED || !pgPool) return false;
   try {
     await pgInitPromise;
     return PG_READY;
   } catch (e) {
     return false;
+  }
+}
+
+async function ensureDevSeedUser() {
+  if (!IS_DEV_MODE) return;
+  const seed = {
+    username: "Iri",
+    password: "Perseverance75",
+    role: "Owner",
+  };
+  try {
+    if (PG_READY && pgPool) {
+      const hash = await bcrypt.hash(seed.password, 10);
+      await pgPool.query(
+        `
+        INSERT INTO users (username, password_hash, role, created_at)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (username)
+        DO UPDATE SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role
+        `,
+        [seed.username, hash, seed.role, Date.now()]
+      );
+      return;
+    }
+  } catch (e) {
+    console.warn("[seed][pg] failed, falling back to sqlite:", e?.message || e);
+  }
+  try {
+    await seedDevUser(seed);
+  } catch (e) {
+    console.warn("[seed][sqlite] failed:", e?.message || e);
   }
 }
 
@@ -16847,6 +16902,9 @@ async function startServer() {
   }
   if (pgResult.status === "rejected") {
     console.error("[startup] Postgres init failed", pgResult.reason);
+    if (IS_PROD) {
+      process.exit(1);
+    }
   }
 
   try {
@@ -16854,6 +16912,8 @@ async function startServer() {
   } catch (e) {
     console.warn("[startup] core room ensure failed", e?.message || e);
   }
+
+  await ensureDevSeedUser();
 
   await new Promise((resolve) => {
     httpServer.listen(PORT, () => {

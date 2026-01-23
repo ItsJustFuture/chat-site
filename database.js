@@ -1,10 +1,16 @@
 "use strict";
 
 const path = require("path");
+const fs = require("fs");
 const sqlite3 = require("sqlite3").verbose();
 const bcrypt = require("bcrypt");
 
-const DB_FILE = process.env.DB_FILE || path.join(__dirname, "chat.db");
+const DEFAULT_SQLITE_PATH = path.join(__dirname, "data", "dev.sqlite");
+const DB_FILE = process.env.SQLITE_PATH || process.env.DB_FILE || DEFAULT_SQLITE_PATH;
+const dbDir = path.dirname(DB_FILE);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
 const db = new sqlite3.Database(DB_FILE);
 
 function run(sql, params = []) {
@@ -901,10 +907,34 @@ await run(`CREATE INDEX IF NOT EXISTS idx_appeal_messages_appeal ON appeal_messa
   await run("UPDATE users SET role='Admin' WHERE lower(username)='ally'");
 }
 
+async function seedDevUser({ username, password, role }) {
+  const safeName = String(username || "").trim();
+  if (!safeName || !password) return null;
+  const existing = await all("SELECT id FROM users WHERE lower(username)=lower(?) LIMIT 1", [safeName]);
+  if (existing && existing[0]?.id) {
+    const hash = await bcrypt.hash(String(password), 10);
+    await run("UPDATE users SET role=?, password_hash=? WHERE id=?", [
+      role || "Owner",
+      hash,
+      existing[0].id,
+    ]);
+    return existing[0].id;
+  }
+  const now = Date.now();
+  const hash = await bcrypt.hash(String(password), 10);
+  const result = await run(
+    "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
+    [safeName, hash, role || "Owner", now]
+  );
+  return result?.lastID || null;
+}
+
 const migrationsReady = runSqliteMigrations();
 
 module.exports = {
   db,
   migrationsReady,
   runSqliteMigrations,
+  DB_FILE,
+  seedDevUser,
 };
