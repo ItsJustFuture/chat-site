@@ -5138,19 +5138,45 @@ function sanitizeDisplayName(name) {
 
 // Must match the client arena map zone labels.
 const SURVIVAL_ZONES = [
-  "Open Field",
   "Pine Woods",
-  "Rocky Ridge",
-  "Ruins",
-  "River Bend",
-  "Caves",
-  "Swamp",
-  "Cornucopia",
+  "Old Ruins",
+  "Ridge",
+  "Shimmer Lake",
+  "Central Plaza",
+  "Cave Mouth",
+  "Mossy Swamp",
+  "Supply Drop Zone",
 ];
+const SURVIVAL_ZONE_ALIASES = new Map([
+  ["open field", "Central Plaza"],
+  ["rocky ridge", "Ridge"],
+  ["ruins", "Old Ruins"],
+  ["river bend", "Shimmer Lake"],
+  ["caves", "Cave Mouth"],
+  ["swamp", "Mossy Swamp"],
+  ["cornucopia", "Supply Drop Zone"],
+  ["pine woods", "Pine Woods"],
+  ["old ruins", "Old Ruins"],
+  ["ridge", "Ridge"],
+  ["shimmer lake", "Shimmer Lake"],
+  ["central plaza", "Central Plaza"],
+  ["cave mouth", "Cave Mouth"],
+  ["mossy swamp", "Mossy Swamp"],
+  ["supply drop zone", "Supply Drop Zone"],
+]);
+
+function normalizeSurvivalZoneName(zone) {
+  const raw = String(zone || "").trim();
+  if (!raw) return null;
+  const key = raw.toLowerCase();
+  if (SURVIVAL_ZONE_ALIASES.has(key)) return SURVIVAL_ZONE_ALIASES.get(key);
+  const direct = SURVIVAL_ZONES.find((z) => z.toLowerCase() === key);
+  return direct || raw;
+}
 
 function pickSurvivalSpawnLocation(rng) {
   const fn = typeof rng === "function" ? rng : () => Math.random();
-  return SURVIVAL_ZONES[Math.floor(fn() * SURVIVAL_ZONES.length)] || "central";
+  return SURVIVAL_ZONES[Math.floor(fn() * SURVIVAL_ZONES.length)] || SURVIVAL_ZONES[0];
 }
 
 function buildSurvivalSeedPayload(seed, options) {
@@ -5267,13 +5293,17 @@ function normalizeSurvivalParticipantRow(row) {
     inventory: Array.isArray(row.inventory) ? row.inventory : safeJsonParse(row.inventory_json || "[]", []),
     traits: row.traits || safeJsonParse(row.traits_json || "{}", {}),
     last_event_at: row.last_event_at ? Number(row.last_event_at) : null,
-    location: row.location || null,
+    location: normalizeSurvivalZoneName(row.location) || null,
     created_at: row.created_at ? Number(row.created_at) : null,
   };
 }
 
 function normalizeSurvivalEventRow(row) {
   if (!row) return null;
+  const outcome = safeJsonParse(row.outcome_json || "{}", {});
+  if (outcome && outcome.zone) {
+    outcome.zone = normalizeSurvivalZoneName(outcome.zone) || outcome.zone;
+  }
   return {
     id: Number(row.id),
     season_id: Number(row.season_id),
@@ -5282,7 +5312,7 @@ function normalizeSurvivalEventRow(row) {
     order_index: Number(row.order_index),
     text: row.text,
     involved_user_ids: safeJsonParse(row.involved_user_ids_json || "[]", []),
-    outcome: safeJsonParse(row.outcome_json || "{}", {}),
+    outcome,
     created_at: row.created_at ? Number(row.created_at) : null,
   };
 }
@@ -5679,7 +5709,7 @@ function pickZoneFromAlive(alive, rng){
   // Prefer zones that currently have people (so the map feels alive).
   const counts = new Map();
   for(const p of alive){
-    const z = String(p.location || SURVIVAL_ZONES[0]);
+    const z = normalizeSurvivalZoneName(p.location) || SURVIVAL_ZONES[0];
     counts.set(z, (counts.get(z) || 0) + 1);
   }
   const weighted = Array.from(counts.entries()).map(([zone, c]) => ({ zone, weight: Math.max(1, c) }));
@@ -5700,7 +5730,7 @@ function maybeGenerateArenaEvent({ season, participants, rng, now }) {
   const zone = scope === "zone" ? pickZoneFromAlive(alive, rng) : null;
 
   const population = scope === "zone"
-    ? alive.filter((p) => String(p.location || SURVIVAL_ZONES[0]).toLowerCase() === String(zone || "").toLowerCase())
+    ? alive.filter((p) => normalizeSurvivalZoneName(p.location) === normalizeSurvivalZoneName(zone))
     : alive;
 
   if (!population.length) return null;
@@ -8670,7 +8700,7 @@ function buildSurvivalArenaPayload(season, participants = []) {
   const dangerLevels = {};
   for (const z of SURVIVAL_ZONES) {
     // 0–5, lightly influenced by population + RNG (purely cosmetic for now).
-    const pop = participants.filter((p) => p.alive && String(p.location || "").toLowerCase() === String(z).toLowerCase()).length;
+    const pop = participants.filter((p) => p.alive && normalizeSurvivalZoneName(p.location) === z).length;
     const base = clamp(Math.round(rng() * 3) + (pop ? 1 : 0), 0, 5);
     dangerLevels[z] = base;
   }
@@ -9108,6 +9138,9 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
 
   const participants = await fetchSurvivalParticipants(seasonId);
   const alliances = await fetchSurvivalAlliances(seasonId);
+  participants.forEach((p) => {
+    p.location = normalizeSurvivalZoneName(p.location) || SURVIVAL_ZONES[0];
+  });
   const alive = participants.filter((p) => p.alive);
   if (alive.length <= 1) {
     season.status = "finished";
@@ -9220,7 +9253,9 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
 
     // Attach a best-guess zone for this event so the arena map can filter/animate.
     try {
-      const zones = (selectedParticipants || []).map((p) => String(p.location || "")).filter(Boolean);
+      const zones = (selectedParticipants || [])
+        .map((p) => normalizeSurvivalZoneName(p.location))
+        .filter(Boolean);
       const zone = zones.length
         ? zones
             .sort(
@@ -9229,7 +9264,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
             )
             .pop()
         : null;
-      if (zone) outcome.zone = zone;
+      if (zone) outcome.zone = normalizeSurvivalZoneName(zone) || zone;
     } catch {}
 
     orderIndex += 1;
