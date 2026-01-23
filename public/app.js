@@ -3741,7 +3741,15 @@ function renderSurvivalArena() {
     svg.appendChild(g);
   });
 
-  wrap.appendChild(svg);
+  const mapGraphic = document.createElement("div");
+  mapGraphic.className = "survivalMapGraphic";
+  const mapImg = document.createElement("img");
+  mapImg.src = "/arena/arena_map.png";
+  mapImg.alt = "Arena map";
+  mapImg.loading = "lazy";
+  mapGraphic.appendChild(mapImg);
+  mapGraphic.appendChild(svg);
+  wrap.appendChild(mapGraphic);
 
   // Zone detail list (either selected zone, or all zones as cards).
   const detail = document.createElement("div");
@@ -8761,6 +8769,20 @@ function toggleMembersAdminMenu(force){
   membersAdminMenu.hidden = !shouldOpen;
   membersAdminMenuBtn?.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
 }
+function bindTapAction(btn, handler){
+  if(!btn || typeof handler !== "function") return;
+  let touchActivated = false;
+  btn.addEventListener("pointerup", (e) => {
+    if (e.pointerType !== "touch") return;
+    touchActivated = true;
+    handler();
+    setTimeout(() => { touchActivated = false; }, 450);
+  });
+  btn.addEventListener("click", () => {
+    if (touchActivated) return;
+    handler();
+  });
+}
 
 function closeDrawers(){
   channelsPane?.classList.remove("open");
@@ -8854,11 +8876,11 @@ adminMenuRoleDebugBtn?.addEventListener("click", () => {
   closeMembersAdminMenu();
   openRoleDebugPanel();
 });
-adminMenuFeatureFlagsBtn?.addEventListener("click", () => {
+bindTapAction(adminMenuFeatureFlagsBtn, () => {
   closeMembersAdminMenu();
   openFeatureFlagsPanel();
 });
-adminMenuSessionsBtn?.addEventListener("click", () => {
+bindTapAction(adminMenuSessionsBtn, () => {
   closeMembersAdminMenu();
   openSessionsPanel();
 });
@@ -14060,8 +14082,10 @@ function renderLatestUpdateSnippet(){
     ? new Date(latestChangelogEntry.createdAt).toLocaleString()
     : "";
 
-  // Render a compact reactions row directly under the timestamp.
   if(latestUpdateReactions){
+    latestUpdateReactions.hidden = !latestUpdateExpanded;
+  }
+  if(latestUpdateReactions && latestUpdateExpanded){
     latestUpdateReactions.innerHTML = "";
     const reactions = normalizeChangelogReactions(latestChangelogEntry.reactions);
     const myReactions = normalizeMyChangelogReactions(latestChangelogEntry.myReactions);
@@ -15528,11 +15552,11 @@ function openSessionsPanel(){
 }
 
 function bindOwnerPanels(){
-  featureFlagsPanelBtn?.addEventListener("click", openFeatureFlagsPanel);
+  bindTapAction(featureFlagsPanelBtn, openFeatureFlagsPanel);
   featureFlagsCloseBtn?.addEventListener("click", closeFeatureFlagsPanel);
   featureFlagsReloadBtn?.addEventListener("click", loadFeatureFlags);
 
-  sessionsPanelBtn?.addEventListener("click", openSessionsPanel);
+  bindTapAction(sessionsPanelBtn, openSessionsPanel);
   sessionsCloseBtn?.addEventListener("click", closeSessionsPanel);
   sessionsReloadBtn?.addEventListener("click", loadSessions);
 }
