@@ -3010,6 +3010,11 @@ const memberMenuName = document.getElementById("memberMenuName");
 const memberViewProfileBtn = document.getElementById("memberViewProfileBtn");
 const memberDmBtn = document.getElementById("memberDmBtn");
 const memberReferBtn = document.getElementById("memberReferBtn");
+const memberModSection = document.getElementById("memberModSection");
+const memberKickBtn = document.getElementById("memberKickBtn");
+const memberMuteBtn = document.getElementById("memberMuteBtn");
+const memberBanBtn = document.getElementById("memberBanBtn");
+const memberLogsBtn = document.getElementById("memberLogsBtn");
 
 const appRoot = document.getElementById("app");
 if (memberMenu && appRoot && memberMenu.parentElement !== appRoot) {
@@ -3251,7 +3256,9 @@ const luckMeterBar = document.getElementById("luckMeterBar");
 const luckMeterBarText = document.getElementById("luckMeterBarText");
 const luckMeterValue = document.getElementById("luckMeterValue");
 const luckMeterStreak = document.getElementById("luckMeterStreak");
-const survivalPanel = document.getElementById("survivalPanel");
+const survivalOpenBtn = document.getElementById("survivalOpenBtn");
+const survivalModal = document.getElementById("survivalModal");
+const survivalModalClose = document.getElementById("survivalModalClose");
 const survivalSeasonTitle = document.getElementById("survivalSeasonTitle");
 const survivalStatus = document.getElementById("survivalStatus");
 const survivalDayPhase = document.getElementById("survivalDayPhase");
@@ -3260,20 +3267,15 @@ const survivalNewSeasonBtn = document.getElementById("survivalNewSeasonBtn");
 const survivalAdvanceBtn = document.getElementById("survivalAdvanceBtn");
 const survivalAutoRunBtn = document.getElementById("survivalAutoRunBtn");
 const survivalEndBtn = document.getElementById("survivalEndBtn");
-const survivalRosterBtn = document.getElementById("survivalRosterBtn");
 const survivalLogBtn = document.getElementById("survivalLogBtn");
-const survivalHideViewBtn = document.getElementById("survivalHideViewBtn");
-const survivalCollapseBtn = document.getElementById("survivalCollapseBtn");
-const survivalMiniBtn = document.getElementById("survivalMiniBtn");
 const survivalArenaBtn = document.getElementById("survivalArenaBtn");
+const survivalControlsBtn = document.getElementById("survivalControlsBtn");
 const survivalLobbyBtn = document.getElementById("survivalLobbyBtn");
 const survivalHistorySelect = document.getElementById("survivalHistorySelect");
-const survivalLogFeed = document.getElementById("survivalLogFeed");
-const survivalLogList = document.getElementById("survivalLogList");
 const survivalArena = document.getElementById("survivalArena");
 const survivalArenaGrid = document.getElementById("survivalArenaGrid");
 const survivalLobbyCount = document.getElementById("survivalLobbyCount");
-const survivalNewSeasonModal = document.getElementById("survivalNewSeasonModal");
+const survivalNewSeasonPanel = document.getElementById("survivalNewSeasonPanel");
 const survivalNewSeasonClose = document.getElementById("survivalNewSeasonClose");
 const survivalSeasonTitleInput = document.getElementById("survivalSeasonTitleInput");
 const survivalParticipantList = document.getElementById("survivalParticipantList");
@@ -3284,11 +3286,7 @@ const survivalNpcNames = document.getElementById("survivalNpcNames");
 const survivalFillSlots = document.getElementById("survivalFillSlots");
 const survivalSeasonStartBtn = document.getElementById("survivalSeasonStartBtn");
 const survivalSeasonMsg = document.getElementById("survivalSeasonMsg");
-const survivalRosterModal = document.getElementById("survivalRosterModal");
-const survivalRosterClose = document.getElementById("survivalRosterClose");
 const survivalRosterList = document.getElementById("survivalRosterList");
-const survivalLogModal = document.getElementById("survivalLogModal");
-const survivalLogClose = document.getElementById("survivalLogClose");
 const survivalLogModalList = document.getElementById("survivalLogModalList");
 const survivalLogLoadBtn = document.getElementById("survivalLogLoadBtn");
 
@@ -3297,26 +3295,64 @@ let voiceRec = { recorder: null, stream: null, chunks: [], startedAt: 0 };
 let dicePayoutOpen = false;
 
 
-// Survival UI can be collapsed to a small button (spectators can rely on system messages).
-let survivalUiCollapsed = false;
-try { survivalUiCollapsed = localStorage.getItem("survivalUiCollapsed") === "1"; } catch {}
+let survivalModalOpen = false;
+let survivalModalTab = "log";
 
-function setSurvivalUiCollapsed(collapsed) {
-  survivalUiCollapsed = !!collapsed;
-  try { localStorage.setItem("survivalUiCollapsed", survivalUiCollapsed ? "1" : "0"); } catch {}
-  const inRoom = isSurvivalRoom(currentRoom);
-  if (survivalPanel) survivalPanel.hidden = !inRoom || survivalUiCollapsed;
-  if (survivalMiniBtn) survivalMiniBtn.hidden = !inRoom || !survivalUiCollapsed;
-  // When collapsed, close expanded views; system messages remain visible in chat.
-  if (survivalUiCollapsed) {
-    survivalState.view = "none";
-  }
-  renderSurvivalPanel();
+function setSurvivalModalTab(tab){
+  const next = (tab === "map" || tab === "controls") ? tab : "log";
+  survivalModalTab = next;
+  survivalState.view = next;
+  if (survivalLogBtn) survivalLogBtn.classList.toggle("active", next === "log");
+  if (survivalArenaBtn) survivalArenaBtn.classList.toggle("active", next === "map");
+  if (survivalControlsBtn) survivalControlsBtn.classList.toggle("active", next === "controls");
+  document.querySelectorAll("[data-survival-view]").forEach((section) => {
+    section.classList.toggle("active", section.dataset.survivalView === next);
+    section.hidden = section.dataset.survivalView !== next;
+  });
 }
 
-// Wire collapse/expand controls
-survivalCollapseBtn?.addEventListener("click", () => setSurvivalUiCollapsed(!survivalUiCollapsed));
-survivalMiniBtn?.addEventListener("click", () => setSurvivalUiCollapsed(false));
+function openSurvivalModal(){
+  if (!survivalModal || !isSurvivalRoom(currentRoom)) return;
+  closeMemberMenu();
+  closeMembersAdminMenu();
+  closeThemesModal();
+  closeProfileSettingsMenu();
+  survivalModalOpen = true;
+  survivalModal.hidden = false;
+  survivalModal.style.display = "flex";
+  survivalModal.classList.remove("modal-closing");
+  lockBodyScroll(true);
+  setSurvivalModalTab(survivalModalTab);
+  renderSurvivalLog(survivalLogModalList, survivalState.events);
+  renderSurvivalRoster();
+  renderSurvivalPanel();
+  if (PREFERS_REDUCED_MOTION) {
+    survivalModal.classList.add("modal-visible");
+  } else {
+    requestAnimationFrame(() => survivalModal.classList.add("modal-visible"));
+  }
+}
+
+function closeSurvivalModal(){
+  if (!survivalModal) return;
+  survivalModalOpen = false;
+  survivalModal.classList.remove("modal-visible");
+  closeSurvivalNewSeasonModal();
+  if (PREFERS_REDUCED_MOTION) {
+    survivalModal.style.display = "none";
+    survivalModal.classList.remove("modal-closing");
+    survivalModal.hidden = true;
+    lockBodyScroll(false);
+    return;
+  }
+  survivalModal.classList.add("modal-closing");
+  setTimeout(() => {
+    survivalModal.style.display = "none";
+    survivalModal.classList.remove("modal-closing");
+    survivalModal.hidden = true;
+    lockBodyScroll(false);
+  }, 180);
+}
 
 // On boot, hide dice-only UI unless we are already in the Dice Room.
 try {
@@ -3324,11 +3360,7 @@ try {
   if (diceVariantWrap) diceVariantWrap.style.display = nowDiceRoom ? "" : "none";
   if (luckMeter) luckMeter.style.display = nowDiceRoom ? "" : "none";
   const nowSurvivalRoom = isSurvivalRoom(currentRoom);
-  if (survivalPanel) survivalPanel.hidden = !nowSurvivalRoom || survivalUiCollapsed;
-  if (survivalMiniBtn) survivalMiniBtn.hidden = !nowSurvivalRoom || !survivalUiCollapsed;
-  // Expanded log/map views are optional; spectators can rely on system messages in chat.
-  if (survivalLogFeed) survivalLogFeed.hidden = !nowSurvivalRoom || survivalUiCollapsed || survivalState.view !== "log";
-  if (survivalArena) survivalArena.hidden = !nowSurvivalRoom || survivalUiCollapsed || survivalState.view !== "arena";
+  if (survivalOpenBtn) survivalOpenBtn.hidden = !nowSurvivalRoom;
 } catch {}
 
 function closeMediaMenu(){
@@ -3508,7 +3540,7 @@ function getSurvivalAliveCount() {
 }
 
 function renderSurvivalPanel() {
-  if (!survivalPanel) return;
+  if (!survivalSeasonTitle || !survivalStatus || !survivalDayPhase || !survivalAliveCount) return;
   const season = survivalState.season;
   const aliveCount = getSurvivalAliveCount();
   if (survivalSeasonTitle) survivalSeasonTitle.textContent = season ? season.title : "No season";
@@ -3526,25 +3558,14 @@ function renderSurvivalPanel() {
   }
   if (survivalAliveCount) survivalAliveCount.textContent = `Alive: ${aliveCount}`;
 
-  if (survivalCollapseBtn) {
-    survivalCollapseBtn.textContent = survivalUiCollapsed ? '▸' : '▾';
-    survivalCollapseBtn.setAttribute('aria-expanded', survivalUiCollapsed ? 'false' : 'true');
-  }
-
   if (survivalNewSeasonBtn) survivalNewSeasonBtn.disabled = !survivalIsOwner();
   if (survivalAdvanceBtn) survivalAdvanceBtn.disabled = !survivalIsOwner() || !season || season.status !== "running";
   if (survivalAutoRunBtn) survivalAutoRunBtn.disabled = !survivalIsOwner() || !season || season.status !== "running";
   if (survivalEndBtn) survivalEndBtn.disabled = !survivalIsOwner() || !season;
   if (survivalAutoRunBtn) survivalAutoRunBtn.textContent = survivalAutoRunning ? "Stop Auto" : "Auto-Run";
   updateSurvivalHistorySelect();
-
-  // View toggles
-  const nowSurvivalRoom = isSurvivalRoom(currentRoom);
-  const collapsed = !!survivalUiCollapsed;
-  if (survivalPanel) survivalPanel.hidden = !nowSurvivalRoom || collapsed;
-  if (survivalMiniBtn) survivalMiniBtn.hidden = !nowSurvivalRoom || !collapsed;
-  if (survivalLogFeed) survivalLogFeed.hidden = !nowSurvivalRoom || collapsed || survivalState.view !== "log";
-  if (survivalArena) survivalArena.hidden = !nowSurvivalRoom || collapsed || survivalState.view !== "arena";
+  if (survivalOpenBtn) survivalOpenBtn.hidden = !isSurvivalRoom(currentRoom);
+  setSurvivalModalTab(survivalModalTab);
 }
 
 function getSurvivalEventIcon(outcome = {}) {
@@ -3711,9 +3732,9 @@ function renderSurvivalArena() {
           if (ev?.outcome?.scope === "global") return true;
           return String(ev?.outcome?.zone || "").toLowerCase() === String(z).toLowerCase();
         });
-        renderSurvivalLog(survivalLogList, filtered);
+        renderSurvivalLog(survivalLogModalList, filtered);
       } else {
-        renderSurvivalLog(survivalLogList, survivalState.events);
+        renderSurvivalLog(survivalLogModalList, survivalState.events);
       }
     });
 
@@ -3772,7 +3793,7 @@ function renderSurvivalArena() {
       survivalState.arena = survivalState.arena || {};
       survivalState.arena.selectedZone = null;
       renderSurvivalArena();
-      renderSurvivalLog(survivalLogList, survivalState.events);
+      renderSurvivalLog(survivalLogModalList, survivalState.events);
     });
     detail.appendChild(buildZoneCard(selected));
   } else {
@@ -3871,12 +3892,13 @@ function applySurvivalPayload(payload, { replaceEvents = false } = {}) {
     survivalState.selectedSeasonId = payload.season.id;
   }
   renderSurvivalPanel();
-  renderSurvivalLog(survivalLogList, survivalState.events);
+  renderSurvivalLog(survivalLogModalList, survivalState.events);
   renderSurvivalArena();
+  renderSurvivalRoster();
 }
 
 async function openSurvivalNewSeasonModal() {
-  if (!survivalNewSeasonModal) return;
+  if (!survivalNewSeasonPanel) return;
   if (!survivalIsOwner()) return toast("Only Owner/Co-Owner can start a season.");
   survivalSeasonMsg.textContent = "";
   const now = new Date();
@@ -3897,73 +3919,17 @@ async function openSurvivalNewSeasonModal() {
     row.innerHTML = `<input type="checkbox" value="${user.id}"/> ${escapeHtml(user.name)}`;
     survivalParticipantList.appendChild(row);
   });
-  survivalNewSeasonModal.hidden = false;
-  survivalNewSeasonModal.style.display = "flex";
-  survivalNewSeasonModal.classList.remove("modal-closing");
-  if (PREFERS_REDUCED_MOTION) {
-    survivalNewSeasonModal.classList.add("modal-visible");
-  } else {
-    requestAnimationFrame(() => survivalNewSeasonModal.classList.add("modal-visible"));
-  }
+  if (!survivalModalOpen) openSurvivalModal();
+  setSurvivalModalTab("controls");
+  survivalNewSeasonPanel.hidden = false;
+  requestAnimationFrame(() => {
+    try { survivalNewSeasonPanel.scrollIntoView({ block: "start", behavior: "smooth" }); } catch {}
+  });
 }
 
 function closeSurvivalNewSeasonModal() {
-  if (!survivalNewSeasonModal) return;
-  survivalNewSeasonModal.classList.remove("modal-visible");
-  survivalNewSeasonModal.classList.add("modal-closing");
-  setTimeout(() => {
-    survivalNewSeasonModal.style.display = "none";
-    survivalNewSeasonModal.classList.remove("modal-closing");
-    survivalNewSeasonModal.hidden = true;
-  }, 140);
-}
-
-function openSurvivalRosterModal() {
-  if (!survivalRosterModal) return;
-  renderSurvivalRoster();
-  survivalRosterModal.hidden = false;
-  survivalRosterModal.style.display = "flex";
-  survivalRosterModal.classList.remove("modal-closing");
-  if (PREFERS_REDUCED_MOTION) {
-    survivalRosterModal.classList.add("modal-visible");
-  } else {
-    requestAnimationFrame(() => survivalRosterModal.classList.add("modal-visible"));
-  }
-}
-
-function closeSurvivalRosterModal() {
-  if (!survivalRosterModal) return;
-  survivalRosterModal.classList.remove("modal-visible");
-  survivalRosterModal.classList.add("modal-closing");
-  setTimeout(() => {
-    survivalRosterModal.style.display = "none";
-    survivalRosterModal.classList.remove("modal-closing");
-    survivalRosterModal.hidden = true;
-  }, 140);
-}
-
-function openSurvivalLogModal() {
-  if (!survivalLogModal) return;
-  renderSurvivalLog(survivalLogModalList, survivalState.events);
-  survivalLogModal.hidden = false;
-  survivalLogModal.style.display = "flex";
-  survivalLogModal.classList.remove("modal-closing");
-  if (PREFERS_REDUCED_MOTION) {
-    survivalLogModal.classList.add("modal-visible");
-  } else {
-    requestAnimationFrame(() => survivalLogModal.classList.add("modal-visible"));
-  }
-}
-
-function closeSurvivalLogModal() {
-  if (!survivalLogModal) return;
-  survivalLogModal.classList.remove("modal-visible");
-  survivalLogModal.classList.add("modal-closing");
-  setTimeout(() => {
-    survivalLogModal.style.display = "none";
-    survivalLogModal.classList.remove("modal-closing");
-    survivalLogModal.hidden = true;
-  }, 140);
+  if (!survivalNewSeasonPanel) return;
+  survivalNewSeasonPanel.hidden = true;
 }
 
 async function startSurvivalSeason() {
@@ -4335,6 +4301,7 @@ const dmSettingsBtn = document.getElementById("dmSettingsBtn");
 const likeProfileBtn = document.getElementById("likeProfileBtn");
 const profileEditBtn = document.getElementById("profileEditBtn");
 const profileSettingsBtn = document.getElementById("profileSettingsBtn");
+const profileSettingsMenu = document.getElementById("profileSettingsMenu");
 const likeCount = document.getElementById("likeCount");
 const profileLikeMsg = document.getElementById("profileLikeMsg");
 const leaderboardXp = document.getElementById("leaderboardXp");
@@ -6953,18 +6920,23 @@ async function purchaseTheme(themeId){
 }
 function openThemesModal(){
   if (!themesModal) return;
+  closeSurvivalModal();
+  closeMemberMenu();
+  closeProfileSettingsMenu();
   themeRecents = loadThemeRecents();
   themeSelectedId = themeIdFromName(currentTheme);
   updateThemePreview(themeSelectedId);
   renderThemeCatalog();
   themesModal.classList.add("show");
   themesModal.setAttribute("aria-hidden", "false");
+  lockBodyScroll(true);
 }
 function closeThemesModal(){
   themesModal?.classList.remove("show");
   themesModal?.setAttribute("aria-hidden", "true");
   closeThemeActionSheet();
   closeThemesFiltersSheet();
+  lockBodyScroll(false);
 }
 function openThemesFiltersSheet(){
   themesFiltersSheet?.classList.add("show");
@@ -8100,6 +8072,19 @@ function positionMemberMenu() {
     return;
   }
 
+  const useSheet = window.matchMedia("(max-width: 640px)").matches;
+  memberMenu.classList.toggle("sheet", useSheet);
+  if (useSheet) {
+    memberMenu.style.left = "12px";
+    memberMenu.style.right = "12px";
+    memberMenu.style.top = "auto";
+    memberMenu.style.bottom = `calc(12px + env(safe-area-inset-bottom))`;
+    memberMenu.style.visibility = "";
+    return;
+  }
+  memberMenu.style.right = "";
+  memberMenu.style.bottom = "";
+
   const anchorRect = memberMenuAnchor.getBoundingClientRect();
   const viewport = window.visualViewport;
   const viewportWidth = viewport?.width ?? window.innerWidth;
@@ -8152,6 +8137,49 @@ function closeMemberMenu(){
   }
 }
 
+function canModerateMember(user){
+  if (!user || !me?.role) return false;
+  const targetRole = user?.role || "User";
+  if (roleRank(me.role) < roleRank("Moderator")) return false;
+  return roleRank(me.role) > roleRank(targetRole);
+}
+
+async function runMemberModAction(action){
+  const target = (memberMenuUsername || memberMenuUser?.username || memberMenuUser?.name || "").trim();
+  if (!target) return;
+  const reason = prompt(`Reason for ${action} ${target}:`, "") || "";
+  const cleaned = reason.trim();
+  if (!cleaned) return;
+  if (!confirmModeration(action, target)) return;
+  if (action === "kick") {
+    const durationSeconds = Number(quickKickSeconds?.value || 300);
+    const resp = await emitModWithAck("mod kick", { username: target, reason: cleaned, durationSeconds });
+    if (!resp?.ok) return toast?.(resp?.error || "Kick failed.");
+    showToast(`Kicked ${target} for ${formatDurationLabel({ seconds: durationSeconds })}`, {
+      actionLabel: "Undo",
+      actionFn: () => undoWithAck("mod unkick", { username: target }),
+      durationMs: 5200
+    });
+    return;
+  }
+  if (action === "mute") {
+    const minutes = Number(quickMuteMins?.value || 10);
+    const resp = await emitModWithAck("mod mute", { username: target, minutes, reason: cleaned });
+    if (!resp?.ok) return toast?.(resp?.error || "Mute failed.");
+    showToast(`Muted ${target}`, {
+      actionLabel: "Undo",
+      actionFn: () => undoWithAck("mod unmute", { username: target, reason: "Undo mute" }),
+      durationMs: 5200
+    });
+    return;
+  }
+  if (action === "ban") {
+    const minutes = Number(quickBanMins?.value || 0);
+    const resp = await emitModWithAck("mod ban", { username: target, minutes, reason: cleaned });
+    if (!resp?.ok) return toast?.(resp?.error || "Ban failed.");
+  }
+}
+
 
 // ---- Member quick-actions menu buttons
 memberViewProfileBtn?.addEventListener("click", ()=>{
@@ -8181,14 +8209,30 @@ memberReferBtn?.addEventListener("click", ()=>{
   });
   closeMemberMenu();
 });
+memberKickBtn?.addEventListener("click", async () => {
+  await runMemberModAction("kick");
+  closeMemberMenu();
+});
+memberMuteBtn?.addEventListener("click", async () => {
+  await runMemberModAction("mute");
+  closeMemberMenu();
+});
+memberBanBtn?.addEventListener("click", async () => {
+  await runMemberModAction("ban");
+  closeMemberMenu();
+});
+memberLogsBtn?.addEventListener("click", async () => {
+  const target = (memberMenuUsername || memberMenuUser?.username || memberMenuUser?.name || "").trim();
+  if (!target) return;
+  closeMemberMenu();
+  await openMyProfile();
+  setTab("actions");
+  if (logUser) logUser.value = target;
+  await refreshLogs();
+});
 
 function openMemberMenu(user, anchor){
-  if (!memberMenu || !membersPane) {
-    // Fallback if the quick-actions menu is unavailable
-    const uname = user?.username || user?.name || "";
-    if (uname) openMemberProfile(uname);
-    return;
-  }
+  if (!memberMenu || !membersPane) return;
 
   const anchorEl = anchor?.querySelector(".mName") || anchor;
   if (memberMenu.classList.contains("open") && memberMenuAnchor === anchorEl) {
@@ -8204,7 +8248,15 @@ function openMemberMenu(user, anchor){
     const isSelf = (memberMenuUsername && me?.username && memberMenuUsername.toLowerCase()===me.username.toLowerCase());
     memberReferBtn.style.display = (!isSelf && (me?.role==="Moderator")) ? "inline-flex" : "none";
   }
-  if (memberMenuName) memberMenuName.textContent = `${roleIcon(user.role)} ${user.name}`;
+  if (memberModSection) {
+    const canMod = canModerateMember(user);
+    memberModSection.style.display = canMod ? "flex" : "none";
+    if (memberLogsBtn) memberLogsBtn.style.display = canMod && !!logUser ? "inline-flex" : "none";
+  }
+  if (memberMenuName) {
+    const displayName = user?.name || user?.username || memberMenuUsername || "";
+    memberMenuName.textContent = `${roleIcon(user.role)} ${displayName}`.trim();
+  }
   memberMenu.classList.add("open");
   scheduleMemberMenuPosition();
 }
@@ -10545,6 +10597,22 @@ profileEditToggleBtn?.addEventListener("click", () => {
   if (!currentProfileIsSelf) return;
   setProfileEditMode(!profileEditMode);
 });
+function closeProfileSettingsMenu(){
+  if (!profileSettingsMenu) return;
+  profileSettingsMenu.hidden = true;
+  profileSettingsBtn?.setAttribute("aria-expanded", "false");
+}
+function openProfileSettingsMenu(){
+  if (!profileSettingsMenu) return;
+  closeMemberMenu();
+  profileSettingsMenu.hidden = false;
+  profileSettingsBtn?.setAttribute("aria-expanded", "true");
+}
+function toggleProfileSettingsMenu(){
+  if (!profileSettingsMenu) return;
+  if (profileSettingsMenu.hidden) openProfileSettingsMenu();
+  else closeProfileSettingsMenu();
+}
 profileSettingsBtn?.addEventListener("click", async () => {
   if (!currentProfileIsSelf) {
     if (modalTargetUsername) {
@@ -10553,9 +10621,26 @@ profileSettingsBtn?.addEventListener("click", async () => {
     }
     return;
   }
+  toggleProfileSettingsMenu();
+});
+profileSettingsMenu?.addEventListener("click", async (e) => {
+  const btn = e.target?.closest?.("[data-profile-menu]");
+  if (!btn) return;
+  const action = btn.dataset.profileMenu;
+  closeProfileSettingsMenu();
+  if (action === "themes") {
+    openThemesModal();
+    return;
+  }
   setTab("customize");
   try { syncSoundPrefsUI(true); } catch {}
   await loadChatFxPrefs({ force: true });
+});
+document.addEventListener("click", (e) => {
+  if (!profileSettingsMenu || profileSettingsMenu.hidden) return;
+  if (profileSettingsMenu.contains(e.target)) return;
+  if (profileSettingsBtn?.contains(e.target)) return;
+  closeProfileSettingsMenu();
 });
 
 roomChessBtn?.addEventListener("click", () => {
@@ -11116,6 +11201,9 @@ function hardHideProfileModal(){
 // modal open/close
 function openModal(){
   if (!modal) return;
+  closeSurvivalModal();
+  closeMemberMenu();
+  closeProfileSettingsMenu();
   logProfileModal("openModal");
   modal.style.display="flex";
   modal.classList.remove("modal-closing");
@@ -11141,6 +11229,7 @@ function closeModal(){
   modalTargetUserId=null;
   setProfileEditMode(false);
   setCustomizePage(null);
+  closeProfileSettingsMenu();
   quickModMsg.textContent="";
   modMsg.textContent="";
   logsMsg.textContent="";
@@ -11195,6 +11284,9 @@ function undockCouplesFromModal(){
 
 function openCouplesModal(){
   if (!couplesModal) return;
+  closeSurvivalModal();
+  closeMemberMenu();
+  closeProfileSettingsMenu();
   const ok = dockCouplesIntoModal();
   if (!ok) {
     toast?.("Open your profile first to use Couples.");
@@ -11249,14 +11341,14 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && roomCreateModal && roomCreateModal.style.display !== "none") {
     closeRoomCreateModal();
   }
-  if (e.key === "Escape" && survivalNewSeasonModal && survivalNewSeasonModal.style.display !== "none") {
+  if (e.key === "Escape" && profileSettingsMenu && !profileSettingsMenu.hidden) {
+    closeProfileSettingsMenu();
+  }
+  if (e.key === "Escape" && survivalNewSeasonPanel && !survivalNewSeasonPanel.hidden) {
     closeSurvivalNewSeasonModal();
   }
-  if (e.key === "Escape" && survivalRosterModal && survivalRosterModal.style.display !== "none") {
-    closeSurvivalRosterModal();
-  }
-  if (e.key === "Escape" && survivalLogModal && survivalLogModal.style.display !== "none") {
-    closeSurvivalLogModal();
+  if (e.key === "Escape" && survivalModal && survivalModal.style.display !== "none") {
+    closeSurvivalModal();
   }
 });
 
@@ -11265,30 +11357,25 @@ modal.addEventListener("click", (e)=>{ if(e.target===modal) closeModal(); });
 
 survivalNewSeasonBtn?.addEventListener("click", openSurvivalNewSeasonModal);
 survivalNewSeasonClose?.addEventListener("click", closeSurvivalNewSeasonModal);
-survivalNewSeasonModal?.addEventListener("click", (e) => {
-  if (e.target === survivalNewSeasonModal) closeSurvivalNewSeasonModal();
+survivalOpenBtn?.addEventListener("click", openSurvivalModal);
+survivalModalClose?.addEventListener("click", closeSurvivalModal);
+survivalModal?.addEventListener("click", (e) => {
+  if (e.target === survivalModal) closeSurvivalModal();
 });
 survivalSeasonStartBtn?.addEventListener("click", startSurvivalSeason);
 survivalAdvanceBtn?.addEventListener("click", advanceSurvivalSeason);
 survivalEndBtn?.addEventListener("click", endSurvivalSeason);
-survivalRosterBtn?.addEventListener("click", openSurvivalRosterModal);
-survivalRosterClose?.addEventListener("click", closeSurvivalRosterModal);
-survivalRosterModal?.addEventListener("click", (e) => {
-  if (e.target === survivalRosterModal) closeSurvivalRosterModal();
-});
-survivalLogBtn?.addEventListener("click", (e) => {
-  survivalState.view = "log";
-  renderSurvivalPanel();
-  if (e?.shiftKey) openSurvivalLogModal();
+survivalLogBtn?.addEventListener("click", () => {
+  setSurvivalModalTab("log");
+  renderSurvivalLog(survivalLogModalList, survivalState.events);
 });
 survivalArenaBtn?.addEventListener("click", () => {
-  survivalState.view = "arena";
-  renderSurvivalPanel();
+  setSurvivalModalTab("map");
   renderSurvivalArena();
 });
-survivalLogClose?.addEventListener("click", closeSurvivalLogModal);
-survivalLogModal?.addEventListener("click", (e) => {
-  if (e.target === survivalLogModal) closeSurvivalLogModal();
+survivalControlsBtn?.addEventListener("click", () => {
+  setSurvivalModalTab("controls");
+  renderSurvivalRoster();
 });
 survivalLogLoadBtn?.addEventListener("click", loadOlderSurvivalLog);
 survivalLobbyBtn?.addEventListener("click", async () => {
@@ -11321,13 +11408,6 @@ survivalHistorySelect?.addEventListener("change", async (e) => {
   renderSurvivalLog(survivalLogModalList, survivalState.events);
   renderSurvivalRoster();
 });
-// Allow viewers to close the expanded log/map UI (system messages remain in chat).
-survivalHideViewBtn?.addEventListener("click", () => {
-  survivalState.view = "none";
-  renderSurvivalPanel();
-});
-
-
 // rooms
 function setActiveRoom(room){
   const wasDiceRoom = isDiceRoom(currentRoom);
@@ -11335,6 +11415,8 @@ function setActiveRoom(room){
   currentRoom = room;
   setRoomEvent(null);
   closeMembersAdminMenu();
+  closeMemberMenu();
+  closeProfileSettingsMenu();
   const nowDiceRoom = isDiceRoom(room);
   const nowSurvivalRoom = isSurvivalRoom(room);
   document.body.classList.toggle("dice-room", nowDiceRoom);
@@ -11347,22 +11429,17 @@ function setActiveRoom(room){
   // Ensure room-specific UI doesn't leak into other rooms.
   if (diceVariantWrap) diceVariantWrap.style.display = nowDiceRoom ? "" : "none";
   if (luckMeter) luckMeter.style.display = nowDiceRoom ? "" : "none";
-  if (survivalPanel) survivalPanel.hidden = !nowSurvivalRoom || survivalUiCollapsed;
-  if (survivalMiniBtn) survivalMiniBtn.hidden = !nowSurvivalRoom || !survivalUiCollapsed;
-  if (survivalLogFeed) survivalLogFeed.hidden = !nowSurvivalRoom || survivalUiCollapsed || survivalState.view !== "log";
-  if (survivalArena) survivalArena.hidden = !nowSurvivalRoom || survivalUiCollapsed || survivalState.view !== "arena";
+  if (survivalOpenBtn) survivalOpenBtn.hidden = !nowSurvivalRoom;
+  if (!nowSurvivalRoom) {
+    closeSurvivalModal();
+    closeSurvivalNewSeasonModal();
+  }
   // If a modal is open that is built around room/profile context, close it when switching rooms.
   try {
     if (couplesModal && couplesModal.style.display && couplesModal.style.display !== "none") closeCouplesModal();
   } catch {}
   try {
-    if (survivalRosterModal && survivalRosterModal.style.display && survivalRosterModal.style.display !== "none") closeSurvivalRosterModal();
-  } catch {}
-  try {
-    if (survivalLogModal && survivalLogModal.style.display && survivalLogModal.style.display !== "none") closeSurvivalLogModal();
-  } catch {}
-  try {
-    if (survivalNewSeasonModal && survivalNewSeasonModal.style.display && survivalNewSeasonModal.style.display !== "none") closeSurvivalNewSeasonModal();
+    if (survivalModal && survivalModal.style.display && survivalModal.style.display !== "none" && !nowSurvivalRoom) closeSurvivalModal();
   } catch {}
 
 
@@ -15760,6 +15837,7 @@ function syncProfileEditUi(){
 
 function updateProfileActions({ isSelf = false, canModerate = false } = {}){
   // Quick "Edit profile" button now lives in the top quick-actions row.
+  if (!isSelf) closeProfileSettingsMenu();
   if (profileEditToggleBtn) profileEditToggleBtn.style.display = isSelf ? "" : "none";
   if (profileEditToggleRow) profileEditToggleRow.style.display = "none";
   applyCustomizeVisibility();
@@ -15794,7 +15872,7 @@ function updateProfileActions({ isSelf = false, canModerate = false } = {}){
     profileEditBtn.style.display = "none";
   }
   if (profileSettingsBtn) {
-    profileSettingsBtn.style.display = "none";
+    profileSettingsBtn.style.display = isSelf ? "" : "none";
   }
   syncProfileEditUi();
   updateMemoryVisibility();
@@ -17599,10 +17677,7 @@ initAppealsDurationSelect();
     if (!payload || payload.seasonId !== survivalState.season?.id) return;
     if (!Array.isArray(payload.events)) return;
     survivalState.events = [...survivalState.events, ...payload.events];
-    renderSurvivalLog(survivalLogList, survivalState.events);
-    if (survivalLogModal && survivalLogModal.style.display !== "none") {
-      renderSurvivalLog(survivalLogModalList, survivalState.events);
-    }
+    renderSurvivalLog(survivalLogModalList, survivalState.events);
   });
 
   socket.on("survival:lobby", (payload = {}) => {

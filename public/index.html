@@ -335,6 +335,7 @@
 <button class="iconBtn withBadge" id="groupDmToggleBtn" title="Group DMs" type="button">👥<span class="notifDot" id="groupDmBadgeDot" title="New group DMs"></span></button>
 <button aria-label="Notifications" class="iconBtn withBadge" id="notificationsBtn" title="Notifications" type="button">🔔<span class="notifDot" id="notificationsDot" title="New notifications"></span></button>
 <button class="iconBtn" id="roomChessBtn" title="Chess Table" type="button">♟</button>
+<button class="btn secondary small survivalOpenBtn" hidden id="survivalOpenBtn" type="button">Open Simulator</button>
 <button class="iconBtn mobOnly" id="openMembersBtn" title="Members" type="button">👥</button>
 </div>
 </div>
@@ -404,63 +405,96 @@
 </div>
 </div>
 </div>
-<div class="modal" hidden="" id="survivalNewSeasonModal">
-<div class="modalCard survivalModal">
-<div class="modalTop">
-<strong>New Survival Season</strong>
+<div class="modal" hidden="" id="survivalModal">
+<div class="modalCard survivalModal survivalModalShell">
+<div class="modalTop survivalModalTop">
+<div class="survivalModalHeading">
+<strong>Survival Simulator</strong>
+<div class="survivalModalMeta">
+<span class="survivalModalSeason" id="survivalSeasonTitle">No season</span>
+<span class="survivalModalStatus" id="survivalStatus">No season</span>
+<span class="survivalModalPhase" id="survivalDayPhase">Day 1 — Day</span>
+<span class="survivalModalAlive" id="survivalAliveCount">Alive: 0</span>
+</div>
+</div>
+<button aria-label="Close" class="iconBtn" id="survivalModalClose" type="button">✕</button>
+</div>
+<div class="survivalModalTabs">
+<button class="pillBtn active" id="survivalLogBtn" type="button">Log</button>
+<button class="pillBtn" id="survivalArenaBtn" type="button">Map</button>
+<button class="pillBtn" id="survivalControlsBtn" type="button">Controls</button>
+</div>
+<div class="modalBody survivalModalBody">
+<section class="survivalModalSection" data-survival-view="log">
+<div class="survivalLogHeaderRow">
+<button class="btn secondary small" id="survivalLogLoadBtn" type="button">Load older</button>
+<label class="survivalHistoryLabel">History
+<select id="survivalHistorySelect"></select>
+</label>
+</div>
+<div class="survivalLogList" id="survivalLogModalList"></div>
+</section>
+<section class="survivalModalSection" data-survival-view="map" hidden>
+<div class="survivalArena" id="survivalArena">
+<div class="survivalArenaHeader">
+<span class="survivalArenaTitle">Arena Map</span>
+<span class="small muted" id="survivalLobbyCount"></span>
+</div>
+<div class="survivalArenaGrid" id="survivalArenaGrid"></div>
+</div>
+</section>
+<section class="survivalModalSection" data-survival-view="controls" hidden>
+<div class="survivalPanelControls">
+<div class="survivalPanelGroup">
+<button class="btn secondary small" id="survivalNewSeasonBtn" type="button">New Season</button>
+<button class="btn secondary small" id="survivalAdvanceBtn" type="button">Advance</button>
+<button class="btn secondary small" id="survivalAutoRunBtn" type="button">Auto-Run</button>
+<button class="btn secondary small" id="survivalEndBtn" type="button">Reset/End</button>
+</div>
+<div class="survivalPanelGroup">
+<button class="btn secondary small" id="survivalLobbyBtn" type="button">Opt-in</button>
+</div>
+</div>
+<div class="survivalNewSeasonPanel" hidden id="survivalNewSeasonPanel">
+<div class="survivalPanelHeader">
+<div class="survivalPanelTitle">
+<span class="survivalPanelName">New Survival Season</span>
+<span class="small muted">Set up a fresh run.</span>
+</div>
+<div class="survivalPanelMeta">
 <button aria-label="Close" class="iconBtn" id="survivalNewSeasonClose" type="button">✕</button>
 </div>
-<div class="modalBody">
+</div>
 <label class="fieldLabel">Title
   <input id="survivalSeasonTitleInput" maxlength="120" placeholder="Season — ..." type="text"/>
 </label>
 <div class="survivalPicker">
-  <div class="survivalPickerModes">
-    <label><input checked="" name="survivalPickMode" type="radio" value="online"/> Everyone online</label>
-    <label><input name="survivalPickMode" type="radio" value="select"/> Select users</label>
-  </div>
-  <div class="survivalParticipantList" id="survivalParticipantList"></div>
+<div class="survivalPickerModes">
+<label><input checked="" name="survivalPickMode" type="radio" value="online"/> Everyone online</label>
+<label><input name="survivalPickMode" type="radio" value="select"/> Select users</label>
+</div>
+<div class="survivalParticipantList" id="survivalParticipantList"></div>
 </div>
 <div class="survivalOptions">
-  <label><input id="survivalCouplesToggle" type="checkbox"/> Include Couples synergy</label>
-  <label><input id="survivalChaosToggle" type="checkbox"/> Chaotic mode</label>
-  <label><input id="survivalLobbyToggle" type="checkbox"/> Include lobby signups</label>
-  <div class="survivalNpcFields">
-    <label class="small muted">Custom names (one per line... and set fill slots to auto-top-up)</label>
-    <textarea id="survivalNpcNames" placeholder="e.g.\nKat\nPeeta\nRue" rows="4"></textarea>
-    <div class="survivalNpcRow">
-      <label class="small muted">Fill slots (0 = no auto fill)</label>
-      <input id="survivalFillSlots" type="number" min="0" max="48" value="0"/>
-    </div>
-  </div>
+<label><input id="survivalCouplesToggle" type="checkbox"/> Include Couples synergy</label>
+<label><input id="survivalChaosToggle" type="checkbox"/> Chaotic mode</label>
+<label><input id="survivalLobbyToggle" type="checkbox"/> Include lobby signups</label>
+<div class="survivalNpcFields">
+<label class="small muted">Custom names (one per line... and set fill slots to auto-top-up)</label>
+<textarea id="survivalNpcNames" placeholder="e.g.\nKat\nPeeta\nRue" rows="4"></textarea>
+<div class="survivalNpcRow">
+<label class="small muted">Fill slots (0 = no auto fill)</label>
+<input id="survivalFillSlots" type="number" min="0" max="48" value="0"/>
+</div>
+</div>
 </div>
 <div class="modalActions">
-  <button class="btn" id="survivalSeasonStartBtn" type="button">Start</button>
+<button class="btn" id="survivalSeasonStartBtn" type="button">Start</button>
 </div>
 <div class="small muted" id="survivalSeasonMsg"></div>
 </div>
-</div>
-</div>
-<div class="modal" hidden="" id="survivalRosterModal">
-<div class="modalCard survivalModal">
-<div class="modalTop">
-<strong>Survival Roster</strong>
-<button aria-label="Close" class="iconBtn" id="survivalRosterClose" type="button">✕</button>
-</div>
-<div class="modalBody">
 <div class="survivalRosterList" id="survivalRosterList"></div>
-</div>
-</div>
-</div>
-<div class="modal" hidden="" id="survivalLogModal">
-<div class="modalCard survivalModal">
-<div class="modalTop">
-<strong>Survival Log</strong>
-<button aria-label="Close" class="iconBtn" id="survivalLogClose" type="button">✕</button>
-</div>
-<div class="modalBody">
-<button class="btn secondary small" id="survivalLogLoadBtn" type="button">Load older</button>
-<div class="survivalLogList" id="survivalLogModalList"></div>
+</section>
 </div>
 </div>
 </div>
@@ -473,53 +507,6 @@
   <div aria-label="Luck meter" class="luckMeterBar" id="luckMeterBar" role="meter" aria-valuemin="-2.0" aria-valuemax="0.30" aria-valuenow="0">
     <span class="luckMeterBarText" id="luckMeterBarText">|------------^------------|</span>
   </div>
-</div>
-<div class="survivalPanel" hidden="" id="survivalPanel">
-  <div class="survivalPanelHeader">
-    <div class="survivalPanelTitle">
-      <span class="survivalPanelName">Survival Simulator</span>
-      <span class="survivalPanelSeasonTitle" id="survivalSeasonTitle">No season</span>
-      <span class="survivalPanelStatus" id="survivalStatus">No season</span>
-    </div>
-    <div class="survivalPanelMeta">
-      <span class="survivalPanelPhase" id="survivalDayPhase">Day 1 — Day</span>
-      <span class="survivalPanelAlive" id="survivalAliveCount">Alive: 0</span>
-      <button class="iconBtn survivalCollapseBtn" id="survivalCollapseBtn" type="button" aria-label="Collapse survival UI">▾</button>
-    </div>
-  </div>
-  <div class="survivalPanelControls">
-    <div class="survivalPanelGroup">
-      <button class="btn secondary small" id="survivalNewSeasonBtn" type="button">New Season</button>
-      <button class="btn secondary small" id="survivalAdvanceBtn" type="button">Advance</button>
-      <button class="btn secondary small" id="survivalAutoRunBtn" type="button">Auto-Run</button>
-      <button class="btn secondary small" id="survivalEndBtn" type="button">Reset/End</button>
-    </div>
-    <div class="survivalPanelGroup">
-      <button class="btn secondary small" id="survivalLobbyBtn" type="button">Opt-in</button>
-      <button class="btn secondary small" id="survivalRosterBtn" type="button">View Roster</button>
-      <button class="btn secondary small" id="survivalLogBtn" type="button">View Log</button>
-      <button class="btn secondary small" id="survivalArenaBtn" type="button">Arena</button>
-      <button class="btn secondary small" id="survivalHideViewBtn" type="button">Hide</button>
-      <label class="survivalHistoryLabel">History
-        <select id="survivalHistorySelect"></select>
-      </label>
-    </div>
-  </div>
-<div class="survivalArena" hidden id="survivalArena">
-    <div class="survivalArenaHeader">
-      <span class="survivalArenaTitle">Arena Map</span>
-      <span class="small muted" id="survivalLobbyCount"></span>
-    </div>
-    <div class="survivalArenaGrid" id="survivalArenaGrid"></div>
-  </div>
-</div>
-
-<!-- Small minimized survival button (spectators can rely on system messages) -->
-<button class="survivalMiniBtn" id="survivalMiniBtn" type="button" hidden aria-label="Open survival UI">⚔️ Survival</button>
-
-<div class="survivalLogFeed" hidden="" id="survivalLogFeed">
-  <div class="survivalLogHeader">Recent Log</div>
-  <div class="survivalLogList" id="survivalLogList"></div>
 </div>
 <div class="msgs" id="msgs"></div>
 <div class="typing" id="typing"></div>
@@ -616,6 +603,15 @@
 <button class="btn secondary" id="memberViewProfileBtn" type="button">View profile</button>
 <button class="btn" id="memberDmBtn" type="button">DM</button>
 <button class="btn secondary" id="memberReferBtn" style="display:none;" type="button">Refer ban</button>
+<div class="memberMenuSection" id="memberModSection" style="display:none;">
+<div class="memberMenuSectionTitle">Moderation</div>
+<div class="memberMenuSectionActions">
+<button class="btn secondary" id="memberKickBtn" type="button">Kick</button>
+<button class="btn secondary" id="memberMuteBtn" type="button">Mute</button>
+<button class="btn danger" id="memberBanBtn" type="button">Ban</button>
+<button class="btn secondary" id="memberLogsBtn" type="button">View logs</button>
+</div>
+</div>
 
 <div class="menuSection" data-menu-section="daily">
   <div class="menuSectionHeader">
@@ -789,7 +785,13 @@
 </div>
 <div class="profileHeaderActions">
 <button aria-label="Edit profile" class="iconBtn smallIcon" id="profileEditBtn" style="display:none;" title="Edit profile" type="button">✏️</button>
-<button aria-label="Preferences" class="iconBtn smallIcon" id="profileSettingsBtn" style="display:none;" title="Preferences" type="button">⚙️</button>
+<div class="profileSettingsWrap" id="profileSettingsWrap">
+<button aria-label="Preferences" aria-expanded="false" aria-haspopup="menu" class="iconBtn smallIcon" id="profileSettingsBtn" style="display:none;" title="Preferences" type="button">⚙️</button>
+<div class="profileSettingsMenu" hidden id="profileSettingsMenu" role="menu">
+<button class="profileSettingsItem" data-profile-menu="customize" role="menuitem" type="button">Customize</button>
+<button class="profileSettingsItem" data-profile-menu="themes" role="menuitem" type="button">Themes</button>
+</div>
+</div>
 <button aria-label="Moderation actions" class="iconBtn smallIcon" id="actionsBtn" style="display:none;" title="Moderation actions" type="button">🛡️</button>
 <button aria-label="Close profile" class="iconBtn smallIcon" id="closeModalBtn" type="button">✕</button>
 </div>
@@ -1131,12 +1133,6 @@
 <div class="cardTitle">Chat &amp; Identity</div>
 <div class="cardHint">Bubbles, fonts, name color, and message text.</div>
 <div class="cardPreview chatPreview"></div>
-</button>
-
-<button class="customizeCard" data-category="themes" data-search="themes theme appearance preview apply palette" id="openThemesModalBtn" type="button">
-<div class="cardTitle">Themes</div>
-<div class="cardHint">Browse, preview, and apply themes.</div>
-<div class="cardPreview themesPreview"></div>
 </button>
 
 <button class="customizeCard" data-category="profile" data-search="profile appearance header gradient avatar aura" type="button">
