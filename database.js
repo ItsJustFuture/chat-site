@@ -67,6 +67,9 @@ async function migrateLegacyPasswords() {
 async function seedDefaultRooms() {
   const now = Date.now();
   const seedRooms = ["main", "nsfw", "music", "diceroom", "survivalsimulator"];
+  // Discovery: core room seeding runs in SQLite during migrations for room structure persistence.
+  const existing = await all(`SELECT name FROM rooms LIMIT 1`);
+  if (existing && existing.length) return;
   for (const r of seedRooms) {
     await run(`INSERT OR IGNORE INTO rooms (name, created_by, created_at) VALUES (?, NULL, ?)`, [r, now]);
   }
@@ -95,13 +98,16 @@ async function ensureRoomHierarchySqlite() {
   `);
 
   await run(`CREATE INDEX IF NOT EXISTS idx_room_categories_master ON room_categories(master_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_room_categories_master_sort ON room_categories(master_id, sort_order)`);
 
   await ensureColumns("rooms", [
     ["category_id", "category_id INTEGER"],
     ["room_sort_order", "room_sort_order INTEGER NOT NULL DEFAULT 0"],
     ["created_by_user_id", "created_by_user_id INTEGER"],
     ["is_user_room", "is_user_room INTEGER NOT NULL DEFAULT 0"],
+    ["is_system", "is_system INTEGER NOT NULL DEFAULT 0"],
   ]);
+  await run(`CREATE INDEX IF NOT EXISTS idx_rooms_category_sort ON rooms(category_id, room_sort_order)`);
 
   await ensureColumns("users", [
     ["room_master_collapsed", "room_master_collapsed TEXT NOT NULL DEFAULT '{}'"],
@@ -183,6 +189,7 @@ async function runSqliteMigrations() {
     )
   `);
 
+  // Discovery: room hierarchy lives in room_master_categories/room_categories + rooms columns (sort order + category).
   await ensureColumns("rooms", [
     ["slowmode_seconds", "slowmode_seconds INTEGER NOT NULL DEFAULT 0"],
     ["is_locked", "is_locked INTEGER NOT NULL DEFAULT 0"],
@@ -193,6 +200,7 @@ async function runSqliteMigrations() {
     ["min_level", "min_level INTEGER NOT NULL DEFAULT 0"],
     ["events_enabled", "events_enabled INTEGER NOT NULL DEFAULT 1"],
     ["archived", "archived INTEGER NOT NULL DEFAULT 0"],
+    ["is_system", "is_system INTEGER NOT NULL DEFAULT 0"],
   ]);
 
   await ensureRoomHierarchySqlite();
@@ -371,6 +379,7 @@ async function runSqliteMigrations() {
     )
   `);
 
+  // Discovery: mod_logs persist moderation actions (mute/ban/kick/warn/report).
   await run(`
     CREATE TABLE IF NOT EXISTS mod_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -388,6 +397,7 @@ async function runSqliteMigrations() {
 
 
 // --- Kick/Ban restrictions + appeals (persistent)
+// Discovery: restrictions + appeals are stored in user_restrictions + appeals/appeal_messages.
 await run(`
   CREATE TABLE IF NOT EXISTS user_restrictions (
     username TEXT PRIMARY KEY,
@@ -441,8 +451,8 @@ await run(`
 await run(`CREATE INDEX IF NOT EXISTS idx_appeals_status ON appeals(status)`);
 await run(`CREATE INDEX IF NOT EXISTS idx_appeals_username ON appeals(username)`);
 
-await run(`
-  CREATE TABLE IF NOT EXISTS appeal_messages (
+  await run(`
+    CREATE TABLE IF NOT EXISTS appeal_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     appeal_id INTEGER NOT NULL,
     author_role TEXT NOT NULL, -- 'user'|'admin'
@@ -732,6 +742,7 @@ await run(`CREATE INDEX IF NOT EXISTS idx_appeal_messages_appeal ON appeal_messa
   `);
 
   // --- Referrals (moderator -> admin escalation) — SQLite fallback/dev
+  // Discovery: referrals are stored in referrals + referral_messages tables.
   await run(`
     CREATE TABLE IF NOT EXISTS referrals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -791,6 +802,75 @@ await run(`CREATE INDEX IF NOT EXISTS idx_appeal_messages_appeal ON appeal_messa
   }
 
 
+
+  // Discovery: unified moderation cases system tables live here (do not replace appeals/referrals).
+  await run(`
+    CREATE TABLE IF NOT EXISTS mod_cases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      priority TEXT NOT NULL DEFAULT 'normal',
+      subject_user_id INTEGER,
+      created_by_user_id INTEGER,
+      assigned_to_user_id INTEGER,
+      room_id TEXT,
+      title TEXT,
+      summary TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      closed_at INTEGER,
+      closed_reason TEXT
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS mod_case_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      actor_user_id INTEGER,
+      event_type TEXT NOT NULL,
+      event_payload TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS mod_case_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      author_user_id INTEGER,
+      body TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS mod_case_evidence (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      evidence_type TEXT NOT NULL,
+      room_id TEXT,
+      message_id INTEGER,
+      message_excerpt TEXT,
+      url TEXT,
+      text TEXT,
+      created_by_user_id INTEGER,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  await run(`CREATE INDEX IF NOT EXISTS idx_mod_case_events_case ON mod_case_events(case_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_mod_case_notes_case ON mod_case_notes(case_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_mod_case_evidence_case ON mod_case_evidence(case_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_mod_cases_status ON mod_cases(status)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_mod_cases_type ON mod_cases(type)`);
+
+  // Discovery: room structure audit log for create/reorder/move/reset actions.
+  await run(`
+    CREATE TABLE IF NOT EXISTS room_structure_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action TEXT NOT NULL,
+      actor_user_id INTEGER,
+      payload TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
 
   // --- Friends system (requests + favorites)
   await run(`
