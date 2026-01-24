@@ -1167,9 +1167,9 @@
 <div class="customizeSearchWrap"><input id="customizeSearch" placeholder="Search settings…" type="search"/></div>
 </div>
 <div class="customizeCardGrid" id="customizeCardGrid">
-<button class="customizeCard" data-category="chat" data-search="chat appearance bubbles colors spacing text identity font username color readability" type="button">
+<button class="customizeCard" data-category="chat" data-search="chat appearance message layout colors spacing text identity font username color readability" type="button">
 <div class="cardTitle">Chat &amp; Identity</div>
-<div class="cardHint">Bubbles, fonts, name color, and message text.</div>
+<div class="cardHint">Message layout, fonts, name styling, and message text.</div>
 <div class="cardPreview chatPreview"></div>
 </button>
 
@@ -1206,7 +1206,7 @@
 <button aria-label="Back" class="iconBtn customizeBackBtn" data-back="chat" type="button">←</button>
 <div>
 <div class="title">Chat &amp; Identity</div>
-<div class="small muted">Bubble style, density, plus fonts and readability.</div>
+<div class="small muted">Message layout, fonts, and readability.</div>
 </div>
 </div>
 <div class="customizeChatLayout">
@@ -1226,7 +1226,7 @@
 </div>
 <div class="time" id="chatFxPreviewTime">Just now</div>
 </div>
-<div class="text" id="chatFxPreviewText">Your message preview bubble.</div>
+<div class="text" id="chatFxPreviewText">Your message preview.</div>
 </div>
 </div>
 </div>
@@ -1240,88 +1240,59 @@
 </aside>
 <div class="customizeChatControls">
 <div class="customizeSection">
-<div class="sectionTitle">Basic</div>
-<div class="panelBox" id="chatAppearanceBasic">
-<div class="field" data-customize-item="" data-search="bubble style glow">
-<label>Bubble style</label>
-<select id="chatFxGlow">
-<option value="off">Off</option>
-<option value="soft">Soft</option>
-<option value="neon">Neon</option>
-<option value="strong">Strong</option>
+<div class="sectionTitle">Message Layout</div>
+<div class="panelBox" id="messageLayoutControls">
+<div class="field" data-customize-item="" data-search="message density spacing compact comfortable">
+<label for="msgDensitySelect">Message density</label>
+<select id="msgDensitySelect">
+<option value="compact">Compact</option>
+<option value="medium">Medium</option>
+<option value="comfortable">Comfortable</option>
 </select>
+<div class="small muted">Adjust padding and gap between messages.</div>
 </div>
-<div class="field" data-customize-item="" data-search="bubble color">
-<label>Bubble color</label>
-<div class="chatFxColorRow">
-<input aria-label="Pick bubble color" id="chatFxBubbleColorPick" type="color" value="#2b2d31"/>
-<input id="chatFxBubbleColor" placeholder="#RRGGBB" type="text"/>
-<button class="pillBtn" id="chatFxBubbleColorClear" type="button">Clear</button>
+<div class="field" data-customize-item="" data-search="accent line style border">
+<label for="msgAccentStyleSelect">Accent line style</label>
+<select id="msgAccentStyleSelect">
+<option value="solid">Solid</option>
+<option value="dotted">Dotted</option>
+<option value="gradient">Subtle gradient</option>
+<option value="hoverGlow">Hover glow</option>
+</select>
+<div class="small muted">Left rail detail for each message block.</div>
 </div>
+<div class="field" data-customize-item="" data-search="username emphasis bold underline role chip">
+<label for="msgUsernameEmphasisSelect">Username emphasis</label>
+<select id="msgUsernameEmphasisSelect">
+<option value="normal">Normal</option>
+<option value="bold">Bold</option>
+<option value="underlineHover">Underline-on-hover</option>
+<option value="roleChip">Role-chip</option>
+</select>
+<div class="small muted">Pick how names stand out in chat.</div>
 </div>
-<div class="field" data-customize-item="" data-search="message spacing compact">
-<div class="toggleRow">
-<label class="switch">
-<input id="chatSpacingCompact" type="checkbox"/>
-<span class="slider"></span>
-</label>
-<div class="toggleLabel">Compact message spacing</div>
+<div class="field" data-customize-item="" data-search="system message density compact minimized">
+<label for="sysMsgDensitySelect">System message density</label>
+<select id="sysMsgDensitySelect">
+<option value="full">Full</option>
+<option value="compact">Compact</option>
+<option value="minimized">Minimized</option>
+</select>
+<div class="small muted">Tighten system message padding and size.</div>
 </div>
-</div>
-</div>
-</div>
-<details class="customizeSection" data-section="chat-advanced">
-<summary>Advanced</summary>
-<div class="panelBox" id="chatAppearanceAdvanced">
-<div class="field" data-customize-item="" data-search="bubble radius">
-<label>Bubble radius</label>
-<div class="chatFxSliderRow">
-<input id="chatFxRadius" max="28" min="6" step="1" type="range"/>
-<span class="chatFxSliderValue" id="chatFxRadiusValue">14</span>
-</div>
-</div>
-<div class="field" data-customize-item="" data-search="border thickness">
-<label>Border thickness</label>
-<div class="chatFxSliderRow">
-<input id="chatFxBorder" max="3" min="0" step="1" type="range"/>
-<span class="chatFxSliderValue" id="chatFxBorderValue">0</span>
-</div>
-</div>
-<div class="field" data-customize-item="" data-search="shadow glow">
-<label>Bubble glow intensity</label>
-<div class="chatFxSliderRow">
-<input id="chatFxGlass" max="1" min="0" step="0.05" type="range"/>
-<span class="chatFxSliderValue" id="chatFxGlassValue">0</span>
-</div>
-</div>
-<div class="field" data-customize-item="" data-search="blur">
-<label>Bubble blur</label>
-<div class="chatFxSliderRow">
-<input id="chatFxBlur" max="16" min="0" step="1" type="range"/>
-<span class="chatFxSliderValue" id="chatFxBlurValue">0</span>
-</div>
-</div>
-<div class="field" data-customize-item="" data-search="density spacing">
-<label>Message spacing</label>
-<div class="chatFxDensityRow" id="chatFxDensity">
-<button class="pillBtn" data-value="compact" type="button">Compact</button>
-<button class="pillBtn" data-value="cozy" type="button">Cozy</button>
-<button class="pillBtn" data-value="spacious" type="button">Spacious</button>
-</div>
-</div>
-<div class="field" data-customize-item="" data-search="enable bubbles">
-<div class="toggleRow">
-<label class="switch">
-<input id="chatFxEnabled" type="checkbox"/>
-<span class="slider"></span>
-</label>
-<div class="toggleLabel">Enable custom bubbles</div>
+<div class="field" data-customize-item="" data-search="message background contrast">
+<label for="msgContrastSelect">Message background contrast</label>
+<select id="msgContrastSelect">
+<option value="low">Low</option>
+<option value="medium">Medium</option>
+<option value="high">High</option>
+</select>
+<div class="small muted">Control the block tint behind messages.</div>
 </div>
 </div>
 </div>
-</details>
 <div class="customizeResetRow">
-<button class="btn secondary" id="resetChatAppearanceBtn" type="button">Reset this section</button>
+<button class="btn secondary" id="resetMessageLayoutBtn" type="button">Reset message layout</button>
 </div>
 </div>
 </div>
