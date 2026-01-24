@@ -11479,3 +11479,27 @@ body[data-theme="Iris & Lola Neon"] .irisLolaDrawerEasterStar{
     max-width:100%;
   }
 }
+
+
+/* Donate button at bottom of members list */
+.paypal-donate-members {
+  display: flex;
+  justify-content: center;
+  padding: 10px 6px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+.paypal-donate-members button {
+  all: unset;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffd86b;
+  background: rgba(255, 216, 107, 0.12);
+}
+
+.paypal-donate-members button:hover {
+  background: rgba(255, 216, 107, 0.22);
+}
