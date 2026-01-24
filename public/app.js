@@ -1695,6 +1695,21 @@ function normalizeChatFx(input){
   };
 }
 
+function stripBubbleSettings(fx){
+  return {
+    ...fx,
+    enabled: true,
+    glow: CHAT_FX_DEFAULTS.glow,
+    radius: CHAT_FX_DEFAULTS.radius,
+    border: CHAT_FX_DEFAULTS.border,
+    glass: CHAT_FX_DEFAULTS.glass,
+    blur: CHAT_FX_DEFAULTS.blur,
+    density: CHAT_FX_DEFAULTS.density,
+    accent: CHAT_FX_DEFAULTS.accent,
+    bubbleColor: CHAT_FX_DEFAULTS.bubbleColor
+  };
+}
+
 function updateUserFxMap(username, fx){
   if (!username) return;
   const key = String(username);
@@ -1901,7 +1916,9 @@ function queueContrastReinforcement(bubble){
 function applyChatFxToBubble(bubble, fx, options = {}){
   if (!bubble) return;
   const resolved = normalizeChatFx(fx);
-  const effective = resolved.enabled ? resolved : CHAT_FX_DEFAULTS;
+  const isDmBubble = !!options.dmRow || bubble.classList.contains("dmBubble");
+  const sanitized = isDmBubble ? resolved : stripBubbleSettings(resolved);
+  const effective = sanitized.enabled ? sanitized : CHAT_FX_DEFAULTS;
   const glowMap = { off: 0, soft: 0.4, neon: 0.8, strong: 1.15 };
   const glowValue = glowMap[effective.glow] ?? 0;
   const textGlowMap = { off: 0, soft: 0.35, neon: 0.8, strong: 1.2 };
@@ -2955,11 +2972,15 @@ const customizeCards = Array.from(document.querySelectorAll(".customizeCard"));
 const customizeBackBtns = Array.from(document.querySelectorAll(".customizeBackBtn"));
 const customizePages = Array.from(document.querySelectorAll(".customizeSubpage"));
 
-const chatSpacingCompact = document.getElementById("chatSpacingCompact");
+const msgDensitySelect = document.getElementById("msgDensitySelect");
+const msgAccentStyleSelect = document.getElementById("msgAccentStyleSelect");
+const msgUsernameEmphasisSelect = document.getElementById("msgUsernameEmphasisSelect");
+const sysMsgDensitySelect = document.getElementById("sysMsgDensitySelect");
+const msgContrastSelect = document.getElementById("msgContrastSelect");
 const effectsPreset = document.getElementById("effectsPreset");
 const reduceMotionToggle = document.getElementById("reduceMotionToggle");
 
-const resetChatAppearanceBtn = document.getElementById("resetChatAppearanceBtn");
+const resetMessageLayoutBtn = document.getElementById("resetMessageLayoutBtn");
 const resetTextIdentityBtn = document.getElementById("resetTextIdentityBtn");
 const resetProfileAppearanceBtn = document.getElementById("resetProfileAppearanceBtn");
 const resetEffectsBtn = document.getElementById("resetEffectsBtn");
@@ -6498,10 +6519,103 @@ function applyComfortMode(enabled, { persistLocal = true, persistServer = true }
   }
 }
 
+const MESSAGE_LAYOUT_KEY = "messageLayout:v1";
+const MESSAGE_LAYOUT_DEFAULTS = Object.freeze({
+  msgDensity: "medium",
+  msgAccentStyle: "solid",
+  msgUsernameEmphasis: "normal",
+  sysMsgDensity: "full",
+  msgContrast: "medium"
+});
+const MESSAGE_LAYOUT_CLASSES = Object.freeze({
+  msgDensity: ["msg-density-compact", "msg-density-medium", "msg-density-comfortable"],
+  msgAccentStyle: ["msg-accent-solid", "msg-accent-dotted", "msg-accent-gradient", "msg-accent-hoverglow"],
+  msgUsernameEmphasis: ["msg-name-normal", "msg-name-bold", "msg-name-underlinehover", "msg-name-rolechip"],
+  sysMsgDensity: ["sys-density-full", "sys-density-compact", "sys-density-minimized"],
+  msgContrast: ["msg-contrast-low", "msg-contrast-medium", "msg-contrast-high"]
+});
+
+function normalizeMessageLayout(input){
+  const raw = (input && typeof input === "object") ? input : {};
+  const msgDensity = ["compact", "medium", "comfortable"].includes(raw.msgDensity)
+    ? raw.msgDensity
+    : MESSAGE_LAYOUT_DEFAULTS.msgDensity;
+  const msgAccentStyle = ["solid", "dotted", "gradient", "hoverGlow"].includes(raw.msgAccentStyle)
+    ? raw.msgAccentStyle
+    : MESSAGE_LAYOUT_DEFAULTS.msgAccentStyle;
+  const msgUsernameEmphasis = ["normal", "bold", "underlineHover", "roleChip"].includes(raw.msgUsernameEmphasis)
+    ? raw.msgUsernameEmphasis
+    : MESSAGE_LAYOUT_DEFAULTS.msgUsernameEmphasis;
+  const sysMsgDensity = ["full", "compact", "minimized"].includes(raw.sysMsgDensity)
+    ? raw.sysMsgDensity
+    : MESSAGE_LAYOUT_DEFAULTS.sysMsgDensity;
+  const msgContrast = ["low", "medium", "high"].includes(raw.msgContrast)
+    ? raw.msgContrast
+    : MESSAGE_LAYOUT_DEFAULTS.msgContrast;
+  return { msgDensity, msgAccentStyle, msgUsernameEmphasis, sysMsgDensity, msgContrast };
+}
+
+function hasMessageLayoutPrefs(prefs){
+  if (!prefs || typeof prefs !== "object") return false;
+  if (prefs.messageLayout && typeof prefs.messageLayout === "object") return true;
+  return ["msgDensity", "msgAccentStyle", "msgUsernameEmphasis", "sysMsgDensity", "msgContrast"]
+    .some((key) => Object.prototype.hasOwnProperty.call(prefs, key));
+}
+
+function readMessageLayoutStorage(){
+  try{
+    const raw = localStorage.getItem(MESSAGE_LAYOUT_KEY);
+    if (!raw) return { layout: { ...MESSAGE_LAYOUT_DEFAULTS }, hasStored: false };
+    return { layout: normalizeMessageLayout(JSON.parse(raw)), hasStored: true };
+  }catch{
+    return { layout: { ...MESSAGE_LAYOUT_DEFAULTS }, hasStored: false };
+  }
+}
+
+function syncMessageLayoutControls(layout){
+  const normalized = normalizeMessageLayout(layout);
+  if (msgDensitySelect) msgDensitySelect.value = normalized.msgDensity;
+  if (msgAccentStyleSelect) msgAccentStyleSelect.value = normalized.msgAccentStyle;
+  if (msgUsernameEmphasisSelect) msgUsernameEmphasisSelect.value = normalized.msgUsernameEmphasis;
+  if (sysMsgDensitySelect) sysMsgDensitySelect.value = normalized.sysMsgDensity;
+  if (msgContrastSelect) msgContrastSelect.value = normalized.msgContrast;
+}
+
+function readMessageLayoutForm(){
+  return normalizeMessageLayout({
+    msgDensity: msgDensitySelect?.value || MESSAGE_LAYOUT_DEFAULTS.msgDensity,
+    msgAccentStyle: msgAccentStyleSelect?.value || MESSAGE_LAYOUT_DEFAULTS.msgAccentStyle,
+    msgUsernameEmphasis: msgUsernameEmphasisSelect?.value || MESSAGE_LAYOUT_DEFAULTS.msgUsernameEmphasis,
+    sysMsgDensity: sysMsgDensitySelect?.value || MESSAGE_LAYOUT_DEFAULTS.sysMsgDensity,
+    msgContrast: msgContrastSelect?.value || MESSAGE_LAYOUT_DEFAULTS.msgContrast
+  });
+}
+
+function applyMessageLayout(layout, { persistLocal = true, persistServer = true } = {}){
+  const normalized = normalizeMessageLayout(layout);
+  const body = document.body;
+  if (body){
+    Object.values(MESSAGE_LAYOUT_CLASSES).forEach((classes) => body.classList.remove(...classes));
+    body.classList.add(`msg-density-${normalized.msgDensity}`);
+    body.classList.add(`msg-accent-${normalized.msgAccentStyle.toLowerCase()}`);
+    body.classList.add(`msg-name-${normalized.msgUsernameEmphasis.toLowerCase()}`);
+    body.classList.add(`sys-density-${normalized.sysMsgDensity}`);
+    body.classList.add(`msg-contrast-${normalized.msgContrast}`);
+  }
+  syncMessageLayoutControls(normalized);
+  if (persistLocal){
+    try{ localStorage.setItem(MESSAGE_LAYOUT_KEY, JSON.stringify(normalized)); }catch{}
+  }
+  if (persistServer){
+    queuePersistPrefs({ messageLayout: normalized });
+  }
+  return normalized;
+}
+
 function mergeChatFxDefaults(fx){
   const safe = (fx && typeof fx === "object") ? fx : {};
   const merged = { ...CHAT_FX_DEFAULTS, ...safe };
-  if (safe.enabled === false) merged.enabled = false;
+  if (safe.enabled === false && document.getElementById("chatFxEnabled")) merged.enabled = false;
   return normalizeChatFx(merged);
 }
 
@@ -6626,6 +6740,20 @@ async function loadUserPrefs(){
     applyComfortMode(comfortEnabled, { persistLocal: true, persistServer: false });
     if (comfortPref == null && comfortStored != null) {
       queuePersistPrefs({ comfortMode: comfortEnabled });
+    }
+    const { layout: storedLayout, hasStored: hasStoredLayout } = readMessageLayoutStorage();
+    const serverLayout = normalizeMessageLayout({
+      msgDensity: prefs.msgDensity ?? prefs.messageLayout?.msgDensity,
+      msgAccentStyle: prefs.msgAccentStyle ?? prefs.messageLayout?.msgAccentStyle,
+      msgUsernameEmphasis: prefs.msgUsernameEmphasis ?? prefs.messageLayout?.msgUsernameEmphasis,
+      sysMsgDensity: prefs.sysMsgDensity ?? prefs.messageLayout?.sysMsgDensity,
+      msgContrast: prefs.msgContrast ?? prefs.messageLayout?.msgContrast
+    });
+    const hasServerLayout = hasMessageLayoutPrefs(prefs);
+    const activeLayout = hasServerLayout ? serverLayout : storedLayout;
+    applyMessageLayout(activeLayout, { persistLocal: true, persistServer: false });
+    if (!hasServerLayout && hasStoredLayout) {
+      queuePersistPrefs({ messageLayout: activeLayout });
     }
     if (prefs.chatFx && typeof prefs.chatFx === "object") {
       applyChatFxPrefsFromServer(prefs.chatFx);
@@ -11364,6 +11492,7 @@ memoryFilterChips.forEach((chip) => {
 // New profile edit menu + avatar action wiring
 wireSoundPrefs();
 wireComfortMode();
+wireMessageLayoutPrefs();
 wireChatFxPrefs();
 wireProfileAvatarActions();
 wireHeaderGradientInputs();
@@ -16605,6 +16734,28 @@ function wireComfortMode(){
   });
 }
 
+function wireMessageLayoutPrefs(){
+  const selects = [
+    msgDensitySelect,
+    msgAccentStyleSelect,
+    msgUsernameEmphasisSelect,
+    sysMsgDensitySelect,
+    msgContrastSelect
+  ];
+  if (!selects.some(Boolean)) return;
+  if (msgDensitySelect && msgDensitySelect._wired) return;
+  selects.forEach((sel) => {
+    if (!sel || sel._wired) return;
+    sel._wired = true;
+    sel.addEventListener("change", () => {
+      applyMessageLayout(readMessageLayoutForm(), { persistLocal: true, persistServer: true });
+    });
+  });
+  resetMessageLayoutBtn?.addEventListener("click", () => {
+    applyMessageLayout(MESSAGE_LAYOUT_DEFAULTS, { persistLocal: true, persistServer: true });
+  });
+}
+
 function updateChatFxSliderValue(el, value, decimals = 0){
   if (!el) return;
   const num = Number(value);
@@ -16650,7 +16801,6 @@ function setChatFxDensityButtons(value){
   chatFxPrefEls.densityButtons.forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.value === value);
   });
-  if (chatSpacingCompact) chatSpacingCompact.checked = value === "compact";
 }
 
 function getChatFxDensitySelection(){
@@ -16662,15 +16812,15 @@ function getChatFxDensitySelection(){
 function syncChatFxControls(fx){
   if (!chatFxPrefEls) return;
   const resolved = normalizeChatFx(fx);
-  chatFxPrefEls.enabled.checked = resolved.enabled;
-  chatFxPrefEls.glow.value = resolved.glow;
-  chatFxPrefEls.font.value = resolved.font;
+  if (chatFxPrefEls.enabled) chatFxPrefEls.enabled.checked = resolved.enabled;
+  if (chatFxPrefEls.glow) chatFxPrefEls.glow.value = resolved.glow;
+  if (chatFxPrefEls.font) chatFxPrefEls.font.value = resolved.font;
   if (chatFxPrefEls.nameFont) chatFxPrefEls.nameFont.value = resolved.nameFont;
-  chatFxPrefEls.radius.value = String(resolved.radius);
-  chatFxPrefEls.border.value = String(resolved.border);
-  chatFxPrefEls.glass.value = String(resolved.glass);
-  chatFxPrefEls.blur.value = String(resolved.blur);
-  chatFxPrefEls.accent.value = resolved.accent || "";
+  if (chatFxPrefEls.radius) chatFxPrefEls.radius.value = String(resolved.radius);
+  if (chatFxPrefEls.border) chatFxPrefEls.border.value = String(resolved.border);
+  if (chatFxPrefEls.glass) chatFxPrefEls.glass.value = String(resolved.glass);
+  if (chatFxPrefEls.blur) chatFxPrefEls.blur.value = String(resolved.blur);
+  if (chatFxPrefEls.accent) chatFxPrefEls.accent.value = resolved.accent || "";
   if (chatFxPrefEls.bubbleColor) chatFxPrefEls.bubbleColor.value = resolved.bubbleColor || "";
   if (chatFxPrefEls.textColor) chatFxPrefEls.textColor.value = resolved.textColor || "";
   if (chatFxPrefEls.nameColor) chatFxPrefEls.nameColor.value = resolved.nameColor || "";
@@ -16721,16 +16871,16 @@ function syncChatFxControls(fx){
 function readChatFxFormRaw(){
   if (!chatFxPrefEls) return { ...CHAT_FX_DEFAULTS };
   return {
-    enabled: chatFxPrefEls.enabled.checked,
-    glow: chatFxPrefEls.glow.value,
-    font: chatFxPrefEls.font.value,
+    enabled: chatFxPrefEls.enabled?.checked ?? CHAT_FX_DEFAULTS.enabled,
+    glow: chatFxPrefEls.glow?.value || CHAT_FX_DEFAULTS.glow,
+    font: chatFxPrefEls.font?.value || CHAT_FX_DEFAULTS.font,
     nameFont: chatFxPrefEls.nameFont?.value || CHAT_FX_DEFAULTS.nameFont,
-    radius: Number(chatFxPrefEls.radius.value),
-    border: Number(chatFxPrefEls.border.value),
-    glass: Number(chatFxPrefEls.glass.value),
-    blur: Number(chatFxPrefEls.blur.value),
+    radius: chatFxPrefEls.radius ? Number(chatFxPrefEls.radius.value) : CHAT_FX_DEFAULTS.radius,
+    border: chatFxPrefEls.border ? Number(chatFxPrefEls.border.value) : CHAT_FX_DEFAULTS.border,
+    glass: chatFxPrefEls.glass ? Number(chatFxPrefEls.glass.value) : CHAT_FX_DEFAULTS.glass,
+    blur: chatFxPrefEls.blur ? Number(chatFxPrefEls.blur.value) : CHAT_FX_DEFAULTS.blur,
     density: getChatFxDensitySelection(),
-    accent: (chatFxPrefEls.accent.value || "").trim(),
+    accent: (chatFxPrefEls.accent?.value || "").trim(),
     bubbleColor: (chatFxPrefEls.bubbleColor?.value || "").trim(),
     textColor: (chatFxPrefEls.textColor?.value || "").trim(),
     nameColor: (chatFxPrefEls.nameColor?.value || "").trim(),
@@ -17096,14 +17246,6 @@ function wireChatFxPrefs(){
       handleChatFxInput();
     });
   });
-  if (chatSpacingCompact && !chatSpacingCompact._wired){
-    chatSpacingCompact._wired = true;
-    chatSpacingCompact.addEventListener("change", () => {
-      const next = chatSpacingCompact.checked ? "compact" : "cozy";
-      setChatFxDensityButtons(next);
-      handleChatFxInput();
-    });
-  }
 
   if (effectsPreset && !effectsPreset._wired){
     effectsPreset._wired = true;
@@ -17194,7 +17336,6 @@ function resetChatFxSection(section){
   handleChatFxInput();
 }
 
-resetChatAppearanceBtn?.addEventListener("click", () => resetChatFxSection("chat"));
 resetTextIdentityBtn?.addEventListener("click", () => resetChatFxSection("text"));
 resetProfileAppearanceBtn?.addEventListener("click", () => resetChatFxSection("profile"));
 resetEffectsBtn?.addEventListener("click", () => resetChatFxSection("effects"));

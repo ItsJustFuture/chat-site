@@ -2557,7 +2557,7 @@ body.keyboard-open .menuContent{ padding-bottom: calc(200px + var(--kb, 0px) + e
   padding:14px 14px 12px;
   display:flex;
   flex-direction:column;
-  gap:8px;
+  gap:var(--msg-stack-gap, 8px);
   min-height:0;
   justify-content:flex-start;
 }
@@ -3028,9 +3028,117 @@ body.survival-room .survivalArena{
 /* ---- Main chat message grouping (consecutive messages) ---- */
 .msgGroup{ display:flex; gap:8px; align-items:flex-start; max-width:900px; }
 .msgGroup.self{ align-self:flex-end; flex-direction:row-reverse; }
-.msgGroupBody{ display:flex; flex-direction:column; gap:var(--fx-group-gap, 4px); min-width:0; }
-.msgItem{ position:relative; display:flex; flex-direction:row; align-items:flex-start; gap:8px; min-width:0; }
+.msgGroupBody{ display:flex; flex-direction:column; gap:var(--msg-group-gap, var(--fx-group-gap, 4px)); min-width:0; }
+.msgItem{ position:relative; display:flex; flex-direction:row; align-items:flex-start; gap:var(--msg-item-gap, 8px); min-width:0; }
 .msgItem.self{ flex-direction:row-reverse; }
+
+/* --- Message layout preferences (main chat) --- */
+body.msg-density-compact{
+  --msg-pad-y:6px;
+  --msg-pad-x:10px;
+  --msg-accent-offset:2px;
+  --msg-group-gap:2px;
+  --msg-stack-gap:6px;
+  --msg-item-gap:6px;
+  --msg-meta-gap:6px;
+  --msg-line-height:1.3;
+}
+body.msg-density-medium{
+  --msg-pad-y:8px;
+  --msg-pad-x:12px;
+  --msg-accent-offset:2px;
+  --msg-group-gap:4px;
+  --msg-stack-gap:8px;
+  --msg-item-gap:8px;
+  --msg-meta-gap:8px;
+  --msg-line-height:1.4;
+}
+body.msg-density-comfortable{
+  --msg-pad-y:11px;
+  --msg-pad-x:14px;
+  --msg-accent-offset:3px;
+  --msg-group-gap:6px;
+  --msg-stack-gap:12px;
+  --msg-item-gap:10px;
+  --msg-meta-gap:10px;
+  --msg-line-height:1.5;
+}
+
+body.msg-contrast-low{ --msg-bg-strength:12%; }
+body.msg-contrast-medium{ --msg-bg-strength:18%; }
+body.msg-contrast-high{ --msg-bg-strength:28%; }
+
+body.msg-accent-solid .msgGroup .bubble::before{
+  background:color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent);
+  opacity:0.55;
+}
+body.msg-accent-dotted .msgGroup .bubble::before{
+  background:repeating-linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--fx-accent, var(--accent)) 55%, transparent) 0 2px,
+    transparent 2px 5px
+  );
+  opacity:0.7;
+}
+body.msg-accent-gradient .msgGroup .bubble::before{
+  background:linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--fx-accent, var(--accent)) 55%, transparent) 0%,
+    transparent 100%
+  );
+  opacity:0.65;
+}
+body.msg-accent-hoverglow .msgGroup .bubble::before{
+  background:color-mix(in srgb, var(--fx-accent, var(--accent)) 40%, transparent);
+  opacity:0.35;
+  transition: opacity 160ms ease, box-shadow 160ms ease;
+}
+body.msg-accent-hoverglow .msgItem:hover .bubble::before,
+body.msg-accent-hoverglow .msgItem.showActions .bubble::before{
+  opacity:0.65;
+  box-shadow:0 0 6px color-mix(in srgb, var(--fx-accent, var(--accent)) 35%, transparent);
+}
+
+body.msg-name-bold .msgItem .name{ font-weight:800; }
+body.msg-name-underlinehover .msgItem .name .unameText{
+  text-decoration:none;
+  text-underline-offset:3px;
+}
+body.msg-name-underlinehover .msgItem:hover .name .unameText,
+body.msg-name-underlinehover .msgItem.showActions .name .unameText{
+  text-decoration:underline;
+}
+body.msg-name-rolechip .msgItem .name .unameText{
+  padding:2px 6px;
+  border-radius:999px;
+  background:color-mix(in srgb, var(--panel) 80%, transparent);
+  border:1px solid color-mix(in srgb, var(--fx-accent, var(--accent)) 18%, transparent);
+}
+
+body.sys-density-full{
+  --sys-msg-font-size:11px;
+  --sys-msg-pad-y:6px;
+  --sys-msg-pad-x:10px;
+  --sys-msg-opacity:1;
+}
+body.sys-density-compact{
+  --sys-msg-font-size:10px;
+  --sys-msg-pad-y:4px;
+  --sys-msg-pad-x:8px;
+  --sys-msg-opacity:0.9;
+}
+body.sys-density-minimized{
+  --sys-msg-font-size:9px;
+  --sys-msg-pad-y:3px;
+  --sys-msg-pad-x:6px;
+  --sys-msg-opacity:0.7;
+}
+
+body:not(.dice-room) .sys{
+  font-size:var(--sys-msg-font-size, 11px);
+  padding:var(--sys-msg-pad-y, 6px) var(--sys-msg-pad-x, 10px);
+  opacity:var(--sys-msg-opacity, 1);
+}
 .msgItem.message--deleting,
 .dmRow.message--deleting{
   opacity:0;
@@ -3115,7 +3223,7 @@ body.survival-room .survivalArena{
   transform: translateY(0);
 }
 /* Make grouped bubbles visually merge into one (main chat) */
-.msgGroupBody{ gap:var(--fx-group-gap, 4px); }
+.msgGroupBody{ gap:var(--msg-group-gap, var(--fx-group-gap, 4px)); }
 .msgItem.gCont .bubble{ margin-top:2px; }
 .msgItem.gMid .bubble{ margin-top:2px; }
 
@@ -3180,8 +3288,10 @@ body.survival-room .survivalArena{
   --fx-glow: 0;
   --fx-blur: 0;
   --fx-glass: 0;
-  padding:8px 12px 8px 14px;
-  background:color-mix(in srgb, var(--fx-base) 18%, transparent);
+  padding:var(--msg-pad-y, 8px) var(--msg-pad-x, 12px);
+  padding-left:calc(var(--msg-pad-x, 12px) + var(--msg-accent-offset, 2px));
+  line-height:var(--msg-line-height, 1.45);
+  background:color-mix(in srgb, var(--fx-base) var(--msg-bg-strength, 18%), transparent);
   border-color:color-mix(in srgb, var(--fx-accent, var(--accent)) 12%, var(--border));
   box-shadow:none;
 }
@@ -3343,7 +3453,7 @@ body.survival-room .survivalArena{
 /* Message meta (name/time) */
 .msgItem .meta{
   display:flex;
-  gap:8px;
+  gap:var(--msg-meta-gap, 8px);
   align-items:baseline;
   flex-wrap:wrap;
 }
