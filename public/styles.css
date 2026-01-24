@@ -2557,14 +2557,18 @@ body.keyboard-open .menuContent{ padding-bottom: calc(200px + var(--kb, 0px) + e
   padding:14px 14px 12px;
   display:flex;
   flex-direction:column;
-  gap:10px;
+  gap:8px;
   min-height:0;
   justify-content:flex-start;
 }
 .sys{
-  align-self:center; color:var(--messageSystemText); font-size:12px;
-  padding:6px 10px; border-radius:999px;
-  background:var(--messageSystemBg); border:1px solid var(--border);
+  align-self:center;
+  color:var(--messageSystemText);
+  font-size:11px;
+  padding:6px 10px;
+  border-radius:10px;
+  background:color-mix(in srgb, var(--messageSystemBg) 70%, transparent);
+  border:1px solid color-mix(in srgb, var(--border) 70%, transparent);
   max-width:min(90%, 640px);
   overflow-wrap:anywhere;
   word-break:break-word;
@@ -3022,9 +3026,9 @@ body.survival-room .survivalArena{
   content:\"🧭 \";
 }
 /* ---- Main chat message grouping (consecutive messages) ---- */
-.msgGroup{ display:flex; gap:10px; align-items:flex-start; max-width:900px; }
+.msgGroup{ display:flex; gap:8px; align-items:flex-start; max-width:900px; }
 .msgGroup.self{ align-self:flex-end; flex-direction:row-reverse; }
-.msgGroupBody{ display:flex; flex-direction:column; gap:var(--fx-group-gap, 1px); min-width:0; }
+.msgGroupBody{ display:flex; flex-direction:column; gap:var(--fx-group-gap, 4px); min-width:0; }
 .msgItem{ position:relative; display:flex; flex-direction:row; align-items:flex-start; gap:8px; min-width:0; }
 .msgItem.self{ flex-direction:row-reverse; }
 .msgItem.message--deleting,
@@ -3111,21 +3115,21 @@ body.survival-room .survivalArena{
   transform: translateY(0);
 }
 /* Make grouped bubbles visually merge into one (main chat) */
-.msgGroupBody{ gap:var(--fx-group-gap, 1px); }
-.msgItem.gCont .bubble{ margin-top:-8px; border-top:none; }
-.msgItem.gMid .bubble{ margin-top:-8px; border-top:none; }
+.msgGroupBody{ gap:var(--fx-group-gap, 4px); }
+.msgItem.gCont .bubble{ margin-top:2px; }
+.msgItem.gMid .bubble{ margin-top:2px; }
 
 /* Corner shaping so grouped messages look like one continuous bubble */
 .msgItem.gFirst:not(.gLast) .bubble{
-  border-bottom-left-radius:var(--fx-radius-grouped, 12px);
-  border-bottom-right-radius:var(--fx-radius-grouped, 12px);
+  border-bottom-left-radius:var(--fx-radius-grouped, 8px);
+  border-bottom-right-radius:var(--fx-radius-grouped, 8px);
 }
 .msgItem.gMid .bubble{
-  border-radius:var(--fx-radius-grouped, 12px);
+  border-radius:var(--fx-radius-grouped, 8px);
 }
 .msgItem.gLast:not(.gFirst) .bubble{
-  border-top-left-radius:var(--fx-radius-grouped, 12px);
-  border-top-right-radius:var(--fx-radius-grouped, 12px);
+  border-top-left-radius:var(--fx-radius-grouped, 8px);
+  border-top-right-radius:var(--fx-radius-grouped, 8px);
 }
 /* If a message has reactions, give it a little breathing room (splits by reaction space) */
 .msgItem.hasReacts{ margin-bottom:6px; }
@@ -3169,6 +3173,34 @@ body.survival-room .survivalArena{
   box-shadow:
     0 0 calc(var(--fx-glow, 0) * 6px) color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent),
     0 0 calc(var(--fx-glow, 0) * 14px) color-mix(in srgb, var(--fx-accent, var(--accent)) 28%, transparent);
+}
+.msgGroup .bubble{
+  --fx-radius: 8px;
+  --fx-border: 1px;
+  --fx-glow: 0;
+  --fx-blur: 0;
+  --fx-glass: 0;
+  padding:8px 12px 8px 14px;
+  background:color-mix(in srgb, var(--fx-base) 18%, transparent);
+  border-color:color-mix(in srgb, var(--fx-accent, var(--accent)) 12%, var(--border));
+  box-shadow:none;
+}
+.msgGroup .bubble::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:6px;
+  bottom:6px;
+  width:3px;
+  border-radius:3px;
+  background:color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent);
+  opacity:0.55;
+}
+.msgItem--continued .name{
+  display:none;
+}
+.msgItem--continued .meta{
+  gap:6px;
 }
 .bubble,
 .dmBubble{
