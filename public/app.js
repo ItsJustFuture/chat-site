@@ -7575,7 +7575,7 @@ try{
     String(lastEl.dataset.role||"") === String(senderRole||"") &&
     String(lastEl.dataset.self||"") === String(isSelf ? "1" : "0") &&
     // Optional time window to avoid grouping across long pauses
-    (Number(m.ts||0) - Number(lastEl.dataset.lastTs||0) <= 2 * 60 * 1000);
+    (Number(m.ts||0) - Number(lastEl.dataset.lastTs||0) <= 3 * 60 * 1000);
 
   let group = lastEl;
   if(!canGroup){
@@ -7689,6 +7689,7 @@ function buildMainMsgItem(m, opts){
 
   const item = document.createElement("div");
   item.className = "msgItem" + (isSelf ? " self" : "");
+  if (!showHeader) item.classList.add("msgItem--continued");
   item.dataset.mid = mid;
 
   const bubble = document.createElement("div");
