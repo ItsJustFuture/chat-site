@@ -2020,13 +2020,15 @@ const TEXT_STYLE_DEFAULTS = Object.freeze({
   },
   gradient: {
     presetId: null,
-    css: null
+    css: null,
+    intensity: "normal"
   },
   fontFamily: "system",
   fontStyle: "normal"
 });
 const TEXT_STYLE_MODES = new Set(["color", "neon", "gradient"]);
 const TEXT_STYLE_INTENSITIES = new Set(["low", "med", "high", "ultra"]);
+const TEXT_STYLE_GRADIENT_INTENSITIES = new Set(["soft", "normal", "bold"]);
 const TEXT_STYLE_HEX = /^#[0-9a-f]{6}$/i;
 const CHAT_FX_TEXT_GLOWS = new Set(["off", "soft", "neon", "strong"]);
 const CHAT_FX_FONTS = new Set([
@@ -2072,9 +2074,33 @@ function sanitizeTextStyle(raw) {
   if (raw.gradient && typeof raw.gradient === "object") {
     if (typeof raw.gradient.presetId === "string") out.gradient.presetId = raw.gradient.presetId.slice(0, 64);
     if (typeof raw.gradient.css === "string") out.gradient.css = raw.gradient.css.slice(0, 180);
+    const intensity = String(raw.gradient.intensity || "").toLowerCase();
+    if (TEXT_STYLE_GRADIENT_INTENSITIES.has(intensity)) out.gradient.intensity = intensity;
   }
 
   return out;
+}
+
+function sanitizeCustomization(raw, fallbackTextStyle = null) {
+  if (!raw || typeof raw !== "object") {
+    if (fallbackTextStyle) {
+      const fallback = sanitizeTextStyle(fallbackTextStyle);
+      return fallback ? { userNameStyle: fallback, messageTextStyle: fallback } : null;
+    }
+    return null;
+  }
+  const userNameRaw = raw.userNameStyle ?? raw.usernameStyle ?? raw.nameStyle;
+  const messageRaw = raw.messageTextStyle ?? raw.messageStyle ?? raw.textStyle;
+  const fallback = fallbackTextStyle ? sanitizeTextStyle(fallbackTextStyle) : null;
+  const userNameStyle = userNameRaw ? sanitizeTextStyle(userNameRaw) : null;
+  const messageTextStyle = messageRaw ? sanitizeTextStyle(messageRaw) : null;
+  if (!userNameStyle && !messageTextStyle) {
+    return fallback ? { userNameStyle: fallback, messageTextStyle: fallback } : null;
+  }
+  return {
+    ...(userNameStyle ? { userNameStyle } : {}),
+    ...(messageTextStyle ? { messageTextStyle } : {})
+  };
 }
 
 function sanitizeChatFx(raw) {
@@ -2137,10 +2163,10 @@ function sanitizeChatFx(raw) {
   return out;
 }
 
-function mergeChatFxWithTextStyle(chatFx, textStyle) {
+function mergeChatFxWithCustomization(chatFx, customization, textStyle) {
   const fx = sanitizeChatFx(chatFx);
-  const style = sanitizeTextStyle(textStyle);
-  return style ? { ...fx, textStyle: style } : fx;
+  const custom = sanitizeCustomization(customization, textStyle);
+  return custom ? { ...fx, ...custom } : fx;
 }
 
 const TONE_KEYS = new Set(["chill", "joke", "sarcastic", "serious"]);
@@ -8839,6 +8865,7 @@ function normalizePrefs(raw) {
     sound: normalizeSoundPrefs(prefs.sound),
     chatFx: sanitizeChatFx(prefs.chatFx),
     textStyle: sanitizeTextStyle(prefs.textStyle),
+    customization: sanitizeCustomization(prefs.customization, prefs.textStyle)
   };
 }
 function sanitizePrefsInput(p) {
@@ -8851,6 +8878,16 @@ function sanitizePrefsInput(p) {
     if (Array.isArray(p.favoriteThemeIds)) out.favoriteThemeIds = normalizeThemeIdList(p.favoriteThemeIds);
     if (p.chatFx && typeof p.chatFx === "object") out.chatFx = sanitizeChatFx(p.chatFx);
     if (p.textStyle && typeof p.textStyle === "object") out.textStyle = sanitizeTextStyle(p.textStyle);
+    if (p.customization && typeof p.customization === "object") {
+      out.customization = sanitizeCustomization(p.customization, p.textStyle);
+    }
+    if (p.userNameStyle && typeof p.userNameStyle === "object") {
+      out.customization = sanitizeCustomization({ userNameStyle: p.userNameStyle }, p.textStyle);
+    }
+    if (p.messageTextStyle && typeof p.messageTextStyle === "object") {
+      const existing = out.customization || sanitizeCustomization(p.customization, p.textStyle) || {};
+      out.customization = sanitizeCustomization({ ...existing, messageTextStyle: p.messageTextStyle }, p.textStyle);
+    }
     if (p.sound && typeof p.sound === "object") {
       const sound = {};
       for (const key of ["enabled", "room", "dm", "mention", "sent", "receive", "reaction"]) {
@@ -8869,20 +8906,20 @@ function buildAuthorsFxMap(usernames, cb) {
   // Prefer Postgres during the SQLite -> PG migration.
   (async () => {
     const base = {};
-    for (const name of unique) base[name] = mergeChatFxWithTextStyle(null, null);
+    for (const name of unique) base[name] = mergeChatFxWithCustomization(null, null, null);
 
     try {
       if (pgPool) {
-        const { rows } = await pgPool.query(
-          "SELECT username, prefs_json FROM users WHERE username = ANY($1::text[])",
-          [unique]
-        );
-        for (const row of rows || []) {
-          const prefs = safeJsonParse(row?.prefs_json, {});
-          base[row.username] = mergeChatFxWithTextStyle(prefs?.chatFx, prefs?.textStyle);
+          const { rows } = await pgPool.query(
+            "SELECT username, prefs_json FROM users WHERE username = ANY($1::text[])",
+            [unique]
+          );
+          for (const row of rows || []) {
+            const prefs = safeJsonParse(row?.prefs_json, {});
+            base[row.username] = mergeChatFxWithCustomization(prefs?.chatFx, prefs?.customization, prefs?.textStyle);
+          }
+          return cb(base);
         }
-        return cb(base);
-      }
     } catch (e) {
       console.warn("[chatFx][authorsFx][pg] failed, falling back to sqlite:", e?.message || e);
     }
@@ -8894,7 +8931,7 @@ function buildAuthorsFxMap(usernames, cb) {
       (_e, rows) => {
         for (const row of rows || []) {
           const prefs = safeJsonParse(row?.prefs_json, {});
-          base[row.username] = mergeChatFxWithTextStyle(prefs?.chatFx, prefs?.textStyle);
+          base[row.username] = mergeChatFxWithCustomization(prefs?.chatFx, prefs?.customization, prefs?.textStyle);
         }
         cb(base);
       }
@@ -8907,8 +8944,8 @@ function emitUserFxUpdate(socket) {
   io.emit("user fx updated", {
     userId: socket.user.id,
     username: socket.user.username,
-    chatFx: mergeChatFxWithTextStyle(socket.user.chatFx, socket.user.textStyle),
-    textStyle: sanitizeTextStyle(socket.user.textStyle)
+    chatFx: mergeChatFxWithCustomization(socket.user.chatFx, socket.user.customization, socket.user.textStyle),
+    customization: sanitizeCustomization(socket.user.customization, socket.user.textStyle)
   });
 }
 
@@ -8921,10 +8958,11 @@ function updateLiveChatFx(userId, chatFx) {
   emitUserFxUpdate(s);
 }
 
-function updateLiveTextStyle(userId, textStyle) {
+function updateLiveCustomization(userId, customization, textStyle) {
   const sid = socketIdByUserId.get(userId);
   const s = sid ? io.sockets.sockets.get(sid) : null;
   if (!s?.user) return;
+  s.user.customization = sanitizeCustomization(customization, textStyle);
   s.user.textStyle = sanitizeTextStyle(textStyle);
   if (s.currentRoom) emitUserList(s.currentRoom);
   emitUserFxUpdate(s);
@@ -8955,13 +8993,21 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
   const incoming = sanitizePrefsInput(req.body?.prefs ?? req.body);
   const shouldUpdateChatFx = Object.prototype.hasOwnProperty.call(incoming || {}, "chatFx");
   const shouldUpdateTextStyle = Object.prototype.hasOwnProperty.call(incoming || {}, "textStyle");
+  const shouldUpdateCustomization = Object.prototype.hasOwnProperty.call(incoming || {}, "customization")
+    || Object.prototype.hasOwnProperty.call(incoming || {}, "userNameStyle")
+    || Object.prototype.hasOwnProperty.call(incoming || {}, "messageTextStyle");
 
   try {
     if (await pgUserExists(userId)) {
       const { rows } = await pgPool.query("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
       const current = safeJsonParse(rows?.[0]?.prefs_json, {});
+      const currentPrefs = normalizePrefs(current || {});
+      const mergedCustomization = sanitizeCustomization(
+        { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
+        currentPrefs.textStyle || incoming.textStyle
+      );
       const merged = enforcePinnedLimit(
-        normalizePrefs({ ...(current || {}), ...(incoming || {}) }),
+        normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }),
         req.session.user.role
       );
       // IMPORTANT: node-postgres does not reliably serialize plain JS objects to JSON/JSONB.
@@ -8976,7 +9022,10 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
       }
       if (shouldUpdateTextStyle) {
         req.session.user.textStyle = sanitizeTextStyle(merged.textStyle);
-        updateLiveTextStyle(userId, merged.textStyle);
+      }
+      if (shouldUpdateCustomization) {
+        req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle);
+        updateLiveCustomization(userId, merged.customization, merged.textStyle);
       }
       return res.json({ ok: true, prefs: merged });
     }
@@ -8987,8 +9036,13 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
   // SQLite fallback
   db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
     const current = safeJsonParse(row?.prefs_json, {});
+    const currentPrefs = normalizePrefs(current || {});
+    const mergedCustomization = sanitizeCustomization(
+      { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
+      currentPrefs.textStyle || incoming.textStyle
+    );
     const merged = enforcePinnedLimit(
-      normalizePrefs({ ...(current || {}), ...(incoming || {}) }),
+      normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }),
       req.session.user.role
     );
     db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId], (err2) => {
@@ -8999,9 +9053,65 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
       }
       if (shouldUpdateTextStyle) {
         req.session.user.textStyle = sanitizeTextStyle(merged.textStyle);
-        updateLiveTextStyle(userId, merged.textStyle);
+      }
+      if (shouldUpdateCustomization) {
+        req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle);
+        updateLiveCustomization(userId, merged.customization, merged.textStyle);
       }
       return res.json({ ok: true, prefs: merged });
+    });
+  });
+});
+
+app.post("/api/profile/customization", strictLimiter, requireLogin, async (req, res) => {
+  const userId = req.session.user.id;
+  const rawCustomization = req.body?.customization ?? {
+    userNameStyle: req.body?.userNameStyle,
+    messageTextStyle: req.body?.messageTextStyle
+  };
+  const incoming = sanitizePrefsInput({ customization: rawCustomization, textStyle: req.body?.textStyle });
+  const shouldUpdateCustomization = Object.prototype.hasOwnProperty.call(incoming || {}, "customization");
+  if (!shouldUpdateCustomization) return res.status(400).send("Invalid customization");
+
+  try {
+    if (await pgUserExists(userId)) {
+      const { rows } = await pgPool.query("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
+      const current = safeJsonParse(rows?.[0]?.prefs_json, {});
+      const currentPrefs = normalizePrefs(current || {});
+      const mergedCustomization = sanitizeCustomization(
+        { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
+        currentPrefs.textStyle || incoming.textStyle
+      );
+      const merged = enforcePinnedLimit(
+        normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }),
+        req.session.user.role
+      );
+      await pgPool.query("UPDATE users SET prefs_json = $1::jsonb WHERE id = $2", [JSON.stringify(merged), userId]);
+      db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId]);
+      req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle);
+      updateLiveCustomization(userId, merged.customization, merged.textStyle);
+      return res.json({ ok: true, customization: merged.customization, prefs: merged });
+    }
+  } catch (e) {
+    console.warn("[prefs][pg] customization update failed, falling back to sqlite:", e?.message || e);
+  }
+
+  db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
+    const current = safeJsonParse(row?.prefs_json, {});
+    const currentPrefs = normalizePrefs(current || {});
+    const mergedCustomization = sanitizeCustomization(
+      { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
+      currentPrefs.textStyle || incoming.textStyle
+    );
+    const merged = enforcePinnedLimit(
+      normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }),
+      req.session.user.role
+    );
+    db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId], (err2) => {
+      if (err2) return res.status(500).send("Failed");
+      req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle);
+      updateLiveCustomization(userId, merged.customization, merged.textStyle);
+      return res.json({ ok: true, customization: merged.customization, prefs: merged });
     });
   });
 });
@@ -14145,8 +14255,8 @@ async function emitUserList(room) {
         mood: s.user.mood || "",
         avatar: s.user.avatar || "",
         vibe_tags: sanitizeVibeTags(s.user.vibe_tags || []),
-        chatFx: mergeChatFxWithTextStyle(s.user.chatFx, s.user.textStyle),
-        textStyle: sanitizeTextStyle(s.user.textStyle),
+        chatFx: mergeChatFxWithCustomization(s.user.chatFx, s.user.customization, s.user.textStyle),
+        customization: sanitizeCustomization(s.user.customization, s.user.textStyle),
       });
     }
   }
@@ -14400,6 +14510,7 @@ io.on("connection", async (socket) => {
     vibe_tags: Array.isArray(sessUser.vibe_tags) ? sessUser.vibe_tags : [],
     chatFx: sanitizeChatFx(sessUser.chatFx),
     textStyle: sanitizeTextStyle(sessUser.textStyle),
+    customization: sanitizeCustomization(sessUser.customization, sessUser.textStyle),
   };
 
   // --- Owner session map: register basic meta
@@ -14505,6 +14616,7 @@ if (existingSid && existingSid !== socket.id) {
         const prefs = safeJsonParse(r?.prefs_json, {});
         socket.user.chatFx = sanitizeChatFx(prefs?.chatFx);
         socket.user.textStyle = sanitizeTextStyle(prefs?.textStyle);
+        socket.user.customization = sanitizeCustomization(prefs?.customization, prefs?.textStyle);
         if (socket.currentRoom) emitUserList(socket.currentRoom);
       }
       return;
@@ -14525,6 +14637,7 @@ if (existingSid && existingSid !== socket.id) {
         const prefs = safeJsonParse(row?.prefs_json, {});
         socket.user.chatFx = sanitizeChatFx(prefs?.chatFx);
         socket.user.textStyle = sanitizeTextStyle(prefs?.textStyle);
+        socket.user.customization = sanitizeCustomization(prefs?.customization, prefs?.textStyle);
         if (socket.currentRoom) emitUserList(socket.currentRoom);
       }
     }
@@ -14999,7 +15112,7 @@ function doJoin(room, status) {
       buildAuthorsFxMap(usernames, (authorsFx) => {
         const history = baseHistory.map((m) => ({
           ...m,
-          chatFx: authorsFx[m.user] || mergeChatFxWithTextStyle(null, null),
+          chatFx: authorsFx[m.user] || mergeChatFxWithCustomization(null, null, null),
         }));
         socket.emit("history", history, { authorsFx });
 
@@ -15340,7 +15453,7 @@ if (!room) {
               attachmentMime: attMime,
               attachmentType: attType,
               attachmentSize: attSize,
-              chatFx: mergeChatFxWithTextStyle(socket.user.chatFx, socket.user.textStyle),
+              chatFx: mergeChatFxWithCustomization(socket.user.chatFx, socket.user.customization, socket.user.textStyle),
               replyToId: replyPk,
               replyToUser: replyUser || "",
               replyToText: replyText || "",
@@ -15962,7 +16075,7 @@ if (!room) {
                     replyToId: replyPk,
                     replyToUser: replyUser || "",
                     replyToText: replyText || "",
-                    chatFx: mergeChatFxWithTextStyle(socket.user.chatFx, socket.user.textStyle),
+                    chatFx: mergeChatFxWithCustomization(socket.user.chatFx, socket.user.customization, socket.user.textStyle),
                   };
                   // Daily challenges + smart mentions
                   try { bumpDailyProgress(socket.user.id, dayKeyNow(), "room_msgs_5", 1); } catch {}
