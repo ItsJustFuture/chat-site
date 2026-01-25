@@ -923,13 +923,41 @@ const TEXT_STYLE_DEFAULTS = Object.freeze({
   },
   gradient: {
     presetId: null,
-    css: ""
+    css: "",
+    intensity: "normal"
   },
   fontFamily: "system",
   fontStyle: "normal"
 });
 const TEXT_STYLE_MODES = new Set(["color", "neon", "gradient"]);
 const TEXT_STYLE_INTENSITIES = new Set(["low", "med", "high", "ultra"]);
+const TEXT_STYLE_GRADIENT_INTENSITIES = new Set(["soft", "normal", "bold"]);
+const COLOR_PRESETS = Object.freeze([
+  { id: "color-white", label: "White", value: "#ffffff" },
+  { id: "color-ice", label: "Ice", value: "#f5f9ff" },
+  { id: "color-sun", label: "Sun", value: "#ffe600" },
+  { id: "color-citrus", label: "Citrus", value: "#ffb37a" },
+  { id: "color-ember", label: "Ember", value: "#ff7b1c" },
+  { id: "color-rose", label: "Rose", value: "#ff3b8d" },
+  { id: "color-flare", label: "Flare", value: "#ff004f" },
+  { id: "color-candy", label: "Candy", value: "#ff5bf1" },
+  { id: "color-magenta", label: "Magenta", value: "#c000ff" },
+  { id: "color-violet", label: "Violet", value: "#7c4dff" },
+  { id: "color-royal", label: "Royal", value: "#2b7cff" },
+  { id: "color-sky", label: "Sky", value: "#00a2ff" },
+  { id: "color-neon-blue", label: "Neon Blue", value: "#00e5ff" },
+  { id: "color-aqua", label: "Aqua", value: "#00f5ff" },
+  { id: "color-mint", label: "Mint", value: "#00ffa6" },
+  { id: "color-lime", label: "Lime", value: "#39ff14" },
+  { id: "color-spring", label: "Spring", value: "#7dff6a" },
+  { id: "color-gold", label: "Gold", value: "#ffd800" },
+  { id: "color-blush", label: "Blush", value: "#ffd1ff" },
+  { id: "color-cloud", label: "Cloud", value: "#b6f0ff" },
+  { id: "color-silver", label: "Silver", value: "#c0c0c0" },
+  { id: "color-slate", label: "Slate", value: "#6b7a90" },
+  { id: "color-ink", label: "Ink", value: "#0b0b0c" },
+  { id: "color-frost", label: "Frost", value: "#f7faff" }
+]);
 const NEON_PRESETS = Object.freeze([
   { id: "neon-red-1", label: "Red Blaze", baseColor: "#ff3b3b", textColor: "#ff7a7a", group: "Reds" },
   { id: "neon-red-2", label: "Crimson", baseColor: "#ff1f4b", textColor: "#ff6d8b", group: "Reds" },
@@ -970,18 +998,46 @@ const NEON_PRESETS = Object.freeze([
 ]);
 const NEON_PRESET_MAP = new Map(NEON_PRESETS.map((preset) => [preset.id, preset]));
 const GRADIENT_PRESETS = Object.freeze([
-  { id: "grad-sunset", label: "Sunset", a: "#ff6a2b", b: "#ff3b8d", angle: 135 },
-  { id: "grad-nebula", label: "Nebula", a: "#7c4dff", b: "#00e5ff", angle: 135 },
-  { id: "grad-aurora", label: "Aurora", a: "#00ffa6", b: "#5b7bff", angle: 135 },
-  { id: "grad-rose", label: "Rose", a: "#ff5f6d", b: "#ffc371", angle: 135 },
-  { id: "grad-ocean", label: "Ocean", a: "#2b7cff", b: "#00f5ff", angle: 135 },
-  { id: "grad-lime", label: "Lime", a: "#39ff14", b: "#ffe600", angle: 135 },
-  { id: "grad-grape", label: "Grape", a: "#8b00ff", b: "#ff2fd6", angle: 135 },
-  { id: "grad-flare", label: "Flare", a: "#ff7b1c", b: "#ff004f", angle: 135 },
-  { id: "grad-dream", label: "Dream", a: "#5ffcff", b: "#c000ff", angle: 135 },
-  { id: "grad-cotton", label: "Cotton", a: "#ffb7ff", b: "#b6f0ff", angle: 135 },
-  { id: "grad-midnight", label: "Midnight", a: "#2b0f08", b: "#6a00ff", angle: 135 },
-  { id: "grad-glow", label: "Glow", a: "#fff300", b: "#ff6a00", angle: 135 }
+  { id: "grad-sunset", label: "Sunset", group: "Sunset", css: "linear-gradient(135deg, #ff6a2b, #ff3b8d)" },
+  { id: "grad-ember", label: "Ember", group: "Sunset", css: "linear-gradient(135deg, #ff8a00, #ff004f, #ff3b3b)" },
+  { id: "grad-citrus", label: "Citrus", group: "Sunset", css: "linear-gradient(135deg, #ffe600, #ff6a00)" },
+  { id: "grad-dusk", label: "Dusk", group: "Sunset", css: "linear-gradient(135deg, #ff6a00, #8b00ff)" },
+  { id: "grad-aurora", label: "Aurora", group: "Aurora", css: "linear-gradient(135deg, #00ffa6, #5b7bff)" },
+  { id: "grad-polar", label: "Polar", group: "Aurora", css: "linear-gradient(135deg, #5ffcff, #b8ffea, #7c4dff)" },
+  { id: "grad-boreal", label: "Boreal", group: "Aurora", css: "linear-gradient(135deg, #00f5ff, #39ff14, #5b7bff)" },
+  { id: "grad-mintwave", label: "Mintwave", group: "Aurora", css: "linear-gradient(135deg, #00ffa6, #00e5ff)" },
+  { id: "grad-candy", label: "Candy", group: "Candy", css: "linear-gradient(135deg, #ff5bf1, #ff83ea, #ffd1ff)" },
+  { id: "grad-sherbet", label: "Sherbet", group: "Candy", css: "linear-gradient(135deg, #ffc371, #ff5f6d)" },
+  { id: "grad-bubblegum", label: "Bubblegum", group: "Candy", css: "linear-gradient(135deg, #ff5bf1, #7c4dff)" },
+  { id: "grad-jellybean", label: "Jellybean", group: "Candy", css: "linear-gradient(135deg, #ff7a7a, #7dff6a, #6bffb8)" },
+  { id: "grad-ocean", label: "Ocean", group: "Ocean", css: "linear-gradient(135deg, #2b7cff, #00f5ff)" },
+  { id: "grad-lagoon", label: "Lagoon", group: "Ocean", css: "linear-gradient(135deg, #00ffd5, #5ffcff)" },
+  { id: "grad-tidepool", label: "Tidepool", group: "Ocean", css: "linear-gradient(135deg, #00a2ff, #00ffa6)" },
+  { id: "grad-deepsea", label: "Deep Sea", group: "Ocean", css: "linear-gradient(135deg, #0f2b5b, #2b7cff, #00e5ff)" },
+  { id: "grad-neon-dream", label: "Neon Dream", group: "Cyber", css: "linear-gradient(135deg, #00e5ff, #7c4dff)" },
+  { id: "grad-matrix", label: "Matrix", group: "Cyber", css: "linear-gradient(135deg, #39ff14, #00ffa6)" },
+  { id: "grad-ultraviolet", label: "Ultraviolet", group: "Cyber", css: "linear-gradient(135deg, #c000ff, #2952ff)" },
+  { id: "grad-circuit", label: "Circuit", group: "Cyber", css: "linear-gradient(135deg, #00ffd5, #ffe600)" },
+  { id: "grad-royal", label: "Royal", group: "Royal", css: "linear-gradient(135deg, #8b00ff, #ff2fd6)" },
+  { id: "grad-amethyst", label: "Amethyst", group: "Royal", css: "linear-gradient(135deg, #6a00ff, #00e5ff)" },
+  { id: "grad-velvet", label: "Velvet", group: "Royal", css: "linear-gradient(135deg, #2b0f08, #ff004f)" },
+  { id: "grad-crown", label: "Crown", group: "Royal", css: "linear-gradient(135deg, #ffd800, #ff7b1c, #ff3b8d)" },
+  { id: "grad-pastel-sky", label: "Pastel Sky", group: "Pastel", css: "linear-gradient(135deg, #b6f0ff, #ffb7ff)" },
+  { id: "grad-soft-lilac", label: "Soft Lilac", group: "Pastel", css: "linear-gradient(135deg, #d3a1ff, #b6f0ff)" },
+  { id: "grad-spring", label: "Spring", group: "Pastel", css: "linear-gradient(135deg, #baffc9, #b6f0ff)" },
+  { id: "grad-peachy", label: "Peachy", group: "Pastel", css: "linear-gradient(135deg, #ffc79a, #ffb7ff)" },
+  { id: "grad-graphite", label: "Graphite", group: "Mono", css: "linear-gradient(135deg, #c2c7d0, #6b7a90)" },
+  { id: "grad-chrome", label: "Chrome", group: "Mono", css: "linear-gradient(135deg, #ffffff, #c0c0c0)" },
+  { id: "grad-ink", label: "Ink", group: "Mono", css: "linear-gradient(135deg, #7f8aa8, #2b3a55)" },
+  { id: "grad-frost", label: "Frost", group: "Mono", css: "linear-gradient(135deg, #f5f9ff, #b8c7ff)" },
+  { id: "grad-firestorm", label: "Firestorm", group: "Fire/Ice", css: "linear-gradient(135deg, #ff4e50, #f9d423)" },
+  { id: "grad-iceflare", label: "Iceflare", group: "Fire/Ice", css: "linear-gradient(135deg, #00e5ff, #7c4dff, #ff2fd6)" },
+  { id: "grad-glacier", label: "Glacier", group: "Fire/Ice", css: "linear-gradient(135deg, #b6f0ff, #2b7cff)" },
+  { id: "grad-arctic", label: "Arctic", group: "Fire/Ice", css: "linear-gradient(135deg, #f5f9ff, #00f5ff)" },
+  { id: "grad-prism", label: "Prism", group: "Neon Mix", css: "linear-gradient(135deg, #7c4dff, #00e5ff, #39ff14)" },
+  { id: "grad-rave", label: "Rave", group: "Neon Mix", css: "linear-gradient(135deg, #ff2fd6, #00f5ff)" },
+  { id: "grad-synthwave", label: "Synthwave", group: "Neon Mix", css: "linear-gradient(135deg, #ff00ff, #00a2ff)" },
+  { id: "grad-laserpop", label: "Laserpop", group: "Neon Mix", css: "linear-gradient(135deg, #ffe600, #00f5ff, #ff5bf1)" }
 ]);
 const GRADIENT_PRESET_MAP = new Map(GRADIENT_PRESETS.map((preset) => [preset.id, preset]));
 const LEGACY_BUBBLE_PREF_KEYS = Object.freeze([
@@ -1409,15 +1465,22 @@ let textFxPreviewTime = null;
 let chatFxStatus = null;
 let chatFxPrefsLoaded = false;
 let chatFxPrefsLoading = false;
-let textStylePrefs = { ...TEXT_STYLE_DEFAULTS, neon: { ...TEXT_STYLE_DEFAULTS.neon }, gradient: { ...TEXT_STYLE_DEFAULTS.gradient } };
+let userNameStylePrefs = { ...TEXT_STYLE_DEFAULTS, neon: { ...TEXT_STYLE_DEFAULTS.neon }, gradient: { ...TEXT_STYLE_DEFAULTS.gradient } };
+let messageTextStylePrefs = { ...TEXT_STYLE_DEFAULTS, neon: { ...TEXT_STYLE_DEFAULTS.neon }, gradient: { ...TEXT_STYLE_DEFAULTS.gradient } };
 let textStyleDraft = null;
+let textStyleTarget = "username";
 let textCustomizationModal = null;
-let textCustomizationPreview = null;
+let textCustomizationPreviewMembers = null;
+let textCustomizationPreviewHeader = null;
+let textCustomizationPreviewMessage = null;
+let textCustomizationTitle = null;
 let textCustomizationIntensity = null;
+let textCustomizationGradientIntensity = null;
 let textCustomizationFont = null;
 let textCustomizationStyle = null;
 let textCustomizationColorInput = null;
 let textCustomizationColorText = null;
+let textCustomizationColorGrid = null;
 let textCustomizationNeonGrid = null;
 let textCustomizationGradientGrid = null;
 let textCustomizationSaveBtn = null;
@@ -1712,10 +1775,13 @@ function normalizeHexColor6(input){
   return /^#[0-9a-f]{6}$/i.test(raw) ? raw : "";
 }
 
-function buildGradientCss({ a, b, angle }){
-  const cleanA = normalizeHexColor6(a) || "#7c4dff";
-  const cleanB = normalizeHexColor6(b) || "#00e5ff";
-  const deg = Number.isFinite(Number(angle)) ? Math.round(Number(angle)) : 135;
+function buildGradientCss(preset){
+  if (!preset) return "";
+  if (typeof preset === "string") return preset;
+  if (typeof preset.css === "string") return preset.css;
+  const cleanA = normalizeHexColor6(preset.a) || "#7c4dff";
+  const cleanB = normalizeHexColor6(preset.b) || "#00e5ff";
+  const deg = Number.isFinite(Number(preset.angle)) ? Math.round(Number(preset.angle)) : 135;
   return `linear-gradient(${deg}deg, ${cleanA}, ${cleanB})`;
 }
 
@@ -1765,11 +1831,15 @@ function deriveTextStyleFromLegacy(legacy){
   else if (legacy.textItalic === true) base.fontStyle = "italic";
 
   if (legacy.textGradientEnabled && (gradientA || gradientB)) {
-    const presetId = GRADIENT_PRESETS.find((preset) => preset.a === gradientA && preset.b === gradientB)?.id || null;
+    const presetId = GRADIENT_PRESETS.find((preset) => {
+      const stops = extractGradientStops(buildGradientCss(preset));
+      return stops?.a === gradientA && stops?.b === gradientB;
+    })?.id || null;
     base.mode = "gradient";
     base.gradient = {
       presetId,
-      css: buildGradientCss({ a: gradientA || "#7c4dff", b: gradientB || "#00e5ff", angle: gradientAngle })
+      css: buildGradientCss({ a: gradientA || "#7c4dff", b: gradientB || "#00e5ff", angle: gradientAngle }),
+      intensity: base.gradient.intensity
     };
     return base;
   }
@@ -1815,6 +1885,8 @@ function normalizeTextStyle(raw, legacy = {}){
     const preset = presetId ? GRADIENT_PRESET_MAP.get(presetId) : null;
     base.gradient.presetId = preset ? presetId : null;
     base.gradient.css = typeof raw.gradient.css === "string" ? raw.gradient.css : (preset ? buildGradientCss(preset) : "");
+    const intensity = String(raw.gradient.intensity || "").toLowerCase();
+    base.gradient.intensity = TEXT_STYLE_GRADIENT_INTENSITIES.has(intensity) ? intensity : base.gradient.intensity;
   }
 
   if (!base.color && mode === "color") {
@@ -1877,6 +1949,15 @@ function normalizeChatFx(input){
   const fx = (input && typeof input === "object") ? input : {};
   const nameFontRaw = (fx.nameFont ?? fx.usernameFont ?? fx.userNameFont ?? fx.uNameFont);
   const nameColorRaw = (fx.nameColor ?? fx.usernameColor ?? fx.userNameColor ?? fx.uNameColor);
+  const customizationRaw = (fx.customization && typeof fx.customization === "object")
+    ? fx.customization
+    : {
+        userNameStyle: fx.userNameStyle,
+        messageTextStyle: fx.messageTextStyle,
+        textStyle: fx.textStyle
+      };
+  const userNameStyle = normalizeTextStyle(customizationRaw?.userNameStyle || fx.textStyle, fx);
+  const messageTextStyle = normalizeTextStyle(customizationRaw?.messageTextStyle || fx.textStyle, fx);
   return {
     font: normalizeChatFxFontKey(fx.font),
     nameFont: normalizeChatFxFontKey(nameFontRaw),
@@ -1894,7 +1975,8 @@ function normalizeChatFx(input){
     polishPack: normalizeChatFxBool(fx.polishPack, CHAT_FX_DEFAULTS.polishPack),
     polishAuras: normalizeChatFxBool(fx.polishAuras, CHAT_FX_DEFAULTS.polishAuras),
     polishAnimations: normalizeChatFxBool(fx.polishAnimations, CHAT_FX_DEFAULTS.polishAnimations),
-    textStyle: normalizeTextStyle(fx.textStyle, fx)
+    userNameStyle,
+    messageTextStyle
   };
 }
 
@@ -2039,6 +2121,27 @@ function buildNeonTextShadow(color, intensity){
   return layers.map((layer) => `0 0 ${layer.blur}px rgba(${rgb.r},${rgb.g},${rgb.b},${layer.alpha})`).join(", ");
 }
 
+function gradientVisibilityProfile(intensity){
+  const profiles = {
+    soft: {
+      shadow: "0 1px 2px rgba(0,0,0,0.28)",
+      stroke: "0.25px",
+      strokeColor: "rgba(0,0,0,0.35)"
+    },
+    normal: {
+      shadow: "0 1px 2px rgba(0,0,0,0.45)",
+      stroke: "0.35px",
+      strokeColor: "rgba(0,0,0,0.45)"
+    },
+    bold: {
+      shadow: "0 1px 3px rgba(0,0,0,0.6)",
+      stroke: "0.5px",
+      strokeColor: "rgba(0,0,0,0.6)"
+    }
+  };
+  return profiles[intensity] || profiles.normal;
+}
+
 function applyTextStyleToEl(el, style, { fallbackColor = "" } = {}){
   if (!el) return;
   const normalized = normalizeTextStyle(style);
@@ -2051,12 +2154,19 @@ function applyTextStyleToEl(el, style, { fallbackColor = "" } = {}){
   el.style.backgroundImage = "";
   el.classList.remove("textStyleGradient");
   el.style.color = "";
+  el.style.removeProperty("--text-gradient-shadow");
+  el.style.removeProperty("--text-gradient-stroke");
+  el.style.removeProperty("--text-gradient-stroke-color");
 
   if (normalized.mode === "gradient") {
     const preset = normalized.gradient.presetId ? GRADIENT_PRESET_MAP.get(normalized.gradient.presetId) : null;
     const css = normalized.gradient.css || (preset ? buildGradientCss(preset) : "");
     if (css) {
+      const profile = gradientVisibilityProfile(normalized.gradient.intensity);
       el.style.backgroundImage = css;
+      el.style.setProperty("--text-gradient-shadow", profile.shadow);
+      el.style.setProperty("--text-gradient-stroke", profile.stroke);
+      el.style.setProperty("--text-gradient-stroke-color", profile.strokeColor);
       el.classList.add("textStyleGradient");
       return;
     }
@@ -2080,7 +2190,7 @@ function applyTextStyleToEl(el, style, { fallbackColor = "" } = {}){
 function applyNameFxToEl(el, fx){
   if (!el) return;
   const resolved = normalizeChatFx(fx);
-  applyTextStyleToEl(el, resolved.textStyle, { fallbackColor: resolved.nameColor });
+  applyTextStyleToEl(el, resolved.userNameStyle, { fallbackColor: resolved.nameColor });
 }
 
 function parseCssRgbToTuple(cssColor){
@@ -2220,7 +2330,7 @@ function applyChatFxToBubble(bubble, fx, options = {}){
   if (!bubble) return;
   const resolved = normalizeChatFx(fx);
   const effective = resolved;
-  const textStyle = resolved.textStyle || normalizeTextStyle(null, resolved);
+  const textStyle = resolved.messageTextStyle || normalizeTextStyle(null, resolved);
   const textMode = textStyle.mode;
   const intensityMap = { low: 0.4, med: 0.7, high: 1.0, ultra: 1.3 };
   const textGlowValue = textMode === "neon" ? (intensityMap[textStyle.neon.intensity] ?? 0.7) : 0;
@@ -2255,10 +2365,22 @@ function applyChatFxToBubble(bubble, fx, options = {}){
   bubble.style.setProperty("--fx-text-glow", String(textGlowValue));
   const gradientEnabled = textMode === "gradient";
   const gradientPreset = textStyle.gradient.presetId ? GRADIENT_PRESET_MAP.get(textStyle.gradient.presetId) : null;
-  const gradientStops = gradientPreset ? gradientPreset : extractGradientStops(textStyle.gradient.css);
+  const gradientStops = gradientPreset
+    ? extractGradientStops(buildGradientCss(gradientPreset))
+    : extractGradientStops(textStyle.gradient.css);
   const gradientA = (gradientStops?.a || effective.textGradientA || "var(--fx-accent, var(--accent))");
   const gradientB = (gradientStops?.b || effective.textGradientB || "#00e5ff");
   const gradientAngle = gradientStops?.angle ?? effective.textGradientAngle;
+  if (gradientEnabled) {
+    const profile = gradientVisibilityProfile(textStyle.gradient.intensity);
+    bubble.style.setProperty("--fx-text-grad-shadow", profile.shadow);
+    bubble.style.setProperty("--fx-text-grad-stroke", profile.stroke);
+    bubble.style.setProperty("--fx-text-grad-stroke-color", profile.strokeColor);
+  } else {
+    bubble.style.removeProperty("--fx-text-grad-shadow");
+    bubble.style.removeProperty("--fx-text-grad-stroke");
+    bubble.style.removeProperty("--fx-text-grad-stroke-color");
+  }
   bubble.style.setProperty("--fx-text-grad-a", gradientA);
   bubble.style.setProperty("--fx-text-grad-b", gradientB);
   bubble.style.setProperty("--fx-text-grad-angle", `${gradientAngle}deg`);
@@ -4695,7 +4817,8 @@ const profileSettingsBtn = document.getElementById("profileSettingsBtn");
 const profileSettingsMenu = document.getElementById("profileSettingsMenu");
 const likeCount = document.getElementById("likeCount");
 const profileLikeMsg = document.getElementById("profileLikeMsg");
-const openTextCustomizationBtn = document.getElementById("openTextCustomizationBtn");
+const openUsernameCustomizationBtn = document.getElementById("openUsernameCustomizationBtn");
+const openMessageCustomizationBtn = document.getElementById("openMessageCustomizationBtn");
 const leaderboardXp = document.getElementById("leaderboardXp");
 const leaderboardGold = document.getElementById("leaderboardGold");
 const leaderboardDice = document.getElementById("leaderboardDice");
@@ -6949,7 +7072,7 @@ function applyChatFxPrefsFromServer(fx){
   chatFxPrefsLoaded = true;
   if (me?.username){
     me.chatFx = { ...chatFxPrefs };
-    updateUserFxMap(me.username, { ...chatFxPrefs, textStyle: textStylePrefs });
+    updateUserFxMap(me.username, { ...chatFxPrefs, userNameStyle: userNameStylePrefs, messageTextStyle: messageTextStylePrefs });
   }
   if (chatFxPrefEls){
     syncChatFxControls(chatFxPrefs);
@@ -7048,9 +7171,14 @@ async function loadUserPrefs(){
     const legacyGlowPresent = cleanedPrefs?.glowEnabled === true
       || cleanedPrefs?.glowColor
       || (cleanedPrefs?.chatFx && cleanedPrefs.chatFx.textGlow && cleanedPrefs.chatFx.textGlow !== "off");
-    const textStyleNormalized = applyTextStylePrefsFromServer(cleanedPrefs.textStyle, cleanedPrefs.chatFx || {});
-    if (!cleanedPrefs.textStyle && legacyGlowPresent) {
-      queuePersistPrefs({ textStyle: textStyleNormalized });
+    const customizationRaw = cleanedPrefs.customization;
+    const customizationNormalized = applyCustomizationPrefsFromServer(
+      customizationRaw,
+      cleanedPrefs.chatFx || {},
+      cleanedPrefs.textStyle || null
+    );
+    if (!customizationRaw && (cleanedPrefs.textStyle || legacyGlowPresent)) {
+      queuePersistPrefs({ customization: customizationNormalized });
     }
   }catch{}
 }
@@ -7482,7 +7610,8 @@ function initCustomizationUi(){
   });
   openThemesModalBtn?.addEventListener("click", openThemesModal);
   themesModalCloseBtn?.addEventListener("click", closeThemesModal);
-  openTextCustomizationBtn?.addEventListener("click", openTextCustomizationModal);
+  openUsernameCustomizationBtn?.addEventListener("click", () => openTextCustomizationModal("username"));
+  openMessageCustomizationBtn?.addEventListener("click", () => openTextCustomizationModal("messageText"));
   themesModal?.addEventListener("click", (e) => {
     if (e.target === themesModal) closeThemesModal();
   });
@@ -8940,8 +9069,8 @@ function renderMembers(users){
     let insertedMarker = false;
     lastUsers.forEach((u, idx)=>{
       updateRoleCache(u.username || u.name, u.role);
-      if (u?.chatFx || u?.textStyle) {
-        updateUserFxMap(u.name, { ...(u?.chatFx || {}), textStyle: u?.textStyle });
+      if (u?.chatFx || u?.customization || u?.textStyle) {
+        updateUserFxMap(u.name, { ...(u?.chatFx || {}), customization: u?.customization, textStyle: u?.textStyle });
       }
       const row=document.createElement("div");
       row.className="mItem";
@@ -8985,7 +9114,7 @@ function renderMembers(users){
       uname.textContent = String(u.name || "");
       name.appendChild(ico);
       name.appendChild(uname);
-      try{ applyNameFxToEl(uname, userFxMap[u.name] || { ...(u.chatFx || {}), textStyle: u?.textStyle }); }catch{}
+      try{ applyNameFxToEl(uname, userFxMap[u.name] || { ...(u.chatFx || {}), customization: u?.customization, textStyle: u?.textStyle }); }catch{}
 
       const sub=document.createElement("div");
       sub.className="mSub";
@@ -16742,7 +16871,7 @@ function fillProfileSheetHeader(p, isSelf){
   // Name + role chip
   if (profileSheetName) {
     profileSheetName.textContent = p.username || "—";
-    const fx = userFxMap[p.username] || p.chatFx || { textStyle: textStylePrefs };
+    const fx = userFxMap[p.username] || p.chatFx || { userNameStyle: userNameStylePrefs, messageTextStyle: messageTextStylePrefs };
     applyNameFxToEl(profileSheetName, fx);
   }
   if (profileSheetRoleChip){
@@ -17235,41 +17364,73 @@ function cloneTextStyle(style){
   });
 }
 
-function applyTextStylePrefsFromServer(style, legacyFx = chatFxPrefs){
-  const normalized = normalizeTextStyle(style, legacyFx);
-  textStylePrefs = normalized;
+function getActiveTextStylePrefs(){
+  return textStyleTarget === "messageText" ? messageTextStylePrefs : userNameStylePrefs;
+}
+
+function normalizeCustomizationPrefs(customization, legacyFx = chatFxPrefs, legacyTextStyle = null){
+  const raw = customization && typeof customization === "object" ? customization : {};
+  const legacyFallback = legacyTextStyle && typeof legacyTextStyle === "object" ? legacyTextStyle : null;
+  const crossFallback = raw.userNameStyle || raw.messageTextStyle || legacyFallback;
+  return {
+    userNameStyle: normalizeTextStyle(raw.userNameStyle || crossFallback, legacyFx),
+    messageTextStyle: normalizeTextStyle(raw.messageTextStyle || crossFallback, legacyFx)
+  };
+}
+
+function applyCustomizationPrefsFromServer(customization, legacyFx = chatFxPrefs, legacyTextStyle = null){
+  const normalized = normalizeCustomizationPrefs(customization, legacyFx, legacyTextStyle);
+  userNameStylePrefs = normalized.userNameStyle;
+  messageTextStylePrefs = normalized.messageTextStyle;
   if (me?.username) {
-    me.textStyle = { ...normalized };
-    updateUserFxMap(me.username, { ...chatFxPrefs, textStyle: normalized });
-    updateUserFxInDom(me.username, { ...chatFxPrefs, textStyle: normalized });
+    me.customization = { ...normalized };
+    updateUserFxMap(me.username, { ...chatFxPrefs, userNameStyle: userNameStylePrefs, messageTextStyle: messageTextStylePrefs });
+    updateUserFxInDom(me.username, { ...chatFxPrefs, userNameStyle: userNameStylePrefs, messageTextStyle: messageTextStylePrefs });
   }
   if (profileSheetName && currentProfileIsSelf) {
-    applyNameFxToEl(profileSheetName, { textStyle: normalized, nameColor: normalized.color });
+    applyNameFxToEl(profileSheetName, { userNameStyle: userNameStylePrefs, nameColor: userNameStylePrefs.color });
   }
   return normalized;
 }
 
-async function saveTextStylePrefs(style){
+async function saveCustomizationPrefs(style, target = textStyleTarget){
   if (!me) return false;
   const normalized = normalizeTextStyle(style, chatFxPrefs);
-  const saved = await persistUserPrefs({ textStyle: normalized });
-  const applied = applyTextStylePrefsFromServer(saved?.textStyle || normalized, chatFxPrefs);
+  const nextCustomization = {
+    userNameStyle: target === "username" ? normalized : cloneTextStyle(userNameStylePrefs),
+    messageTextStyle: target === "messageText" ? normalized : cloneTextStyle(messageTextStylePrefs)
+  };
+  const saved = await persistUserPrefs({ customization: nextCustomization });
+  const applied = applyCustomizationPrefsFromServer(saved?.customization || nextCustomization, chatFxPrefs, saved?.textStyle || null);
   renderMembers(lastUsers);
   renderDmThreads();
-  if (profileSheetName && currentProfileIsSelf) applyNameFxToEl(profileSheetName, { textStyle: applied, nameColor: applied.color });
+  if (profileSheetName && currentProfileIsSelf) {
+    applyNameFxToEl(profileSheetName, { userNameStyle: applied.userNameStyle, nameColor: applied.userNameStyle.color });
+  }
   return !!saved;
 }
 
 function updateTextCustomizationPreview(){
-  if (!textCustomizationPreview || !textStyleDraft) return;
-  const previewText = me?.username || "Neon Text";
-  textCustomizationPreview.textContent = previewText;
-  applyTextStyleToEl(textCustomizationPreview, textStyleDraft, { fallbackColor: "#ffffff" });
+  if (!textStyleDraft) return;
+  if (textCustomizationPreviewMembers) {
+    const nameText = me?.username || "Iri";
+    textCustomizationPreviewMembers.textContent = nameText;
+    applyTextStyleToEl(textCustomizationPreviewMembers, textStyleDraft, { fallbackColor: "#ffffff" });
+  }
+  if (textCustomizationPreviewHeader) {
+    const nameText = me?.username || "Iri";
+    textCustomizationPreviewHeader.textContent = nameText;
+    applyTextStyleToEl(textCustomizationPreviewHeader, textStyleDraft, { fallbackColor: "#ffffff" });
+  }
+  if (textCustomizationPreviewMessage) {
+    textCustomizationPreviewMessage.textContent = "This is a sample message with sparkle.";
+    applyTextStyleToEl(textCustomizationPreviewMessage, textStyleDraft, { fallbackColor: "#ffffff" });
+  }
 }
 
 function setTextCustomizationMode(mode){
   if (!TEXT_STYLE_MODES.has(mode)) return;
-  if (!textStyleDraft) textStyleDraft = cloneTextStyle(textStylePrefs);
+  if (!textStyleDraft) textStyleDraft = cloneTextStyle(getActiveTextStylePrefs());
   textStyleDraft.mode = mode;
   textCustomizationTabs?.querySelectorAll("button[data-mode]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.mode === mode);
@@ -17279,6 +17440,9 @@ function setTextCustomizationMode(mode){
   });
   if (textCustomizationIntensity) {
     textCustomizationIntensity.closest(".textCustomizationField")?.classList.toggle("hidden", mode !== "neon");
+  }
+  if (textCustomizationGradientIntensity) {
+    textCustomizationGradientIntensity.closest(".textCustomizationField")?.classList.toggle("hidden", mode !== "gradient");
   }
   updateTextCustomizationPreview();
 }
@@ -17315,22 +17479,66 @@ function renderTextCustomizationNeonGrid(){
   });
 }
 
-function renderTextCustomizationGradientGrid(){
-  if (!textCustomizationGradientGrid) return;
-  textCustomizationGradientGrid.innerHTML = "";
+function renderTextCustomizationColorGrid(){
+  if (!textCustomizationColorGrid) return;
+  textCustomizationColorGrid.innerHTML = "";
   const grid = document.createElement("div");
   grid.className = "textCustomizationGrid";
-  GRADIENT_PRESETS.forEach((preset) => {
+  const selectedColor = normalizeHexColor6(textStyleDraft?.color);
+  COLOR_PRESETS.forEach((preset) => {
     const swatch = document.createElement("button");
     swatch.type = "button";
     swatch.className = "textCustomizationSwatch";
-    swatch.style.setProperty("--swatch-color", buildGradientCss(preset));
-    swatch.dataset.presetId = preset.id;
+    swatch.style.setProperty("--swatch-color", preset.value);
+    swatch.dataset.color = preset.value;
     swatch.setAttribute("aria-label", preset.label);
-    if (textStyleDraft?.gradient?.presetId === preset.id) swatch.classList.add("selected");
+    if (selectedColor && selectedColor.toLowerCase() === preset.value.toLowerCase()) {
+      swatch.classList.add("selected");
+    }
+    const label = document.createElement("span");
+    label.className = "textCustomizationSwatchLabel";
+    label.textContent = "Aa";
+    swatch.appendChild(label);
     grid.appendChild(swatch);
   });
-  textCustomizationGradientGrid.appendChild(grid);
+  textCustomizationColorGrid.appendChild(grid);
+}
+
+function renderTextCustomizationGradientGrid(){
+  if (!textCustomizationGradientGrid) return;
+  textCustomizationGradientGrid.innerHTML = "";
+  const byGroup = new Map();
+  GRADIENT_PRESETS.forEach((preset) => {
+    const group = preset.group || "Presets";
+    if (!byGroup.has(group)) byGroup.set(group, []);
+    byGroup.get(group).push(preset);
+  });
+  byGroup.forEach((presets, label) => {
+    const groupWrap = document.createElement("div");
+    groupWrap.className = "textCustomizationGridGroup";
+    const groupLabel = document.createElement("div");
+    groupLabel.className = "textCustomizationGroupLabel";
+    groupLabel.textContent = label;
+    const grid = document.createElement("div");
+    grid.className = "textCustomizationGrid";
+    presets.forEach((preset) => {
+      const swatch = document.createElement("button");
+      swatch.type = "button";
+      swatch.className = "textCustomizationSwatch textCustomizationSwatch--gradient";
+      swatch.style.setProperty("--swatch-color", buildGradientCss(preset));
+      swatch.dataset.presetId = preset.id;
+      swatch.setAttribute("aria-label", preset.label);
+      if (textStyleDraft?.gradient?.presetId === preset.id) swatch.classList.add("selected");
+      const labelText = document.createElement("span");
+      labelText.className = "textCustomizationSwatchLabel";
+      labelText.textContent = "Aa";
+      swatch.appendChild(labelText);
+      grid.appendChild(swatch);
+    });
+    groupWrap.appendChild(groupLabel);
+    groupWrap.appendChild(grid);
+    textCustomizationGradientGrid.appendChild(groupWrap);
+  });
 }
 
 function syncTextCustomizationInputs(){
@@ -17350,6 +17558,9 @@ function syncTextCustomizationInputs(){
   if (textCustomizationIntensity) {
     textCustomizationIntensity.value = textStyleDraft.neon?.intensity || TEXT_STYLE_DEFAULTS.neon.intensity;
   }
+  if (textCustomizationGradientIntensity) {
+    textCustomizationGradientIntensity.value = textStyleDraft.gradient?.intensity || TEXT_STYLE_DEFAULTS.gradient.intensity;
+  }
 }
 
 function buildTextCustomizationModal(){
@@ -17365,57 +17576,90 @@ function buildTextCustomizationModal(){
         <button class="iconBtn" type="button" data-action="close-text-customization" aria-label="Close text customisation">✕</button>
       </div>
       <div class="textCustomizationBody">
-        <div class="textCustomizationPreview">
-          <div class="textCustomizationPreviewLabel">Preview</div>
-          <div class="textCustomizationPreviewText" id="textCustomizationPreviewText">Neon Text</div>
-        </div>
-        <div class="textCustomizationTabs">
-          <button type="button" data-mode="color">Color</button>
-          <button type="button" data-mode="neon">Neon</button>
-          <button type="button" data-mode="gradient">Gradient</button>
-        </div>
-        <div class="textCustomizationPanel" data-panel="color">
-          <div class="textCustomizationField">
-            <label>Color</label>
-            <div class="chatFxColorRow">
-              <input type="color" id="textCustomizationColorInput" aria-label="Pick text color" />
-              <input type="text" id="textCustomizationColorText" placeholder="#RRGGBB" />
+        <div class="textCustomizationLayout">
+          <div class="textCustomizationLeft">
+            <div class="textCustomizationPreview textCustomizationPreview--username">
+              <div class="textCustomizationPreviewLabel">Preview</div>
+              <div class="textCustomizationPreviewGrid">
+                <div class="textCustomizationPreviewPanel isMembers">
+                  <div class="textCustomizationPreviewPanelLabel">Members list</div>
+                  <div class="textCustomizationPreviewText" id="textCustomizationPreviewMembers">Iri</div>
+                </div>
+                <div class="textCustomizationPreviewPanel isHeader">
+                  <div class="textCustomizationPreviewPanelLabel">Chat header</div>
+                  <div class="textCustomizationPreviewText" id="textCustomizationPreviewHeader">Iri</div>
+                </div>
+              </div>
+            </div>
+            <div class="textCustomizationPreview textCustomizationPreview--message">
+              <div class="textCustomizationPreviewLabel">Preview</div>
+              <div class="textCustomizationPreviewPanel isChat">
+                <div class="textCustomizationPreviewText textCustomizationPreviewText--message" id="textCustomizationPreviewMessage">This is a sample message with sparkle.</div>
+              </div>
+            </div>
+            <div class="textCustomizationTabs">
+              <button type="button" data-mode="color">Color</button>
+              <button type="button" data-mode="neon">Neon</button>
+              <button type="button" data-mode="gradient">Gradient</button>
+            </div>
+            <div class="textCustomizationControls">
+              <div class="textCustomizationField">
+                <label>Color</label>
+                <div class="chatFxColorRow">
+                  <input type="color" id="textCustomizationColorInput" aria-label="Pick text color" />
+                  <input type="text" id="textCustomizationColorText" placeholder="#RRGGBB" />
+                </div>
+              </div>
+              <div class="textCustomizationField">
+                <label for="textCustomizationFont">Font family</label>
+                <select id="textCustomizationFont"></select>
+              </div>
+              <div class="textCustomizationField">
+                <label for="textCustomizationStyle">Font style</label>
+                <select id="textCustomizationStyle">
+                  <option value="normal">Normal</option>
+                  <option value="bold">Bold</option>
+                  <option value="italic">Italic</option>
+                </select>
+              </div>
+              <div class="textCustomizationField">
+                <label for="textCustomizationIntensity">Neon intensity</label>
+                <select id="textCustomizationIntensity">
+                  <option value="low">Low</option>
+                  <option value="med">Medium</option>
+                  <option value="high">High</option>
+                  <option value="ultra">Ultra</option>
+                </select>
+              </div>
+              <div class="textCustomizationField">
+                <label for="textCustomizationGradientIntensity">Gradient intensity</label>
+                <select id="textCustomizationGradientIntensity">
+                  <option value="soft">Soft</option>
+                  <option value="normal">Normal</option>
+                  <option value="bold">Bold</option>
+                </select>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="textCustomizationPanel" data-panel="neon">
-          <div class="textCustomizationField">
-            <label>Neon presets</label>
-            <div id="textCustomizationNeonGrid"></div>
-          </div>
-        </div>
-        <div class="textCustomizationPanel" data-panel="gradient">
-          <div class="textCustomizationField">
-            <label>Gradient presets</label>
-            <div id="textCustomizationGradientGrid"></div>
-          </div>
-        </div>
-        <div class="textCustomizationControls">
-          <div class="textCustomizationField">
-            <label for="textCustomizationFont">Font family</label>
-            <select id="textCustomizationFont"></select>
-          </div>
-          <div class="textCustomizationField">
-            <label for="textCustomizationStyle">Font style</label>
-            <select id="textCustomizationStyle">
-              <option value="normal">Normal</option>
-              <option value="bold">Bold</option>
-              <option value="italic">Italic</option>
-            </select>
-          </div>
-          <div class="textCustomizationField">
-            <label for="textCustomizationIntensity">Intensity</label>
-            <select id="textCustomizationIntensity">
-              <option value="low">Low</option>
-              <option value="med">Medium</option>
-              <option value="high">High</option>
-              <option value="ultra">Ultra</option>
-            </select>
+          <div class="textCustomizationRight">
+            <div class="textCustomizationPanel" data-panel="color">
+              <div class="textCustomizationField">
+                <label>Color presets</label>
+                <div id="textCustomizationColorGrid"></div>
+              </div>
+            </div>
+            <div class="textCustomizationPanel" data-panel="neon">
+              <div class="textCustomizationField">
+                <label>Neon presets</label>
+                <div id="textCustomizationNeonGrid"></div>
+              </div>
+            </div>
+            <div class="textCustomizationPanel" data-panel="gradient">
+              <div class="textCustomizationField">
+                <label>Gradient presets</label>
+                <div id="textCustomizationGradientGrid"></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -17427,12 +17671,17 @@ function buildTextCustomizationModal(){
   document.body.appendChild(modal);
 
   textCustomizationModal = modal;
-  textCustomizationPreview = modal.querySelector("#textCustomizationPreviewText");
+  textCustomizationTitle = modal.querySelector(".textCustomizationTitle");
+  textCustomizationPreviewMembers = modal.querySelector("#textCustomizationPreviewMembers");
+  textCustomizationPreviewHeader = modal.querySelector("#textCustomizationPreviewHeader");
+  textCustomizationPreviewMessage = modal.querySelector("#textCustomizationPreviewMessage");
   textCustomizationIntensity = modal.querySelector("#textCustomizationIntensity");
+  textCustomizationGradientIntensity = modal.querySelector("#textCustomizationGradientIntensity");
   textCustomizationFont = modal.querySelector("#textCustomizationFont");
   textCustomizationStyle = modal.querySelector("#textCustomizationStyle");
   textCustomizationColorInput = modal.querySelector("#textCustomizationColorInput");
   textCustomizationColorText = modal.querySelector("#textCustomizationColorText");
+  textCustomizationColorGrid = modal.querySelector("#textCustomizationColorGrid");
   textCustomizationNeonGrid = modal.querySelector("#textCustomizationNeonGrid");
   textCustomizationGradientGrid = modal.querySelector("#textCustomizationGradientGrid");
   textCustomizationSaveBtn = modal.querySelector("#textCustomizationSave");
@@ -17475,6 +17724,7 @@ function buildTextCustomizationModal(){
     if (!textStyleDraft) return;
     textStyleDraft.color = textCustomizationColorInput.value || "";
     if (textCustomizationColorText) textCustomizationColorText.value = textStyleDraft.color;
+    renderTextCustomizationColorGrid();
     updateTextCustomizationPreview();
   });
   textCustomizationColorText?.addEventListener("input", () => {
@@ -17482,6 +17732,21 @@ function buildTextCustomizationModal(){
     const color = normalizeHexColor6(textCustomizationColorText.value);
     textStyleDraft.color = color;
     if (textCustomizationColorInput && color) textCustomizationColorInput.value = color;
+    renderTextCustomizationColorGrid();
+    updateTextCustomizationPreview();
+  });
+
+  textCustomizationColorGrid?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".textCustomizationSwatch");
+    if (!btn) return;
+    const color = normalizeHexColor6(btn.dataset.color);
+    if (!color || !textStyleDraft) return;
+    textStyleDraft.color = color;
+    if (textCustomizationColorInput) textCustomizationColorInput.value = color;
+    if (textCustomizationColorText) textCustomizationColorText.value = color;
+    textCustomizationColorGrid.querySelectorAll(".textCustomizationSwatch").forEach((node) => {
+      node.classList.toggle("selected", node.dataset.color === color);
+    });
     updateTextCustomizationPreview();
   });
 
@@ -17510,7 +17775,8 @@ function buildTextCustomizationModal(){
     if (!preset || !textStyleDraft) return;
     textStyleDraft.gradient = {
       presetId,
-      css: buildGradientCss(preset)
+      css: buildGradientCss(preset),
+      intensity: textStyleDraft.gradient?.intensity || TEXT_STYLE_DEFAULTS.gradient.intensity
     };
     textCustomizationGradientGrid.querySelectorAll(".textCustomizationSwatch").forEach((node) => {
       node.classList.toggle("selected", node.dataset.presetId === presetId);
@@ -17521,6 +17787,12 @@ function buildTextCustomizationModal(){
   textCustomizationIntensity?.addEventListener("change", () => {
     if (!textStyleDraft) return;
     textStyleDraft.neon = { ...textStyleDraft.neon, intensity: textCustomizationIntensity.value };
+    updateTextCustomizationPreview();
+  });
+
+  textCustomizationGradientIntensity?.addEventListener("change", () => {
+    if (!textStyleDraft) return;
+    textStyleDraft.gradient = { ...textStyleDraft.gradient, intensity: textCustomizationGradientIntensity.value };
     updateTextCustomizationPreview();
   });
 
@@ -17538,16 +17810,23 @@ function buildTextCustomizationModal(){
 
   textCustomizationSaveBtn?.addEventListener("click", async () => {
     if (!textStyleDraft) return;
-    await saveTextStylePrefs(textStyleDraft);
+    await saveCustomizationPrefs(textStyleDraft, textStyleTarget);
     closeTextCustomizationModal();
   });
 
   return modal;
 }
 
-function openTextCustomizationModal(){
+function openTextCustomizationModal(target = "username"){
   const modal = buildTextCustomizationModal();
-  textStyleDraft = cloneTextStyle(textStylePrefs);
+  textStyleTarget = target === "messageText" ? "messageText" : "username";
+  if (textCustomizationTitle) {
+    textCustomizationTitle.textContent = textStyleTarget === "username" ? "Username Customisation" : "Message Text Customisation";
+  }
+  const card = modal.querySelector(".textCustomizationCard");
+  card?.setAttribute("data-target", textStyleTarget);
+  card?.setAttribute("aria-label", textStyleTarget === "username" ? "Username Customisation" : "Message Text Customisation");
+  textStyleDraft = cloneTextStyle(getActiveTextStylePrefs());
   if (textStyleDraft.mode === "neon" && !textStyleDraft.neon?.presetId) {
     const preset = NEON_PRESETS[0];
     textStyleDraft.neon = {
@@ -17560,9 +17839,11 @@ function openTextCustomizationModal(){
     const preset = GRADIENT_PRESETS[0];
     textStyleDraft.gradient = {
       presetId: preset.id,
-      css: buildGradientCss(preset)
+      css: buildGradientCss(preset),
+      intensity: textStyleDraft.gradient?.intensity || TEXT_STYLE_DEFAULTS.gradient.intensity
     };
   }
+  renderTextCustomizationColorGrid();
   renderTextCustomizationNeonGrid();
   renderTextCustomizationGradientGrid();
   syncTextCustomizationInputs();
@@ -19412,7 +19693,7 @@ socket.on("mod:case_event", (payload = {}) => {
   socket.on("user fx updated", (payload = {}) => {
     const name = safeString(payload.username, "").trim();
     if (!name) return;
-    const combinedFx = { ...(payload.chatFx || payload.fx || {}), textStyle: payload.textStyle };
+    const combinedFx = { ...(payload.chatFx || payload.fx || {}), customization: payload.customization, textStyle: payload.textStyle };
     updateUserFxMap(name, combinedFx);
     updateUserFxInDom(name, combinedFx);
     renderDmThreads();
