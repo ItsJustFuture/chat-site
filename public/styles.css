@@ -5715,7 +5715,7 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
 .dmRow.self .dmBubbleWrap{ align-items:flex-end; }
 
 .dmBubble{
-  --fx-base: var(--fx-bubble-bg, var(--panel));
+  --fx-base: var(--bubble, var(--panel));
   color:var(--fx-text, var(--text));
   display:inline-flex;
   width: fit-content;
@@ -5739,7 +5739,7 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
     0 0 calc(var(--fx-glow, 0) * 14px) color-mix(in srgb, var(--fx-accent, var(--accent)) 28%, transparent);
 }
 .dmBubble.self{
-  --fx-base: var(--fx-bubble-bg, var(--bubbleSelf));
+  --fx-base: var(--bubbleSelf, var(--bubble, var(--panel)));
   color:var(--fx-text, #fff);
 }
 .dmMetaRow{

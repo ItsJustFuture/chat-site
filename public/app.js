@@ -890,18 +890,15 @@ const reactionsCache = Object.create(null);
 const dmReactionsCache = Object.create(null);
 const dmReadCache = Object.create(null); // threadId -> { userId, messageId, ts }
 const userFxMap = Object.create(null);
+// Chat FX inventory
+// A) Main bubble settings to remove/ignore: enabled, glow, radius, border, glass, blur, density, bubbleColor.
+// B) DM bubble container settings to remove/ignore: bubbleColor, radius, border, glass, blur, glow, density.
+// C) Text settings to keep everywhere: font, nameFont, accent, textColor, nameColor, autoContrast,
+//    textBold, textItalic, textGlow, textGradientEnabled, textGradientA, textGradientB, textGradientAngle.
 const CHAT_FX_DEFAULTS = Object.freeze({
-  enabled: true,
-  glow: "off",
   font: "system",
   nameFont: "system",
-  radius: 14,
-  border: 0,
-  glass: 0,
-  blur: 0,
-  density: "cozy",
   accent: "",
-  bubbleColor: "",
   textColor: "",
   nameColor: "",
   autoContrast: false,
@@ -1287,12 +1284,6 @@ function buildFontSelectOptionsHTML(){
     return `<optgroup label="${escapeHtml(group.label)}">${options}</optgroup>`;
   }).join("");
 }
-const CHAT_FX_DENSITY_PRESETS = Object.freeze({
-  compact: { padY: 6, padX: 8, innerGap: 4, timeSize: 10, groupGap: 0, dmGap: 4, dmGapTight: 0 },
-  cozy: { padY: 10, padX: 12, innerGap: 6, timeSize: 11, groupGap: 1, dmGap: 6, dmGapTight: 1 },
-  spacious: { padY: 12, padX: 14, innerGap: 8, timeSize: 12, groupGap: 4, dmGap: 10, dmGapTight: 2 }
-});
-
 const msgIndex = [];
 let dmThreads = [];
 let activeDmId = null;
@@ -1593,18 +1584,6 @@ function normalizeChatFxFontKey(input){
   return CHAT_FX_DEFAULTS.font;
 }
 
-function normalizeChatFxDensity(input){
-  const raw = String(input || "").trim().toLowerCase();
-  if (raw === "compact" || raw === "cozy" || raw === "spacious") return raw;
-  return CHAT_FX_DEFAULTS.density;
-}
-
-function normalizeChatFxGlow(input){
-  const raw = String(input || "").trim().toLowerCase();
-  if (raw === "soft" || raw === "neon" || raw === "strong" || raw === "off") return raw;
-  return CHAT_FX_DEFAULTS.glow;
-}
-
 function normalizeChatFxTextGlow(input){
   const raw = String(input || "").trim().toLowerCase();
   if (raw === "soft" || raw === "neon" || raw === "strong" || raw === "off") return raw;
@@ -1624,13 +1603,6 @@ function normalizeChatFxNumber(input, fallback, min, max){
 }
 
 function normalizeChatFxAccent(input){
-  if (!input) return "";
-  const raw = String(input).trim();
-  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw)) return raw;
-  return "";
-}
-
-function normalizeChatFxBubbleColor(input){
   if (!input) return "";
   const raw = String(input).trim();
   if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw)) return raw;
@@ -1660,25 +1632,12 @@ function normalizeChatFxGradientColor(input){
 
 function normalizeChatFx(input){
   const fx = (input && typeof input === "object") ? input : {};
-  const enabled = fx.enabled !== false;
-  const radiusRaw = (fx.radius ?? fx.bubbleRadius);
-  const borderRaw = (fx.border ?? fx.borderPx);
-  const blurRaw = (fx.blur ?? fx.glassBlur);
-  const bubbleColorRaw = (fx.bubbleColor ?? fx.bubbleBg ?? fx.bubble);
   const nameFontRaw = (fx.nameFont ?? fx.usernameFont ?? fx.userNameFont ?? fx.uNameFont);
   const nameColorRaw = (fx.nameColor ?? fx.usernameColor ?? fx.userNameColor ?? fx.uNameColor);
   return {
-    enabled,
-    glow: normalizeChatFxGlow(fx.glow),
     font: normalizeChatFxFontKey(fx.font),
     nameFont: normalizeChatFxFontKey(nameFontRaw),
-    radius: normalizeChatFxNumber(radiusRaw, CHAT_FX_DEFAULTS.radius, 6, 28),
-    border: normalizeChatFxNumber(borderRaw, CHAT_FX_DEFAULTS.border, 0, 3),
-    glass: normalizeChatFxNumber(fx.glass, CHAT_FX_DEFAULTS.glass, 0, 1),
-    blur: normalizeChatFxNumber(blurRaw, CHAT_FX_DEFAULTS.blur, 0, 16),
-    density: normalizeChatFxDensity(fx.density),
     accent: normalizeChatFxAccent(fx.accent),
-    bubbleColor: normalizeChatFxBubbleColor(bubbleColorRaw),
     textColor: normalizeChatFxTextColor(fx.textColor),
     nameColor: normalizeChatFxNameColor(nameColorRaw),
     autoContrast: fx.autoContrast === true,
@@ -1692,21 +1651,6 @@ function normalizeChatFx(input){
     polishPack: normalizeChatFxBool(fx.polishPack, CHAT_FX_DEFAULTS.polishPack),
     polishAuras: normalizeChatFxBool(fx.polishAuras, CHAT_FX_DEFAULTS.polishAuras),
     polishAnimations: normalizeChatFxBool(fx.polishAnimations, CHAT_FX_DEFAULTS.polishAnimations)
-  };
-}
-
-function stripBubbleSettings(fx){
-  return {
-    ...fx,
-    enabled: true,
-    glow: CHAT_FX_DEFAULTS.glow,
-    radius: CHAT_FX_DEFAULTS.radius,
-    border: CHAT_FX_DEFAULTS.border,
-    glass: CHAT_FX_DEFAULTS.glass,
-    blur: CHAT_FX_DEFAULTS.blur,
-    density: CHAT_FX_DEFAULTS.density,
-    accent: CHAT_FX_DEFAULTS.accent,
-    bubbleColor: CHAT_FX_DEFAULTS.bubbleColor
   };
 }
 
@@ -1773,12 +1717,11 @@ function resolveChatFx(message, author){
 function applyNameFxToEl(el, fx){
   if (!el) return;
   const resolved = normalizeChatFx(fx);
-  const effective = resolved.enabled ? resolved : CHAT_FX_DEFAULTS;
-  const stack = CHAT_FX_FONT_STACKS[effective.nameFont] || CHAT_FX_FONT_STACKS[effective.font] || CHAT_FX_FONT_STACKS.system;
-  ensureGoogleFontLoaded(effective.nameFont);
+  const stack = CHAT_FX_FONT_STACKS[resolved.nameFont] || CHAT_FX_FONT_STACKS[resolved.font] || CHAT_FX_FONT_STACKS.system;
+  ensureGoogleFontLoaded(resolved.nameFont);
   // Only apply when explicitly set, so we don't override theme styles unnecessarily.
   el.style.fontFamily = stack;
-  const c = String(effective.nameColor || "").trim();
+  const c = String(resolved.nameColor || "").trim();
   el.style.color = c || "";
 }
 
@@ -1829,13 +1772,6 @@ function hexToRgbTuple(hex){
   const g = (n >> 8) & 255;
   const b = n & 255;
   return { r, g, b, a: 1 };
-}
-
-function pickAutoContrastFromHex(hex){
-  const t = hexToRgbTuple(hex);
-  if (!t) return "";
-  const lum = relativeLuminance(t);
-  return lum > 0.52 ? "#000000" : "#ffffff";
 }
 
 function contrastRatio(colorA, colorB){
@@ -1916,11 +1852,7 @@ function queueContrastReinforcement(bubble){
 function applyChatFxToBubble(bubble, fx, options = {}){
   if (!bubble) return;
   const resolved = normalizeChatFx(fx);
-  const isDmBubble = !!options.dmRow || bubble.classList.contains("dmBubble");
-  const sanitized = isDmBubble ? resolved : stripBubbleSettings(resolved);
-  const effective = sanitized.enabled ? sanitized : CHAT_FX_DEFAULTS;
-  const glowMap = { off: 0, soft: 0.4, neon: 0.8, strong: 1.15 };
-  const glowValue = glowMap[effective.glow] ?? 0;
+  const effective = resolved;
   const textGlowMap = { off: 0, soft: 0.35, neon: 0.8, strong: 1.2 };
   const textGlowValue = textGlowMap[effective.textGlow] ?? 0;
 
@@ -1930,28 +1862,19 @@ function applyChatFxToBubble(bubble, fx, options = {}){
 
   const fontStack = CHAT_FX_FONT_STACKS[effective.font] || CHAT_FX_FONT_STACKS.system;
   const nameFontStack = CHAT_FX_FONT_STACKS[effective.nameFont] || fontStack;
-  const densityPreset = CHAT_FX_DENSITY_PRESETS[effective.density] || CHAT_FX_DENSITY_PRESETS.cozy;
-  const radiusGrouped = Math.max(8, effective.radius - 2);
-
-  // Bubble background override (optional)
-  const bubbleBg = (effective.bubbleColor || "").trim();
-  if (bubbleBg) bubble.style.setProperty("--fx-bubble-bg", bubbleBg);
-  else bubble.style.removeProperty("--fx-bubble-bg");
 
   bubble.style.setProperty("--fx-font-family", fontStack);
   bubble.style.setProperty("--fx-name-font-family", nameFontStack);
   const nameColor = (effective.nameColor || "").trim();
   bubble.style.setProperty("--fx-name-color", nameColor);
-  bubble.style.setProperty("--fx-glow", String(glowValue));
   bubble.style.setProperty("--fx-accent", effective.accent || "var(--accent)");
   // Text colour: explicit override beats auto-contrast.
   const textOverride = (effective.textColor || "").trim();
   const autoContrast = !!effective.autoContrast && !textOverride;
-  // If the user has set a bubble background colour, prefer that for auto-contrast.
-  const autoColor = autoContrast ? (bubbleBg ? pickAutoContrastFromHex(bubbleBg) : pickAutoContrastTextColor(bubble)) : "";
+  const autoColor = autoContrast ? pickAutoContrastTextColor(bubble) : "";
   bubble.style.setProperty("--fx-text", textOverride || autoColor || "");
   bubble.dataset.fxTextColor = textOverride || autoColor || "";
-  bubble.dataset.fxBubbleColor = bubbleBg || "";
+  bubble.dataset.fxBubbleColor = "";
   bubble.style.setProperty("--fx-text-weight", effective.textBold ? "700" : "400");
   bubble.style.setProperty("--fx-text-style", effective.textItalic ? "italic" : "normal");
   bubble.style.setProperty("--fx-text-glow", String(textGlowValue));
@@ -1965,30 +1888,6 @@ function applyChatFxToBubble(bubble, fx, options = {}){
   bubble.dataset.fxTextGradB = gradientB;
   bubble.classList.toggle("fx-textGradient", gradientEnabled);
   bubble.classList.toggle("fx-autoContrast", autoContrast);
-  bubble.style.setProperty("--fx-radius", `${effective.radius}px`);
-  bubble.style.setProperty("--fx-radius-grouped", `${radiusGrouped}px`);
-  bubble.style.setProperty("--fx-border", `${effective.border}px`);
-  bubble.style.setProperty("--fx-glass", String(effective.glass));
-  bubble.style.setProperty("--fx-blur", `${effective.blur}px`);
-  bubble.style.setProperty("--fx-density", effective.density);
-  bubble.style.setProperty("--fx-pad-y", `${densityPreset.padY}px`);
-  bubble.style.setProperty("--fx-pad-x", `${densityPreset.padX}px`);
-  bubble.style.setProperty("--fx-inner-gap", `${densityPreset.innerGap}px`);
-  bubble.style.setProperty("--fx-time-size", `${densityPreset.timeSize}px`);
-
-  bubble.classList.remove("fx-density-compact", "fx-density-cozy", "fx-density-spacious");
-  bubble.classList.add(`fx-density-${effective.density}`);
-
-  if (options.groupBody){
-    options.groupBody.style.setProperty("--fx-group-gap", `${densityPreset.groupGap}px`);
-  }
-  if (options.dmRow){
-    options.dmRow.style.setProperty("--fx-dm-gap", `${densityPreset.dmGap}px`);
-    options.dmRow.style.setProperty("--fx-dm-gap-tight", `${densityPreset.dmGapTight}px`);
-  }
-  if (options.dmWrap){
-    options.dmWrap.style.setProperty("--fx-time-size", `${densityPreset.timeSize}px`);
-  }
 }
 
 function markDmRead(threadId, ts) {
@@ -6615,7 +6514,6 @@ function applyMessageLayout(layout, { persistLocal = true, persistServer = true 
 function mergeChatFxDefaults(fx){
   const safe = (fx && typeof fx === "object") ? fx : {};
   const merged = { ...CHAT_FX_DEFAULTS, ...safe };
-  if (safe.enabled === false && document.getElementById("chatFxEnabled")) merged.enabled = false;
   return normalizeChatFx(merged);
 }
 
@@ -16763,65 +16661,12 @@ function updateChatFxSliderValue(el, value, decimals = 0){
   el.textContent = decimals > 0 ? num.toFixed(decimals) : String(Math.round(num));
 }
 
-function setChatFxControlsDisabled(disabled){
-  if (!chatFxPrefEls) return;
-  const controls = [
-    chatFxPrefEls.glow,
-    chatFxPrefEls.font,
-    chatFxPrefEls.nameFont,
-    chatFxPrefEls.radius,
-    chatFxPrefEls.border,
-    chatFxPrefEls.glass,
-    chatFxPrefEls.blur,
-    chatFxPrefEls.accent,
-    chatFxPrefEls.nameColorPick,
-    chatFxPrefEls.textBold,
-    chatFxPrefEls.textItalic,
-    chatFxPrefEls.textGlow,
-    chatFxPrefEls.textGradientEnabled,
-    chatFxPrefEls.textGradientA,
-    chatFxPrefEls.textGradientAPick,
-    chatFxPrefEls.textGradientAClear,
-    chatFxPrefEls.textGradientB,
-    chatFxPrefEls.textGradientBPick,
-    chatFxPrefEls.textGradientBClear,
-    chatFxPrefEls.textGradientAngle
-  ];
-  controls.forEach((el) => {
-    if (el) el.disabled = disabled;
-  });
-  chatFxPrefEls.densityButtons?.forEach((btn) => {
-    btn.disabled = disabled;
-    btn.classList.toggle("disabled", disabled);
-  });
-}
-
-function setChatFxDensityButtons(value){
-  if (!chatFxPrefEls?.densityButtons) return;
-  chatFxPrefEls.densityButtons.forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.value === value);
-  });
-}
-
-function getChatFxDensitySelection(){
-  if (!chatFxPrefEls?.densityButtons) return CHAT_FX_DEFAULTS.density;
-  const active = chatFxPrefEls.densityButtons.find((btn) => btn.classList.contains("active"));
-  return active?.dataset.value || CHAT_FX_DEFAULTS.density;
-}
-
 function syncChatFxControls(fx){
   if (!chatFxPrefEls) return;
   const resolved = normalizeChatFx(fx);
-  if (chatFxPrefEls.enabled) chatFxPrefEls.enabled.checked = resolved.enabled;
-  if (chatFxPrefEls.glow) chatFxPrefEls.glow.value = resolved.glow;
   if (chatFxPrefEls.font) chatFxPrefEls.font.value = resolved.font;
   if (chatFxPrefEls.nameFont) chatFxPrefEls.nameFont.value = resolved.nameFont;
-  if (chatFxPrefEls.radius) chatFxPrefEls.radius.value = String(resolved.radius);
-  if (chatFxPrefEls.border) chatFxPrefEls.border.value = String(resolved.border);
-  if (chatFxPrefEls.glass) chatFxPrefEls.glass.value = String(resolved.glass);
-  if (chatFxPrefEls.blur) chatFxPrefEls.blur.value = String(resolved.blur);
   if (chatFxPrefEls.accent) chatFxPrefEls.accent.value = resolved.accent || "";
-  if (chatFxPrefEls.bubbleColor) chatFxPrefEls.bubbleColor.value = resolved.bubbleColor || "";
   if (chatFxPrefEls.textColor) chatFxPrefEls.textColor.value = resolved.textColor || "";
   if (chatFxPrefEls.nameColor) chatFxPrefEls.nameColor.value = resolved.nameColor || "";
   if (chatFxPrefEls.autoContrast) chatFxPrefEls.autoContrast.checked = !!resolved.autoContrast;
@@ -16835,20 +16680,10 @@ function syncChatFxControls(fx){
   if (chatFxPrefEls.polishPack) chatFxPrefEls.polishPack.checked = !!resolved.polishPack;
   if (chatFxPrefEls.polishAuras) chatFxPrefEls.polishAuras.checked = !!resolved.polishAuras;
   if (chatFxPrefEls.polishAnimations) chatFxPrefEls.polishAnimations.checked = !!resolved.polishAnimations;
-  setChatFxDensityButtons(resolved.density);
-  updateChatFxSliderValue(chatFxPrefEls.radiusValue, resolved.radius);
-  updateChatFxSliderValue(chatFxPrefEls.borderValue, resolved.border);
-  updateChatFxSliderValue(chatFxPrefEls.glassValue, resolved.glass, 2);
-  updateChatFxSliderValue(chatFxPrefEls.blurValue, resolved.blur);
   updateChatFxSliderValue(chatFxPrefEls.textGradientAngleValue, resolved.textGradientAngle);
-  setChatFxControlsDisabled(!resolved.enabled);
 
   // Keep color pickers in sync (they can't be blank, so use fallbacks when empty/invalid)
   try {
-    if (chatFxPrefEls.bubbleColorPick) {
-      const v = String(resolved.bubbleColor || "").trim();
-      chatFxPrefEls.bubbleColorPick.value = /^#[0-9a-f]{6}$/i.test(v) ? v : "#2b2d31";
-    }
     if (chatFxPrefEls.textColorPick) {
       const v = String(resolved.textColor || "").trim();
       chatFxPrefEls.textColorPick.value = /^#[0-9a-f]{6}$/i.test(v) ? v : "#ffffff";
@@ -16871,17 +16706,9 @@ function syncChatFxControls(fx){
 function readChatFxFormRaw(){
   if (!chatFxPrefEls) return { ...CHAT_FX_DEFAULTS };
   return {
-    enabled: chatFxPrefEls.enabled?.checked ?? CHAT_FX_DEFAULTS.enabled,
-    glow: chatFxPrefEls.glow?.value || CHAT_FX_DEFAULTS.glow,
     font: chatFxPrefEls.font?.value || CHAT_FX_DEFAULTS.font,
     nameFont: chatFxPrefEls.nameFont?.value || CHAT_FX_DEFAULTS.nameFont,
-    radius: chatFxPrefEls.radius ? Number(chatFxPrefEls.radius.value) : CHAT_FX_DEFAULTS.radius,
-    border: chatFxPrefEls.border ? Number(chatFxPrefEls.border.value) : CHAT_FX_DEFAULTS.border,
-    glass: chatFxPrefEls.glass ? Number(chatFxPrefEls.glass.value) : CHAT_FX_DEFAULTS.glass,
-    blur: chatFxPrefEls.blur ? Number(chatFxPrefEls.blur.value) : CHAT_FX_DEFAULTS.blur,
-    density: getChatFxDensitySelection(),
     accent: (chatFxPrefEls.accent?.value || "").trim(),
-    bubbleColor: (chatFxPrefEls.bubbleColor?.value || "").trim(),
     textColor: (chatFxPrefEls.textColor?.value || "").trim(),
     nameColor: (chatFxPrefEls.nameColor?.value || "").trim(),
     autoContrast: !!chatFxPrefEls.autoContrast?.checked,
@@ -16902,11 +16729,9 @@ function updateChatFxPreview(fx){
   const normalized = normalizeChatFx(fx);
   if (chatFxPreviewBubble) {
     applyChatFxToBubble(chatFxPreviewBubble, normalized);
-    chatFxPreviewBubble.closest(".chatFxPreview")?.classList.toggle("disabled", !normalized.enabled);
   }
   if (textFxPreviewBubble) {
     applyChatFxToBubble(textFxPreviewBubble, normalized);
-    textFxPreviewBubble.closest(".chatFxPreview")?.classList.toggle("disabled", !normalized.enabled);
   }
 }
 
@@ -16947,14 +16772,9 @@ function handleChatFxInput(){
   if (!chatFxPrefEls) return;
   const normalized = normalizeChatFx(readChatFxFormRaw());
   chatFxDraft = normalized;
-  updateChatFxSliderValue(chatFxPrefEls.radiusValue, normalized.radius);
-  updateChatFxSliderValue(chatFxPrefEls.borderValue, normalized.border);
-  updateChatFxSliderValue(chatFxPrefEls.glassValue, normalized.glass, 2);
-  updateChatFxSliderValue(chatFxPrefEls.blurValue, normalized.blur);
   updateChatFxSliderValue(chatFxPrefEls.textGradientAngleValue, normalized.textGradientAngle);
   updatePolishPackClasses(normalized);
   updateChatFxPreview(normalized);
-  setChatFxControlsDisabled(!normalized.enabled);
 }
 
 function applyChatFxToSelfBubbles(fx){
@@ -17028,22 +16848,9 @@ function wireChatFxPrefs(){
 
   const q = (sel) => document.querySelector(sel);
   chatFxPrefEls = {
-    enabled: q("#chatFxEnabled"),
-    glow: q("#chatFxGlow"),
     font: q("#chatFxFont"),
     nameFont: q("#chatFxNameFont"),
-    radius: q("#chatFxRadius"),
-    radiusValue: q("#chatFxRadiusValue"),
-    border: q("#chatFxBorder"),
-    borderValue: q("#chatFxBorderValue"),
-    glass: q("#chatFxGlass"),
-    glassValue: q("#chatFxGlassValue"),
-    blur: q("#chatFxBlur"),
-    blurValue: q("#chatFxBlurValue"),
     accent: q("#chatFxAccent"),
-    bubbleColor: q("#chatFxBubbleColor"),
-    bubbleColorPick: q("#chatFxBubbleColorPick"),
-    bubbleColorClear: q("#chatFxBubbleColorClear"),
     textColor: q("#chatFxTextColor"),
     textColorPick: q("#chatFxTextColorPick"),
     textColorClear: q("#chatFxTextColorClear"),
@@ -17067,10 +16874,8 @@ function wireChatFxPrefs(){
     polishAuras: q("#chatFxPolishAuras"),
     polishAnimations: q("#chatFxPolishAnimations"),
     saveBtn: q("#chatFxSaveBtn"),
-    status: q("#chatFxStatus"),
-    densityRow: q("#chatFxDensity")
+    status: q("#chatFxStatus")
   };
-  chatFxPrefEls.densityButtons = Array.from(chatFxPrefEls.densityRow?.querySelectorAll("button") || []);
   chatFxPreviewBubble = q("#chatFxPreviewBubble");
   chatFxPreviewAvatar = q("#chatFxPreviewAvatar");
   chatFxPreviewName = q("#chatFxPreviewName");
@@ -17086,16 +16891,9 @@ function wireChatFxPrefs(){
   chatFxStatus = chatFxPrefEls.status;
   updateChatFxPreviewIdentity(me);
 
-  chatFxPrefEls.enabled?.addEventListener("change", handleChatFxInput);
-  chatFxPrefEls.glow?.addEventListener("change", handleChatFxInput);
   chatFxPrefEls.font?.addEventListener("change", handleChatFxInput);
   chatFxPrefEls.nameFont?.addEventListener("change", handleChatFxInput);
-  chatFxPrefEls.radius?.addEventListener("input", handleChatFxInput);
-  chatFxPrefEls.border?.addEventListener("input", handleChatFxInput);
-  chatFxPrefEls.glass?.addEventListener("input", handleChatFxInput);
-  chatFxPrefEls.blur?.addEventListener("input", handleChatFxInput);
   chatFxPrefEls.accent?.addEventListener("input", handleChatFxInput);
-  chatFxPrefEls.bubbleColor?.addEventListener("input", handleChatFxInput);
   chatFxPrefEls.textColor?.addEventListener("input", handleChatFxInput);
   chatFxPrefEls.autoContrast?.addEventListener("change", handleChatFxInput);
   chatFxPrefEls.textBold?.addEventListener("change", handleChatFxInput);
@@ -17111,16 +16909,6 @@ function wireChatFxPrefs(){
   chatFxPrefEls.accent?.addEventListener("blur", () => {
     const normalized = normalizeChatFx(readChatFxFormRaw());
     if (chatFxPrefEls?.accent) chatFxPrefEls.accent.value = normalized.accent || "";
-    handleChatFxInput();
-  });
-  chatFxPrefEls.bubbleColor?.addEventListener("blur", () => {
-    const normalized = normalizeChatFx(readChatFxFormRaw());
-    if (chatFxPrefEls?.bubbleColor) chatFxPrefEls.bubbleColor.value = normalized.bubbleColor || "";
-    // Keep picker in sync (only supports 6-digit).
-    if (chatFxPrefEls?.bubbleColorPick) {
-      const v = (normalized.bubbleColor || "").trim();
-      if (/^#[0-9a-f]{6}$/i.test(v)) chatFxPrefEls.bubbleColorPick.value = v;
-    }
     handleChatFxInput();
   });
   chatFxPrefEls.textColor?.addEventListener("blur", () => {
@@ -17147,7 +16935,7 @@ function wireChatFxPrefs(){
     handleChatFxInput();
   });
 
-  // Color picker wiring (bubble + text): keep picker <-> text inputs synced and allow clearing to blank.
+  // Color picker wiring (text): keep picker <-> text inputs synced and allow clearing to blank.
   const syncPickerFromText = (textEl, pickerEl, fallback) => {
     if (!textEl || !pickerEl) return;
     const v = String(textEl.value || "").trim();
@@ -17158,23 +16946,6 @@ function wireChatFxPrefs(){
     if (!textEl || !pickerEl) return;
     textEl.value = pickerEl.value || "";
   };
-
-  // Bubble color picker
-  if (chatFxPrefEls.bubbleColorPick && chatFxPrefEls.bubbleColor){
-    syncPickerFromText(chatFxPrefEls.bubbleColor, chatFxPrefEls.bubbleColorPick, "#2b2d31");
-    chatFxPrefEls.bubbleColorPick.addEventListener("input", () => {
-      syncTextFromPicker(chatFxPrefEls.bubbleColor, chatFxPrefEls.bubbleColorPick);
-      handleChatFxInput();
-    });
-    chatFxPrefEls.bubbleColor.addEventListener("input", () => {
-      syncPickerFromText(chatFxPrefEls.bubbleColor, chatFxPrefEls.bubbleColorPick, "#2b2d31");
-    });
-  }
-  chatFxPrefEls.bubbleColorClear?.addEventListener("click", () => {
-    if (chatFxPrefEls?.bubbleColor) chatFxPrefEls.bubbleColor.value = "";
-    syncPickerFromText(chatFxPrefEls?.bubbleColor, chatFxPrefEls?.bubbleColorPick, "#2b2d31");
-    handleChatFxInput();
-  });
 
   // Text color picker
   if (chatFxPrefEls.textColorPick && chatFxPrefEls.textColor){
@@ -17239,14 +17010,6 @@ function wireChatFxPrefs(){
     handleChatFxInput();
   });
 
-  chatFxPrefEls.densityButtons.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (btn.disabled) return;
-      setChatFxDensityButtons(btn.dataset.value);
-      handleChatFxInput();
-    });
-  });
-
   if (effectsPreset && !effectsPreset._wired){
     effectsPreset._wired = true;
     effectsPreset.addEventListener("change", () => {
@@ -17256,16 +17019,13 @@ function wireChatFxPrefs(){
         return;
       }
       const presets = {
-        soft: { glow: "soft", textGlow: "soft", glass: 0.3, blur: 4 },
-        neon: { glow: "neon", textGlow: "neon", glass: 0.5, blur: 8 },
-        minimal: { glow: "off", textGlow: "off", glass: 0, blur: 0 },
+        soft: { textGlow: "soft" },
+        neon: { textGlow: "neon" },
+        minimal: { textGlow: "off" },
       };
       const next = presets[preset];
       if (!next) return;
-      if (chatFxPrefEls.glow) chatFxPrefEls.glow.value = next.glow;
       if (chatFxPrefEls.textGlow) chatFxPrefEls.textGlow.value = next.textGlow;
-      if (chatFxPrefEls.glass) chatFxPrefEls.glass.value = String(next.glass);
-      if (chatFxPrefEls.blur) chatFxPrefEls.blur.value = String(next.blur);
       handleChatFxInput();
     });
   }
@@ -17305,19 +17065,7 @@ function resetChatFxSection(section){
     if (chatFxPrefEls.textGradientAngle) chatFxPrefEls.textGradientAngle.value = String(defaults.textGradientAngle);
     if (chatFxPrefEls.autoContrast) chatFxPrefEls.autoContrast.checked = !!defaults.autoContrast;
   };
-  const applyBubbleDefaults = () => {
-    if (chatFxPrefEls.enabled) chatFxPrefEls.enabled.checked = !!defaults.enabled;
-    if (chatFxPrefEls.glow) chatFxPrefEls.glow.value = defaults.glow;
-    if (chatFxPrefEls.radius) chatFxPrefEls.radius.value = String(defaults.radius);
-    if (chatFxPrefEls.border) chatFxPrefEls.border.value = String(defaults.border);
-    if (chatFxPrefEls.glass) chatFxPrefEls.glass.value = String(defaults.glass);
-    if (chatFxPrefEls.blur) chatFxPrefEls.blur.value = String(defaults.blur);
-    if (chatFxPrefEls.bubbleColor) chatFxPrefEls.bubbleColor.value = defaults.bubbleColor || "";
-    if (chatFxPrefEls.bubbleColorPick) chatFxPrefEls.bubbleColorPick.value = normalizeColorForInput(defaults.bubbleColor || "#2b2d31", "#2b2d31");
-    setChatFxDensityButtons(defaults.density);
-  };
 
-  if (section === "chat") applyBubbleDefaults();
   if (section === "text") applyTextDefaults();
   if (section === "profile") {
     if (chatFxPrefEls.polishAuras) chatFxPrefEls.polishAuras.checked = !!defaults.polishAuras;
