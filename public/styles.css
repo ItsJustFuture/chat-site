@@ -3520,7 +3520,7 @@ body.sys-density-minimized .chat-main{
   --fx-glow: 0;
   --fx-blur: 0;
   --fx-glass: 0;
-  --msg-accent-top-size: var(--msg-accent-height, 4px);
+  --msg-accent-top-size: calc(var(--msg-accent-height, 4px) * 0.5);
   --msg-accent-bottom-size: 0px;
   --fx-contrast-shadow: 0 1px 2px rgba(0,0,0,0.18);
   padding:var(--msg-pad-y, 8px) var(--msg-pad-x, 12px);
@@ -3532,7 +3532,7 @@ body.sys-density-minimized .chat-main{
   box-shadow:none;
 }
 .chat-main .msgItem.msg--main.msg--group-end .bubble{
-  --msg-accent-bottom-size: var(--msg-accent-height, 4px);
+  --msg-accent-bottom-size: calc(var(--msg-accent-height, 4px) * 0.5);
   padding-bottom:calc(var(--msg-pad-y, 8px) + var(--msg-accent-height, 4px) + var(--msg-accent-gap, 4px));
 }
 .chat-main .msg--main .bubble::before{
