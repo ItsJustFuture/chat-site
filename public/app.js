@@ -913,6 +913,30 @@ const CHAT_FX_DEFAULTS = Object.freeze({
   polishAuras: true,
   polishAnimations: true
 });
+const LEGACY_BUBBLE_PREF_KEYS = Object.freeze([
+  "enabled",
+  "glow",
+  "radius",
+  "border",
+  "glass",
+  "blur",
+  "density",
+  "bubbleColor"
+]);
+const LEGACY_BUBBLE_STORAGE_KEYS = Object.freeze([
+  "chatFxBubbleColor",
+  "chatFxBubble",
+  "chatFxBubbleStyle",
+  "chatFxBubbleRadius",
+  "chatFxBubbleGlow",
+  "chatFxBubbleBorder",
+  "chatFxBubbleGlass",
+  "chatFxBubbleBlur",
+  "chatFxBubbleDensity",
+  "chatFxEnabled",
+  "chatSpacingCompact"
+]);
+let legacyBubbleCleanupNoted = false;
 const TONE_OPTIONS = Object.freeze([
   { key: "chill", emoji: "😌", name: "Chill", description: "Relaxed / friendly" },
   { key: "joke", emoji: "😂", name: "Joke", description: "Joking / playful" },
@@ -1651,6 +1675,47 @@ function normalizeChatFx(input){
     polishPack: normalizeChatFxBool(fx.polishPack, CHAT_FX_DEFAULTS.polishPack),
     polishAuras: normalizeChatFxBool(fx.polishAuras, CHAT_FX_DEFAULTS.polishAuras),
     polishAnimations: normalizeChatFxBool(fx.polishAnimations, CHAT_FX_DEFAULTS.polishAnimations)
+  };
+}
+
+function stripLegacyBubblePrefs(rawFx){
+  if (!rawFx || typeof rawFx !== "object") return { cleaned: {}, removed: false };
+  const cleaned = { ...rawFx };
+  let removed = false;
+  LEGACY_BUBBLE_PREF_KEYS.forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(cleaned, key)) {
+      delete cleaned[key];
+      removed = true;
+    }
+  });
+  return { cleaned, removed };
+}
+
+function cleanupLegacyBubbleStorage(){
+  let removed = false;
+  LEGACY_BUBBLE_STORAGE_KEYS.forEach((key) => {
+    try{
+      if (localStorage.getItem(key) != null) {
+        localStorage.removeItem(key);
+        removed = true;
+      }
+    }catch{}
+  });
+  return removed;
+}
+
+function cleanupLegacyBubblePrefs(prefs){
+  const safe = (prefs && typeof prefs === "object") ? prefs : {};
+  const { cleaned, removed } = stripLegacyBubblePrefs(safe.chatFx || {});
+  const removedStorage = cleanupLegacyBubbleStorage();
+  const didClean = removed || removedStorage;
+  if (didClean && IS_DEV && !legacyBubbleCleanupNoted) {
+    console.info("[prefs] Cleaned legacy bubble settings.");
+    legacyBubbleCleanupNoted = true;
+  }
+  return {
+    prefs: removed ? { ...safe, chatFx: cleaned } : safe,
+    cleaned: didClean
   };
 }
 
@@ -5945,7 +6010,13 @@ function isDiceResultSystemMessage(text){
 function addSystem(text, options = {}){
   const div=document.createElement("div");
   div.className="sys";
-  if (options.className) div.classList.add(options.className);
+  const classHint = String(options.className || "");
+  if (classHint) div.classList.add(...classHint.split(" ").filter(Boolean));
+  if (classHint.toLowerCase().includes("mod")) div.classList.add("sys-mod");
+  if (classHint.toLowerCase().includes("dice") || isDiceResultSystemMessage(text) || isDiceRoom(currentRoom)) {
+    div.classList.add("sys-dice");
+  }
+  if (isSurvivalRoom(currentRoom)) div.classList.add("sys-sim");
 
   // Dice Room: make system messages larger, and make dice faces much more visible
   if(currentRoom === "diceroom"){
@@ -6512,7 +6583,8 @@ function applyMessageLayout(layout, { persistLocal = true, persistServer = true 
 }
 
 function mergeChatFxDefaults(fx){
-  const safe = (fx && typeof fx === "object") ? fx : {};
+  const { cleaned } = stripLegacyBubblePrefs(fx);
+  const safe = (cleaned && typeof cleaned === "object") ? cleaned : {};
   const merged = { ...CHAT_FX_DEFAULTS, ...safe };
   return normalizeChatFx(merged);
 }
@@ -6603,36 +6675,37 @@ async function loadUserPrefs(){
     if(!res.ok){ hardHideProfileModal(); return; }
     const data = await res.json();
     const prefs = data?.prefs || {};
-    if(prefs.dmBadgePrefs && typeof prefs.dmBadgePrefs === "object"){
-      badgePrefs = { ...badgeDefaults, ...prefs.dmBadgePrefs };
+    const { prefs: cleanedPrefs } = cleanupLegacyBubblePrefs(prefs);
+    if(cleanedPrefs.dmBadgePrefs && typeof cleanedPrefs.dmBadgePrefs === "object"){
+      badgePrefs = { ...badgeDefaults, ...cleanedPrefs.dmBadgePrefs };
       applyBadgePrefs();
       saveBadgePrefsToStorage();
   queuePersistPrefs({ dmBadgePrefs: badgePrefs });
     }
-    if (typeof prefs.dmNeonColor === "string") {
-      dmNeonColor = prefs.dmNeonColor;
+    if (typeof cleanedPrefs.dmNeonColor === "string") {
+      dmNeonColor = cleanedPrefs.dmNeonColor;
       applyDmNeonPrefs();
       saveDmNeonColorToStorage();
-    } else if (prefs.dmThemePrefs && typeof prefs.dmThemePrefs === "object" && typeof prefs.dmThemePrefs.background === "string") {
-      dmNeonColor = prefs.dmThemePrefs.background;
+    } else if (cleanedPrefs.dmThemePrefs && typeof cleanedPrefs.dmThemePrefs === "object" && typeof cleanedPrefs.dmThemePrefs.background === "string") {
+      dmNeonColor = cleanedPrefs.dmThemePrefs.background;
       applyDmNeonPrefs();
       saveDmNeonColorToStorage();
       queuePersistPrefs({ dmNeonColor });
     }
-    if (Array.isArray(prefs.pinnedThemeIds)) {
-      themePinnedIds = normalizeThemeIdList(prefs.pinnedThemeIds);
+    if (Array.isArray(cleanedPrefs.pinnedThemeIds)) {
+      themePinnedIds = normalizeThemeIdList(cleanedPrefs.pinnedThemeIds);
     }
-    if (Array.isArray(prefs.favoriteThemeIds)) {
-      themeFavoriteIds = normalizeThemeIdList(prefs.favoriteThemeIds);
+    if (Array.isArray(cleanedPrefs.favoriteThemeIds)) {
+      themeFavoriteIds = normalizeThemeIdList(cleanedPrefs.favoriteThemeIds);
     }
-    if (Array.isArray(prefs.ownedThemeIds)) {
-      themeOwnedIds = normalizeThemeIdList(prefs.ownedThemeIds);
+    if (Array.isArray(cleanedPrefs.ownedThemeIds)) {
+      themeOwnedIds = normalizeThemeIdList(cleanedPrefs.ownedThemeIds);
     }
-    if (prefs.sound && typeof prefs.sound === "object") {
-      Sound.importPrefs(prefs.sound);
+    if (cleanedPrefs.sound && typeof cleanedPrefs.sound === "object") {
+      Sound.importPrefs(cleanedPrefs.sound);
       syncSoundPrefsUI(false);
     }
-    const comfortPref = typeof prefs.comfortMode === "boolean" ? prefs.comfortMode : null;
+    const comfortPref = typeof cleanedPrefs.comfortMode === "boolean" ? cleanedPrefs.comfortMode : null;
     const comfortStored = readComfortModeStorage();
     const comfortEnabled = comfortPref ?? comfortStored ?? false;
     applyComfortMode(comfortEnabled, { persistLocal: true, persistServer: false });
@@ -6641,20 +6714,20 @@ async function loadUserPrefs(){
     }
     const { layout: storedLayout, hasStored: hasStoredLayout } = readMessageLayoutStorage();
     const serverLayout = normalizeMessageLayout({
-      msgDensity: prefs.msgDensity ?? prefs.messageLayout?.msgDensity,
-      msgAccentStyle: prefs.msgAccentStyle ?? prefs.messageLayout?.msgAccentStyle,
-      msgUsernameEmphasis: prefs.msgUsernameEmphasis ?? prefs.messageLayout?.msgUsernameEmphasis,
-      sysMsgDensity: prefs.sysMsgDensity ?? prefs.messageLayout?.sysMsgDensity,
-      msgContrast: prefs.msgContrast ?? prefs.messageLayout?.msgContrast
+      msgDensity: cleanedPrefs.msgDensity ?? cleanedPrefs.messageLayout?.msgDensity,
+      msgAccentStyle: cleanedPrefs.msgAccentStyle ?? cleanedPrefs.messageLayout?.msgAccentStyle,
+      msgUsernameEmphasis: cleanedPrefs.msgUsernameEmphasis ?? cleanedPrefs.messageLayout?.msgUsernameEmphasis,
+      sysMsgDensity: cleanedPrefs.sysMsgDensity ?? cleanedPrefs.messageLayout?.sysMsgDensity,
+      msgContrast: cleanedPrefs.msgContrast ?? cleanedPrefs.messageLayout?.msgContrast
     });
-    const hasServerLayout = hasMessageLayoutPrefs(prefs);
+    const hasServerLayout = hasMessageLayoutPrefs(cleanedPrefs);
     const activeLayout = hasServerLayout ? serverLayout : storedLayout;
     applyMessageLayout(activeLayout, { persistLocal: true, persistServer: false });
     if (!hasServerLayout && hasStoredLayout) {
       queuePersistPrefs({ messageLayout: activeLayout });
     }
-    if (prefs.chatFx && typeof prefs.chatFx === "object") {
-      applyChatFxPrefsFromServer(prefs.chatFx);
+    if (cleanedPrefs.chatFx && typeof cleanedPrefs.chatFx === "object") {
+      applyChatFxPrefsFromServer(cleanedPrefs.chatFx);
     } else {
       applyChatFxPrefsFromServer({});
     }
@@ -7714,7 +7787,7 @@ function buildMainMsgItem(m, opts){
   const mid = m.messageId;
 
   const item = document.createElement("div");
-  item.className = "msgItem" + (isSelf ? " self" : "");
+  item.className = "msgItem msg--main" + (isSelf ? " self" : "");
   if (!showHeader) item.classList.add("msgItem--continued");
   item.dataset.mid = mid;
 
@@ -9842,7 +9915,7 @@ function renderDmMessages(threadId){
 
 
     const row = document.createElement("div");
-    row.className = "dmRow" + (isSelf ? " self" : "") + gClass;
+    row.className = "dmRow msg--dm" + (isSelf ? " self" : "") + gClass;
     row.dataset.dmMid = m.messageId || m.id;
     row.dataset.username = normKey(authorName || "");
     applyIdentityGlow(row, { username: authorName, role: m.role || roleForUser(authorName), vibe_tags: m?.vibe_tags, couple: m?.couple });
@@ -16780,12 +16853,12 @@ function handleChatFxInput(){
 function applyChatFxToSelfBubbles(fx){
   if (!me?.username) return;
   const normalized = normalizeChatFx(fx);
-  document.querySelectorAll(".msgItem.self .bubble").forEach((bubble) => {
+  document.querySelectorAll(".chat-main .msgItem.msg--main.self .bubble").forEach((bubble) => {
     const groupBody = bubble.closest(".msgGroupBody");
     applyChatFxToBubble(bubble, normalized, { groupBody });
     queueContrastReinforcement(bubble);
   });
-  document.querySelectorAll(".dmRow.self").forEach((row) => {
+  document.querySelectorAll(".chat-dm .dmRow.msg--dm.self").forEach((row) => {
     const bubble = row.querySelector(".dmBubble");
     const wrap = row.querySelector(".dmBubbleWrap");
     applyChatFxToBubble(bubble, normalized, { dmRow: row, dmWrap: wrap });
