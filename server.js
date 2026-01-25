@@ -2010,6 +2010,24 @@ const CHAT_FX_DEFAULTS = Object.freeze({
   polishAuras: true,
   polishAnimations: true
 });
+const TEXT_STYLE_DEFAULTS = Object.freeze({
+  mode: "color",
+  color: null,
+  neon: {
+    presetId: null,
+    color: null,
+    intensity: "med"
+  },
+  gradient: {
+    presetId: null,
+    css: null
+  },
+  fontFamily: "system",
+  fontStyle: "normal"
+});
+const TEXT_STYLE_MODES = new Set(["color", "neon", "gradient"]);
+const TEXT_STYLE_INTENSITIES = new Set(["low", "med", "high", "ultra"]);
+const TEXT_STYLE_HEX = /^#[0-9a-f]{6}$/i;
 const CHAT_FX_TEXT_GLOWS = new Set(["off", "soft", "neon", "strong"]);
 const CHAT_FX_FONTS = new Set([
   "system",
@@ -2028,6 +2046,36 @@ const CHAT_FX_FONTS = new Set([
   "unifrakturcook","unifrakturmaguntia","pirataone","newrocker","eater","nosifer"
 ]);
 const CHAT_FX_HEX = /^#[0-9a-f]{6}$/i;
+
+function sanitizeTextStyle(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const out = {
+    ...TEXT_STYLE_DEFAULTS,
+    neon: { ...TEXT_STYLE_DEFAULTS.neon },
+    gradient: { ...TEXT_STYLE_DEFAULTS.gradient }
+  };
+  const mode = String(raw.mode || "").toLowerCase();
+  if (TEXT_STYLE_MODES.has(mode)) out.mode = mode;
+  if (TEXT_STYLE_HEX.test(raw.color || "")) out.color = String(raw.color).trim();
+  const family = String(raw.fontFamily || raw.font || "").trim();
+  if (CHAT_FX_FONTS.has(family)) out.fontFamily = family;
+  const fontStyle = String(raw.fontStyle || "").toLowerCase();
+  if (fontStyle === "normal" || fontStyle === "bold" || fontStyle === "italic") out.fontStyle = fontStyle;
+
+  if (raw.neon && typeof raw.neon === "object") {
+    const intensity = String(raw.neon.intensity || "").toLowerCase();
+    if (TEXT_STYLE_INTENSITIES.has(intensity)) out.neon.intensity = intensity;
+    if (TEXT_STYLE_HEX.test(raw.neon.color || "")) out.neon.color = String(raw.neon.color).trim();
+    if (typeof raw.neon.presetId === "string") out.neon.presetId = raw.neon.presetId.slice(0, 64);
+  }
+
+  if (raw.gradient && typeof raw.gradient === "object") {
+    if (typeof raw.gradient.presetId === "string") out.gradient.presetId = raw.gradient.presetId.slice(0, 64);
+    if (typeof raw.gradient.css === "string") out.gradient.css = raw.gradient.css.slice(0, 180);
+  }
+
+  return out;
+}
 
 function sanitizeChatFx(raw) {
   const out = { ...CHAT_FX_DEFAULTS };
@@ -2087,6 +2135,12 @@ function sanitizeChatFx(raw) {
   if (typeof raw.polishAnimations === "boolean") out.polishAnimations = raw.polishAnimations;
 
   return out;
+}
+
+function mergeChatFxWithTextStyle(chatFx, textStyle) {
+  const fx = sanitizeChatFx(chatFx);
+  const style = sanitizeTextStyle(textStyle);
+  return style ? { ...fx, textStyle: style } : fx;
 }
 
 const TONE_KEYS = new Set(["chill", "joke", "sarcastic", "serious"]);
@@ -8784,6 +8838,7 @@ function normalizePrefs(raw) {
     dmThemePrefs,
     sound: normalizeSoundPrefs(prefs.sound),
     chatFx: sanitizeChatFx(prefs.chatFx),
+    textStyle: sanitizeTextStyle(prefs.textStyle),
   };
 }
 function sanitizePrefsInput(p) {
@@ -8795,6 +8850,7 @@ function sanitizePrefsInput(p) {
     if (Array.isArray(p.pinnedThemeIds)) out.pinnedThemeIds = normalizeThemeIdList(p.pinnedThemeIds);
     if (Array.isArray(p.favoriteThemeIds)) out.favoriteThemeIds = normalizeThemeIdList(p.favoriteThemeIds);
     if (p.chatFx && typeof p.chatFx === "object") out.chatFx = sanitizeChatFx(p.chatFx);
+    if (p.textStyle && typeof p.textStyle === "object") out.textStyle = sanitizeTextStyle(p.textStyle);
     if (p.sound && typeof p.sound === "object") {
       const sound = {};
       for (const key of ["enabled", "room", "dm", "mention", "sent", "receive", "reaction"]) {
@@ -8813,7 +8869,7 @@ function buildAuthorsFxMap(usernames, cb) {
   // Prefer Postgres during the SQLite -> PG migration.
   (async () => {
     const base = {};
-    for (const name of unique) base[name] = sanitizeChatFx(null);
+    for (const name of unique) base[name] = mergeChatFxWithTextStyle(null, null);
 
     try {
       if (pgPool) {
@@ -8823,7 +8879,7 @@ function buildAuthorsFxMap(usernames, cb) {
         );
         for (const row of rows || []) {
           const prefs = safeJsonParse(row?.prefs_json, {});
-          base[row.username] = sanitizeChatFx(prefs?.chatFx);
+          base[row.username] = mergeChatFxWithTextStyle(prefs?.chatFx, prefs?.textStyle);
         }
         return cb(base);
       }
@@ -8838,12 +8894,22 @@ function buildAuthorsFxMap(usernames, cb) {
       (_e, rows) => {
         for (const row of rows || []) {
           const prefs = safeJsonParse(row?.prefs_json, {});
-          base[row.username] = sanitizeChatFx(prefs?.chatFx);
+          base[row.username] = mergeChatFxWithTextStyle(prefs?.chatFx, prefs?.textStyle);
         }
         cb(base);
       }
     );
   })();
+}
+
+function emitUserFxUpdate(socket) {
+  if (!socket?.user) return;
+  io.emit("user fx updated", {
+    userId: socket.user.id,
+    username: socket.user.username,
+    chatFx: mergeChatFxWithTextStyle(socket.user.chatFx, socket.user.textStyle),
+    textStyle: sanitizeTextStyle(socket.user.textStyle)
+  });
 }
 
 function updateLiveChatFx(userId, chatFx) {
@@ -8852,7 +8918,16 @@ function updateLiveChatFx(userId, chatFx) {
   if (!s?.user) return;
   s.user.chatFx = sanitizeChatFx(chatFx);
   if (s.currentRoom) emitUserList(s.currentRoom);
-  io.emit("user fx updated", { userId: s.user.id, username: s.user.username, chatFx: s.user.chatFx });
+  emitUserFxUpdate(s);
+}
+
+function updateLiveTextStyle(userId, textStyle) {
+  const sid = socketIdByUserId.get(userId);
+  const s = sid ? io.sockets.sockets.get(sid) : null;
+  if (!s?.user) return;
+  s.user.textStyle = sanitizeTextStyle(textStyle);
+  if (s.currentRoom) emitUserList(s.currentRoom);
+  emitUserFxUpdate(s);
 }
 
 app.get("/api/me/prefs", requireLogin, async (req, res) => {
@@ -8879,6 +8954,7 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
   const userId = req.session.user.id;
   const incoming = sanitizePrefsInput(req.body?.prefs ?? req.body);
   const shouldUpdateChatFx = Object.prototype.hasOwnProperty.call(incoming || {}, "chatFx");
+  const shouldUpdateTextStyle = Object.prototype.hasOwnProperty.call(incoming || {}, "textStyle");
 
   try {
     if (await pgUserExists(userId)) {
@@ -8898,6 +8974,10 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
         req.session.user.chatFx = sanitizeChatFx(merged.chatFx);
         updateLiveChatFx(userId, merged.chatFx);
       }
+      if (shouldUpdateTextStyle) {
+        req.session.user.textStyle = sanitizeTextStyle(merged.textStyle);
+        updateLiveTextStyle(userId, merged.textStyle);
+      }
       return res.json({ ok: true, prefs: merged });
     }
   } catch (e) {
@@ -8916,6 +8996,10 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
       if (shouldUpdateChatFx) {
         req.session.user.chatFx = sanitizeChatFx(merged.chatFx);
         updateLiveChatFx(userId, merged.chatFx);
+      }
+      if (shouldUpdateTextStyle) {
+        req.session.user.textStyle = sanitizeTextStyle(merged.textStyle);
+        updateLiveTextStyle(userId, merged.textStyle);
       }
       return res.json({ ok: true, prefs: merged });
     });
@@ -14061,7 +14145,8 @@ async function emitUserList(room) {
         mood: s.user.mood || "",
         avatar: s.user.avatar || "",
         vibe_tags: sanitizeVibeTags(s.user.vibe_tags || []),
-        chatFx: sanitizeChatFx(s.user.chatFx),
+        chatFx: mergeChatFxWithTextStyle(s.user.chatFx, s.user.textStyle),
+        textStyle: sanitizeTextStyle(s.user.textStyle),
       });
     }
   }
@@ -14314,6 +14399,7 @@ io.on("connection", async (socket) => {
     avatar: sessUser.avatar || "",
     vibe_tags: Array.isArray(sessUser.vibe_tags) ? sessUser.vibe_tags : [],
     chatFx: sanitizeChatFx(sessUser.chatFx),
+    textStyle: sanitizeTextStyle(sessUser.textStyle),
   };
 
   // --- Owner session map: register basic meta
@@ -14418,6 +14504,7 @@ if (existingSid && existingSid !== socket.id) {
         socket.user.vibe_tags = sanitizeVibeTags(r.vibe_tags || []);
         const prefs = safeJsonParse(r?.prefs_json, {});
         socket.user.chatFx = sanitizeChatFx(prefs?.chatFx);
+        socket.user.textStyle = sanitizeTextStyle(prefs?.textStyle);
         if (socket.currentRoom) emitUserList(socket.currentRoom);
       }
       return;
@@ -14437,6 +14524,7 @@ if (existingSid && existingSid !== socket.id) {
         socket.user.vibe_tags = sanitizeVibeTags(row.vibe_tags || []);
         const prefs = safeJsonParse(row?.prefs_json, {});
         socket.user.chatFx = sanitizeChatFx(prefs?.chatFx);
+        socket.user.textStyle = sanitizeTextStyle(prefs?.textStyle);
         if (socket.currentRoom) emitUserList(socket.currentRoom);
       }
     }
@@ -14911,7 +14999,7 @@ function doJoin(room, status) {
       buildAuthorsFxMap(usernames, (authorsFx) => {
         const history = baseHistory.map((m) => ({
           ...m,
-          chatFx: authorsFx[m.user] || sanitizeChatFx(null),
+          chatFx: authorsFx[m.user] || mergeChatFxWithTextStyle(null, null),
         }));
         socket.emit("history", history, { authorsFx });
 
@@ -15252,7 +15340,7 @@ if (!room) {
               attachmentMime: attMime,
               attachmentType: attType,
               attachmentSize: attSize,
-              chatFx: sanitizeChatFx(socket.user.chatFx),
+              chatFx: mergeChatFxWithTextStyle(socket.user.chatFx, socket.user.textStyle),
               replyToId: replyPk,
               replyToUser: replyUser || "",
               replyToText: replyText || "",
@@ -15874,7 +15962,7 @@ if (!room) {
                     replyToId: replyPk,
                     replyToUser: replyUser || "",
                     replyToText: replyText || "",
-                    chatFx: sanitizeChatFx(socket.user.chatFx),
+                    chatFx: mergeChatFxWithTextStyle(socket.user.chatFx, socket.user.textStyle),
                   };
                   // Daily challenges + smart mentions
                   try { bumpDailyProgress(socket.user.id, dayKeyNow(), "room_msgs_5", 1); } catch {}
