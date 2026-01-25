@@ -1993,17 +1993,9 @@ function sanitizeHexColor(raw){
 }
 
 const CHAT_FX_DEFAULTS = Object.freeze({
-  enabled: true,
-  glow: "off",
   font: "system",
   nameFont: "system",
-  bubbleRadius: 14,
-  borderPx: 0,
-  glass: 0,
-  glassBlur: 0,
-  density: "cozy",
   accent: null,
-  bubbleColor: null,
   textColor: null,
   nameColor: null,
   autoContrast: false,
@@ -2018,7 +2010,6 @@ const CHAT_FX_DEFAULTS = Object.freeze({
   polishAuras: true,
   polishAnimations: true
 });
-const CHAT_FX_GLOWS = new Set(["off", "soft", "neon", "strong"]);
 const CHAT_FX_TEXT_GLOWS = new Set(["off", "soft", "neon", "strong"]);
 const CHAT_FX_FONTS = new Set([
   "system",
@@ -2036,15 +2027,12 @@ const CHAT_FX_FONTS = new Set([
   "kaushanscript","greatvibes","allura","sacramento","satisfy","yellowtail","marckscript",
   "unifrakturcook","unifrakturmaguntia","pirataone","newrocker","eater","nosifer"
 ]);
-const CHAT_FX_DENSITIES = new Set(["compact", "cozy", "spacious"]);
 const CHAT_FX_HEX = /^#[0-9a-f]{6}$/i;
 
 function sanitizeChatFx(raw) {
   const out = { ...CHAT_FX_DEFAULTS };
   if (!raw || typeof raw !== "object") return out;
 
-  if (typeof raw.enabled === "boolean") out.enabled = raw.enabled;
-  if (CHAT_FX_GLOWS.has(raw.glow)) out.glow = raw.glow;
   if (CHAT_FX_FONTS.has(raw.font)) out.font = raw.font;
 
   // Username styling (shown anywhere the username appears)
@@ -2052,39 +2040,11 @@ function sanitizeChatFx(raw) {
   const nf = String(nameFontRaw || "").trim();
   if (CHAT_FX_FONTS.has(nf)) out.nameFont = nf;
 
-  // Backwards/forwards compatibility: accept either client-style keys (radius/border/blur)
-  // or server-style keys (bubbleRadius/borderPx/glassBlur).
-  const bubbleRadiusRaw = raw.bubbleRadius ?? raw.radius;
-  if (Number.isFinite(Number(bubbleRadiusRaw))) {
-    out.bubbleRadius = clamp(bubbleRadiusRaw, 6, 28);
-  }
-  const borderPxRaw = raw.borderPx ?? raw.border;
-  if (Number.isFinite(Number(borderPxRaw))) {
-    out.borderPx = clamp(borderPxRaw, 0, 3);
-  }
-  if (Number.isFinite(Number(raw.glass))) {
-    out.glass = clamp(raw.glass, 0, 1);
-  }
-  const glassBlurRaw = raw.glassBlur ?? raw.blur;
-  if (Number.isFinite(Number(glassBlurRaw))) {
-    out.glassBlur = clamp(glassBlurRaw, 0, 16);
-  }
-  if (CHAT_FX_DENSITIES.has(raw.density)) out.density = raw.density;
-
   if (raw.accent == null) {
     out.accent = null;
   } else {
     const accent = String(raw.accent || "").trim();
     out.accent = CHAT_FX_HEX.test(accent) ? accent : null;
-  }
-
-  // Optional bubble background override (hex)
-  const bubbleColorRaw = raw.bubbleColor ?? raw.bubbleBg ?? raw.bubble;
-  if (bubbleColorRaw == null || bubbleColorRaw === "") {
-    out.bubbleColor = null;
-  } else {
-    const bc = String(bubbleColorRaw || "").trim();
-    out.bubbleColor = CHAT_FX_HEX.test(bc) ? bc : null;
   }
 
   if (raw.textColor == null) {
