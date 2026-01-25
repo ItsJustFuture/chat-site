@@ -3259,6 +3259,8 @@ body.msg-density-compact .chat-main{
   --msg-pad-y:6px;
   --msg-pad-x:10px;
   --msg-accent-offset:2px;
+  --msg-accent-height:3px;
+  --msg-accent-gap:3px;
   --msg-group-gap:2px;
   --msg-stack-gap:6px;
   --msg-item-gap:6px;
@@ -3269,6 +3271,8 @@ body.msg-density-medium .chat-main{
   --msg-pad-y:8px;
   --msg-pad-x:12px;
   --msg-accent-offset:2px;
+  --msg-accent-height:4px;
+  --msg-accent-gap:4px;
   --msg-group-gap:4px;
   --msg-stack-gap:8px;
   --msg-item-gap:8px;
@@ -3279,6 +3283,8 @@ body.msg-density-comfortable .chat-main{
   --msg-pad-y:11px;
   --msg-pad-x:14px;
   --msg-accent-offset:3px;
+  --msg-accent-height:5px;
+  --msg-accent-gap:4px;
   --msg-group-gap:6px;
   --msg-stack-gap:12px;
   --msg-item-gap:10px;
@@ -3290,33 +3296,38 @@ body.msg-contrast-low .chat-main{ --msg-bg-strength:12%; }
 body.msg-contrast-medium .chat-main{ --msg-bg-strength:18%; }
 body.msg-contrast-high .chat-main{ --msg-bg-strength:28%; }
 
-body.msg-accent-solid .chat-main .msg--main .bubble::before{
-  background:color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent);
-  opacity:0.55;
+body.msg-accent-solid .chat-main,
+body.msg-accent-solid .chat-dm{
+  --msg-accent-fill: color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent);
+  --msg-accent-opacity: 0.55;
 }
-body.msg-accent-dotted .chat-main .msg--main .bubble::before{
-  background:repeating-linear-gradient(
+body.msg-accent-dotted .chat-main,
+body.msg-accent-dotted .chat-dm{
+  --msg-accent-fill: repeating-linear-gradient(
     180deg,
     color-mix(in srgb, var(--fx-accent, var(--accent)) 55%, transparent) 0 2px,
     transparent 2px 5px
   );
-  opacity:0.7;
+  --msg-accent-opacity: 0.7;
 }
-body.msg-accent-gradient .chat-main .msg--main .bubble::before{
-  background:linear-gradient(
+body.msg-accent-gradient .chat-main,
+body.msg-accent-gradient .chat-dm{
+  --msg-accent-fill: linear-gradient(
     180deg,
     color-mix(in srgb, var(--fx-accent, var(--accent)) 55%, transparent) 0%,
     transparent 100%
   );
-  opacity:0.65;
+  --msg-accent-opacity: 0.65;
 }
-body.msg-accent-hoverglow .chat-main .msg--main .bubble::before{
-  background:color-mix(in srgb, var(--fx-accent, var(--accent)) 40%, transparent);
-  opacity:0.35;
-  transition: opacity 160ms ease, box-shadow 160ms ease;
+body.msg-accent-hoverglow .chat-main,
+body.msg-accent-hoverglow .chat-dm{
+  --msg-accent-fill: color-mix(in srgb, var(--fx-accent, var(--accent)) 40%, transparent);
+  --msg-accent-opacity: 0.35;
 }
 body.msg-accent-hoverglow .chat-main .msg--main:hover .bubble::before,
-body.msg-accent-hoverglow .chat-main .msg--main.showActions .bubble::before{
+body.msg-accent-hoverglow .chat-main .msg--main.showActions .bubble::before,
+body.msg-accent-hoverglow .chat-dm .dmRow.msg--dm:hover .dmBubble::before,
+body.msg-accent-hoverglow .chat-dm .dmRow.msg--dm.showActions .dmBubble::before{
   opacity:0.65;
   box-shadow:0 0 6px color-mix(in srgb, var(--fx-accent, var(--accent)) 35%, transparent);
 }
@@ -3443,6 +3454,9 @@ body.sys-density-minimized .chat-main{
 .chat-main .msgGroupBody{ gap:var(--msg-group-gap, var(--fx-group-gap, 4px)); }
 .chat-main .msgItem.msg--main.gCont .bubble{ margin-top:2px; }
 .chat-main .msgItem.msg--main.gMid .bubble{ margin-top:2px; }
+.chat-main .msgItem.msg--main.msg--grouped:not(.msg--group-start){
+  margin-top:2px;
+}
 
 /* Corner shaping so grouped messages look like one continuous bubble */
 .chat-main .msgItem.msg--main.gFirst:not(.gLast) .bubble{
@@ -3502,27 +3516,42 @@ body.sys-density-minimized .chat-main{
 }
 .chat-main .msg--main .bubble{
   --fx-radius: 8px;
-  --fx-border: 1px;
+  --fx-border: 0;
   --fx-glow: 0;
   --fx-blur: 0;
   --fx-glass: 0;
+  --msg-accent-top-size: var(--msg-accent-height, 4px);
+  --msg-accent-bottom-size: 0px;
+  --fx-contrast-shadow: 0 1px 2px rgba(0,0,0,0.18);
   padding:var(--msg-pad-y, 8px) var(--msg-pad-x, 12px);
-  padding-left:calc(var(--msg-pad-x, 12px) + var(--msg-accent-offset, 2px));
+  padding-top:calc(var(--msg-pad-y, 8px) + var(--msg-accent-height, 4px) + var(--msg-accent-gap, 4px));
+  padding-bottom:var(--msg-pad-y, 8px);
   line-height:var(--msg-line-height, 1.45);
-  background:color-mix(in srgb, var(--fx-base) var(--msg-bg-strength, 18%), transparent);
-  border-color:color-mix(in srgb, var(--fx-accent, var(--accent)) 12%, var(--border));
+  background:transparent;
+  border-color:transparent;
   box-shadow:none;
+}
+.chat-main .msgItem.msg--main.msg--group-end .bubble{
+  --msg-accent-bottom-size: var(--msg-accent-height, 4px);
+  padding-bottom:calc(var(--msg-pad-y, 8px) + var(--msg-accent-height, 4px) + var(--msg-accent-gap, 4px));
 }
 .chat-main .msg--main .bubble::before{
   content:"";
   position:absolute;
   left:0;
-  top:6px;
-  bottom:6px;
-  width:3px;
-  border-radius:3px;
-  background:color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent);
-  opacity:0.55;
+  right:0;
+  top:0;
+  bottom:0;
+  border-radius:999px;
+  background-image:
+    var(--msg-accent-fill, color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent)),
+    var(--msg-accent-fill, color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent));
+  background-repeat:no-repeat;
+  background-position: top left, bottom left;
+  background-size: 100% var(--msg-accent-top-size, 4px), 100% var(--msg-accent-bottom-size, 0px);
+  opacity:var(--msg-accent-opacity, 0.6);
+  pointer-events:none;
+  transition: opacity 160ms ease, box-shadow 160ms ease;
 }
 .bubble,
 .dmBubble{
@@ -3637,7 +3666,7 @@ body.sys-density-minimized .chat-main{
 .chat-main .msgItem.msg--main.showActions .bubble,
 .chat-dm .dmRow.msg--dm.showActions .dmBubble{
   filter: brightness(1.04);
-  box-shadow: 0 6px 16px rgba(0,0,0,0.18);
+  box-shadow: none;
 }
 
 @media (hover:hover) and (pointer:fine){
@@ -5966,21 +5995,46 @@ body.polish-pack.polish-animations .chat-dm .msg-new .dmMsgAvatar{
 .chat-dm .dmRow.self .dmBubbleWrap{ align-items:flex-end; }
 
 .chat-dm .dmBubble{
-  --fx-contrast-shadow: var(--text-shadow-soft);
+  --fx-contrast-shadow: 0 1px 2px rgba(0,0,0,0.18);
+  --msg-accent-top-size: var(--msg-accent-height, 4px);
+  --msg-accent-bottom-size: 0px;
   color:var(--fx-text, var(--text));
   display:inline-flex;
   width: fit-content;
   max-width:100%;
   flex: 0 0 auto;
   padding:10px 12px;
+  padding-top:calc(10px + var(--msg-accent-height, 4px) + var(--msg-accent-gap, 4px));
   border-radius:var(--dm-bubble-radius, 16px);
-  background:var(--dm-bubble-bg, var(--panel));
-  border:1px solid var(--dm-bubble-border, color-mix(in srgb, var(--border) 80%, transparent));
+  background:transparent;
+  border:0;
   overflow-wrap:anywhere;
   word-break:break-word;
   font-family:var(--fx-font-family, inherit);
   gap:6px;
-  box-shadow:var(--dm-bubble-shadow, none);
+  box-shadow:none;
+}
+.chat-dm .dmRow.msg--dm.msg--group-end .dmBubble{
+  --msg-accent-bottom-size: var(--msg-accent-height, 4px);
+  padding-bottom:calc(10px + var(--msg-accent-height, 4px) + var(--msg-accent-gap, 4px));
+}
+.chat-dm .dmBubble::before{
+  content:"";
+  position:absolute;
+  left:0;
+  right:0;
+  top:0;
+  bottom:0;
+  border-radius:999px;
+  background-image:
+    var(--msg-accent-fill, color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent)),
+    var(--msg-accent-fill, color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent));
+  background-repeat:no-repeat;
+  background-position: top left, bottom left;
+  background-size: 100% var(--msg-accent-top-size, 4px), 100% var(--msg-accent-bottom-size, 0px);
+  opacity:var(--msg-accent-opacity, 0.6);
+  pointer-events:none;
+  transition: opacity 160ms ease, box-shadow 160ms ease;
 }
 .chat-dm .dmBubble.self{
   --dm-bubble-bg: var(--bubbleSelf, var(--dm-bubble-bg, var(--panel)));
