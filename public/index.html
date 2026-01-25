@@ -319,7 +319,7 @@
 </select>
 </div>
 </aside>
-<main class="chat">
+<main class="chat chat-main">
 <div class="topbar">
 <div class="roomEventBanner" hidden="" id="roomEventBanner"></div>
 <div class="row topLeft" style="align-items:center; gap:10px;">
@@ -641,7 +641,7 @@
 <div class="overlay" id="drawerOverlay"></div>
 </div>
 <!-- DM PANEL -->
-<div class="dmPanel" id="dmPanel">
+<div class="dmPanel chat-dm" id="dmPanel">
 <div class="dmHeader">
 <div class="dmHeaderMain">
 <button class="iconBtn secondary dmBackBtn" id="dmBackBtn" title="Back to inbox" type="button">←</button>
@@ -1213,9 +1213,9 @@
 <aside class="customizeChatPreview">
 <div class="chatFxPreviewWrap">
 <div class="small" style="margin-bottom:10px;">Preview your chat appearance before saving.</div>
-<div class="chatFxPreview" id="chatFxPreview">
+<div class="chatFxPreview chat-main" id="chatFxPreview">
 <div class="chatFxPreviewRow self">
-<div class="msgItem self chatFxPreviewItem">
+<div class="msgItem msg--main self chatFxPreviewItem">
 <div class="msgAvatar chatFxPreviewAvatar" id="chatFxPreviewAvatar"></div>
 <div class="msgMain">
 <div class="bubble chatFxPreviewBubble" id="chatFxPreviewBubble">
@@ -1298,9 +1298,9 @@
 </div>
 <section class="customizeMergedSection" id="mergedTextIdentitySection"><div class="customizeSectionTitle">Text &amp; Identity</div><div class="textFxStickyPreview" id="textFxStickyPreview">
 <div class="chatFxPreviewWrap">
-<div class="chatFxPreview" id="textFxPreview">
+<div class="chatFxPreview chat-main" id="textFxPreview">
 <div class="chatFxPreviewRow self">
-<div class="msgItem self chatFxPreviewItem">
+<div class="msgItem msg--main self chatFxPreviewItem">
 <div class="msgAvatar chatFxPreviewAvatar" id="textFxPreviewAvatar"></div>
 <div class="msgMain">
 <div class="bubble chatFxPreviewBubble" id="textFxPreviewBubble">

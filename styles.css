@@ -52,6 +52,10 @@
   --overlay-scrim: rgba(0, 0, 0, 0.6);
   --bubble: var(--messageOtherBg);
   --bubbleSelf: var(--messageSelfBg);
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --ok: var(--success);
   --warn: var(--warning);
   --gray: var(--muted);
@@ -85,6 +89,10 @@
   --messageOtherText: #e3e5e8;
   --messageSystemBg: rgba(0, 0, 0, 0.12);
   --messageSystemText: #c9ced6;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(88, 101, 242, 0.15);
   --mentionText: #e3e5e8;
   --btnPrimaryBg: #5865f2;
@@ -126,6 +134,10 @@
   --messageOtherText: #f6f8fb;
   --messageSystemBg: rgba(255, 255, 255, 0.1);
   --messageSystemText: #d9dce5;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(140, 180, 255, 0.2);
   --mentionText: #f6f8fb;
   --btnPrimaryBg: #8cb4ff;
@@ -167,6 +179,10 @@
   --messageOtherText: #e7e9ff;
   --messageSystemBg: rgba(122, 215, 255, 0.12);
   --messageSystemText: #cfe4ff;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(255, 60, 172, 0.15);
   --mentionText: #ffe3f4;
   --btnPrimaryBg: #ff3cac;
@@ -208,6 +224,10 @@
   --messageOtherText: #d9e0ff;
   --messageSystemBg: rgba(111, 126, 255, 0.18);
   --messageSystemText: #d0d7ff;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(111, 126, 255, 0.22);
   --mentionText: #f7f8ff;
   --btnPrimaryBg: #6e7dff;
@@ -249,6 +269,10 @@
   --messageOtherText: #f0e6d8;
   --messageSystemBg: rgba(212, 165, 90, 0.14);
   --messageSystemText: #f0e6d8;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(240, 194, 125, 0.2);
   --mentionText: #fdf6ea;
   --btnPrimaryBg: #d4a55a;
@@ -290,6 +314,10 @@
   --messageOtherText: #ffe9dc;
   --messageSystemBg: rgba(242, 140, 82, 0.16);
   --messageSystemText: #ffe9dc;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(255, 179, 122, 0.18);
   --mentionText: #fff3e8;
   --btnPrimaryBg: #f28c52;
@@ -331,6 +359,10 @@
   --messageOtherText: #dfe7ff;
   --messageSystemBg: rgba(93, 214, 255, 0.14);
   --messageSystemText: #dfe7ff;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(159, 122, 234, 0.18);
   --mentionText: #f6f0ff;
   --btnPrimaryBg: #5dd6ff;
@@ -372,6 +404,10 @@
   --messageOtherText: #eae7ff;
   --messageSystemBg: rgba(192, 132, 252, 0.16);
   --messageSystemText: #f0ecff;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(125, 211, 252, 0.15);
   --mentionText: #f5f9ff;
   --btnPrimaryBg: #c084fc;
@@ -413,6 +449,10 @@
   --messageOtherText: #16171b;
   --messageSystemBg: rgba(37, 99, 235, 0.12);
   --messageSystemText: #1f2937;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(37, 99, 235, 0.16);
   --mentionText: #111827;
   --btnPrimaryBg: #2563eb;
@@ -454,6 +494,10 @@
   --messageOtherText: #0b0c10;
   --messageSystemBg: rgba(17, 24, 39, 0.08);
   --messageSystemText: #111827;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(17, 24, 39, 0.08);
   --mentionText: #0b0c10;
   --btnPrimaryBg: #0b0c10;
@@ -495,6 +539,10 @@
   --messageOtherText: #2d1b3d;
   --messageSystemBg: rgba(167, 139, 250, 0.2);
   --messageSystemText: #3b3050;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(249, 168, 212, 0.2);
   --mentionText: #2d1b3d;
   --btnPrimaryBg: #a78bfa;
@@ -536,6 +584,10 @@
   --messageOtherText: #2f2615;
   --messageSystemBg: rgba(197, 139, 75, 0.18);
   --messageSystemText: #3a2f1b;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(156, 124, 91, 0.18);
   --mentionText: #2f2615;
   --btnPrimaryBg: #c58b4b;
@@ -577,6 +629,10 @@
   --messageOtherText: #0f172a;
   --messageSystemBg: rgba(56, 189, 248, 0.2);
   --messageSystemText: #0f172a;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(14, 165, 233, 0.18);
   --mentionText: #0f172a;
   --btnPrimaryBg: #0ea5e9;
@@ -619,6 +675,10 @@
   --messageOtherText: #f3eef2;
   --messageSystemBg: rgba(255, 111, 174, 0.10);
   --messageSystemText: #f3eef2;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(255, 111, 174, 0.14);
   --mentionText: #f3eef2;
 }
@@ -646,6 +706,10 @@
   --messageOtherText: #2b1f2a;
   --messageSystemBg: rgba(233, 78, 143, 0.10);
   --messageSystemText: #2b1f2a;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(233, 78, 143, 0.12);
   --mentionText: #2b1f2a;
 }
@@ -697,6 +761,10 @@
 
   --messageSystemBg: rgba(34,197,94,0.12);
   --messageSystemText: #102014;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
 
   --mentionBg: rgba(34,197,94,0.16);
   --mentionText: #102014;
@@ -761,6 +829,10 @@
 
   --messageSystemBg: rgba(83,215,106,0.10);
   --messageSystemText: #eaffef;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
 
   --mentionBg: rgba(83,215,106,0.14);
   --mentionText: #eaffef;
@@ -801,6 +873,10 @@
   --messageOtherText: #e7f6ff;
   --messageSystemBg: rgba(61, 241, 194, 0.10);
   --messageSystemText: #cfefff;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(122, 167, 255, 0.14);
   --mentionText: #e7f6ff;
 }
@@ -828,6 +904,10 @@
   --messageOtherText: #13312a;
   --messageSystemBg: rgba(31, 191, 154, 0.10);
   --messageSystemText: #13312a;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(31, 191, 154, 0.12);
   --mentionText: #13312a;
 }
@@ -858,6 +938,10 @@
   --messageOtherText: #2a1f2a;
   --messageSystemBg: rgba(255, 92, 168, 0.12);
   --messageSystemText: #2a1f2a;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(90, 167, 255, 0.14);
   --mentionText: #2a1f2a;
   color-scheme: light;
@@ -885,6 +969,10 @@
   --messageOtherText: #1f2937;
   --messageSystemBg: rgba(124, 92, 255, 0.12);
   --messageSystemText: #1f2937;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(255, 99, 182, 0.14);
   --mentionText: #1f2937;
   color-scheme: light;
@@ -912,6 +1000,10 @@
   --messageOtherText: #12212c;
   --messageSystemBg: rgba(0, 179, 255, 0.12);
   --messageSystemText: #12212c;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(0, 211, 167, 0.14);
   --mentionText: #12212c;
   color-scheme: light;
@@ -939,6 +1031,10 @@
   --messageOtherText: #1e2329;
   --messageSystemBg: rgba(255, 138, 0, 0.12);
   --messageSystemText: #1e2329;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(0, 194, 168, 0.14);
   --mentionText: #1e2329;
   color-scheme: light;
@@ -966,6 +1062,10 @@
   --messageOtherText: #10212b;
   --messageSystemBg: rgba(59, 130, 246, 0.12);
   --messageSystemText: #10212b;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(168, 85, 247, 0.14);
   --mentionText: #10212b;
   color-scheme: light;
@@ -993,6 +1093,10 @@
   --messageOtherText: #0f1f1a;
   --messageSystemBg: rgba(16, 185, 129, 0.12);
   --messageSystemText: #0f1f1a;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(96, 165, 250, 0.14);
   --mentionText: #0f1f1a;
   color-scheme: light;
@@ -1020,6 +1124,10 @@
   --messageOtherText: #eef2ff;
   --messageSystemBg: rgba(34, 211, 238, 0.12);
   --messageSystemText: #e6fbff;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(167, 139, 250, 0.14);
   --mentionText: #eef2ff;
   color-scheme: dark;
@@ -1047,6 +1155,10 @@
   --messageOtherText: #eaffff;
   --messageSystemBg: rgba(0, 245, 212, 0.12);
   --messageSystemText: #d9ffff;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(255, 77, 255, 0.14);
   --mentionText: #eaffff;
   color-scheme: dark;
@@ -1074,6 +1186,10 @@
   --messageOtherText: #f3e8ff;
   --messageSystemBg: rgba(124, 92, 255, 0.12);
   --messageSystemText: #efe7ff;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(255, 123, 220, 0.14);
   --mentionText: #f3e8ff;
   color-scheme: dark;
@@ -1101,6 +1217,10 @@
   --messageOtherText: #e7fff6;
   --messageSystemBg: rgba(61, 241, 194, 0.12);
   --messageSystemText: #d5fff3;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(122, 167, 255, 0.14);
   --mentionText: #e7fff6;
   color-scheme: dark;
@@ -1129,6 +1249,10 @@
     /* DM bubbles */
   --bubble: linear-gradient(135deg, rgba(0, 255, 119, 0.20) 0%, rgba(167, 82, 255, 0.20) 100%);
   --bubbleSelf: linear-gradient(135deg, rgba(0, 255, 119, 0.40) 0%, rgba(167, 82, 255, 0.40) 100%);
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
 
   /* Accent/links */
   --accent: #b55dff;
@@ -1203,8 +1327,8 @@ body[data-theme="Cherry Blossom (Dark)"] .listPanel {
   background-position: 10px 6px;
 }
 
-body[data-theme="Cherry Blossom (Light)"] .bubble,
-body[data-theme="Cherry Blossom (Dark)"] .bubble {
+body[data-theme="Cherry Blossom (Light)"] .chat-main .msg--main .bubble,
+body[data-theme="Cherry Blossom (Dark)"] .chat-main .msg--main .bubble {
   background-image: var(--sakuraPatternBubble);
   background-size: 420px 420px;
   background-repeat: repeat;
@@ -1262,6 +1386,10 @@ body[data-theme="420 Friendly (Light)"]{
   --messageOtherText: var(--text);
   --messageSystemBg: rgba(52, 211, 153, 0.10);
   --messageSystemText: var(--text);
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(52, 211, 153, 0.18);
   --mentionText: var(--text);
 
@@ -1305,6 +1433,10 @@ body[data-theme="420 Friendly (Light)"]{
   --messageOtherText: var(--text);
   --messageSystemBg: rgba(34, 197, 94, 0.10);
   --messageSystemText: var(--text);
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(34, 197, 94, 0.18);
   --mentionText: var(--text);
 
@@ -1348,6 +1480,10 @@ body[data-theme="420 Friendly (Light)"]{
   --messageOtherText: var(--text);
   --messageSystemBg: rgba(251, 146, 60, 0.10);
   --messageSystemText: var(--text);
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(251, 146, 60, 0.18);
   --mentionText: var(--text);
 
@@ -1391,6 +1527,10 @@ body[data-theme="420 Friendly (Light)"]{
   --messageOtherText: #0b1220;
   --messageSystemBg: rgba(56, 189, 248, 0.16);
   --messageSystemText: #0b1220;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(37, 99, 235, 0.12);
   --mentionText: #0b1220;
 
@@ -1434,6 +1574,10 @@ body[data-theme="420 Friendly (Light)"]{
   --messageOtherText: #1f1220;
   --messageSystemBg: rgba(251, 113, 133, 0.16);
   --messageSystemText: #1f1220;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(236, 72, 153, 0.12);
   --mentionText: #1f1220;
 
@@ -1477,6 +1621,10 @@ body[data-theme="420 Friendly (Light)"]{
   --messageOtherText: #111827;
   --messageSystemBg: rgba(245, 158, 11, 0.16);
   --messageSystemText: #111827;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(234, 179, 8, 0.14);
   --mentionText: #111827;
 
@@ -1929,7 +2077,7 @@ body.event-active .roomTitle{
   color: var(--accent);
 }
 
-.msgs{
+.chat-main .msgs{
   flex:1 1 auto;
   min-height:0;
   overflow-y:auto;
@@ -2560,27 +2708,47 @@ body.keyboard-open .menuContent{ padding-bottom: calc(200px + var(--kb, 0px) + e
   outline:none;
 }
 
-.msgs{
+.chat-main .msgs{
   flex:1;
   overflow:auto;
   padding:14px 14px 12px;
   display:flex;
   flex-direction:column;
-  gap:10px;
+  gap:var(--msg-stack-gap, 8px);
   min-height:0;
   justify-content:flex-start;
 }
-.sys{
-  align-self:center; color:var(--messageSystemText); font-size:12px;
-  padding:6px 10px; border-radius:999px;
-  background:var(--messageSystemBg); border:1px solid var(--border);
+.chat-main .sys{
+  align-self:center;
+  color:var(--messageSystemText);
+  font-size:var(--sys-msg-font-size, 11px);
+  padding:var(--sys-msg-pad-y, 6px) calc(var(--sys-msg-pad-x, 10px) + 6px);
+  border-radius:10px;
+  background:color-mix(in srgb, var(--messageSystemBg) 80%, transparent);
+  border:1px solid color-mix(in srgb, var(--border) 65%, transparent);
   max-width:min(90%, 640px);
   overflow-wrap:anywhere;
   word-break:break-word;
   margin:2px 0;
   position:relative;
   z-index:2;
+  opacity:var(--sys-msg-opacity, 1);
+  --sys-rail: color-mix(in srgb, var(--accent) 26%, transparent);
 }
+.chat-main .sys::before{
+  content:"";
+  position:absolute;
+  left:8px;
+  top:6px;
+  bottom:6px;
+  width:2px;
+  border-radius:2px;
+  background:var(--sys-rail);
+  opacity:0.65;
+}
+.chat-main .sys.sys-dice{ --sys-rail: color-mix(in srgb, var(--accent) 55%, transparent); }
+.chat-main .sys.sys-mod{ --sys-rail: color-mix(in srgb, var(--warning) 60%, transparent); }
+.chat-main .sys.sys-sim{ --sys-rail: color-mix(in srgb, var(--success) 55%, transparent); }
 
 .dmMessages,
 .dmMsgs,
@@ -2589,11 +2757,11 @@ body.keyboard-open .menuContent{ padding-bottom: calc(200px + var(--kb, 0px) + e
 }
 
 /* Dice Room: scale system messages + dice faces ONLY in that room */
-body.dice-room .sys{
-  font-size:24px; /* 2x default 12px */
-  padding:10px 14px;
+body.dice-room .chat-main .sys{
+  font-size:calc(var(--sys-msg-font-size, 11px) * 2);
+  padding:calc(var(--sys-msg-pad-y, 6px) + 4px) calc(var(--sys-msg-pad-x, 10px) + 10px);
 }
-body.dice-room .sys .diceFace{
+body.dice-room .chat-main .sys .diceFace{
   font-size:2em; /* 2x within the 2x sys => 4x overall */
   line-height:1;
   display:inline-block;
@@ -3031,21 +3199,128 @@ body.survival-room .survivalArena{
   content:\"🧭 \";
 }
 /* ---- Main chat message grouping (consecutive messages) ---- */
-.msgGroup{ display:flex; gap:10px; align-items:flex-start; max-width:900px; }
-.msgGroup.self{ align-self:flex-end; flex-direction:row-reverse; }
-.msgGroupBody{ display:flex; flex-direction:column; gap:var(--fx-group-gap, 1px); min-width:0; }
-.msgItem{ position:relative; display:flex; flex-direction:row; align-items:flex-start; gap:8px; min-width:0; }
-.msgItem.self{ flex-direction:row-reverse; }
-.msgItem.message--deleting,
-.dmRow.message--deleting{
+.chat-main .msgGroup{ display:flex; gap:8px; align-items:flex-start; max-width:900px; }
+.chat-main .msgGroup.self{ align-self:flex-end; flex-direction:row-reverse; }
+.chat-main .msgGroupBody{ display:flex; flex-direction:column; gap:var(--msg-group-gap, var(--fx-group-gap, 4px)); min-width:0; }
+.chat-main .msgItem.msg--main{ position:relative; display:flex; flex-direction:row; align-items:flex-start; gap:var(--msg-item-gap, 8px); min-width:0; }
+.chat-main .msgItem.msg--main.self{ flex-direction:row-reverse; }
+.chat-main .msgGroup + .msgGroup .msgGroupBody{
+  padding-top:4px;
+  border-top:1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+/* --- Message layout preferences (main chat) --- */
+body.msg-density-compact .chat-main{
+  --msg-pad-y:6px;
+  --msg-pad-x:10px;
+  --msg-accent-offset:2px;
+  --msg-group-gap:2px;
+  --msg-stack-gap:6px;
+  --msg-item-gap:6px;
+  --msg-meta-gap:6px;
+  --msg-line-height:1.3;
+}
+body.msg-density-medium .chat-main{
+  --msg-pad-y:8px;
+  --msg-pad-x:12px;
+  --msg-accent-offset:2px;
+  --msg-group-gap:4px;
+  --msg-stack-gap:8px;
+  --msg-item-gap:8px;
+  --msg-meta-gap:8px;
+  --msg-line-height:1.4;
+}
+body.msg-density-comfortable .chat-main{
+  --msg-pad-y:11px;
+  --msg-pad-x:14px;
+  --msg-accent-offset:3px;
+  --msg-group-gap:6px;
+  --msg-stack-gap:12px;
+  --msg-item-gap:10px;
+  --msg-meta-gap:10px;
+  --msg-line-height:1.5;
+}
+
+body.msg-contrast-low .chat-main{ --msg-bg-strength:12%; }
+body.msg-contrast-medium .chat-main{ --msg-bg-strength:18%; }
+body.msg-contrast-high .chat-main{ --msg-bg-strength:28%; }
+
+body.msg-accent-solid .chat-main .msg--main .bubble::before{
+  background:color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent);
+  opacity:0.55;
+}
+body.msg-accent-dotted .chat-main .msg--main .bubble::before{
+  background:repeating-linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--fx-accent, var(--accent)) 55%, transparent) 0 2px,
+    transparent 2px 5px
+  );
+  opacity:0.7;
+}
+body.msg-accent-gradient .chat-main .msg--main .bubble::before{
+  background:linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--fx-accent, var(--accent)) 55%, transparent) 0%,
+    transparent 100%
+  );
+  opacity:0.65;
+}
+body.msg-accent-hoverglow .chat-main .msg--main .bubble::before{
+  background:color-mix(in srgb, var(--fx-accent, var(--accent)) 40%, transparent);
+  opacity:0.35;
+  transition: opacity 160ms ease, box-shadow 160ms ease;
+}
+body.msg-accent-hoverglow .chat-main .msg--main:hover .bubble::before,
+body.msg-accent-hoverglow .chat-main .msg--main.showActions .bubble::before{
+  opacity:0.65;
+  box-shadow:0 0 6px color-mix(in srgb, var(--fx-accent, var(--accent)) 35%, transparent);
+}
+
+body.msg-name-bold .chat-main .msg--main .name{ font-weight:800; }
+body.msg-name-underlinehover .chat-main .msg--main .name .unameText{
+  text-decoration:none;
+  text-underline-offset:3px;
+}
+body.msg-name-underlinehover .chat-main .msg--main:hover .name .unameText,
+body.msg-name-underlinehover .chat-main .msg--main.showActions .name .unameText{
+  text-decoration:underline;
+}
+body.msg-name-rolechip .chat-main .msg--main .name .unameText{
+  padding:2px 6px;
+  border-radius:999px;
+  background:color-mix(in srgb, var(--panel) 80%, transparent);
+  border:1px solid color-mix(in srgb, var(--fx-accent, var(--accent)) 18%, transparent);
+}
+
+body.sys-density-full .chat-main{
+  --sys-msg-font-size:11px;
+  --sys-msg-pad-y:6px;
+  --sys-msg-pad-x:10px;
+  --sys-msg-opacity:1;
+}
+body.sys-density-compact .chat-main{
+  --sys-msg-font-size:10px;
+  --sys-msg-pad-y:4px;
+  --sys-msg-pad-x:8px;
+  --sys-msg-opacity:0.9;
+}
+body.sys-density-minimized .chat-main{
+  --sys-msg-font-size:9px;
+  --sys-msg-pad-y:3px;
+  --sys-msg-pad-x:6px;
+  --sys-msg-opacity:0.7;
+}
+
+.chat-main .msgItem.msg--main.message--deleting,
+.chat-dm .dmRow.msg--dm.message--deleting{
   opacity:0;
   transform: translateY(-4px) scale(0.98);
   transition: opacity 200ms ease, transform 200ms ease;
   pointer-events:none;
 }
 @media (prefers-reduced-motion: reduce){
-  .msgItem.message--deleting,
-  .dmRow.message--deleting{
+  .chat-main .msgItem.msg--main.message--deleting,
+  .chat-dm .dmRow.msg--dm.message--deleting{
     transition-duration: 1ms;
     transform: none;
   }
@@ -3058,7 +3333,7 @@ body.survival-room .survivalArena{
 */
 
 /* Message layout container: bubble + reacts + actions */
-.msgMain{
+.chat-main .msgMain{
   display:flex;
   flex-direction:column;
   /* Don't use flex gap here.
@@ -3074,10 +3349,10 @@ body.survival-room .survivalArena{
 
 /* Self messages: keep the stack aligned to the right, while still allowing
    the bubble itself to stay content-sized. */
-.msgItem.self .msgMain{ align-items:flex-end; }
+.chat-main .msgItem.msg--main.self .msgMain{ align-items:flex-end; }
 
 /* Collapsed by default: no height, no interaction */
-.msgMain .msgActions{
+.chat-main .msgMain .msgActions{
   display:flex;
   flex-direction:row;
   gap:6px;
@@ -3095,14 +3370,14 @@ body.survival-room .survivalArena{
 }
 
 /* Self messages: align the action row to the right */
-.msgItem.self .msgMain .msgActions{
+.chat-main .msgItem.msg--main.self .msgMain .msgActions{
   justify-content:flex-end;
   align-self:flex-end;
 }
 
 /* Reveal actions on hover (desktop) */
 @media (hover:hover){
-  .msgItem:hover .msgMain .msgActions{
+  .chat-main .msgItem.msg--main:hover .msgMain .msgActions{
     max-height:72px;
     opacity:1;
     margin-top:6px;
@@ -3112,7 +3387,7 @@ body.survival-room .survivalArena{
 }
 
 /* Reveal actions when toggled open (mobile) */
-.msgItem.showActions .msgMain .msgActions{
+.chat-main .msgItem.msg--main.showActions .msgMain .msgActions{
   max-height:72px;
   opacity:1;
   margin-top:6px;
@@ -3120,24 +3395,24 @@ body.survival-room .survivalArena{
   transform: translateY(0);
 }
 /* Make grouped bubbles visually merge into one (main chat) */
-.msgGroupBody{ gap:var(--fx-group-gap, 1px); }
-.msgItem.gCont .bubble{ margin-top:-8px; border-top:none; }
-.msgItem.gMid .bubble{ margin-top:-8px; border-top:none; }
+.chat-main .msgGroupBody{ gap:var(--msg-group-gap, var(--fx-group-gap, 4px)); }
+.chat-main .msgItem.msg--main.gCont .bubble{ margin-top:2px; }
+.chat-main .msgItem.msg--main.gMid .bubble{ margin-top:2px; }
 
 /* Corner shaping so grouped messages look like one continuous bubble */
-.msgItem.gFirst:not(.gLast) .bubble{
-  border-bottom-left-radius:var(--fx-radius-grouped, 12px);
-  border-bottom-right-radius:var(--fx-radius-grouped, 12px);
+.chat-main .msgItem.msg--main.gFirst:not(.gLast) .bubble{
+  border-bottom-left-radius:var(--fx-radius-grouped, 8px);
+  border-bottom-right-radius:var(--fx-radius-grouped, 8px);
 }
-.msgItem.gMid .bubble{
-  border-radius:var(--fx-radius-grouped, 12px);
+.chat-main .msgItem.msg--main.gMid .bubble{
+  border-radius:var(--fx-radius-grouped, 8px);
 }
-.msgItem.gLast:not(.gFirst) .bubble{
-  border-top-left-radius:var(--fx-radius-grouped, 12px);
-  border-top-right-radius:var(--fx-radius-grouped, 12px);
+.chat-main .msgItem.msg--main.gLast:not(.gFirst) .bubble{
+  border-top-left-radius:var(--fx-radius-grouped, 8px);
+  border-top-right-radius:var(--fx-radius-grouped, 8px);
 }
 /* If a message has reactions, give it a little breathing room (splits by reaction space) */
-.msgItem.hasReacts{ margin-bottom:6px; }
+.chat-main .msgItem.msg--main.hasReacts{ margin-bottom:6px; }
 
 .msg{ display:flex; gap:10px; align-items:flex-start; max-width:900px; }
 .msg.self{ align-self:flex-end; flex-direction:row-reverse; }
@@ -3179,6 +3454,30 @@ body.survival-room .survivalArena{
     0 0 calc(var(--fx-glow, 0) * 6px) color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent),
     0 0 calc(var(--fx-glow, 0) * 14px) color-mix(in srgb, var(--fx-accent, var(--accent)) 28%, transparent);
 }
+.chat-main .msg--main .bubble{
+  --fx-radius: 8px;
+  --fx-border: 1px;
+  --fx-glow: 0;
+  --fx-blur: 0;
+  --fx-glass: 0;
+  padding:var(--msg-pad-y, 8px) var(--msg-pad-x, 12px);
+  padding-left:calc(var(--msg-pad-x, 12px) + var(--msg-accent-offset, 2px));
+  line-height:var(--msg-line-height, 1.45);
+  background:color-mix(in srgb, var(--fx-base) var(--msg-bg-strength, 18%), transparent);
+  border-color:color-mix(in srgb, var(--fx-accent, var(--accent)) 12%, var(--border));
+  box-shadow:none;
+}
+.chat-main .msg--main .bubble::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:6px;
+  bottom:6px;
+  width:3px;
+  border-radius:3px;
+  background:color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent);
+  opacity:0.55;
+}
 .bubble,
 .dmBubble{
   position:relative;
@@ -3194,27 +3493,27 @@ body.survival-room .survivalArena{
   We explicitly disable outlines on all main-chat message containers and then
   re-introduce the glow strictly via the bubble ::after shadow (rounded).
 */
-.msgGroup,
-.msgGroupBody,
-.msgItem,
-.msgMain,
-.bubble,
-.dmRow,
-.dmBubbleWrap,
-.dmMetaRow,
-.dmAvatarSlot,
-.dmMessages{
+.chat-main .msgGroup,
+.chat-main .msgGroupBody,
+.chat-main .msgItem,
+.chat-main .msgMain,
+.chat-main .bubble,
+.chat-dm .dmRow,
+.chat-dm .dmBubbleWrap,
+.chat-dm .dmMetaRow,
+.chat-dm .dmAvatarSlot,
+.chat-dm .dmMessages{
   outline: none !important;
   -webkit-tap-highlight-color: transparent;
 }
 
 /* If any wrapper pseudo-elements exist (from past experiments), neutralize them. */
-.msgGroup::before,
-.msgGroup::after,
-.msgItem::before,
-.msgItem::after,
-.msgMain::before,
-.msgMain::after{
+.chat-main .msgGroup::before,
+.chat-main .msgGroup::after,
+.chat-main .msgItem::before,
+.chat-main .msgItem::after,
+.chat-main .msgMain::before,
+.chat-main .msgMain::after{
   content: none !important;
   box-shadow: none !important;
   border: 0 !important;
@@ -3248,13 +3547,13 @@ body.survival-room .survivalArena{
       0 0 12px color-mix(in srgb, var(--userGlow) 20%, transparent);
   }
 }
-.self .bubble{
+.chat-main .msg--main.self .bubble{
   --fx-base: var(--fx-bubble-bg, var(--messageSelfBg));
   color:var(--fx-text, var(--messageSelfText));
 }
 
 /* Right-align self bubbles without forcing them to stretch. */
-.msgItem.self .bubble{ align-self:flex-end; }
+.chat-main .msgItem.msg--main.self .bubble{ align-self:flex-end; }
 .bubble,
 .dmBubble{
   transition: filter 180ms ease, box-shadow 180ms ease;
@@ -3287,70 +3586,70 @@ body.survival-room .survivalArena{
 @media (prefers-reduced-motion: reduce){
   .msgEnter{ animation:none; }
 }
-.msgItem:hover .bubble,
-.dmRow:hover .dmBubble,
-.msgItem.showActions .bubble,
-.dmRow.showActions .dmBubble{
+.chat-main .msgItem.msg--main:hover .bubble,
+.chat-dm .dmRow.msg--dm:hover .dmBubble,
+.chat-main .msgItem.msg--main.showActions .bubble,
+.chat-dm .dmRow.msg--dm.showActions .dmBubble{
   filter: brightness(1.04);
   box-shadow: 0 6px 16px rgba(0,0,0,0.18);
 }
 
 @media (hover:hover) and (pointer:fine){
-  body.polish-pack .msgItem .bubble,
-  body.polish-pack .dmRow .dmBubble{
+  body.polish-pack .chat-main .msgItem.msg--main .bubble,
+  body.polish-pack .chat-dm .dmRow.msg--dm .dmBubble{
     outline: 1px solid transparent;
     outline-offset: -1px;
     transition: outline-color 160ms ease;
   }
-  body.polish-pack .msgItem:hover .bubble,
-  body.polish-pack .dmRow:hover .dmBubble{
+  body.polish-pack .chat-main .msgItem.msg--main:hover .bubble,
+  body.polish-pack .chat-dm .dmRow.msg--dm:hover .dmBubble{
     outline-color: color-mix(in srgb, var(--fx-accent, var(--accent)) 22%, transparent);
   }
-  body.polish-pack .msgItem.hasReacts:hover .bubble,
-  body.polish-pack .dmRow.hasReacts:hover .dmBubble{
+  body.polish-pack .chat-main .msgItem.msg--main.hasReacts:hover .bubble,
+  body.polish-pack .chat-dm .dmRow.msg--dm.hasReacts:hover .dmBubble{
     outline-color: color-mix(in srgb, var(--fx-accent, var(--accent)) 42%, transparent);
   }
 
   /* DMs: disable the square outline ring (it can appear as harsh boxes on some themes). */
-  body.polish-pack .dmRow .dmBubble{
+  body.polish-pack .chat-dm .dmRow.msg--dm .dmBubble{
     outline: none !important;
   }
 }
 
 /* Message meta (name/time) */
-.msgItem .meta{
+.chat-main .msgItem.msg--main .meta{
   display:flex;
   gap:8px;
   align-items:baseline;
   flex-wrap:wrap;
 }
-.msgItem .name{ font-weight:700; }
-.msgItem .name .unameText{
+.chat-main .msgItem.msg--main .name{ font-weight:700; }
+.chat-main .msgItem.msg--main .name .unameText{
   font-family: var(--fx-name-font-family, inherit);
   color: var(--fx-name-color, inherit);
 }
-.msgItem .name .unameText[data-role="owner"],
+.chat-main .msgItem.msg--main .name .unameText[data-role="owner"],
 .dmMetaUser[data-role="owner"]{
   text-shadow: 0 0 6px rgba(120, 255, 180, 0.45), 0 0 12px rgba(120, 255, 180, 0.22);
 }
-.msgItem .name .unameText[data-role="coowner"],
+.chat-main .msgItem.msg--main .name .unameText[data-role="coowner"],
 .dmMetaUser[data-role="coowner"]{
   text-shadow: 0 0 6px rgba(200, 150, 255, 0.45), 0 0 12px rgba(255, 120, 220, 0.25);
 }
-.msgItem .name .unameText[data-role="admin"],
+.chat-main .msgItem.msg--main .name .unameText[data-role="admin"],
 .dmMetaUser[data-role="admin"],
-.msgItem .name .unameText[data-role="moderator"],
+.chat-main .msgItem.msg--main .name .unameText[data-role="moderator"],
 .dmMetaUser[data-role="moderator"]{
   background-image: linear-gradient(transparent 70%, rgba(255, 215, 120, 0.75) 70%);
   background-size: 100% 100%;
   background-repeat: no-repeat;
   padding-bottom: 1px;
 }
-.msgItem .name .unameText[data-role="vip"],
+.chat-main .msgItem.msg--main .name .unameText[data-role="vip"],
 .dmMetaUser[data-role="vip"]{
   text-shadow: 0 0 4px rgba(120, 200, 255, 0.45), 0 0 9px rgba(120, 200, 255, 0.25);
 }
-.msgItem .time{
+.chat-main .msgItem.msg--main .time{
   font-size: var(--fx-time-size, 11px);
   opacity: .65;
 }
@@ -3361,11 +3660,11 @@ body.survival-room .survivalArena{
 }
 
 /* Reactions are OUTSIDE the bubble (inside .msgMain) */
-.msgMain > .reacts{
+.chat-main .msgMain > .reacts{
   align-self:flex-end;
   margin:0 2px 2px 2px;
 }
-.msgMain > .reacts:empty{ display:none; }
+.chat-main .msgMain > .reacts:empty{ display:none; }
 .metaLine{ display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
 .uName{ font-weight:900; font-size:13px; }
 .badge{
@@ -3438,7 +3737,7 @@ body.survival-room .survivalArena{
 */
 
 /* Collapsed by default: no height, no interaction */
-.msgMain .msgActions{
+.chat-main .msgMain .msgActions{
   display:flex;
   flex-direction:row;
   gap:6px;
@@ -3456,13 +3755,13 @@ body.survival-room .survivalArena{
 }
 
 /* Self messages: align action row right */
-.msgItem.self .msgMain .msgActions{
+.chat-main .msgItem.msg--main.self .msgMain .msgActions{
   justify-content:flex-end;
   align-self:flex-end;
 }
 
 @media (hover:hover){
-  .msgItem:hover .msgMain .msgActions{
+  .chat-main .msgItem.msg--main:hover .msgMain .msgActions{
     max-height:72px;
     opacity:1;
     margin-top:6px;
@@ -3471,7 +3770,7 @@ body.survival-room .survivalArena{
   }
 }
 
-.msgItem.showActions .msgMain .msgActions{
+.chat-main .msgItem.msg--main.showActions .msgMain .msgActions{
   max-height:72px;
   opacity:1;
   margin-top:6px;
@@ -5448,7 +5747,7 @@ body.lockScroll{ overflow:hidden; }
   cursor:pointer;
 }
 
-.sys.diceResult{
+.chat-main .sys.diceResult{
   animation: diceResultPop 240ms ease-out;
 }
 
@@ -5469,7 +5768,7 @@ body.lockScroll{ overflow:hidden; }
 
 @media (prefers-reduced-motion: reduce){
   #mediaBtn.diceShaking,
-  .sys.diceResult{
+  .chat-main .sys.diceResult{
     animation:none !important;
   }
 }
@@ -5528,15 +5827,15 @@ body.lockScroll{ overflow:hidden; }
 .dmSettingsRow:last-child{ border-bottom:0; }
 .colorInputRow.tight{ gap:6px; }
 .colorInputRow.tight input[type="text"]{ min-width:120px; }
-.dmMessages{ flex:1; overflow:auto; padding:10px 12px; display:flex; flex-direction:column; gap:8px; min-height:0; }
+.chat-dm .dmMessages{ flex:1; overflow:auto; padding:10px 12px; display:flex; flex-direction:column; gap:8px; min-height:0; }
 
 /* --- DM message layout (bubble hugs content; actions appear BELOW bubble, no reserved space) --- */
-.dmMessages{ padding:14px 16px; gap:8px; }
-.dmRow{ width:100%; display:flex; align-items:flex-start; box-sizing:border-box; min-width:0; }
-.dmRow.self{ justify-content:flex-end; }
+.chat-dm .dmMessages{ padding:14px 16px; gap:8px; }
+.chat-dm .dmRow{ width:100%; display:flex; align-items:flex-start; box-sizing:border-box; min-width:0; }
+.chat-dm .dmRow.self{ justify-content:flex-end; }
 
 /* DM message avatars (pfps) */
-.dmAvatarSlot{
+.chat-dm .dmAvatarSlot{
   width:40px;
   flex: 0 0 40px;
   display:flex;
@@ -5545,32 +5844,32 @@ body.lockScroll{ overflow:hidden; }
   padding-right:6px;
   box-sizing:border-box;
 }
-.dmAvatarSlot.empty{ visibility:hidden; }
-.dmAvatarSpacer{ width:30px; height:30px; }
-.dmMsgAvatar{ width:30px; height:30px; }
+.chat-dm .dmAvatarSlot.empty{ visibility:hidden; }
+.chat-dm .dmAvatarSpacer{ width:30px; height:30px; }
+.chat-dm .dmMsgAvatar{ width:30px; height:30px; }
 
 /* Self messages don't need a left avatar column */
 /* Self messages: show your avatar on the RIGHT (like modern DMs) */
-.dmRow.self .dmAvatarSlot{
+.chat-dm .dmRow.self .dmAvatarSlot{
   display:flex;
   order:2;
   padding-right:0;
   padding-left:6px;
   justify-content:center;
 }
-.dmRow.self .dmBubbleWrap{ order:1; }
+.chat-dm .dmRow.self .dmBubbleWrap{ order:1; }
 
-body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
+body.polish-pack.polish-animations .chat-dm .msg-new .dmMsgAvatar{
   animation: msgArrival 160ms cubic-bezier(.22,.61,.36,1);
   transform-origin: center;
 }
 @media (prefers-reduced-motion: reduce){
-  body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
+  body.polish-pack.polish-animations .chat-dm .msg-new .dmMsgAvatar{
     animation:none;
   }
 }
 
-.dmBubbleWrap{
+.chat-dm .dmBubbleWrap{
   display:flex;
   flex-direction:column;
   flex: 0 1 auto;
@@ -5579,37 +5878,29 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
   /* Prevent bubbles from stretching to the width of meta/reactions/actions */
   align-items:flex-start;
 }
-.dmRow.self .dmBubbleWrap{ align-items:flex-end; }
+.chat-dm .dmRow.self .dmBubbleWrap{ align-items:flex-end; }
 
-.dmBubble{
-  --fx-base: var(--fx-bubble-bg, var(--panel));
+.chat-dm .dmBubble{
   color:var(--fx-text, var(--text));
   display:inline-flex;
   width: fit-content;
   max-width:100%;
   flex: 0 0 auto;
-  padding:var(--fx-pad-y, 10px) var(--fx-pad-x, 12px);
-  border-radius:var(--fx-radius, 14px);
-  background:
-    linear-gradient(rgba(255,255,255, var(--fx-glass, 0)), rgba(255,255,255, var(--fx-glass, 0))),
-    var(--fx-base);
-  border-style:solid;
-  border-width:var(--fx-border, 0px);
-  border-color:color-mix(in srgb, var(--fx-accent, var(--accent)) 22%, var(--line));
+  padding:10px 12px;
+  border-radius:var(--dm-bubble-radius, 16px);
+  background:var(--dm-bubble-bg, var(--panel));
+  border:1px solid var(--dm-bubble-border, color-mix(in srgb, var(--border) 80%, transparent));
   overflow-wrap:anywhere;
   word-break:break-word;
   font-family:var(--fx-font-family, inherit);
-  gap:var(--fx-inner-gap, 6px);
-  backdrop-filter: blur(var(--fx-blur, 0px));
-  box-shadow:
-    0 0 calc(var(--fx-glow, 0) * 6px) color-mix(in srgb, var(--fx-accent, var(--accent)) 45%, transparent),
-    0 0 calc(var(--fx-glow, 0) * 14px) color-mix(in srgb, var(--fx-accent, var(--accent)) 28%, transparent);
+  gap:6px;
+  box-shadow:var(--dm-bubble-shadow, none);
 }
-.dmBubble.self{
-  --fx-base: var(--fx-bubble-bg, var(--bubbleSelf));
+.chat-dm .dmBubble.self{
+  --dm-bubble-bg: var(--bubbleSelf, var(--dm-bubble-bg, var(--panel)));
   color:var(--fx-text, #fff);
 }
-.dmMetaRow{
+.chat-dm .dmMetaRow{
   display:flex;
   justify-content:flex-start;
   align-items:baseline;
@@ -5619,13 +5910,13 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
   font-size:var(--fx-time-size, 12px);
   color: var(--muted);
 }
-.dmMetaUser{ font-weight:800; }
-.dmMetaTime{ opacity:.85; }
+.chat-dm .dmMetaUser{ font-weight:800; }
+.chat-dm .dmMetaTime{ opacity:.85; }
 
 /* DM actions: overlay beside the bubble (never reserves vertical space) */
-.dmBubbleWrap{ position:relative; }
+.chat-dm .dmBubbleWrap{ position:relative; }
 
-.dmActionsBar{
+.chat-dm .dmActionsBar{
   /* horizontal, like main chat */
   display:flex !important;
   flex-direction:row !important;
@@ -5656,23 +5947,23 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
 }
 
 /* Ensure buttons never force a new line in the flex row */
-.dmActionsBar > *{ flex: 0 0 auto; }
+.chat-dm .dmActionsBar > *{ flex: 0 0 auto; }
 
 /* Self messages are on the right: put actions on the left of the bubble */
-.dmRow.self .dmActionsBar{
+.chat-dm .dmRow.msg--dm.self .dmActionsBar{
   left:auto;
   right: calc(100% + 10px);
 }
 
 @media (hover:hover){
-  .dmRow:hover .dmActionsBar{
+  .chat-dm .dmRow.msg--dm:hover .dmActionsBar{
     opacity:1;
     pointer-events:auto;
     transform: translateY(-50%) scale(1);
   }
 }
 
-.dmRow.showActions .dmActionsBar{
+.chat-dm .dmRow.msg--dm.showActions .dmActionsBar{
   opacity:1;
   pointer-events:auto;
   transform: translateY(-50%) scale(1);
@@ -5680,7 +5971,7 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
 
 /* Mobile: keep the bar horizontal and tighter so it fits nicely */
 @media (max-width: 520px){
-  .dmActionsBar{
+  .chat-dm .dmActionsBar{
     gap:6px;
     padding:5px;
     left: calc(100% + 8px);
@@ -5688,8 +5979,8 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
     overflow-x:auto;
     -webkit-overflow-scrolling: touch;
   }
-  .dmRow.self .dmActionsBar{ right: calc(100% + 8px); }
-  .dmActionsBar .iconBtn.smallIcon{
+  .chat-dm .dmRow.msg--dm.self .dmActionsBar{ right: calc(100% + 8px); }
+  .chat-dm .dmActionsBar .iconBtn.smallIcon{
     width:30px;
     height:30px;
     border-radius:11px;
@@ -5697,7 +5988,7 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
   }
 }
 
-.dmReplyContext{
+.chat-dm .dmReplyContext{
   width:100%;
   text-align:left;
   border:0;
@@ -5708,8 +5999,8 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
   margin-bottom:8px;
   cursor:pointer;
 }
-.dmReplyContext .replyUser{ font-weight:900; font-size:12px; }
-.dmReplyContext .replySnippet{ font-size:12px; opacity:.9; }
+.chat-dm .dmReplyContext .replyUser{ font-weight:900; font-size:12px; }
+.chat-dm .dmReplyContext .replySnippet{ font-size:12px; opacity:.9; }
 .dmInput{ padding:10px 12px; border-top:1px solid var(--line); display:flex; gap:8px; flex-shrink:0; background: var(--panel2); position:relative; }
 .dmInput input{ flex:1; }
 .dmSectionTitle{
@@ -5860,19 +6151,20 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
 :root{
   --dmActionsW: 104px; /* estimated width of 3 small action buttons + gaps */
 }
-.dmRow{
+.chat-dm .dmRow.msg--dm{
   min-width:0;
   box-sizing:border-box;
 }
-.dmBubbleWrap{
+.chat-dm .dmBubbleWrap{
   flex:0 1 auto;
   min-width:0;
   max-width:66%;
 }
-.dmMetaRow{
+.chat-dm .dmMetaRow{
   max-width:100%;
 }
-.dmMetaUser, .dmMetaTime{
+.chat-dm .dmMetaUser,
+.chat-dm .dmMetaTime{
   max-width:100%;
   overflow:hidden;
   text-overflow:ellipsis;
@@ -5889,10 +6181,10 @@ body.polish-pack.polish-animations .msg-new .dmMsgAvatar{
   :root{ --dmActionsW: 92px; }
 }
 /* --- DM actions rail: smaller and hug bubbles more closely --- */
-.dmActionsRail{
+.chat-dm .dmActionsRail{
   gap:4px;
 }
-.dmActionsRail .iconBtn.smallIcon{
+.chat-dm .dmActionsRail .iconBtn.smallIcon{
   width:28px;
   height:28px;
   border-radius:10px;
@@ -6661,6 +6953,10 @@ html {
   --messageOtherText: #20132f;
   --messageSystemBg: rgba(139,92,246,0.10);
   --messageSystemText: #4b2e6a;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(181,124,255,0.18);
   --mentionText: #20132f;
   --btnPrimaryBg: #8b5cf6;
@@ -6699,6 +6995,10 @@ html {
   --messageOtherText: #06222b;
   --messageSystemBg: rgba(34,195,214,0.10);
   --messageSystemText: #0b4b5c;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(34,195,214,0.16);
   --mentionText: #06222b;
   --btnPrimaryBg: #0ea5b7;
@@ -6737,6 +7037,10 @@ html {
   --messageOtherText: #2a1a08;
   --messageSystemBg: rgba(245,158,11,0.12);
   --messageSystemText: #6b3f16;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(245,158,11,0.18);
   --mentionText: #2a1a08;
   --btnPrimaryBg: #f59e0b;
@@ -6775,6 +7079,10 @@ html {
   --messageOtherText: #f7f2f6;
   --messageSystemBg: rgba(239,68,68,0.10);
   --messageSystemText: #c9b8c6;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(239,68,68,0.16);
   --mentionText: #f7f2f6;
   --btnPrimaryBg: #ef4444;
@@ -6813,6 +7121,10 @@ html {
   --messageOtherText: #e6f2ff;
   --messageSystemBg: rgba(56,189,248,0.10);
   --messageSystemText: #a7c3d9;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(56,189,248,0.16);
   --mentionText: #e6f2ff;
   --btnPrimaryBg: #38bdf8;
@@ -6851,6 +7163,10 @@ html {
   --messageOtherText: #f1f5f9;
   --messageSystemBg: rgba(255,255,255,0.08);
   --messageSystemText: #cbd5e1;
+  --dm-bubble-bg: var(--bubble);
+  --dm-bubble-border: color-mix(in srgb, var(--border) 80%, transparent);
+  --dm-bubble-radius: var(--radiusLg);
+  --dm-bubble-shadow: 0 8px 18px color-mix(in srgb, var(--shadowColor) 60%, transparent);
   --mentionBg: rgba(255,255,255,0.12);
   --mentionText: #f1f5f9;
   --btnPrimaryBg: #d4d4d4;
@@ -7282,8 +7598,8 @@ body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .irisLolaCoupleMarker {
   letter-spacing: 0.08em;
 }
 
-body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .msgItem.couple-partner-msg .bubble,
-body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .dmRow.couple-partner-msg .dmBubble {
+body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .chat-main .msgItem.msg--main.couple-partner-msg .bubble,
+body[data-theme="Iris & Lola Neon"].irisLolaCoupleActive .chat-dm .dmRow.msg--dm.couple-partner-msg .dmBubble {
   box-shadow:
     0 0 0 1px rgba(0, 255, 180, 0.12),
     0 0 10px rgba(181, 93, 255, 0.08);
@@ -8219,12 +8535,14 @@ body.polish-pack.polish-auras .presenceAura.isVip::after{
 }
 
 /* --- DM bubble overflow hardening --- */
-.dmMessages{ overflow-x:hidden; }
-.dmRow, .dmBubbleWrap, .dmBubble{
+.chat-dm .dmMessages{ overflow-x:hidden; }
+.chat-dm .dmRow.msg--dm,
+.chat-dm .dmBubbleWrap,
+.chat-dm .dmBubble{
   min-width:0;
   box-sizing:border-box;
 }
-.dmBubble{
+.chat-dm .dmBubble{
   max-width:100%;
   overflow-wrap:anywhere;
   word-break:break-word;
@@ -8238,8 +8556,8 @@ body.kb-open #typing{ display:none !important; }
   from{ opacity:0; transform: translateY(-3px); }
   to{ opacity:1; transform: translateY(0); }
 }
-body.polish-pack.polish-animations .msg-new .bubble,
-body.polish-pack.polish-animations .msg-new .dmBubble{
+body.polish-pack.polish-animations .chat-main .msg-new .bubble,
+body.polish-pack.polish-animations .chat-dm .msg-new .dmBubble{
   animation: msgArrival 160ms cubic-bezier(.22,.61,.36,1);
   transform-origin: center;
 }
@@ -8248,8 +8566,8 @@ body.polish-pack.polish-animations .msg-new .dmBubble{
   will-change: transform;
 }
 @media (prefers-reduced-motion: reduce){
-  body.polish-pack.polish-animations .msg-new .bubble,
-  body.polish-pack.polish-animations .msg-new .dmBubble{
+  body.polish-pack.polish-animations .chat-main .msg-new .bubble,
+  body.polish-pack.polish-animations .chat-dm .msg-new .dmBubble{
     animation:none;
   }
 }
@@ -8279,38 +8597,38 @@ body.polish-pack.polish-animations .msg-new .dmBubble{
   45%{ box-shadow: 0 0 0 6px color-mix(in srgb, var(--mentionBg) 85%, transparent); }
   100%{ box-shadow: 0 0 0 0 transparent; }
 }
-.msgItem.msg-mention-hit .bubble{
+.chat-main .msgItem.msg--main.msg-mention-hit .bubble{
   animation: mentionJump 1200ms ease;
 }
 @media (prefers-reduced-motion: reduce){
-  .msgItem.msg-mention-hit .bubble{
+  .chat-main .msgItem.msg--main.msg-mention-hit .bubble{
     animation: none;
   }
 }
 
 /* === DM bubble sizing & alignment FIX === */
-.dmRow{
+.chat-dm .dmRow.msg--dm{
   display:flex;
   width:100%;
 }
-.dmRow.self{
+.chat-dm .dmRow.msg--dm.self{
   justify-content:flex-end;
 }
-.dmRow:not(.self){
+.chat-dm .dmRow.msg--dm:not(.self){
   justify-content:flex-start;
 }
-.dmBubbleWrap{
+.chat-dm .dmBubbleWrap{
   flex:0 1 auto;
   min-width:0;
   max-width:66%;
 }
-.dmBubble{
+.chat-dm .dmBubble{
   width:fit-content;
   max-width:100%;
 }
 
 /* Prevent sender bubbles from pushing off-screen */
-.dmRow.self .dmBubbleWrap{
+.chat-dm .dmRow.msg--dm.self .dmBubbleWrap{
   margin-left:auto;
   margin-right:0;
 }
@@ -8336,7 +8654,7 @@ body.polish-pack.polish-animations .msg-new .dmBubble{
     height: 100%;
     min-height: 0;
   }
-  .msgs{
+  .chat-main .msgs{
     min-height:0;
     overflow-y:auto;
   }
@@ -8353,39 +8671,39 @@ body.polish-pack.polish-animations .msg-new .dmBubble{
    - remove container gap (which stacks with per-row margins)
    - use small per-row top margins so groups read cleanly without huge whitespace
 */
-.dmMessages{ gap:0 !important; }
+.chat-dm .dmMessages{ gap:0 !important; }
 
-.dmRow.g-mid,
-.dmRow.g-end{
+.chat-dm .dmRow.msg--dm.g-mid,
+.chat-dm .dmRow.msg--dm.g-end{
   margin-top: var(--fx-dm-gap-tight, 1px);
 }
-.dmRow.g-start,
-.dmRow.g-solo{
+.chat-dm .dmRow.msg--dm.g-start,
+.chat-dm .dmRow.msg--dm.g-solo{
   margin-top: var(--fx-dm-gap, 6px);
 }
 
 /* Meta row spacing: align under bubble */
-.dmMetaRow{
+.chat-dm .dmMetaRow{
   display:flex;
   gap:8px;
   align-items:baseline;
   flex-wrap:wrap;
 }
-.dmMetaRow .reacts{
+.chat-dm .dmMetaRow .reacts{
   display:inline-flex;
   gap:6px;
   margin-left:0px;
   align-items:center;
   flex-wrap:wrap;
 }
-.dmSeen{
+.chat-dm .dmSeen{
   opacity: .75;
   font-size: 12px;
   margin-left: 6px;
 }
 
 /* DM read receipt: a small checkmark next to the timestamp on the last message read by the other person */
-.dmReadTick{
+.chat-dm .dmReadTick{
   display:inline-flex;
   align-items:center;
   justify-content:center;
@@ -8396,14 +8714,14 @@ body.polish-pack.polish-animations .msg-new .dmBubble{
 }
 
 /* Bubble "tail" only on end/solo messages (g-end / g-solo) */
-.dmRow.g-solo .dmBubble,
-.dmRow.g-end .dmBubble{
+.chat-dm .dmRow.msg--dm.g-solo .dmBubble,
+.chat-dm .dmRow.msg--dm.g-end .dmBubble{
   position: relative;
 }
 
 /* left tail (incoming) */
-.dmRow:not(.self).g-solo .dmBubble::after,
-.dmRow:not(.self).g-end .dmBubble::after{
+.chat-dm .dmRow.msg--dm:not(.self).g-solo .dmBubble::after,
+.chat-dm .dmRow.msg--dm:not(.self).g-end .dmBubble::after{
   content:"";
   position:absolute;
   left:-6px;
@@ -8416,8 +8734,8 @@ body.polish-pack.polish-animations .msg-new .dmBubble{
 }
 
 /* right tail (self) */
-.dmRow.self.g-solo .dmBubble::after,
-.dmRow.self.g-end .dmBubble::after{
+.chat-dm .dmRow.msg--dm.self.g-solo .dmBubble::after,
+.chat-dm .dmRow.msg--dm.self.g-end .dmBubble::after{
   content:"";
   position:absolute;
   right:-6px;
@@ -8430,32 +8748,32 @@ body.polish-pack.polish-animations .msg-new .dmBubble{
 }
 
 /* When grouped, slightly flatten connecting corners */
-.dmRow.g-mid .dmBubble,
-.dmRow.g-end .dmBubble{
+.chat-dm .dmRow.msg--dm.g-mid .dmBubble,
+.chat-dm .dmRow.msg--dm.g-end .dmBubble{
   border-top-left-radius: var(--fx-radius-grouped, 12px);
   border-top-right-radius: var(--fx-radius-grouped, 12px);
 }
-.dmRow.g-start .dmBubble,
-.dmRow.g-mid .dmBubble{
+.chat-dm .dmRow.msg--dm.g-start .dmBubble,
+.chat-dm .dmRow.msg--dm.g-mid .dmBubble{
   border-bottom-left-radius: var(--fx-radius-grouped, 12px);
   border-bottom-right-radius: var(--fx-radius-grouped, 12px);
 }
 
 /* Don't show tails when grouped mid/start */
-.dmRow.g-start .dmBubble::after,
-.dmRow.g-mid .dmBubble::after{
+.chat-dm .dmRow.msg--dm.g-start .dmBubble::after,
+.chat-dm .dmRow.msg--dm.g-mid .dmBubble::after{
   content:none !important;
 }
 
 /* === FINAL DM CONSTRAINTS (prevents right overflow + keeps meta/reactions/seen visible) === */
-.dmMessages{
+.chat-dm .dmMessages{
   overflow-x:hidden;
   padding-left: 16px;
   padding-right: 16px;
   box-sizing:border-box;
 }
 
-.dmRow{
+.chat-dm .dmRow.msg--dm{
   width:100%;
   max-width:100%;
   display:flex;
@@ -8465,16 +8783,16 @@ body.polish-pack.polish-animations .msg-new .dmBubble{
   min-width:0;
 }
 
-.dmRow.self{ justify-content:flex-end; }
-.dmRow:not(.self){ justify-content:flex-start; }
+.chat-dm .dmRow.msg--dm.self{ justify-content:flex-end; }
+.chat-dm .dmRow.msg--dm:not(.self){ justify-content:flex-start; }
 
-.dmActionsRail{
+.chat-dm .dmActionsRail{
   flex:0 0 auto;
   width:34px;
   min-width:34px;
 }
 
-.dmBubbleWrap{
+.chat-dm .dmBubbleWrap{
   flex:0 1 auto;          /* critical: do NOT grow to full width */
   max-width:66%;          /* never exceed 2/3 of panel */
   min-width:0;
@@ -8482,29 +8800,29 @@ body.polish-pack.polish-animations .msg-new .dmBubble{
   flex-direction:column;
 }
 
-.dmRow.self .dmBubbleWrap{
+.chat-dm .dmRow.msg--dm.self .dmBubbleWrap{
   margin-left:auto;       /* pin to right, expand left */
   align-items:flex-end;
 }
-.dmRow:not(.self) .dmBubbleWrap{
+.chat-dm .dmRow.msg--dm:not(.self) .dmBubbleWrap{
   margin-right:auto;
   align-items:flex-start;
 }
 
-.dmBubble{
+.chat-dm .dmBubble{
   display:inline-block;
   width:fit-content;      /* size to content */
   max-width:100%;
 }
 
-.dmMetaRow{
+.chat-dm .dmMetaRow{
   max-width:100%;
   min-width:0;
   overflow:hidden;
 }
 
 /* Ensure meta items (username/time/reactions/seen) never render off-panel */
-.dmMetaRow > *{
+.chat-dm .dmMetaRow > *{
   min-width:0;
   max-width:100%;
 }
@@ -8527,25 +8845,25 @@ body.polish-pack.polish-animations .msg-new .dmBubble{
 }
 
 /* === Mobile DM overflow fix: prevent combined (actions + bubble) width from pushing right === */
-.dmRow.self .dmBubbleWrap{
+.chat-dm .dmRow.msg--dm.self .dmBubbleWrap{
   margin-left: 0 !important;   /* rely on flex-end, not auto margins */
   margin-right: 0 !important;
 }
 
 /* On small screens, reduce paddings and gaps so bubble+actions always fit */
 @media (max-width: 900px){
-  .dmMessages{
+  .chat-dm .dmMessages{
     padding-left: 12px !important;
     padding-right: 12px !important;
   }
-  .dmRow{
+  .chat-dm .dmRow.msg--dm{
     gap: 6px !important;
   }
-  .dmActionsRail{
+  .chat-dm .dmActionsRail{
     width: 30px !important;
     min-width: 30px !important;
   }
-  .dmBubbleWrap{
+  .chat-dm .dmBubbleWrap{
     max-width: 66% !important;
   }
 }
@@ -8948,8 +9266,8 @@ body.dice-room .toastStack{
 
 /* Comfort mode (reduced glow + motion) */
 body.comfortMode .neonBrand{ text-shadow: none; }
-body.comfortMode .bubble,
-body.comfortMode .dmBubble{
+body.comfortMode .chat-main .bubble,
+body.comfortMode .chat-dm .dmBubble{
   --fx-glow: 0;
   --fx-text-glow: 0;
 }
@@ -8960,8 +9278,8 @@ body.comfortMode .clReactBtn.pop,
 body.comfortMode .faqReactionBtn.pop{ animation: none; }
 body.comfortMode .presenceAura{ box-shadow: none !important; }
 body.comfortMode .profileSheetOverlay,
-body.comfortMode .msg-new .bubble,
-body.comfortMode .msg-new .dmBubble{
+body.comfortMode .chat-main .msg-new .bubble,
+body.comfortMode .chat-dm .msg-new .dmBubble{
   animation-duration: 0.12s;
   transition-duration: 0.12s;
 }
@@ -11167,7 +11485,7 @@ body[data-theme="Iris & Lola Neon"] .irisLolaDrawerEasterStar{
 
 
 /* --- Survival Simulator: mention highlighting + arena map --- */
-.sys.sys-mention { box-shadow: 0 0 0 2px rgba(120, 255, 170, 0.25) inset; }
+.chat-main .sys.sys-mention { box-shadow: 0 0 0 2px rgba(120, 255, 170, 0.25) inset; }
 
 .survivalLogItem.mention-hit { box-shadow: 0 0 0 2px rgba(120, 255, 170, 0.22) inset; }
 .survivalLogZoneTag{
