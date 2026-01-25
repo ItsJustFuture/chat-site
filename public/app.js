@@ -7712,6 +7712,11 @@ try{
     showHeader: !canGroup, // show username/role only on first in group
     isSelf
   });
+  if (canGroup) {
+    item.classList.add("msg--grouped", "msg--group-end");
+  } else {
+    item.classList.add("msg--group-start", "msg--group-end");
+  }
   item.dataset.username = normKey(senderName || "");
   const isPartner = isPartnerName(senderName);
   if (shouldUseIrisLolaCoupleUi() && !isSelf && isPartner) {
@@ -7764,6 +7769,8 @@ try{
       // prev was the last; it becomes mid (or first if it was the first in the group)
       prev.classList.remove("gLast");
       if(!prev.classList.contains("gFirst")) prev.classList.add("gMid");
+      prev.classList.add("msg--grouped");
+      prev.classList.remove("msg--group-end");
     }
     // ensure the first child is flagged as first
     const first = body.firstElementChild;
@@ -9916,6 +9923,9 @@ function renderDmMessages(threadId){
 
     const row = document.createElement("div");
     row.className = "dmRow msg--dm" + (isSelf ? " self" : "") + gClass;
+    if (samePrev || sameNext) row.classList.add("msg--grouped");
+    if (!samePrev) row.classList.add("msg--group-start");
+    if (!sameNext) row.classList.add("msg--group-end");
     row.dataset.dmMid = m.messageId || m.id;
     row.dataset.username = normKey(authorName || "");
     applyIdentityGlow(row, { username: authorName, role: m.role || roleForUser(authorName), vibe_tags: m?.vibe_tags, couple: m?.couple });
