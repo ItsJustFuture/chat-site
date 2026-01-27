@@ -232,6 +232,36 @@ const {
 } = require("./luck-utils");
 const { SURVIVAL_EVENT_TEMPLATES, SURVIVAL_ITEM_POOL } = require("./survival-events");
 
+// ---- NEW: Validation and State Persistence ----
+const {
+  validate,
+  sanitizeText,
+  validateUsername,
+  validatePassword,
+  ChatMessageSchema,
+  DMMessageSchema,
+  EditMessageSchema,
+  ReactionSchema,
+  DiceRollSchema,
+  JoinRoomSchema,
+} = require("./validators");
+
+const {
+  initStateManagement,
+  createStateTables,
+  setState,
+  getState,
+  deleteState,
+  setUserOnline,
+  isUserOnline,
+  setTyping,
+  getTypingUsers,
+  addToSurvivalLobby,
+  removeFromSurvivalLobby,
+  getSurvivalLobby,
+  clearSurvivalLobby,
+} = require("./state-persistence");
+
 // ---- Safety nets (prevents silent crashes in prod) ----
 process.on("unhandledRejection", (err) => {
   console.error("[unhandledRejection]", err);
@@ -15948,6 +15978,28 @@ if (!room) {
   });
 
   socket.on("chat message", (payload = {}) => {
+    // ---- NEW: Validate input ----
+    const validation = validate(ChatMessageSchema, {
+      room: payload.room || socket.currentRoom || "main",
+      text: payload.text,
+      replyTo: payload.replyTo,
+    });
+    
+    if (!validation.success) {
+      socket.emit("system", buildSystemPayload(socket.currentRoom || "main", "Invalid message: " + validation.error));
+      return;
+    }
+    
+    // Sanitize text to prevent XSS
+    const sanitized = sanitizeText(validation.data.text);
+    if (!sanitized) {
+      socket.emit("system", buildSystemPayload(socket.currentRoom || "main", "Message cannot be empty"));
+      return;
+    }
+    
+    // Override payload with validated data
+    payload.text = sanitized;
+    
     // If a client sends before it has joined a room (mobile reconnect/race),
     // auto-join main so the message doesn't silently disappear.
     let room = socket.currentRoom;
@@ -17075,6 +17127,16 @@ async function startServer() {
   }
 
   await ensureDevSeedUser();
+
+  // ---- NEW: Initialize state persistence ----
+  try {
+    console.log("[startup] Initializing state persistence...");
+    initStateManagement(dbRunAsync, dbAllAsync, pgPool);
+    await createStateTables();
+    console.log("[startup] State persistence ready ✓");
+  } catch (e) {
+    console.warn("[startup] State persistence init failed", e?.message || e);
+  }
 
   await new Promise((resolve) => {
     httpServer.listen(PORT, () => {
