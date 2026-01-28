@@ -16288,6 +16288,12 @@ async function doRegister(){
 }
 
 async function doLogout(){
+  // Show confirmation dialog
+  const confirmed = confirm("Are you sure you want to log out?");
+  if (!confirmed) {
+    return; // User clicked "No" or "Cancel", abort logout
+  }
+  
   // Explicitly include credentials so the session cookie is always sent.
   await fetch("/logout", {method:"POST", credentials:"include"}).catch(()=>{});
   setAuthUser(null);
