@@ -16369,35 +16369,46 @@ if (!room) {
   socket.on("message:delivered", ({ messageId }) => {
     if (!messageId) return;
     
-    messageUtils.markMessageDelivered(messageId)
-      .then(() => {
-        // Optionally notify sender
-        const room = socket.currentRoom;
-        if (room) {
-          io.to(room).emit("message:delivered", { messageId, deliveredAt: Date.now() });
-        }
-      })
-      .catch(err => console.error("[message:delivered] error:", err));
+    // Fetch message to get room and validate it exists
+    db.get("SELECT id, room FROM messages WHERE id = ?", [messageId], (err, msg) => {
+      if (err || !msg) return;
+      
+      messageUtils.markMessageDelivered(messageId)
+        .then(() => {
+          io.to(msg.room).emit("message:delivered", { 
+            messageId, 
+            deliveredAt: Date.now() 
+          });
+        })
+        .catch(err => console.error("[message:delivered] error:", err));
+    });
   });
 
   // ---- NEW: Message read receipt handler ----
   socket.on("message:read", ({ messageId }) => {
     if (!messageId) return;
     
-    messageUtils.markMessageRead(messageId)
-      .then(() => {
-        // Optionally notify sender
-        const room = socket.currentRoom;
-        if (room) {
-          io.to(room).emit("message:read", { messageId, readAt: Date.now() });
-        }
-      })
-      .catch(err => console.error("[message:read] error:", err));
+    // Fetch message to get room and validate it exists
+    db.get("SELECT id, room FROM messages WHERE id = ?", [messageId], (err, msg) => {
+      if (err || !msg) return;
+      
+      messageUtils.markMessageRead(messageId)
+        .then(() => {
+          io.to(msg.room).emit("message:read", { 
+            messageId, 
+            readAt: Date.now() 
+          });
+        })
+        .catch(err => console.error("[message:read] error:", err));
+    });
   });
 
   // ---- NEW: Typing indicator with state persistence ----
   socket.on("typing", ({ room, isTyping }) => {
     if (!room || !socket.user?.username) return;
+    
+    // Validate socket is actually in this room
+    if (socket.currentRoom !== room) return;
     
     try {
       const username = socket.user.username;
@@ -16406,6 +16417,7 @@ if (!room) {
       if (isTyping) {
         setTyping(room, username, 5).catch(() => {}); // 5 second TTL
       } else {
+        // Clear typing state
         deleteState(`typing:${room}:${username}`).catch(() => {});
       }
       
