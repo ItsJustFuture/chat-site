@@ -22,6 +22,30 @@ async function setRoleEverywhere(targetId, username, role) {
 }
 "use strict";
 
+// Load environment variables
+require("dotenv").config();
+
+// Optional: Initialize Sentry for error tracking (if SENTRY_DSN is provided)
+let Sentry = null;
+if (process.env.SENTRY_DSN) {
+  try {
+    Sentry = require("@sentry/node");
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN,
+      environment: process.env.NODE_ENV || "development",
+      tracesSampleRate: parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE || "0.1"),
+      // Performance monitoring
+      integrations: [
+        // Automatically instrument Node.js libraries and frameworks
+        ...Sentry.autoDiscoverNodePerformanceMonitoringIntegrations(),
+      ],
+    });
+    console.log("[Sentry] Initialized for error tracking");
+  } catch (err) {
+    console.warn("[Sentry] Failed to initialize:", err.message);
+  }
+}
+
 // === Iris & Lola private theme config ===
 const PRIVATE_THEME_ALLOWLIST = {
   "Iris & Lola Neon": {
@@ -343,6 +367,29 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
     pingTimeout: 300_000,  // wait 5 minutes for pong before disconnect (mobile suspend)
     upgradeTimeout: 45_000,
   });
+
+  // ---- Optional Redis Adapter for Socket.IO (for horizontal scaling) ----
+  if (process.env.REDIS_URL) {
+    try {
+      const { createClient } = require("redis");
+      const { createAdapter } = require("@socket.io/redis-adapter");
+      
+      const pubClient = createClient({ url: process.env.REDIS_URL });
+      const subClient = pubClient.duplicate();
+
+      Promise.all([pubClient.connect(), subClient.connect()])
+        .then(() => {
+          io.adapter(createAdapter(pubClient, subClient));
+          console.log("[Redis] Socket.IO adapter connected for horizontal scaling");
+        })
+        .catch((err) => {
+          console.warn("[Redis] Failed to connect adapter:", err.message);
+          console.warn("[Redis] Continuing without Redis (single-instance mode)");
+        });
+    } catch (err) {
+      console.warn("[Redis] Redis adapter not available:", err.message);
+    }
+  }
 
   const DEBUG_ROOMS = String(process.env.DEBUG_ROOMS || "").toLowerCase() === "true";
 
