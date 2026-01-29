@@ -4,7 +4,18 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" name="viewport"/>
+<meta name="description" content="18+ community chat built for rooms, DMs, and a little chaos"/>
+<meta name="theme-color" content="#6366f1"/>
+<!-- PWA Configuration (set via server-side rendering based on ENABLE_PWA env) -->
+<!-- <meta name="enable-pwa" content="1"> -->
+<!-- Sentry Configuration (set via server-side rendering based on SENTRY_DSN env) -->
+<!-- <meta name="sentry-dsn" content="your-sentry-dsn"> -->
 <title>Banter &amp; Brats</title>
+<!-- PWA Manifest -->
+<link rel="manifest" href="/manifest.json"/>
+<link rel="icon" type="image/x-icon" href="/favicon.ico"/>
+<!-- Apple Touch Icon for iOS -->
+<link rel="apple-touch-icon" href="/favicon.ico"/>
 <script src="/theme-init.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;family=Nunito:wght@400;600;700&amp;family=Poppins:wght@400;500;600;700&amp;family=Rubik:wght@400;500;600;700&amp;family=Montserrat:wght@400;500;600;700&amp;family=Space+Grotesk:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
 <link href="/styles.css" rel="stylesheet"/>
@@ -1873,8 +1884,25 @@
 <video controls="" id="mediaLightboxVideo" playsinline=""></video>
 </div>
 </div>
+<!-- External Dependencies -->
 <script src="/socket.io/socket.io.js"></script>
 <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+<!-- Markdown and sanitization libraries -->
+<script src="https://cdn.jsdelivr.net/npm/marked@15.0.6/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.3/dist/purify.min.js"></script>
+<!-- Optional: Sentry for error tracking (only loads if meta tag present) -->
+<script>
+  if (document.querySelector('meta[name="sentry-dsn"]')) {
+    const script = document.createElement('script');
+    script.src = 'https://browser.sentry-cdn.com/8.45.0/bundle.min.js';
+    script.integrity = 'sha384-/x1aHz0nKRd6zVUazsV6CbQvjJvr6zQL2CHbQZxmxLYX8FcRPGe7PhBfkPeH4WG8';
+    script.crossOrigin = 'anonymous';
+    document.head.appendChild(script);
+  }
+</script>
+<!-- Chat utilities (markdown, emoji, PWA) -->
+<script src="/chat-utils.js"></script>
+<!-- Main application logic -->
 <script defer="" src="/app.js"></script>
 <div id="modalRoot">
 <!-- STAFF: Kick/Ban Appeals Panel -->
