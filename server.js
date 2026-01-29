@@ -354,6 +354,11 @@ if (IS_PROD) {
     console.error("FATAL: DATABASE_URL is missing. Set your Postgres connection string in your environment.");
     process.exit(1);
   }
+} else {
+  // In development/test mode, provide a default SESSION_SECRET if none is set
+  if (!process.env.SESSION_SECRET) {
+    process.env.SESSION_SECRET = "dev_secret_change_in_production_1234567890";
+  }
 }
 
 const AVATARS_DIR = path.join(__dirname, "avatars");
