@@ -4255,7 +4255,7 @@ body:not(.polish-pack) .tonePicker{
 .replyPreview .iconBtn{ position:absolute; top:8px; right:8px; }
 .replyText{ flex:1; font-size:13px; color:var(--text); line-height:1.45; display:flex; flex-direction:column; gap:6px; padding-right:36px; word-break:break-word; }
 .replyContext{ width:100%; text-align:left; border:1px solid color-mix(in srgb, var(--border) 80%, transparent); background:color-mix(in srgb, var(--panel) 88%, transparent); color:var(--text); border-radius:var(--radiusMd); padding:8px 10px; margin-bottom:6px; display:flex; flex-direction:column; gap:4px; }
-.replyContext .replyUser{ font-weight:700; color:var(--muted); font-size:12px; letter-spacing:.04em; text-transform:uppercase; }
+.replyContext .replyUser{ font-weight:700; color:var(--muted); font-size:12px; letter-spacing:.04em; }
 .replyContext .replySnippet{ font-size:13px; color:var(--text); white-space:pre-wrap; word-break:break-word; }
 .dmReplyContext{ width:100%; text-align:left; border:1px solid color-mix(in srgb, var(--border) 80%, transparent); background:color-mix(in srgb, var(--panel2) 90%, transparent); color:var(--text); border-radius:var(--radiusMd); padding:8px 10px; margin-bottom:6px; display:flex; flex-direction:column; gap:4px; }
 .dmReplyContext .replySnippet{ font-size:13px; color:var(--text); white-space:pre-wrap; word-break:break-word; }
