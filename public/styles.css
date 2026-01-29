@@ -3806,8 +3806,8 @@ body.sys-density-minimized .chat-main{
   background-image: linear-gradient(var(--fx-text-grad-angle, 135deg), var(--fx-text-grad-a, #7c4dff), var(--fx-text-grad-b, #00e5ff));
   background-clip: text;
   -webkit-background-clip: text;
-  background-size: 200% 200%;
-  background-position: 0% 50%;
+  background-size: 100% 100%;
+  background-position: center;
   color: transparent;
   -webkit-text-fill-color: transparent;
   -webkit-text-stroke: var(--fx-text-grad-stroke, var(--fx-contrast-stroke, 0px)) var(--fx-text-grad-stroke-color, var(--fx-contrast-stroke-color, transparent));
@@ -4925,8 +4925,8 @@ body:not(.polish-pack) .tonePicker{
 .textStyleGradient{
   background-clip:text;
   -webkit-background-clip:text;
-  background-size:200% 200%;
-  background-position:0% 50%;
+  background-size:100% 100%;
+  background-position:center;
   color:transparent;
   -webkit-text-fill-color:transparent;
   text-shadow:var(--text-gradient-shadow, 0 1px 2px rgba(0,0,0,0.4));
