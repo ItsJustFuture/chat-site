@@ -15419,6 +15419,14 @@ function initLoginUI(){
   setAuthValidation("");
   initCaptcha();
   initPasswordUpgradeUI();
+  
+  const emailFieldWrap = document.getElementById("emailFieldWrap");
+  const forgotPassBtn = document.getElementById("forgotPassBtn");
+  const forgotPasswordModal = document.getElementById("forgotPasswordModal");
+  const forgotPasswordForm = document.getElementById("forgotPasswordForm");
+  const forgotPasswordCloseBtn = document.getElementById("forgotPasswordCloseBtn");
+  const forgotPasswordMsg = document.getElementById("forgotPasswordMsg");
+
   if(!authHandlersBound){
     authHandlersBound = true;
     authForm?.addEventListener("submit", (e)=>{
@@ -15426,7 +15434,49 @@ function initLoginUI(){
       doLogin();
     });
     loginBtn?.addEventListener("click", (e)=>{ e?.preventDefault?.(); doLogin(); });
-    regBtn?.addEventListener("click", (e)=>{ e?.preventDefault?.(); doRegister(); });
+    regBtn?.addEventListener("click", (e)=>{
+      e?.preventDefault?.();
+      isRegistering = !isRegistering;
+      if (isRegistering) {
+        regBtn.textContent = "Back to login";
+        loginBtn.textContent = "Register";
+        if (emailFieldWrap) emailFieldWrap.hidden = false;
+      } else {
+        regBtn.textContent = "Create account";
+        loginBtn.textContent = "Join chat";
+        if (emailFieldWrap) emailFieldWrap.hidden = true;
+      }
+    });
+
+    if (forgotPassBtn && forgotPasswordModal) {
+      forgotPassBtn.addEventListener("click", () => {
+        forgotPasswordModal.hidden = false;
+        if (forgotPasswordMsg) forgotPasswordMsg.textContent = "";
+      });
+    }
+    if (forgotPasswordCloseBtn && forgotPasswordModal) {
+      forgotPasswordCloseBtn.addEventListener("click", () => {
+        forgotPasswordModal.hidden = true;
+      });
+    }
+    if (forgotPasswordForm) {
+      forgotPasswordForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const email = document.getElementById("resetEmail").value;
+        if (forgotPasswordMsg) forgotPasswordMsg.textContent = "Sending...";
+        try {
+          const res = await fetch("/forgot-password", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email })
+          });
+          const data = await res.json();
+          if (forgotPasswordMsg) forgotPasswordMsg.textContent = data.message || "Reset link sent.";
+        } catch (err) {
+          if (forgotPasswordMsg) forgotPasswordMsg.textContent = "Failed to send reset link.";
+        }
+      });
+    }
   }
   if(authUser && !isAuthenticated()){
     requestAnimationFrame(()=> authUser?.focus?.());
@@ -16258,6 +16308,7 @@ async function doPasswordUpgrade(){
 async function doRegister(){
   const username = authUser?.value?.trim() || "";
   const password = authPass?.value || "";
+  const email = document.getElementById("authEmail")?.value?.trim() || "";
   if(!username){
     setAuthValidation("Please choose a username.");
     authUser?.focus();
@@ -16276,7 +16327,7 @@ async function doRegister(){
   setAuthLoading(true, "Registering...");
   const {res,text}=await api("/register",{
     method:"POST", headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({username, password, captchaToken})
+    body:JSON.stringify({username, password, email, captchaToken})
   });
   if(!res.ok){
     setAuthLoading(false, text||"Register failed.");
