@@ -1908,69 +1908,82 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
   }
 })();
 </script>
-<!-- Quick Actions overlay (staff) -->
+<!-- Quick Actions overlay (staff) - Redesigned for speed and efficiency -->
 <div class="inlineModalOverlay" id="inlineMemberActionsShade" style="display:none;">
-<div class="inlineModalCard">
+<div class="inlineModalCard modPopupCard">
 <div id="memberActionsOverlay" style="display:none;">
-<div class="inlineModalHeader"><div class="sectionTitle" style="margin:0;">Actions</div><button aria-label="Close" class="iconBtn" id="closeMemberActionsBtn" type="button">✕</button></div>
-<div class="panelBox modCard">
-<div class="field">
-<label>Reason</label>
-<div class="pillRow" id="quickReasonPresets"></div>
-<textarea id="quickReason" placeholder="Add context (required)" rows="2"></textarea>
+<div class="inlineModalHeader modPopupHeader">
+<div class="sectionTitle" style="margin:0;">🛡️ Quick Actions</div>
+<button aria-label="Close" class="iconBtn" id="closeMemberActionsBtn" type="button">✕</button>
 </div>
-<div class="modGrid">
-<div class="field">
-<label>Kick length</label>
-<select id="quickKickSeconds">
-<option value="60">1 minute</option>
-<option selected="" value="300">5 minutes</option>
-<option value="900">15 minutes</option>
-<option value="3600">1 hour</option>
-<option value="21600">6 hours</option>
-<option value="86400">24 hours</option>
-<option value="604800">1 week</option>
+<div class="panelBox modCard modPopupBody">
+<!-- Primary Actions - Most common operations in a compact grid -->
+<div class="modActionButtons">
+<button class="modBtn modBtnKick" id="quickKickBtn" type="button" title="Kick user from room">
+<span class="modBtnIcon">👢</span>
+<span class="modBtnLabel">Kick</span>
+<select class="modBtnDuration" id="quickKickSeconds" onclick="event.stopPropagation()">
+<option value="60">1m</option>
+<option value="300" selected="">5m</option>
+<option value="900">15m</option>
+<option value="3600">1h</option>
+<option value="21600">6h</option>
+<option value="86400">24h</option>
+<option value="604800">1w</option>
 </select>
-</div>
-<div class="field">
-<label>Mute length</label>
-<select id="quickMuteMins">
-<option value="10">10 minutes</option>
-<option value="30">30 minutes</option>
-<option value="60">1 hour</option>
-<option value="240">4 hours</option>
-<option value="1440">24 hours</option>
+</button>
+<button class="modBtn modBtnMute" id="quickMuteBtn" type="button" title="Mute user in room">
+<span class="modBtnIcon">🔇</span>
+<span class="modBtnLabel">Mute</span>
+<select class="modBtnDuration" id="quickMuteMins" onclick="event.stopPropagation()">
+<option value="10">10m</option>
+<option value="30">30m</option>
+<option value="60">1h</option>
+<option value="240">4h</option>
+<option value="1440">24h</option>
 </select>
-</div>
-<div class="field">
-<label>Ban length</label>
-<select id="quickBanMins">
-<option value="0">Permanent</option>
-<option value="60">1 hour</option>
-<option value="720">12 hours</option>
-<option value="1440">24 hours</option>
-<option value="10080">7 days</option>
+</button>
+<button class="modBtn modBtnBan" id="quickBanBtn" type="button" title="Ban user from room">
+<span class="modBtnIcon">🚫</span>
+<span class="modBtnLabel">Ban</span>
+<select class="modBtnDuration" id="quickBanMins" onclick="event.stopPropagation()">
+<option value="0">Perm</option>
+<option value="60">1h</option>
+<option value="720">12h</option>
+<option value="1440">24h</option>
+<option value="10080">7d</option>
 </select>
+</button>
 </div>
+
+<!-- Secondary Actions - Reversal actions -->
+<div class="modSecondaryActions">
+<button class="modBtnSmall modBtnUndo" id="quickUnkickBtn" type="button" title="Remove kick">↩️ Unkick</button>
+<button class="modBtnSmall modBtnUndo" id="quickUnmuteBtn" type="button" title="Remove mute">🔊 Unmute</button>
 </div>
-<div class="field">
-<label class="chk">
+
+<!-- Reason Section - Compact with quick presets -->
+<div class="modReasonSection">
+<div class="modReasonHeader">
+<label class="modReasonLabel">Reason</label>
+<div class="pillRow modReasonPresets" id="quickReasonPresets"></div>
+</div>
+<textarea id="quickReason" class="modReasonInput" placeholder="Context (required)" rows="2"></textarea>
+</div>
+
+<!-- Options - Compact checkbox -->
+<label class="modOption">
 <input type="checkbox" id="quickAutoClear">
-Auto-clear all messages from this user
+<span>Auto-clear messages</span>
 </label>
-</div>
-<div class="field" id="quickMessageCaptureSection" style="display:none;">
-<label>Select message for moderation log (last 5)</label>
+
+<!-- Message Capture Section - Collapsible -->
+<div class="modMessageCapture" id="quickMessageCaptureSection" style="display:none;">
+<div class="modMessageCaptureHeader">📋 Select message for log (last 5)</div>
 <div id="quickMessageList" class="messagePreviewList"></div>
-<div class="small muted" style="margin-top:4px;">Click a message to capture it for the mod log with timestamp.</div>
 </div>
-<div class="actionGrid" style="margin-top:8px;">
-<button class="btn btnSecondary" id="quickKickBtn" type="button">Kick</button>
-<button class="btn btnSecondary" id="quickUnkickBtn" type="button">Unkick</button>
-<button class="btn btnSecondary" id="quickMuteBtn" type="button">Mute</button>
-<button class="btn btnSecondary" id="quickUnmuteBtn" type="button">Unmute</button>
-<button class="btn btnDanger" id="quickBanBtn" type="button">Ban</button>
-</div>
+
+<!-- Feedback Message -->
 <div class="msgline" id="quickModMsg"></div>
 </div>
 </div>
