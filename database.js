@@ -969,16 +969,33 @@ async function runSqlFileMigrations() {
     // Split by semicolons and execute each statement
     const statements = sql
       .split(";")
-      .map(s => s.trim())
-      .filter(s => s.length > 0 && !s.startsWith("--"));
+      .map(s => {
+        // Remove SQL comments (lines starting with --)
+        return s.split('\n')
+          .filter(line => !line.trim().startsWith('--'))
+          .join('\n')
+          .trim();
+      })
+      .filter(s => s.length > 0);
 
     for (const statement of statements) {
       try {
         await run(statement);
       } catch (err) {
-        // Ignore errors for ALTER TABLE ADD COLUMN if column already exists
-        if (!err.message?.includes("duplicate column name")) {
+        // Ignore specific SQLite errors that are expected during migrations
+        const ignorableErrors = [
+          "duplicate column name",  // Column already exists
+          "already exists",         // Table/index already exists  
+          "no such table"           // Expected when checking table existence
+        ];
+        
+        const shouldIgnore = ignorableErrors.some(msg => 
+          err.message?.toLowerCase().includes(msg.toLowerCase())
+        );
+        
+        if (!shouldIgnore) {
           console.error(`Migration ${file} error:`, err.message);
+          throw err; // Re-throw non-ignorable errors
         }
       }
     }
