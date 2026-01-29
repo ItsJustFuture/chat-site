@@ -273,6 +273,52 @@ const { Server } = require("socket.io");
 const { db, migrationsReady, seedDevUser, DB_FILE } = require("./database");
 const { VIBE_TAGS, VIBE_TAG_LIMIT } = require("./vibe-tags");
 
+// ---- NEW: Message utilities for receipts, reactions, edits ----
+const messageUtils = require("./lib/message-utils");
+
+// ---- Optional integrations (graceful fallback if not configured) ----
+let Sentry = null;
+let redisAdapter = null;
+let redisClient = null;
+
+// Sentry initialization (optional, requires SENTRY_DSN env var)
+if (process.env.SENTRY_DSN) {
+  try {
+    Sentry = require("@sentry/node");
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN,
+      environment: process.env.NODE_ENV || "development",
+      tracesSampleRate: 0.1,
+    });
+    console.log("[Sentry] Initialized");
+  } catch (err) {
+    console.warn("[Sentry] Failed to initialize:", err.message);
+  }
+}
+
+// Redis adapter for Socket.IO (optional, requires REDIS_URL env var)
+if (process.env.REDIS_URL) {
+  try {
+    const { createClient } = require("redis");
+    const { createAdapter } = require("@socket.io/redis-adapter");
+    
+    redisClient = createClient({ url: process.env.REDIS_URL });
+    redisClient.on("error", (err) => console.error("[Redis] Client error:", err));
+    redisClient.connect().then(() => {
+      console.log("[Redis] Connected for Socket.IO adapter");
+    }).catch((err) => {
+      console.error("[Redis] Connection failed:", err.message);
+    });
+    
+    const subClient = redisClient.duplicate();
+    redisAdapter = createAdapter(redisClient, subClient);
+    console.log("[Redis] Adapter created");
+  } catch (err) {
+    console.warn("[Redis] Failed to initialize:", err.message);
+  }
+}
+
+
 const MEMORY_SYSTEM_ENABLED = process.env.MEMORY_SYSTEM_ENABLED === "1";
 const MEMORY_SYSTEM_ALLOWLIST = new Set(
   String(process.env.MEMORY_SYSTEM_ALLOWLIST || "")
@@ -343,6 +389,13 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
     pingTimeout: 300_000,  // wait 5 minutes for pong before disconnect (mobile suspend)
     upgradeTimeout: 45_000,
   });
+
+  // Attach Redis adapter if available
+  if (redisAdapter) {
+    io.adapter(redisAdapter);
+    console.log("[Socket.IO] Redis adapter attached");
+  }
+
 
   const DEBUG_ROOMS = String(process.env.DEBUG_ROOMS || "").toLowerCase() === "true";
 
@@ -2792,6 +2845,9 @@ function dbRunAsync(sql, params = []) {
     });
   });
 }
+
+// Initialize message-utils with database functions
+messageUtils.init(dbRunAsync, dbGetAsync, dbAllAsync);
 
 async function getConfigValue(key, fallback = null) {
   try {
@@ -16220,7 +16276,7 @@ if (!room) {
     if (!Number.isInteger(mid) || !body) return;
 
     db.get(
-      `SELECT id, room, user_id, ts, deleted FROM messages WHERE id = ?`,
+      `SELECT id, room, user_id, ts, deleted, text FROM messages WHERE id = ?`,
       [mid],
       (err, row) => {
         if (err || !row || Number(row.deleted || 0) === 1) return;
@@ -16232,17 +16288,34 @@ if (!room) {
         const ts = Number(row.ts) || 0;
         if (now - ts > 5 * 60 * 1000) return;
 
-        db.run(
-          `UPDATE messages SET text = ?, edited_at = ? WHERE id = ?`,
-          [body, now, mid],
-          () => {
-            io.to(String(row.room)).emit("message edited", {
-              messageId: mid,
-              text: body,
-              editedAt: now
-            });
-          }
-        );
+        // Store edit history using message-utils
+        messageUtils.persistEdit({
+          message_id: mid,
+          user_id: socket.user.id,
+          previous_text: row.text,
+          new_text: body,
+          edited_at: now
+        }).then(() => {
+          io.to(String(row.room)).emit("message edited", {
+            messageId: mid,
+            text: body,
+            editedAt: now
+          });
+        }).catch(err => {
+          console.error("[edit message] persist error:", err);
+          // Fallback to direct update
+          db.run(
+            `UPDATE messages SET text = ?, edited_at = ? WHERE id = ?`,
+            [body, now, mid],
+            () => {
+              io.to(String(row.room)).emit("message edited", {
+                messageId: mid,
+                text: body,
+                editedAt: now
+              });
+            }
+          );
+        });
       }
     );
   });
@@ -16267,6 +16340,7 @@ if (!room) {
       }
     } catch {}
 
+    // Store in legacy reactions table
     db.run(
       `INSERT INTO reactions (message_id, username, emoji)
        VALUES (?, ?, ?)
@@ -16280,7 +16354,72 @@ if (!room) {
         });
       }
     );
+
+    // Also store in new message_reactions table for history tracking
+    messageUtils.persistReaction({
+      message_id: mid,
+      user_id: socket.user.id,
+      username: socket.user.username,
+      emoji: em,
+      created_at: Date.now()
+    }).catch(err => console.error("[reaction] persist error:", err));
   });
+
+  // ---- NEW: Message delivery receipt handler ----
+  socket.on("message:delivered", ({ messageId }) => {
+    if (!messageId) return;
+    
+    messageUtils.markMessageDelivered(messageId)
+      .then(() => {
+        // Optionally notify sender
+        const room = socket.currentRoom;
+        if (room) {
+          io.to(room).emit("message:delivered", { messageId, deliveredAt: Date.now() });
+        }
+      })
+      .catch(err => console.error("[message:delivered] error:", err));
+  });
+
+  // ---- NEW: Message read receipt handler ----
+  socket.on("message:read", ({ messageId }) => {
+    if (!messageId) return;
+    
+    messageUtils.markMessageRead(messageId)
+      .then(() => {
+        // Optionally notify sender
+        const room = socket.currentRoom;
+        if (room) {
+          io.to(room).emit("message:read", { messageId, readAt: Date.now() });
+        }
+      })
+      .catch(err => console.error("[message:read] error:", err));
+  });
+
+  // ---- NEW: Typing indicator with state persistence ----
+  socket.on("typing", ({ room, isTyping }) => {
+    if (!room || !socket.user?.username) return;
+    
+    try {
+      const username = socket.user.username;
+      
+      // Update state persistence
+      if (isTyping) {
+        setTyping(room, username, 5).catch(() => {}); // 5 second TTL
+      } else {
+        deleteState(`typing:${room}:${username}`).catch(() => {});
+      }
+      
+      // Broadcast to room
+      socket.to(room).emit("user:typing", {
+        room,
+        username,
+        isTyping
+      });
+    } catch (err) {
+      console.error("[typing] error:", err);
+    }
+  });
+
 
   const logDeleteFailure = ({ scope, messageId, actorId, actorRole, reason, roomId, threadId }) => {
     console.warn(`[delete:${scope}]`, { messageId, actorId, actorRole, roomId, threadId, reason });
@@ -16344,7 +16483,9 @@ if (!room) {
           return;
         }
 
-        db.run("UPDATE messages SET deleted=1 WHERE id=?", [mid], (updateErr) => {
+        // Use soft delete with deleted_at timestamp
+        const deletedAt = Date.now();
+        db.run("UPDATE messages SET deleted=1, deleted_at=? WHERE id=?", [deletedAt, mid], (updateErr) => {
           if (updateErr) {
             respondDelete(ack, { ok: false, message: "Failed to delete message." });
             logDeleteFailure({ scope: "main", messageId: mid, actorId: actor.id, actorRole, roomId: msg.room, reason: "update_failed" });
