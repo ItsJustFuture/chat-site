@@ -1953,6 +1953,17 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
 </select>
 </div>
 </div>
+<div class="field">
+<label class="chk">
+<input type="checkbox" id="quickAutoClear">
+Auto-clear all messages from this user
+</label>
+</div>
+<div class="field" id="quickMessageCaptureSection" style="display:none;">
+<label>Select message for moderation log (last 5)</label>
+<div id="quickMessageList" class="messagePreviewList"></div>
+<div class="small muted" style="margin-top:4px;">Click a message to capture it for the mod log with timestamp.</div>
+</div>
 <div class="actionGrid" style="margin-top:8px;">
 <button class="btn btnSecondary" id="quickKickBtn" type="button">Kick</button>
 <button class="btn btnSecondary" id="quickUnkickBtn" type="button">Unkick</button>
@@ -2679,6 +2690,156 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
     </div>
   </div>
 </div>
+
+<script>
+// Auto-clear messages and message capture for kick/ban moderation
+(function() {
+  'use strict';
+  
+  let selectedMessage = null;
+  let currentTargetUsername = null;
+  
+  // Initialize when DOM is ready
+  function init() {
+    const autoClearCheckbox = document.getElementById('quickAutoClear');
+    const messageCaptureSection = document.getElementById('quickMessageCaptureSection');
+    const messageList = document.getElementById('quickMessageList');
+    
+    if (!autoClearCheckbox || !messageCaptureSection || !messageList) {
+      console.warn('[mod-capture] UI elements not found, retrying...');
+      return;
+    }
+    
+    // Show/hide message capture section when clicking kick/ban buttons
+    const quickKickBtn = document.getElementById('quickKickBtn');
+    const quickBanBtn = document.getElementById('quickBanBtn');
+    
+    if (quickKickBtn) {
+      const originalKickHandler = quickKickBtn.onclick;
+      quickKickBtn.addEventListener('click', function(e) {
+        // Load messages when kick action is initiated
+        if (currentTargetUsername) {
+          loadUserMessages(currentTargetUsername);
+        }
+      }, true);
+    }
+    
+    if (quickBanBtn) {
+      const originalBanHandler = quickBanBtn.onclick;
+      quickBanBtn.addEventListener('click', function(e) {
+        // Load messages when ban action is initiated
+        if (currentTargetUsername) {
+          loadUserMessages(currentTargetUsername);
+        }
+      }, true);
+    }
+    
+    console.log('[mod-capture] Initialized');
+  }
+  
+  // Set the current target username (called when modal opens)
+  window.setModTargetUsername = function(username) {
+    currentTargetUsername = username;
+    selectedMessage = null;
+    loadUserMessages(username);
+  };
+  
+  // Load last messages from user
+  async function loadUserMessages(username) {
+    const messageList = document.getElementById('quickMessageList');
+    const messageCaptureSection = document.getElementById('quickMessageCaptureSection');
+    
+    if (!messageList || !messageCaptureSection) return;
+    
+    // Show loading state
+    messageList.innerHTML = '<div class="small muted" style="padding:10px;">Loading messages...</div>';
+    messageCaptureSection.style.display = 'block';
+    
+    try {
+      // Emit socket event to get user messages
+      if (typeof socket !== 'undefined' && socket) {
+        socket.emit('mod get user messages', { username, limit: 5 }, (response) => {
+          if (response.ok && response.messages) {
+            renderMessages(response.messages);
+          } else {
+            messageList.innerHTML = '<div class="small muted" style="padding:10px;">No recent messages found.</div>';
+          }
+        });
+      } else {
+        messageList.innerHTML = '<div class="small muted" style="padding:10px;">Socket not available.</div>';
+      }
+    } catch (err) {
+      console.error('[mod-capture] Error loading messages:', err);
+      messageList.innerHTML = '<div class="small muted" style="padding:10px;">Error loading messages.</div>';
+    }
+  }
+  
+  // Render messages in the preview list
+  function renderMessages(messages) {
+    const messageList = document.getElementById('quickMessageList');
+    if (!messageList) return;
+    
+    if (!messages || messages.length === 0) {
+      messageList.innerHTML = '<div class="small muted" style="padding:10px;">No recent messages found.</div>';
+      return;
+    }
+    
+    messageList.innerHTML = messages.map((msg, index) => {
+      const timestamp = new Date(msg.timestamp);
+      const timeStr = timestamp.toISOString();
+      const text = msg.text || '(attachment/media)';
+      const textPreview = text.length > 100 ? text.substring(0, 100) + '...' : text;
+      
+      return `
+        <div class="messagePreviewItem" data-msg-index="${index}" data-msg-id="${msg.id}">
+          <div class="messagePreviewText">${escapeHtml(textPreview)}</div>
+          <div class="messagePreviewMeta">
+            <span class="messagePreviewRoom">#${msg.room}</span>
+            <span class="messagePreviewTime">${timeStr}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    // Add click handlers to message items
+    const items = messageList.querySelectorAll('.messagePreviewItem');
+    items.forEach((item, index) => {
+      item.addEventListener('click', () => {
+        // Remove previous selection
+        items.forEach(i => i.classList.remove('selected'));
+        // Select this message
+        item.classList.add('selected');
+        selectedMessage = messages[index];
+      });
+    });
+  }
+  
+  // Get captured message for sending with kick/ban
+  window.getModCapturedMessage = function() {
+    return selectedMessage;
+  };
+  
+  // Get auto-clear status
+  window.getModAutoClear = function() {
+    const checkbox = document.getElementById('quickAutoClear');
+    return checkbox ? checkbox.checked : false;
+  };
+  
+  // Escape HTML helper
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+  
+  // Initialize after a delay to ensure DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    setTimeout(init, 1000);
+  }
+})();
+</script>
 
 </body>
 </html>

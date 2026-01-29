@@ -6886,6 +6886,78 @@ function loadThreadForUser(threadId, userId, cb) {
   );
 }
 
+// Helper function to get last N messages from a user (for mod capture on kick/ban)
+async function getUserLastMessages(userId, limit = 5) {
+  try {
+    const messages = await dbAllAsync(
+      `SELECT id, room, text, ts, username, attachment_url, reply_to_id 
+       FROM messages 
+       WHERE user_id = ? AND deleted = 0 
+       ORDER BY ts DESC 
+       LIMIT ?`,
+      [userId, limit]
+    );
+    return messages.map(msg => ({
+      id: msg.id,
+      room: msg.room,
+      text: msg.text || '',
+      timestamp: msg.ts,
+      timestampUTC: new Date(msg.ts).toISOString(),
+      username: msg.username,
+      attachmentUrl: msg.attachment_url || null,
+      replyToId: msg.reply_to_id || null
+    }));
+  } catch (err) {
+    console.error('[getUserLastMessages] Error:', err);
+    return [];
+  }
+}
+
+// Helper function to clear all messages from a user
+async function clearUserMessages(userId, room = null) {
+  try {
+    let query = `SELECT id, room FROM messages WHERE user_id = ? AND deleted = 0`;
+    let params = [userId];
+    
+    if (room) {
+      query += ` AND room = ?`;
+      params.push(room);
+    }
+    
+    const messages = await dbAllAsync(query, params);
+    
+    if (messages.length === 0) return 0;
+    
+    const messageIds = messages.map(m => m.id);
+    
+    // Bulk update messages as deleted
+    await dbRunAsync(
+      `UPDATE messages SET deleted=1 WHERE id IN (${messageIds.map(() => '?').join(',')})`,
+      messageIds
+    );
+    
+    // Bulk delete reactions
+    await dbRunAsync(
+      `DELETE FROM reactions WHERE message_id IN (${messageIds.map(() => '?').join(',')})`,
+      messageIds
+    );
+    
+    // Emit deletion events for each message
+    for (const msg of messages) {
+      const msgRoom = msg.room || room;
+      if (msgRoom) {
+        io.to(msgRoom).emit("messageDeleted", { messageId: msg.id, roomId: msgRoom });
+        io.to(msgRoom).emit("message deleted", { messageId: msg.id });
+      }
+    }
+    
+    return messages.length;
+  } catch (err) {
+    console.error('[clearUserMessages] Error:', err);
+    return 0;
+  }
+}
+
 function logModAction({ actor, action, targetUserId, targetUsername, room, details }) {
   logSecurityEvent("moderation_action", {
     actor: actor?.username || null,
@@ -16889,7 +16961,24 @@ if (!room) {
 
   // ---- Kick / Mute / Ban + Unmute/Unban/Warn + Set role
   
-socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300, caseId = null } = {}, ack) => {
+  // Get user's last messages for moderation (preview before kick/ban)
+  socket.on("mod get user messages", async ({ username, limit = 5 } = {}, ack) => {
+    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+    const actorRole = socket.request.session.user.role;
+    if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
+
+    username = sanitizeUsername(username);
+    if (!username) return respond({ ok: false, error: "Invalid username." });
+
+    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
+      if (!target) return respond({ ok: false, error: "User not found." });
+      
+      const messages = await getUserLastMessages(target.id, Math.min(Number(limit) || 5, 10));
+      respond({ ok: true, messages });
+    });
+  });
+  
+socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300, caseId = null, autoClear = false, capturedMessage = null } = {}, ack) => {
   const respond = (payload) => { if (typeof ack === "function") ack(payload); };
   if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
   const room = socket.currentRoom;
@@ -16904,6 +16993,12 @@ socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300, cas
   db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
     if (!target) return respond({ ok: false, error: "User not found." });
     if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
+
+    // Auto-clear messages if enabled
+    let clearedCount = 0;
+    if (autoClear) {
+      clearedCount = await clearUserMessages(target.id, room);
+    }
 
     // Persist restriction + log
     const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
@@ -16924,16 +17019,30 @@ socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300, cas
     }
     invalidateSessionsForUserId(target.id);
 
+    // Build details with captured message info
+    let details = `duration=${dur}s reason=${why}`;
+    if (autoClear) {
+      details += ` cleared=${clearedCount}`;
+    }
+    if (capturedMessage) {
+      const msgPreview = String(capturedMessage.text || '')
+        .slice(0, 100)
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"');
+      const msgTime = capturedMessage.timestampUTC || new Date(capturedMessage.timestamp).toISOString();
+      details += ` captured_msg="${msgPreview}" msg_time="${msgTime}" msg_user="${capturedMessage.username}"`;
+    }
+
     emitRoomSystem(room, `${username} was kicked.`, { kind: "mod" });
-    logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: target.username, room, details: `duration=${dur}s reason=${why}` });
+    logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: target.username, room, details });
     if (caseId) {
       addModCaseEvent(Number(caseId), {
         actorUserId: socket.user?.id || null,
         eventType: "kick",
-        payload: { targetUserId: target.id, durationSeconds: dur, reason: why },
+        payload: { targetUserId: target.id, durationSeconds: dur, reason: why, capturedMessage, clearedCount },
       }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "kick" })).catch(() => {});
     }
-    respond({ ok: true, username: target.username, durationSeconds: dur });
+    respond({ ok: true, username: target.username, durationSeconds: dur, clearedCount });
   });
 });
 
@@ -17024,7 +17133,7 @@ socket.on("mod unkick", async ({ username, caseId = null } = {}, ack) => {
     });
   });
 
-  socket.on("mod ban", ({ username, minutes = 0, reason = "", caseId = null } = {}, ack) => {
+  socket.on("mod ban", async ({ username, minutes = 0, reason = "", caseId = null, autoClear = false, capturedMessage = null } = {}, ack) => {
     const respond = (payload) => { if (typeof ack === "function") ack(payload); };
     if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
     const room = socket.currentRoom;
@@ -17037,9 +17146,15 @@ socket.on("mod unkick", async ({ username, caseId = null } = {}, ack) => {
     const mins = Number(minutes);
     const expiresAt = Number.isFinite(mins) && mins > 0 ? Date.now() + mins * 60 * 1000 : null;
 
-    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
       if (!target) return respond({ ok: false, error: "User not found." });
       if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
+
+      // Auto-clear messages if enabled
+      let clearedCount = 0;
+      if (autoClear) {
+        clearedCount = await clearUserMessages(target.id, room);
+      }
 
       db.run(
         `INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id, created_at)
@@ -17062,22 +17177,36 @@ if (sid) {
 }
 invalidateSessionsForUserId(target.id);
 
+          // Build details with captured message info
+          let details = expiresAt ? `minutes=${mins}` : `permanent reason=${String(reason || "").slice(0, 180)}`;
+          if (autoClear) {
+            details += ` cleared=${clearedCount}`;
+          }
+          if (capturedMessage) {
+            const msgPreview = String(capturedMessage.text || '')
+              .slice(0, 100)
+              .replace(/\\/g, '\\\\')
+              .replace(/"/g, '\\"');
+            const msgTime = capturedMessage.timestampUTC || new Date(capturedMessage.timestamp).toISOString();
+            details += ` captured_msg="${msgPreview}" msg_time="${msgTime}" msg_user="${capturedMessage.username}"`;
+          }
+
           logModAction({
             actor: socket.user,
             action: "BAN",
             targetUserId: target.id,
             targetUsername: target.username,
             room,
-            details: expiresAt ? `minutes=${mins}` : `permanent reason=${String(reason || "").slice(0, 180)}`,
+            details,
           });
           if (caseId) {
             addModCaseEvent(Number(caseId), {
               actorUserId: socket.user?.id || null,
               eventType: "ban",
-              payload: { targetUserId: target.id, minutes: mins, reason: String(reason || "").slice(0, 180) },
+              payload: { targetUserId: target.id, minutes: mins, reason: String(reason || "").slice(0, 180), capturedMessage, clearedCount },
             }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "ban" })).catch(() => {});
           }
-          respond({ ok: true, username, minutes: mins });
+          respond({ ok: true, username: target.username, minutes: mins, clearedCount });
         }
       );
     });
