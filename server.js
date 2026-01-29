@@ -2912,18 +2912,18 @@ const WORD_FILTER_CACHE_TTL_MS = 60000; // 1 minute
 
 // Hardcoded filters for serious slurs (appropriate for 18+ chat site)
 const HARDCODED_FILTERS = [
-  // Racial slurs
-  { text: "n*gger", isPhrase: false },
-  { text: "n*gga", isPhrase: false },
-  { text: "ch*nk", isPhrase: false },
-  { text: "sp*c", isPhrase: false },
+  // Racial slurs (stored without asterisks for proper matching)
+  { text: "nigger", isPhrase: false },
+  { text: "nigga", isPhrase: false },
+  { text: "chink", isPhrase: false },
+  { text: "spic", isPhrase: false },
   // Homophobic slurs
-  { text: "f*ggot", isPhrase: false },
-  { text: "f*g", isPhrase: false },
+  { text: "faggot", isPhrase: false },
+  { text: "fag", isPhrase: false },
   // Transphobic slurs
-  { text: "tr*nny", isPhrase: false },
+  { text: "tranny", isPhrase: false },
   // Antisemitic slurs
-  { text: "k*ke", isPhrase: false },
+  { text: "kike", isPhrase: false },
 ];
 
 // Initialize hardcoded filters in the database on startup
@@ -2983,22 +2983,21 @@ function createFilterRegex(filterText, isPhrase) {
 }
 
 // Apply word filter to text
-function applyWordFilter(text) {
+async function applyWordFilter(text) {
   if (!text || typeof text !== 'string') return text;
   
-  // Reload cache if stale
+  // Reload cache if stale (synchronously to ensure consistency)
   if (Date.now() - wordFilterLastLoaded > WORD_FILTER_CACHE_TTL_MS) {
-    loadWordFilters().catch(err => console.error("[word-filter] Cache refresh failed:", err));
+    await loadWordFilters();
   }
   
   let filtered = text;
   for (const filter of wordFilterCache) {
-    if (filter.regex.test(filtered)) {
-      // Replace matched text with asterisks (same length)
-      filtered = filtered.replace(filter.regex, (match) => {
-        return '*'.repeat(match.length);
-      });
-    }
+    // Replace matched text with asterisks (same length)
+    // Note: We don't test first as it's unnecessary and can cause issues with global regex
+    filtered = filtered.replace(filter.regex, (match) => {
+      return '*'.repeat(match.length);
+    });
   }
   
   return filtered;
@@ -11706,8 +11705,8 @@ app.post("/api/word-filters", strictLimiter, requireLogin, express.json({ limit:
   const isPhrase = !!req.body?.is_phrase;
   const notes = String(req.body?.notes || "").trim().slice(0, 500);
 
-  if (!filterText || filterText.length > 200) {
-    return res.status(400).json({ ok: false, error: "Invalid filter text (max 200 chars)" });
+  if (!filterText || filterText.length < 2 || filterText.length > 100) {
+    return res.status(400).json({ ok: false, error: "Filter text must be between 2 and 100 characters" });
   }
 
   try {
@@ -15795,7 +15794,7 @@ if (!room) {
     }
   });
 
-  socket.on("dm message", (payload = {}) => {
+  socket.on("dm message", async (payload = {}) => {
     const { threadId, text, replyToId, attachment, tone } = payload || {};
     const tid = Number(threadId);
     if (!allowSocketEvent(socket, "dm_message", 12, 4000)) return;
@@ -15803,8 +15802,8 @@ if (!room) {
     if (rawBody.length > MAX_DM_MESSAGE_CHARS) return;
     let body = rawBody.slice(0, MAX_DM_MESSAGE_CHARS);
     
-    // Apply word filter to DM text
-    body = applyWordFilter(body);
+    // Apply word filter to DM text (async)
+    body = await applyWordFilter(body);
     
     const att = attachment && typeof attachment === "object" ? attachment : null;
     const toneKey = sanitizeTone(tone);
@@ -16362,7 +16361,7 @@ if (!room) {
     if (socket.currentRoom) emitUserList(socket.currentRoom);
   });
 
-  socket.on("chat message", (payload = {}) => {
+  socket.on("chat message", async (payload = {}) => {
     // ---- NEW: Validate input ----
     const validation = validate(ChatMessageSchema, {
       room: payload.room || socket.currentRoom || "main",
@@ -16382,8 +16381,8 @@ if (!room) {
       return;
     }
     
-    // Apply word filter
-    const filtered = applyWordFilter(sanitized);
+    // Apply word filter (async)
+    const filtered = await applyWordFilter(sanitized);
     
     // Override payload with validated and filtered data
     payload.text = filtered;
