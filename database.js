@@ -362,6 +362,8 @@ async function runSqliteMigrations() {
     ["reply_to_text", "reply_to_text TEXT"],
     ["edited_at", "edited_at INTEGER"],
     ["tone", "tone TEXT"],
+    ["delivered_at", "delivered_at INTEGER"],
+    ["read_at", "read_at INTEGER"],
   ]);
 
   await run(`
@@ -372,6 +374,20 @@ async function runSqliteMigrations() {
       PRIMARY KEY (message_id, username)
     )
   `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS message_edits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id INTEGER NOT NULL,
+      old_text TEXT NOT NULL,
+      new_text TEXT NOT NULL,
+      edited_by_user_id INTEGER NOT NULL,
+      edited_by_username TEXT NOT NULL,
+      edited_at INTEGER NOT NULL
+    )
+  `);
+  await run(`CREATE INDEX IF NOT EXISTS idx_message_edits_message ON message_edits(message_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_message_edits_timestamp ON message_edits(edited_at)`);
 
   await run(`
     CREATE TABLE IF NOT EXISTS punishments (

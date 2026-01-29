@@ -1,0 +1,22 @@
+{
+  "name": "Banter & Brats",
+  "short_name": "B&B Chat",
+  "description": "18+ community chat built for rooms, DMs, and a little chaos",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a2e",
+  "theme_color": "#6366f1",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["social", "entertainment"],
+  "lang": "en-US",
+  "dir": "ltr"
+}
