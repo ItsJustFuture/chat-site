@@ -12300,3 +12300,56 @@ body[data-theme="Iris & Lola Neon"] .irisLolaDrawerEasterStar{
   margin-top: 4px;
   font-style: italic;
 }
+
+/* Message Capture Preview Styles */
+.messagePreviewList {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 4px;
+}
+
+.messagePreviewItem {
+  padding: 8px 10px;
+  margin: 2px 0;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.messagePreviewItem:hover {
+  background: rgba(255,255,255,.05);
+}
+
+.messagePreviewItem.selected {
+  border-color: var(--accent);
+  background: rgba(var(--accentRGB), 0.1);
+}
+
+.messagePreviewText {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
+.messagePreviewMeta {
+  font-size: 11px;
+  color: var(--textSecondary);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.messagePreviewRoom {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.messagePreviewTime {
+  opacity: 0.7;
+}
