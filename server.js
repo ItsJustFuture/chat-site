@@ -356,8 +356,9 @@ if (IS_PROD) {
   }
 } else {
   // In development/test mode, provide a default SESSION_SECRET if none is set
+  // Note: This is intentionally too short (<16 chars) to fail production validation
   if (!process.env.SESSION_SECRET) {
-    process.env.SESSION_SECRET = "dev_secret_change_in_production_1234567890";
+    process.env.SESSION_SECRET = "dev-only-secret";
   }
 }
 
