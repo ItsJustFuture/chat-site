@@ -20,7 +20,15 @@ This installs all production and development dependencies, including:
 - TypeScript language server for better code intelligence
 - Type definitions for Node.js and Express
 
-### 2. Environment Configuration
+### 2. Verify Environment
+
+```bash
+npm run dev:verify
+```
+
+This runs a comprehensive check of your development environment and reports any issues.
+
+### 3. Environment Configuration
 
 Copy the example environment file:
 
@@ -37,7 +45,7 @@ Edit `.env` with your configuration. For local development, SQLite is used by de
 - `SENTRY_DSN` - Optional; enables error tracking
 - `ENABLE_PWA` - Optional; enables Progressive Web App features
 
-### 3. Start Development Server
+### 4. Start Development Server
 
 ```bash
 npm run dev
@@ -45,7 +53,7 @@ npm run dev
 
 The server will start on `http://localhost:3000` with SQLite fallback.
 
-### 4. Optional: Start PostgreSQL with Docker
+### 5. Optional: Start PostgreSQL with Docker
 
 ```bash
 docker compose up -d
@@ -58,6 +66,7 @@ Then set `DATABASE_URL` in your `.env` file.
 ### Development
 - `npm run dev` - Start server in development mode with LOCAL_DEV=1
 - `npm run dev:seed` - Seed database with test data
+- `npm run dev:verify` - Verify development environment setup
 - `npm start` - Start server in production mode
 
 ### Testing

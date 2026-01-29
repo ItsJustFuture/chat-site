@@ -8,6 +8,7 @@
     "start": "node server.js",
     "dev": "LOCAL_DEV=1 node server.js",
     "dev:seed": "LOCAL_DEV=1 node scripts/dev-seed.js",
+    "dev:verify": "node scripts/verify-env.js",
     "test": "echo \"No tests yet\" && exit 0",
     "test:dice": "node scripts/dice-variant-smoke.js",
     "test:couples": "node scripts/couples-regression.js",

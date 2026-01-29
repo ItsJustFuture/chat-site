@@ -6,6 +6,9 @@
 # Install dependencies
 npm install
 
+# Verify environment is ready
+npm run dev:verify
+
 # Start development server (uses SQLite by default)
 npm run dev
 
@@ -17,6 +20,9 @@ npm run dev
 ### Code Quality Checks
 
 ```bash
+# Verify development environment
+npm run dev:verify
+
 # Check JavaScript syntax
 npm run check
 
