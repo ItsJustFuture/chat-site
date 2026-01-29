@@ -929,12 +929,99 @@ async function seedDevUser({ username, password, role }) {
   return result?.lastID || null;
 }
 
-const migrationsReady = runSqliteMigrations();
+/**
+ * Run SQL migration files from migrations/ directory
+ * Tracks applied migrations in a migrations_log table
+ */
+async function runSqlFileMigrations() {
+  // Create migrations tracking table
+  await run(`
+    CREATE TABLE IF NOT EXISTS migrations_log (
+      filename TEXT PRIMARY KEY,
+      applied_at INTEGER NOT NULL
+    )
+  `);
+
+  const migrationsDir = path.join(__dirname, "migrations");
+  if (!fs.existsSync(migrationsDir)) {
+    return; // No migrations directory, skip
+  }
+
+  const files = fs.readdirSync(migrationsDir)
+    .filter(f => f.endsWith(".sql"))
+    .sort();
+
+  for (const file of files) {
+    // Check if already applied
+    const existing = await all(
+      "SELECT filename FROM migrations_log WHERE filename = ?",
+      [file]
+    );
+
+    if (existing && existing.length > 0) {
+      continue; // Already applied
+    }
+
+    // Read and execute migration
+    const filePath = path.join(migrationsDir, file);
+    const sql = fs.readFileSync(filePath, "utf8");
+    
+    // Split by semicolons and execute each statement
+    const statements = sql
+      .split(";")
+      .map(s => {
+        // Remove SQL comments (lines starting with --)
+        return s.split('\n')
+          .filter(line => !line.trim().startsWith('--'))
+          .join('\n')
+          .trim();
+      })
+      .filter(s => s.length > 0);
+
+    for (const statement of statements) {
+      try {
+        await run(statement);
+      } catch (err) {
+        // Ignore specific SQLite errors that are expected during migrations
+        const ignorableErrors = [
+          "duplicate column name",  // Column already exists
+          "already exists",         // Table/index already exists  
+          "no such table"           // Expected when checking table existence
+        ];
+        
+        const shouldIgnore = ignorableErrors.some(msg => 
+          err.message?.toLowerCase().includes(msg.toLowerCase())
+        );
+        
+        if (!shouldIgnore) {
+          console.error(`Migration ${file} error:`, err.message);
+          throw err; // Re-throw non-ignorable errors
+        }
+      }
+    }
+
+    // Mark as applied
+    await run(
+      "INSERT INTO migrations_log (filename, applied_at) VALUES (?, ?)",
+      [file, Date.now()]
+    );
+
+    console.log(`[migrations] Applied: ${file}`);
+  }
+}
+
+async function runAllMigrations() {
+  await runSqliteMigrations();
+  await runSqlFileMigrations();
+}
+
+const migrationsReady = runAllMigrations();
 
 module.exports = {
   db,
   migrationsReady,
   runSqliteMigrations,
+  runSqlFileMigrations,
   DB_FILE,
   seedDevUser,
 };
