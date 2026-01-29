@@ -44,7 +44,7 @@
     ':pizza:': '🍕', ':hamburger:': '🍔', ':cake:': '🍰', ':coffee:': '☕',
     ':beer:': '🍺', ':wine_glass:': '🍷', ':cocktail:': '🍹',
     ':rainbow:': '🌈', ':sun:': '☀️', ':moon:': '🌙', ':star2:': '🌟',
-    ':snowflake:': '❄️', ':fire:': '🔥', ':ocean:': '🌊',
+    ':snowflake:': '❄️', ':ocean:': '🌊',
   };
 
   /**
@@ -52,6 +52,9 @@
    */
   function replaceEmojiShortcodes(text) {
     if (!text || typeof text !== 'string') return text;
+    
+    // Performance optimization: check for colons before processing
+    if (!text.includes(':')) return text;
     
     let result = text;
     for (const [shortcode, emoji] of Object.entries(EMOJI_MAP)) {
@@ -92,6 +95,18 @@
   }
 
   /**
+   * Configure marked (do this once, not on every render)
+   */
+  if (typeof marked !== 'undefined') {
+    marked.setOptions({
+      breaks: true,  // Convert \n to <br>
+      gfm: true,     // GitHub Flavored Markdown
+      headerIds: false,
+      mangle: false,
+    });
+  }
+
+  /**
    * Render markdown with emoji support (client-side)
    * Requires: marked.js and DOMPurify to be loaded
    */
@@ -116,15 +131,7 @@
       // Check if marked and DOMPurify are available
       if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
         try {
-          // Configure marked
-          marked.setOptions({
-            breaks: true,  // Convert \n to <br>
-            gfm: true,     // GitHub Flavored Markdown
-            headerIds: false,
-            mangle: false,
-          });
-          
-          // Render markdown
+          // Render markdown (options already configured above)
           const html = marked.parse(result);
           
           // Sanitize HTML
@@ -256,12 +263,17 @@
     // Check if Sentry SDK is loaded
     if (typeof Sentry !== 'undefined' && typeof Sentry.init === 'function') {
       try {
+        const integrations = [];
+        
+        // Add BrowserTracing if available
+        if (typeof Sentry.BrowserTracing === 'function') {
+          integrations.push(new Sentry.BrowserTracing());
+        }
+        
         Sentry.init({
           dsn: sentryDSN.content,
           environment: window.location.hostname === 'localhost' ? 'development' : 'production',
-          integrations: [
-            new Sentry.BrowserTracing(),
-          ],
+          integrations: integrations,
           tracesSampleRate: 0.1,
         });
         console.log('[Sentry] Initialized for client-side error tracking');

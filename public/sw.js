@@ -72,6 +72,11 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
+          // Only cache same-origin responses
+          if (url.origin !== self.location.origin) {
+            return response;
+          }
+          
           // Clone and cache the response
           const responseClone = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
@@ -95,8 +100,13 @@ self.addEventListener("fetch", (event) => {
       }
 
       return fetch(request).then((response) => {
-        // Don't cache non-successful responses
+        // Don't cache non-successful responses or cross-origin
         if (!response || response.status !== 200 || response.type === "error") {
+          return response;
+        }
+        
+        // Only cache same-origin responses
+        if (url.origin !== self.location.origin) {
           return response;
         }
 

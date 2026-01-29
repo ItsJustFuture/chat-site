@@ -6,14 +6,12 @@
   "display": "standalone",
   "background_color": "#1a1a2e",
   "theme_color": "#6366f1",
-  "orientation": "portrait-primary",
   "scope": "/",
   "icons": [
     {
       "src": "/favicon.ico",
-      "sizes": "any",
-      "type": "image/x-icon",
-      "purpose": "any"
+      "sizes": "48x48",
+      "type": "image/x-icon"
     }
   ],
   "categories": ["social", "entertainment"],

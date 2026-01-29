@@ -26,7 +26,6 @@ const EMOJI_MAP = {
   ":yum:": "😋",
   ":stuck_out_tongue:": "😛",
   ":stuck_out_tongue_winking_eye:": "😜",
-  ":stuck_out_tongue_closed_eyes:": "😝",
   ":neutral_face:": "😐",
   ":expressionless:": "😑",
   ":no_mouth:": "😶",
@@ -204,6 +203,11 @@ const EMOJI_MAP = {
  */
 function replaceEmojiShortcodes(text) {
   if (!text || typeof text !== "string") {
+    return text;
+  }
+
+  // Performance optimization: check for colons before processing
+  if (!text.includes(':')) {
     return text;
   }
 
