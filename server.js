@@ -17025,7 +17025,10 @@ socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300, cas
       details += ` cleared=${clearedCount}`;
     }
     if (capturedMessage) {
-      const msgPreview = String(capturedMessage.text || '').slice(0, 100).replace(/"/g, '\\"');
+      const msgPreview = String(capturedMessage.text || '')
+        .slice(0, 100)
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"');
       const msgTime = capturedMessage.timestampUTC || new Date(capturedMessage.timestamp).toISOString();
       details += ` captured_msg="${msgPreview}" msg_time="${msgTime}" msg_user="${capturedMessage.username}"`;
     }
@@ -17180,7 +17183,10 @@ invalidateSessionsForUserId(target.id);
             details += ` cleared=${clearedCount}`;
           }
           if (capturedMessage) {
-            const msgPreview = String(capturedMessage.text || '').slice(0, 100).replace(/"/g, '\\"');
+            const msgPreview = String(capturedMessage.text || '')
+              .slice(0, 100)
+              .replace(/\\/g, '\\\\')
+              .replace(/"/g, '\\"');
             const msgTime = capturedMessage.timestampUTC || new Date(capturedMessage.timestamp).toISOString();
             details += ` captured_msg="${msgPreview}" msg_time="${msgTime}" msg_user="${capturedMessage.username}"`;
           }
