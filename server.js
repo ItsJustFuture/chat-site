@@ -6916,7 +6916,7 @@ async function getUserLastMessages(userId, limit = 5) {
 // Helper function to clear all messages from a user
 async function clearUserMessages(userId, room = null) {
   try {
-    let query = `SELECT id FROM messages WHERE user_id = ? AND deleted = 0`;
+    let query = `SELECT id, room FROM messages WHERE user_id = ? AND deleted = 0`;
     let params = [userId];
     
     if (room) {
@@ -6926,14 +6926,28 @@ async function clearUserMessages(userId, room = null) {
     
     const messages = await dbAllAsync(query, params);
     
+    if (messages.length === 0) return 0;
+    
+    const messageIds = messages.map(m => m.id);
+    
+    // Bulk update messages as deleted
+    await dbRunAsync(
+      `UPDATE messages SET deleted=1 WHERE id IN (${messageIds.map(() => '?').join(',')})`,
+      messageIds
+    );
+    
+    // Bulk delete reactions
+    await dbRunAsync(
+      `DELETE FROM reactions WHERE message_id IN (${messageIds.map(() => '?').join(',')})`,
+      messageIds
+    );
+    
+    // Emit deletion events for each message
     for (const msg of messages) {
-      await dbRunAsync(`UPDATE messages SET deleted=1 WHERE id=?`, [msg.id]);
-      await dbRunAsync(`DELETE FROM reactions WHERE message_id=?`, [msg.id]);
-      
-      // Emit deletion events
-      if (room) {
-        io.to(room).emit("messageDeleted", { messageId: msg.id, roomId: room });
-        io.to(room).emit("message deleted", { messageId: msg.id });
+      const msgRoom = msg.room || room;
+      if (msgRoom) {
+        io.to(msgRoom).emit("messageDeleted", { messageId: msg.id, roomId: msgRoom });
+        io.to(msgRoom).emit("message deleted", { messageId: msg.id });
       }
     }
     
@@ -17011,7 +17025,7 @@ socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300, cas
       details += ` cleared=${clearedCount}`;
     }
     if (capturedMessage) {
-      const msgPreview = String(capturedMessage.text || '').slice(0, 100);
+      const msgPreview = String(capturedMessage.text || '').slice(0, 100).replace(/"/g, '\\"');
       const msgTime = capturedMessage.timestampUTC || new Date(capturedMessage.timestamp).toISOString();
       details += ` captured_msg="${msgPreview}" msg_time="${msgTime}" msg_user="${capturedMessage.username}"`;
     }
@@ -17166,7 +17180,7 @@ invalidateSessionsForUserId(target.id);
             details += ` cleared=${clearedCount}`;
           }
           if (capturedMessage) {
-            const msgPreview = String(capturedMessage.text || '').slice(0, 100);
+            const msgPreview = String(capturedMessage.text || '').slice(0, 100).replace(/"/g, '\\"');
             const msgTime = capturedMessage.timestampUTC || new Date(capturedMessage.timestamp).toISOString();
             details += ` captured_msg="${msgPreview}" msg_time="${msgTime}" msg_user="${capturedMessage.username}"`;
           }

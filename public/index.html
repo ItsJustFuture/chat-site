@@ -2786,7 +2786,7 @@ Auto-clear all messages from this user
     
     messageList.innerHTML = messages.map((msg, index) => {
       const timestamp = new Date(msg.timestamp);
-      const timeStr = timestamp.toLocaleString();
+      const timeStr = timestamp.toISOString();
       const text = msg.text || '(attachment/media)';
       const textPreview = text.length > 100 ? text.substring(0, 100) + '...' : text;
       
@@ -2795,7 +2795,7 @@ Auto-clear all messages from this user
           <div class="messagePreviewText">${escapeHtml(textPreview)}</div>
           <div class="messagePreviewMeta">
             <span class="messagePreviewRoom">#${msg.room}</span>
-            <span class="messagePreviewTime">${timeStr} UTC</span>
+            <span class="messagePreviewTime">${timeStr}</span>
           </div>
         </div>
       `;

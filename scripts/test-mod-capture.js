@@ -104,14 +104,14 @@ async function runTests() {
     }
     console.log("[test-mod-capture] ✓ Test messages created");
 
-    // Test 4: Load getUserLastMessages helper
+    // Test 4: Load server module (for verification, not full testing)
     const server = require("../server");
     
     // We can't easily test the socket handlers without starting the full server,
     // but we can verify the database operations work correctly
 
     // Test 5: Verify message retrieval
-    console.log("[test-mod-capture] Test 4: Verifying message retrieval");
+    console.log("[test-mod-capture] Test 5: Verifying message retrieval");
     const userMessages = await dbAllAsync(
       `SELECT id, room, text, ts, username, attachment_url, reply_to_id 
        FROM messages 
@@ -134,7 +134,7 @@ async function runTests() {
     console.log("[test-mod-capture] ✓ Messages retrieved correctly");
 
     // Test 6: Test message clearing
-    console.log("[test-mod-capture] Test 5: Testing message clearing");
+    console.log("[test-mod-capture] Test 6: Testing message clearing");
     await dbRunAsync(`UPDATE messages SET deleted=1 WHERE user_id=?`, [user.id]);
     await dbRunAsync(`DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE user_id=?)`, [user.id]);
 
@@ -149,7 +149,7 @@ async function runTests() {
     console.log("[test-mod-capture] ✓ Messages cleared successfully");
 
     // Test 7: Verify mod log structure
-    console.log("[test-mod-capture] Test 6: Verifying mod log structure");
+    console.log("[test-mod-capture] Test 7: Verifying mod log structure");
     const modLogSchema = await dbAllAsync(`PRAGMA table_info(mod_logs)`);
     const hasDetails = modLogSchema.some(col => col.name === "details");
     
