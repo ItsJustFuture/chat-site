@@ -12,52 +12,65 @@
 <body>
 <div aria-live="polite" class="authLoading" id="authLoading">Checking your session...</div>
 <!-- AUTH -->
-<div id="loginView">
-<div aria-hidden="true" class="loginBackdrop"></div>
-<div class="loginShell">
-<div class="loginBrand">
-<div class="loginBadge">Welcome to</div>
-<h1 class="loginLogo">Banter <span class="amp">&amp;</span> Brats</h1>
-<p class="loginTag">18+ community chat built for rooms, DMs, and a little chaos.</p>
-<ul class="loginFeatures">
-<li>Pick rooms, hop into DMs, and keep tabs on reactions.</li>
-<li>Track XP, gold, and shout-outs in leaderboards.</li>
-<li>Keep it cozy with themes, vibes, and profile flair.</li>
-</ul>
-</div>
-<div aria-label="Login or register" class="loginCard" role="dialog">
-<div class="loginHeader">
-<h2>Sign in</h2>
-<p>Use your username and password to continue.</p>
-</div>
-<form class="loginForm" id="authForm">
-<div class="field">
-<label for="authUser">Username</label>
-<input autocomplete="username" id="authUser" placeholder="your username" required=""/>
-</div>
-<div class="field">
-<label for="authPass">Password</label>
-<div class="passWrap">
-<input autocomplete="current-password" id="authPass" placeholder="your password" required="" type="password"/>
-<button aria-label="Show password" class="passToggle" id="togglePassBtn" title="Show password" type="button">👁</button>
-</div>
-</div>
-<div aria-live="polite" class="loginValidation" id="authValidation"></div>
-<div class="field" hidden="" id="captchaWrap">
-<div id="captchaWidget"></div>
-<div class="small muted" id="captchaNote"></div>
-</div>
-<div class="row loginActions">
-<button class="btn" id="loginBtn" type="submit">Join chat</button>
-<button class="btn secondary" id="regBtn" type="button">Create account</button>
-</div>
-<div class="loginHint small muted">No email needed. Just claim a username.</div>
-<div aria-live="polite" class="msgline" id="authMsg"></div>
-</form>
-<div class="loginFooter small muted">
-          By continuing, you confirm you are 18+ and agree to follow the community rules.
-</div>
-</div>
+    <div id="loginView">
+      <div aria-hidden="true" class="loginBackdrop"></div>
+      <div class="loginShell">
+        <div class="loginBrand">
+          <div class="loginBadge">Welcome to</div>
+          <h1 class="loginLogo">Banter <span class="amp">&amp;</span> Brats</h1>
+        </div>
+    <div aria-label="Login or register" class="loginCard" role="dialog">
+      <div class="loginHeader">
+        <h2>Sign in</h2>
+      </div>
+      <form class="loginForm" id="authForm">
+        <div class="field">
+          <label for="authUser">Username</label>
+          <input autocomplete="username" id="authUser" placeholder="your username" required=""/>
+        </div>
+        <div class="field" id="emailFieldWrap" hidden>
+          <label for="authEmail">Email</label>
+          <input autocomplete="email" id="authEmail" placeholder="your email" type="email"/>
+        </div>
+        <div class="field">
+          <label for="authPass">Password</label>
+          <div class="passWrap">
+            <input autocomplete="current-password" id="authPass" placeholder="your password" required="" type="password"/>
+            <button aria-label="Show password" class="passToggle" id="togglePassBtn" title="Show password" type="button">👁</button>
+          </div>
+        </div>
+        <div aria-live="polite" class="loginValidation" id="authValidation"></div>
+        <div class="row loginActions">
+          <button class="btn" id="loginBtn" type="submit">Join chat</button>
+          <button class="btn secondary" id="regBtn" type="button">Create account</button>
+        </div>
+        <div class="row loginActions" style="margin-top: 10px; justify-content: center;">
+          <button class="btn secondary small" id="forgotPassBtn" type="button">Forgot password?</button>
+        </div>
+        <div aria-live="polite" class="msgline" id="authMsg"></div>
+      </form>
+    </div>
+
+    <!-- Forgot Password Modal -->
+    <div class="modal" hidden="" id="forgotPasswordModal">
+      <div class="modalCard loginCard">
+        <div class="loginHeader">
+          <h2>Reset Password</h2>
+          <p>Enter your email to receive a reset link.</p>
+        </div>
+        <form class="loginForm" id="forgotPasswordForm">
+          <div class="field">
+            <label for="resetEmail">Email</label>
+            <input id="resetEmail" placeholder="your email" required="" type="email"/>
+          </div>
+          <div aria-live="polite" class="loginValidation" id="forgotPasswordMsg"></div>
+          <div class="row loginActions">
+            <button class="btn" type="submit">Send reset link</button>
+            <button class="btn secondary" id="forgotPasswordCloseBtn" type="button">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
 </div>
 </div>
 <!-- PASSWORD UPGRADE -->
@@ -334,12 +347,12 @@
 <button class="iconBtn withBadge" id="dmToggleBtn" title="Direct messages" type="button">💬<span class="notifDot" id="dmBadgeDot" title="New DMs"></span></button>
 <button class="iconBtn withBadge" id="groupDmToggleBtn" title="Group DMs" type="button">👥<span class="notifDot" id="groupDmBadgeDot" title="New group DMs"></span></button>
 <button aria-label="Notifications" class="iconBtn withBadge" id="notificationsBtn" title="Notifications" type="button">🔔<span class="notifDot" id="notificationsDot" title="New notifications"></span></button>
-	<!-- Donation button temporarily disabled -->
-	<!--
-	<form action="https://www.paypal.com/ncp/payment/44EJ6AKA6YW42" class="paypalDonateForm" method="post" target="_blank" title="Support Banter &amp; Brats">
-	<button aria-label="Support Banter &amp; Brats" class="iconBtn donateBtn" type="submit">$</button>
-	</form>
-	-->
+        <!-- Donation button temporarily disabled -->
+        <!--
+        <form action="https://www.paypal.com/ncp/payment/44EJ6AKA6YW42" class="paypalDonateForm" method="post" target="_blank" title="Support Banter &amp; Brats">
+        <button aria-label="Support Banter &amp; Brats" class="iconBtn donateBtn" type="submit">$</button>
+        </form>
+        -->
 <button class="iconBtn" id="roomChessBtn" title="Chess Table" type="button">♟</button>
 <button aria-label="Open Simulator" class="btn secondary small survivalOpenBtn" hidden id="survivalOpenBtn" title="Open Simulator" type="button">🧭</button>
 <button class="iconBtn mobOnly" id="openMembersBtn" title="Members" type="button">👥</button>
@@ -663,7 +676,7 @@
 <div class="title" id="dmMetaTitle">Pick a thread</div>
 </div>
 <div class="small" id="dmMetaPeople"></div>
-	<!-- typing indicator is positioned near the composer so it never pushes the message list -->
+        <!-- typing indicator is positioned near the composer so it never pushes the message list -->
 </div>
 <div class="dmMetaActions">
 <button class="iconBtn secondary" id="dmChessBtn" title="Play Chess" type="button">♟</button>
@@ -694,8 +707,8 @@
 <div class="replyText" id="dmReplyPreviewText"></div>
 <button aria-label="Cancel reply" class="iconBtn smallIcon" id="dmReplyClose" type="button">✕</button>
 </div>
-	<div class="dmInput">
-	<div class="small dmTyping" id="dmTypingIndicator" aria-live="polite"></div>
+        <div class="dmInput">
+        <div class="small dmTyping" id="dmTypingIndicator" aria-live="polite"></div>
 <input id="dmText" maxlength="800" placeholder="Message"/>
 <input accept="image/*" id="dmFileInput" style="display:none" type="file"/>
 <button class="iconBtn" id="dmPickFileBtn" title="Upload image" type="button">📷</button>
