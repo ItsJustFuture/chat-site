@@ -2116,6 +2116,42 @@ const TEXT_STYLE_MODES = new Set(["color", "neon", "gradient"]);
 const TEXT_STYLE_INTENSITIES = new Set(["low", "med", "high", "ultra"]);
 const TEXT_STYLE_GRADIENT_INTENSITIES = new Set(["soft", "normal", "bold"]);
 const TEXT_STYLE_HEX = /^#[0-9a-f]{6}$/i;
+
+// Gradient presets for text styling (VIP+ only)
+const GRADIENT_PRESETS = {
+  sunset: { name: "Sunset", css: "linear-gradient(135deg, #ff6b6b 0%, #feca57 50%, #ee5a6f 100%)" },
+  ocean: { name: "Ocean", css: "linear-gradient(135deg, #00d2ff 0%, #3a7bd5 100%)" },
+  forest: { name: "Forest", css: "linear-gradient(135deg, #0ba360 0%, #3cba92 100%)" },
+  purple: { name: "Purple Dreams", css: "linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)" },
+  fire: { name: "Fire", css: "linear-gradient(135deg, #f83600 0%, #f9d423 100%)" },
+  aurora: { name: "Aurora", css: "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)" },
+  candy: { name: "Candy", css: "linear-gradient(135deg, #ff0844 0%, #ffb199 100%)" },
+  royal: { name: "Royal", css: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)" },
+  mint: { name: "Mint", css: "linear-gradient(135deg, #13f1fc 0%, #0470dc 100%)" },
+  rose: { name: "Rose Gold", css: "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)" },
+  cosmic: { name: "Cosmic", css: "linear-gradient(135deg, #7c4dff 0%, #00e5ff 100%)" },
+  peach: { name: "Peach", css: "linear-gradient(135deg, #ffafbd 0%, #ffc3a0 100%)" },
+  emerald: { name: "Emerald", css: "linear-gradient(135deg, #56ab2f 0%, #a8e063 100%)" },
+  lavender: { name: "Lavender", css: "linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%)" },
+  rainbow: { name: "Rainbow", css: "linear-gradient(135deg, #ff0000 0%, #ff7f00 20%, #ffff00 40%, #00ff00 60%, #0000ff 80%, #4b0082 100%)" }
+};
+
+// Neon color presets (VIP+ only)
+const NEON_PRESETS = {
+  cyan: { name: "Cyan Glow", color: "#00ffff" },
+  magenta: { name: "Magenta Glow", color: "#ff00ff" },
+  lime: { name: "Lime Glow", color: "#00ff00" },
+  yellow: { name: "Yellow Glow", color: "#ffff00" },
+  pink: { name: "Pink Glow", color: "#ff1493" },
+  blue: { name: "Blue Glow", color: "#1e90ff" },
+  purple: { name: "Purple Glow", color: "#9370db" },
+  orange: { name: "Orange Glow", color: "#ff6600" },
+  green: { name: "Green Glow", color: "#39ff14" },
+  red: { name: "Red Glow", color: "#ff0000" },
+  white: { name: "White Glow", color: "#ffffff" },
+  gold: { name: "Gold Glow", color: "#ffd700" }
+};
+
 const CHAT_FX_TEXT_GLOWS = new Set(["off", "soft", "neon", "strong"]);
 const CHAT_FX_FONTS = new Set([
   "system",
@@ -9114,6 +9150,27 @@ function updateLiveCustomization(userId, customization, textStyle) {
   if (s.currentRoom) emitUserList(s.currentRoom);
   emitUserFxUpdate(s);
 }
+
+// API endpoint to get text style presets (gradient and neon)
+app.get("/api/text-style-presets", requireLogin, (req, res) => {
+  const userRole = req.session.user?.role || "User";
+  const isVip = requireMinRole(userRole, "VIP");
+  
+  // Only VIP+ users can access gradient and neon presets
+  if (!isVip) {
+    return res.json({
+      gradients: {},
+      neons: {},
+      vipRequired: true
+    });
+  }
+  
+  return res.json({
+    gradients: GRADIENT_PRESETS,
+    neons: NEON_PRESETS,
+    vipRequired: false
+  });
+});
 
 app.get("/api/me/prefs", requireLogin, async (req, res) => {
   const userId = req.session.user.id;
