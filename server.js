@@ -1221,6 +1221,9 @@ try {
     PG_INIT_ERROR = null;
     DB_BACKEND = "postgres";
     console.log("Postgres tables ready");
+
+    // Clean up guest accounts on startup
+    await pgPool.query("DELETE FROM users WHERE role = 'Guest'").catch(err => console.error("Guest cleanup error:", err));
   } catch (err) {
     PG_READY = false;
     PG_INIT_ERROR = err;
@@ -7701,6 +7704,41 @@ app.get("/api/captcha-config", (_req, res) => {
 
 // ---- Auth routes
 // ---- Auth routes
+
+// --- Guest Login Endpoint
+app.post("/guest-login", async (req, res) => {
+  const { username } = req.body;
+  if (!username || username.length < 2 || username.length > 20) {
+    return res.status(400).send("Invalid username (2-20 chars).");
+  }
+  
+  try {
+    // Check if user exists
+    const existing = await pgPool.query("SELECT id FROM users WHERE lower(username) = lower($1)", [username]);
+    if (existing.rows.length > 0) {
+      return res.status(400).send("Username already taken.");
+    }
+
+    const now = Date.now();
+    const result = await pgPool.query(
+      `INSERT INTO users (username, role, created_at, last_seen)
+       VALUES ($1, 'Guest', $2, $2)
+       RETURNING id, username, role`,
+      [username, now]
+    );
+
+    const user = result.rows[0];
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    req.session.role = user.role;
+    
+    res.json({ ok: true, user });
+  } catch (err) {
+    console.error("Guest login error:", err);
+    res.status(500).send("Guest login failed.");
+  }
+});
+
 app.post("/register", registerLimiter, async (req, res) => {
   try {
     const username = sanitizeUsername(req.body?.username);
