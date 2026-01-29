@@ -12226,3 +12226,77 @@ body[data-theme="Iris & Lola Neon"] .irisLolaDrawerEasterStar{
     max-width:100%;
   }
 }
+
+/* Word Filter Styles */
+.wordFilterList {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.wordFilterItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  gap: 12px;
+}
+
+.wordFilterItem:last-child {
+  border-bottom: none;
+}
+
+.wordFilterInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.wordFilterText {
+  font-weight: 600;
+  font-family: monospace;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.wordFilterMeta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.wordFilterBadge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.wordFilterBadge.phrase {
+  background: var(--accent);
+  color: var(--btnPrimaryText);
+}
+
+.wordFilterBadge.hardcoded {
+  background: var(--danger);
+  color: white;
+}
+
+.wordFilterActions {
+  display: flex;
+  gap: 6px;
+}
+
+.wordFilterNotes {
+  font-size: 12px;
+  color: var(--textSecondary);
+  margin-top: 4px;
+  font-style: italic;
+}

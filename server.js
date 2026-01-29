@@ -22,6 +22,9 @@ async function setRoleEverywhere(targetId, username, role) {
 }
 "use strict";
 
+// Load environment variables from .env file
+require("dotenv").config();
+
 // === Iris & Lola private theme config ===
 const PRIVATE_THEME_ALLOWLIST = {
   "Iris & Lola Neon": {
@@ -2897,6 +2900,108 @@ function dbRunAsync(sql, params = []) {
 
 // Initialize message-utils with database functions
 messageUtils.init(dbRunAsync, dbGetAsync, dbAllAsync);
+
+// ========================================
+// Word Filter System
+// ========================================
+
+// In-memory cache of word filters (loaded on startup and updated via API)
+let wordFilterCache = [];
+let wordFilterLastLoaded = 0;
+const WORD_FILTER_CACHE_TTL_MS = 60000; // 1 minute
+
+// Hardcoded filters for serious slurs (appropriate for 18+ chat site)
+const HARDCODED_FILTERS = [
+  // Racial slurs (stored without asterisks for proper matching)
+  { text: "nigger", isPhrase: false },
+  { text: "nigga", isPhrase: false },
+  { text: "chink", isPhrase: false },
+  { text: "spic", isPhrase: false },
+  // Homophobic slurs
+  { text: "faggot", isPhrase: false },
+  { text: "fag", isPhrase: false },
+  // Transphobic slurs
+  { text: "tranny", isPhrase: false },
+  // Antisemitic slurs
+  { text: "kike", isPhrase: false },
+];
+
+// Initialize hardcoded filters in the database on startup
+async function initializeHardcodedFilters() {
+  try {
+    for (const filter of HARDCODED_FILTERS) {
+      // Check if already exists
+      const existing = await dbGetAsync(
+        "SELECT id FROM word_filters WHERE filter_text = ? AND is_hardcoded = 1",
+        [filter.text]
+      );
+      
+      if (!existing) {
+        await dbRunAsync(
+          `INSERT INTO word_filters (filter_text, is_phrase, is_hardcoded, created_at, notes) 
+           VALUES (?, ?, 1, ?, 'System hardcoded filter')`,
+          [filter.text, filter.isPhrase ? 1 : 0, Date.now()]
+        );
+      }
+    }
+  } catch (err) {
+    console.error("[word-filter] Error initializing hardcoded filters:", err);
+  }
+}
+
+// Load word filters from database into cache
+async function loadWordFilters() {
+  try {
+    const filters = await dbAllAsync("SELECT * FROM word_filters ORDER BY LENGTH(filter_text) DESC");
+    wordFilterCache = filters.map(f => ({
+      id: f.id,
+      text: f.filter_text,
+      isPhrase: f.is_phrase === 1,
+      isHardcoded: f.is_hardcoded === 1,
+      regex: createFilterRegex(f.filter_text, f.is_phrase === 1)
+    }));
+    wordFilterLastLoaded = Date.now();
+    console.log(`[word-filter] Loaded ${wordFilterCache.length} filters`);
+  } catch (err) {
+    console.error("[word-filter] Error loading filters:", err);
+    wordFilterCache = [];
+  }
+}
+
+// Create regex for filter matching
+function createFilterRegex(filterText, isPhrase) {
+  // Escape special regex characters
+  const escaped = filterText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  
+  // For word filters, match whole words with word boundaries
+  // For phrase filters, match the entire phrase
+  if (isPhrase) {
+    return new RegExp(escaped, 'gi');
+  } else {
+    return new RegExp(`\\b${escaped}\\b`, 'gi');
+  }
+}
+
+// Apply word filter to text
+async function applyWordFilter(text) {
+  if (!text || typeof text !== 'string') return text;
+  
+  // Reload cache if stale (synchronously to ensure consistency)
+  if (Date.now() - wordFilterLastLoaded > WORD_FILTER_CACHE_TTL_MS) {
+    await loadWordFilters();
+  }
+  
+  let filtered = text;
+  for (const filter of wordFilterCache) {
+    // Replace matched text with asterisks (same length)
+    // Note: We don't test first as it's unnecessary and can cause issues with global regex
+    filtered = filtered.replace(filter.regex, (match) => {
+      return '*'.repeat(match.length);
+    });
+  }
+  
+  return filtered;
+}
 
 async function getConfigValue(key, fallback = null) {
   try {
@@ -11567,6 +11672,100 @@ app.post("/api/mod/cases/:id/evidence", strictLimiter, requireLogin, express.jso
   }
 });
 
+// ========================================
+// Word Filter Management API (Admin/Co-owner/Owner only)
+// ========================================
+
+// Get all word filters
+app.get("/api/word-filters", requireLogin, async (req, res) => {
+  const actor = req.session?.user;
+  if (!actor || !requireMinRole(actor.role, "Admin")) {
+    return res.status(403).json({ ok: false, error: "Forbidden" });
+  }
+
+  try {
+    const filters = await dbAllAsync(
+      "SELECT id, filter_text, is_phrase, is_hardcoded, added_by_username, created_at, notes FROM word_filters ORDER BY created_at DESC"
+    );
+    return res.json({ ok: true, filters });
+  } catch (e) {
+    console.error("[word-filters] get failed", e);
+    return res.status(500).json({ ok: false, error: "Failed to fetch filters" });
+  }
+});
+
+// Add a new word filter
+app.post("/api/word-filters", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
+  const actor = req.session?.user;
+  if (!actor || !requireMinRole(actor.role, "Admin")) {
+    return res.status(403).json({ ok: false, error: "Forbidden" });
+  }
+
+  const filterText = String(req.body?.filter_text || "").trim();
+  const isPhrase = !!req.body?.is_phrase;
+  const notes = String(req.body?.notes || "").trim().slice(0, 500);
+
+  if (!filterText || filterText.length < 2 || filterText.length > 100) {
+    return res.status(400).json({ ok: false, error: "Filter text must be between 2 and 100 characters" });
+  }
+
+  try {
+    // Check for duplicates
+    const existing = await dbGetAsync("SELECT id FROM word_filters WHERE filter_text = ?", [filterText]);
+    if (existing) {
+      return res.status(400).json({ ok: false, error: "Filter already exists" });
+    }
+
+    const result = await dbRunAsync(
+      `INSERT INTO word_filters (filter_text, is_phrase, is_hardcoded, added_by_user_id, added_by_username, created_at, notes)
+       VALUES (?, ?, 0, ?, ?, ?, ?)`,
+      [filterText, isPhrase ? 1 : 0, actor.id, actor.username, Date.now(), notes || null]
+    );
+
+    // Reload cache
+    await loadWordFilters();
+
+    return res.json({ ok: true, filterId: result.lastID });
+  } catch (e) {
+    console.error("[word-filters] add failed", e);
+    return res.status(500).json({ ok: false, error: "Failed to add filter" });
+  }
+});
+
+// Delete a word filter (cannot delete hardcoded filters)
+app.delete("/api/word-filters/:id", strictLimiter, requireLogin, async (req, res) => {
+  const actor = req.session?.user;
+  if (!actor || !requireMinRole(actor.role, "Admin")) {
+    return res.status(403).json({ ok: false, error: "Forbidden" });
+  }
+
+  const filterId = Number(req.params.id);
+  if (!Number.isFinite(filterId)) {
+    return res.status(400).json({ ok: false, error: "Invalid filter ID" });
+  }
+
+  try {
+    // Check if hardcoded
+    const filter = await dbGetAsync("SELECT is_hardcoded FROM word_filters WHERE id = ?", [filterId]);
+    if (!filter) {
+      return res.status(404).json({ ok: false, error: "Filter not found" });
+    }
+    if (filter.is_hardcoded === 1) {
+      return res.status(400).json({ ok: false, error: "Cannot delete hardcoded filter" });
+    }
+
+    await dbRunAsync("DELETE FROM word_filters WHERE id = ?", [filterId]);
+
+    // Reload cache
+    await loadWordFilters();
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error("[word-filters] delete failed", e);
+    return res.status(500).json({ ok: false, error: "Failed to delete filter" });
+  }
+});
+
 // ---- Room collapse persistence
 app.patch(
   "/api/users/me/room-master-collapsed",
@@ -15595,13 +15794,17 @@ if (!room) {
     }
   });
 
-  socket.on("dm message", (payload = {}) => {
+  socket.on("dm message", async (payload = {}) => {
     const { threadId, text, replyToId, attachment, tone } = payload || {};
     const tid = Number(threadId);
     if (!allowSocketEvent(socket, "dm_message", 12, 4000)) return;
     const rawBody = safeString(text, "").trim();
     if (rawBody.length > MAX_DM_MESSAGE_CHARS) return;
-    const body = rawBody.slice(0, MAX_DM_MESSAGE_CHARS);
+    let body = rawBody.slice(0, MAX_DM_MESSAGE_CHARS);
+    
+    // Apply word filter to DM text (async)
+    body = await applyWordFilter(body);
+    
     const att = attachment && typeof attachment === "object" ? attachment : null;
     const toneKey = sanitizeTone(tone);
 
@@ -16158,7 +16361,7 @@ if (!room) {
     if (socket.currentRoom) emitUserList(socket.currentRoom);
   });
 
-  socket.on("chat message", (payload = {}) => {
+  socket.on("chat message", async (payload = {}) => {
     // ---- NEW: Validate input ----
     const validation = validate(ChatMessageSchema, {
       room: payload.room || socket.currentRoom || "main",
@@ -16178,8 +16381,11 @@ if (!room) {
       return;
     }
     
-    // Override payload with validated data
-    payload.text = sanitized;
+    // Apply word filter (async)
+    const filtered = await applyWordFilter(sanitized);
+    
+    // Override payload with validated and filtered data
+    payload.text = filtered;
     
     // If a client sends before it has joined a room (mobile reconnect/race),
     // auto-join main so the message doesn't silently disappear.
@@ -17414,6 +17620,16 @@ async function startServer() {
     console.log("[startup] State persistence ready ✓");
   } catch (e) {
     console.warn("[startup] State persistence init failed", e?.message || e);
+  }
+
+  // ---- Initialize word filters ----
+  try {
+    console.log("[startup] Initializing word filters...");
+    await initializeHardcodedFilters();
+    await loadWordFilters();
+    console.log("[startup] Word filters ready ✓");
+  } catch (e) {
+    console.warn("[startup] Word filter init failed", e?.message || e);
   }
 
   await new Promise((resolve) => {
