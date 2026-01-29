@@ -22,6 +22,9 @@ async function setRoleEverywhere(targetId, username, role) {
 }
 "use strict";
 
+// Load environment variables from .env file
+require("dotenv").config();
+
 // === Iris & Lola private theme config ===
 const PRIVATE_THEME_ALLOWLIST = {
   "Iris & Lola Neon": {
