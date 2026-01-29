@@ -15454,6 +15454,33 @@ function initLoginUI(){
         if (forgotPasswordMsg) forgotPasswordMsg.textContent = "";
       });
     }
+    const guestLoginBtn = document.getElementById("guestLoginBtn");
+    if (guestLoginBtn) {
+      guestLoginBtn.addEventListener("click", async () => {
+        const username = authUser?.value?.trim();
+        if (!username) {
+          setAuthValidation("Please enter a username to login as guest.");
+          authUser?.focus();
+          return;
+        }
+        setAuthLoading(true, "Logging in as guest...");
+        try {
+          const { res, text } = await api("/guest-login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username })
+          });
+          if (!res.ok) {
+            setAuthLoading(false, text || "Guest login failed.");
+            return;
+          }
+          await initChatApp();
+          setAuthLoading(false, "");
+        } catch (err) {
+          setAuthLoading(false, "Network error.");
+        }
+      });
+    }
     if (forgotPasswordCloseBtn && forgotPasswordModal) {
       forgotPasswordCloseBtn.addEventListener("click", () => {
         forgotPasswordModal.hidden = true;
