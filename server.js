@@ -2116,6 +2116,42 @@ const TEXT_STYLE_MODES = new Set(["color", "neon", "gradient"]);
 const TEXT_STYLE_INTENSITIES = new Set(["low", "med", "high", "ultra"]);
 const TEXT_STYLE_GRADIENT_INTENSITIES = new Set(["soft", "normal", "bold"]);
 const TEXT_STYLE_HEX = /^#[0-9a-f]{6}$/i;
+
+// Gradient presets for text styling (VIP+ only)
+const GRADIENT_PRESETS = {
+  sunset: { name: "Sunset", css: "linear-gradient(135deg, #ff6b6b 0%, #feca57 50%, #ee5a6f 100%)" },
+  ocean: { name: "Ocean", css: "linear-gradient(135deg, #00d2ff 0%, #3a7bd5 100%)" },
+  forest: { name: "Forest", css: "linear-gradient(135deg, #0ba360 0%, #3cba92 100%)" },
+  purple: { name: "Purple Dreams", css: "linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)" },
+  fire: { name: "Fire", css: "linear-gradient(135deg, #f83600 0%, #f9d423 100%)" },
+  aurora: { name: "Aurora", css: "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)" },
+  candy: { name: "Candy", css: "linear-gradient(135deg, #ff0844 0%, #ffb199 100%)" },
+  royal: { name: "Royal", css: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)" },
+  mint: { name: "Mint", css: "linear-gradient(135deg, #13f1fc 0%, #0470dc 100%)" },
+  rose: { name: "Rose Gold", css: "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)" },
+  cosmic: { name: "Cosmic", css: "linear-gradient(135deg, #7c4dff 0%, #00e5ff 100%)" },
+  peach: { name: "Peach", css: "linear-gradient(135deg, #ffafbd 0%, #ffc3a0 100%)" },
+  emerald: { name: "Emerald", css: "linear-gradient(135deg, #56ab2f 0%, #a8e063 100%)" },
+  lavender: { name: "Lavender", css: "linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%)" },
+  rainbow: { name: "Rainbow", css: "linear-gradient(135deg, #ff0000 0%, #ff7f00 20%, #ffff00 40%, #00ff00 60%, #0000ff 80%, #4b0082 100%)" }
+};
+
+// Neon color presets (VIP+ only)
+const NEON_PRESETS = {
+  cyan: { name: "Cyan Glow", color: "#00ffff" },
+  magenta: { name: "Magenta Glow", color: "#ff00ff" },
+  lime: { name: "Lime Glow", color: "#00ff00" },
+  yellow: { name: "Yellow Glow", color: "#ffff00" },
+  pink: { name: "Pink Glow", color: "#ff1493" },
+  blue: { name: "Blue Glow", color: "#1e90ff" },
+  purple: { name: "Purple Glow", color: "#9370db" },
+  orange: { name: "Orange Glow", color: "#ff6600" },
+  green: { name: "Green Glow", color: "#39ff14" },
+  red: { name: "Red Glow", color: "#ff0000" },
+  white: { name: "White Glow", color: "#ffffff" },
+  gold: { name: "Gold Glow", color: "#ffd700" }
+};
+
 const CHAT_FX_TEXT_GLOWS = new Set(["off", "soft", "neon", "strong"]);
 const CHAT_FX_FONTS = new Set([
   "system",
@@ -2135,7 +2171,7 @@ const CHAT_FX_FONTS = new Set([
 ]);
 const CHAT_FX_HEX = /^#[0-9a-f]{6}$/i;
 
-function sanitizeTextStyle(raw) {
+function sanitizeTextStyle(raw, role = "User") {
   if (!raw || typeof raw !== "object") return null;
   const out = {
     ...TEXT_STYLE_DEFAULTS,
@@ -2143,21 +2179,34 @@ function sanitizeTextStyle(raw) {
     gradient: { ...TEXT_STYLE_DEFAULTS.gradient }
   };
   const mode = String(raw.mode || "").toLowerCase();
-  if (TEXT_STYLE_MODES.has(mode)) out.mode = mode;
+  
+  // VIP gating: restrict gradient and neon modes to VIP+ users only
+  const isVip = requireMinRole(role, "VIP");
+  if (TEXT_STYLE_MODES.has(mode)) {
+    if ((mode === "gradient" || mode === "neon") && !isVip) {
+      // Non-VIP users cannot use gradient or neon modes, fall back to color
+      out.mode = "color";
+    } else {
+      out.mode = mode;
+    }
+  }
+  
   if (TEXT_STYLE_HEX.test(raw.color || "")) out.color = String(raw.color).trim();
   const family = String(raw.fontFamily || raw.font || "").trim();
   if (CHAT_FX_FONTS.has(family)) out.fontFamily = family;
   const fontStyle = String(raw.fontStyle || "").toLowerCase();
   if (fontStyle === "normal" || fontStyle === "bold" || fontStyle === "italic") out.fontStyle = fontStyle;
 
-  if (raw.neon && typeof raw.neon === "object") {
+  // Only process neon settings if VIP+
+  if (isVip && raw.neon && typeof raw.neon === "object") {
     const intensity = String(raw.neon.intensity || "").toLowerCase();
     if (TEXT_STYLE_INTENSITIES.has(intensity)) out.neon.intensity = intensity;
     if (TEXT_STYLE_HEX.test(raw.neon.color || "")) out.neon.color = String(raw.neon.color).trim();
     if (typeof raw.neon.presetId === "string") out.neon.presetId = raw.neon.presetId.slice(0, 64);
   }
 
-  if (raw.gradient && typeof raw.gradient === "object") {
+  // Only process gradient settings if VIP+
+  if (isVip && raw.gradient && typeof raw.gradient === "object") {
     if (typeof raw.gradient.presetId === "string") out.gradient.presetId = raw.gradient.presetId.slice(0, 64);
     if (typeof raw.gradient.css === "string") out.gradient.css = raw.gradient.css.slice(0, 180);
     const intensity = String(raw.gradient.intensity || "").toLowerCase();
@@ -2167,19 +2216,19 @@ function sanitizeTextStyle(raw) {
   return out;
 }
 
-function sanitizeCustomization(raw, fallbackTextStyle = null) {
+function sanitizeCustomization(raw, fallbackTextStyle = null, role = "User") {
   if (!raw || typeof raw !== "object") {
     if (fallbackTextStyle) {
-      const fallback = sanitizeTextStyle(fallbackTextStyle);
+      const fallback = sanitizeTextStyle(fallbackTextStyle, role);
       return fallback ? { userNameStyle: fallback, messageTextStyle: fallback } : null;
     }
     return null;
   }
   const userNameRaw = raw.userNameStyle ?? raw.usernameStyle ?? raw.nameStyle;
   const messageRaw = raw.messageTextStyle ?? raw.messageStyle ?? raw.textStyle;
-  const fallback = fallbackTextStyle ? sanitizeTextStyle(fallbackTextStyle) : null;
-  const userNameStyle = userNameRaw ? sanitizeTextStyle(userNameRaw) : null;
-  const messageTextStyle = messageRaw ? sanitizeTextStyle(messageRaw) : null;
+  const fallback = fallbackTextStyle ? sanitizeTextStyle(fallbackTextStyle, role) : null;
+  const userNameStyle = userNameRaw ? sanitizeTextStyle(userNameRaw, role) : null;
+  const messageTextStyle = messageRaw ? sanitizeTextStyle(messageRaw, role) : null;
   if (!userNameStyle && !messageTextStyle) {
     return fallback ? { userNameStyle: fallback, messageTextStyle: fallback } : null;
   }
@@ -2249,9 +2298,9 @@ function sanitizeChatFx(raw) {
   return out;
 }
 
-function mergeChatFxWithCustomization(chatFx, customization, textStyle) {
+function mergeChatFxWithCustomization(chatFx, customization, textStyle, role = "User") {
   const fx = sanitizeChatFx(chatFx);
-  const custom = sanitizeCustomization(customization, textStyle);
+  const custom = sanitizeCustomization(customization, textStyle, role);
   return custom ? { ...fx, ...custom } : fx;
 }
 
@@ -8852,7 +8901,7 @@ app.post("/api/themes/purchase", strictLimiter, requireLogin, express.json({ lim
           return res.status(404).json({ ok: false, error: "user_not_found" });
         }
         const gold = Number(row.gold || 0);
-        const prefs = normalizePrefs(safeJsonParse(row.prefs_json, {}));
+        const prefs = normalizePrefs(safeJsonParse(row.prefs_json, {}), req.session.user.role);
         const owned = new Set(normalizeThemeIdList(prefs.ownedThemeIds));
         if (owned.has(themeId)) {
           await client.query("COMMIT");
@@ -8864,7 +8913,7 @@ app.post("/api/themes/purchase", strictLimiter, requireLogin, express.json({ lim
         }
         const nextGold = gold - theme.goldPrice;
         owned.add(themeId);
-        const nextPrefs = normalizePrefs({ ...prefs, ownedThemeIds: Array.from(owned) });
+        const nextPrefs = normalizePrefs({ ...prefs, ownedThemeIds: Array.from(owned) }, req.session.user.role);
         await client.query("UPDATE users SET gold = $1, prefs_json = $2::jsonb WHERE id = $3", [
           nextGold,
           JSON.stringify(nextPrefs),
@@ -8891,7 +8940,7 @@ app.post("/api/themes/purchase", strictLimiter, requireLogin, express.json({ lim
   db.get("SELECT gold, prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
     if (!row) return res.status(404).json({ ok: false, error: "user_not_found" });
     const gold = Number(row.gold || 0);
-    const prefs = normalizePrefs(safeJsonParse(row.prefs_json, {}));
+    const prefs = normalizePrefs(safeJsonParse(row.prefs_json, {}), req.session.user.role);
     const owned = new Set(normalizeThemeIdList(prefs.ownedThemeIds));
     if (owned.has(themeId)) {
       return res.json({ ok: true, gold, ownedThemeIds: Array.from(owned) });
@@ -8901,7 +8950,7 @@ app.post("/api/themes/purchase", strictLimiter, requireLogin, express.json({ lim
     }
     const nextGold = gold - theme.goldPrice;
     owned.add(themeId);
-    const nextPrefs = normalizePrefs({ ...prefs, ownedThemeIds: Array.from(owned) });
+    const nextPrefs = normalizePrefs({ ...prefs, ownedThemeIds: Array.from(owned) }, req.session.user.role);
     db.run(
       "UPDATE users SET gold = ?, prefs_json = ? WHERE id = ?",
       [nextGold, JSON.stringify(nextPrefs), userId],
@@ -8974,7 +9023,7 @@ function enforcePinnedLimit(prefs, role) {
   prefs.pinnedThemeIds = normalizeThemeIdList(prefs.pinnedThemeIds).slice(0, maxPins);
   return prefs;
 }
-function normalizePrefs(raw) {
+function normalizePrefs(raw, role = "User") {
   const prefs = raw && typeof raw === "object" ? raw : {};
   const dmBadgePrefs = { ...PREFS_DEFAULTS.dmBadgePrefs };
   if (prefs.dmBadgePrefs && typeof prefs.dmBadgePrefs === "object") {
@@ -8998,11 +9047,11 @@ function normalizePrefs(raw) {
     dmThemePrefs,
     sound: normalizeSoundPrefs(prefs.sound),
     chatFx: sanitizeChatFx(prefs.chatFx),
-    textStyle: sanitizeTextStyle(prefs.textStyle),
-    customization: sanitizeCustomization(prefs.customization, prefs.textStyle)
+    textStyle: sanitizeTextStyle(prefs.textStyle, role),
+    customization: sanitizeCustomization(prefs.customization, prefs.textStyle, role)
   };
 }
-function sanitizePrefsInput(p) {
+function sanitizePrefsInput(p, role = "User") {
   const out = {};
   if (p && typeof p === "object") {
     if (p.dmBadgePrefs && typeof p.dmBadgePrefs === "object") out.dmBadgePrefs = p.dmBadgePrefs;
@@ -9011,16 +9060,16 @@ function sanitizePrefsInput(p) {
     if (Array.isArray(p.pinnedThemeIds)) out.pinnedThemeIds = normalizeThemeIdList(p.pinnedThemeIds);
     if (Array.isArray(p.favoriteThemeIds)) out.favoriteThemeIds = normalizeThemeIdList(p.favoriteThemeIds);
     if (p.chatFx && typeof p.chatFx === "object") out.chatFx = sanitizeChatFx(p.chatFx);
-    if (p.textStyle && typeof p.textStyle === "object") out.textStyle = sanitizeTextStyle(p.textStyle);
+    if (p.textStyle && typeof p.textStyle === "object") out.textStyle = sanitizeTextStyle(p.textStyle, role);
     if (p.customization && typeof p.customization === "object") {
-      out.customization = sanitizeCustomization(p.customization, p.textStyle);
+      out.customization = sanitizeCustomization(p.customization, p.textStyle, role);
     }
     if (p.userNameStyle && typeof p.userNameStyle === "object") {
-      out.customization = sanitizeCustomization({ userNameStyle: p.userNameStyle }, p.textStyle);
+      out.customization = sanitizeCustomization({ userNameStyle: p.userNameStyle }, p.textStyle, role);
     }
     if (p.messageTextStyle && typeof p.messageTextStyle === "object") {
-      const existing = out.customization || sanitizeCustomization(p.customization, p.textStyle) || {};
-      out.customization = sanitizeCustomization({ ...existing, messageTextStyle: p.messageTextStyle }, p.textStyle);
+      const existing = out.customization || sanitizeCustomization(p.customization, p.textStyle, role) || {};
+      out.customization = sanitizeCustomization({ ...existing, messageTextStyle: p.messageTextStyle }, p.textStyle, role);
     }
     if (p.sound && typeof p.sound === "object") {
       const sound = {};
@@ -9078,8 +9127,8 @@ function emitUserFxUpdate(socket) {
   io.emit("user fx updated", {
     userId: socket.user.id,
     username: socket.user.username,
-    chatFx: mergeChatFxWithCustomization(socket.user.chatFx, socket.user.customization, socket.user.textStyle),
-    customization: sanitizeCustomization(socket.user.customization, socket.user.textStyle)
+    chatFx: mergeChatFxWithCustomization(socket.user.chatFx, socket.user.customization, socket.user.textStyle, socket.user.role),
+    customization: sanitizeCustomization(socket.user.customization, socket.user.textStyle, socket.user.role)
   });
 }
 
@@ -9096,19 +9145,41 @@ function updateLiveCustomization(userId, customization, textStyle) {
   const sid = socketIdByUserId.get(userId);
   const s = sid ? io.sockets.sockets.get(sid) : null;
   if (!s?.user) return;
-  s.user.customization = sanitizeCustomization(customization, textStyle);
-  s.user.textStyle = sanitizeTextStyle(textStyle);
+  s.user.customization = sanitizeCustomization(customization, textStyle, s.user.role);
+  s.user.textStyle = sanitizeTextStyle(textStyle, s.user.role);
   if (s.currentRoom) emitUserList(s.currentRoom);
   emitUserFxUpdate(s);
 }
 
+// API endpoint to get text style presets (gradient and neon)
+app.get("/api/text-style-presets", requireLogin, (req, res) => {
+  const userRole = req.session.user?.role || "User";
+  const isVip = requireMinRole(userRole, "VIP");
+  
+  // Only VIP+ users can access gradient and neon presets
+  if (!isVip) {
+    return res.json({
+      gradients: {},
+      neons: {},
+      vipRequired: true
+    });
+  }
+  
+  return res.json({
+    gradients: GRADIENT_PRESETS,
+    neons: NEON_PRESETS,
+    vipRequired: false
+  });
+});
+
 app.get("/api/me/prefs", requireLogin, async (req, res) => {
   const userId = req.session.user.id;
+  const userRole = req.session.user.role || "User";
   try {
     // Prefer Postgres if the user exists there
     if (await pgUserExists(userId)) {
       const { rows } = await pgPool.query("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
-      const prefs = normalizePrefs(safeJsonParse(rows?.[0]?.prefs_json, {}));
+      const prefs = normalizePrefs(safeJsonParse(rows?.[0]?.prefs_json, {}), userRole);
       return res.json({ prefs });
     }
   } catch (e) {
@@ -9117,14 +9188,15 @@ app.get("/api/me/prefs", requireLogin, async (req, res) => {
 
   db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (err, row) => {
     if (err) return res.status(500).send("Failed");
-    const prefs = normalizePrefs(safeJsonParse(row?.prefs_json, {}));
+    const prefs = normalizePrefs(safeJsonParse(row?.prefs_json, {}), userRole);
     return res.json({ prefs });
   });
 });
 
 app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
   const userId = req.session.user.id;
-  const incoming = sanitizePrefsInput(req.body?.prefs ?? req.body);
+  const userRole = req.session.user.role || "User";
+  const incoming = sanitizePrefsInput(req.body?.prefs ?? req.body, userRole);
   const shouldUpdateChatFx = Object.prototype.hasOwnProperty.call(incoming || {}, "chatFx");
   const shouldUpdateTextStyle = Object.prototype.hasOwnProperty.call(incoming || {}, "textStyle");
   const shouldUpdateCustomization = Object.prototype.hasOwnProperty.call(incoming || {}, "customization")
@@ -9135,14 +9207,15 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
     if (await pgUserExists(userId)) {
       const { rows } = await pgPool.query("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
       const current = safeJsonParse(rows?.[0]?.prefs_json, {});
-      const currentPrefs = normalizePrefs(current || {});
+      const currentPrefs = normalizePrefs(current || {}, userRole);
       const mergedCustomization = sanitizeCustomization(
         { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
-        currentPrefs.textStyle || incoming.textStyle
+        currentPrefs.textStyle || incoming.textStyle,
+        userRole
       );
       const merged = enforcePinnedLimit(
-        normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }),
-        req.session.user.role
+        normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }, userRole),
+        userRole
       );
       // IMPORTANT: node-postgres does not reliably serialize plain JS objects to JSON/JSONB.
       // Always stringify and cast to jsonb to ensure prefs are actually persisted.
@@ -9155,10 +9228,10 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
         updateLiveChatFx(userId, merged.chatFx);
       }
       if (shouldUpdateTextStyle) {
-        req.session.user.textStyle = sanitizeTextStyle(merged.textStyle);
+        req.session.user.textStyle = sanitizeTextStyle(merged.textStyle, userRole);
       }
       if (shouldUpdateCustomization) {
-        req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle);
+        req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle, userRole);
         updateLiveCustomization(userId, merged.customization, merged.textStyle);
       }
       return res.json({ ok: true, prefs: merged });
@@ -9170,14 +9243,15 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
   // SQLite fallback
   db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
     const current = safeJsonParse(row?.prefs_json, {});
-    const currentPrefs = normalizePrefs(current || {});
+    const currentPrefs = normalizePrefs(current || {}, userRole);
     const mergedCustomization = sanitizeCustomization(
       { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
-      currentPrefs.textStyle || incoming.textStyle
+      currentPrefs.textStyle || incoming.textStyle,
+      userRole
     );
     const merged = enforcePinnedLimit(
-      normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }),
-      req.session.user.role
+      normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }, userRole),
+      userRole
     );
     db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId], (err2) => {
       if (err2) return res.status(500).send("Failed");
@@ -9186,10 +9260,10 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
         updateLiveChatFx(userId, merged.chatFx);
       }
       if (shouldUpdateTextStyle) {
-        req.session.user.textStyle = sanitizeTextStyle(merged.textStyle);
+        req.session.user.textStyle = sanitizeTextStyle(merged.textStyle, userRole);
       }
       if (shouldUpdateCustomization) {
-        req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle);
+        req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle, userRole);
         updateLiveCustomization(userId, merged.customization, merged.textStyle);
       }
       return res.json({ ok: true, prefs: merged });
@@ -9199,11 +9273,12 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
 
 app.post("/api/profile/customization", strictLimiter, requireLogin, async (req, res) => {
   const userId = req.session.user.id;
+  const userRole = req.session.user.role || "User";
   const rawCustomization = req.body?.customization ?? {
     userNameStyle: req.body?.userNameStyle,
     messageTextStyle: req.body?.messageTextStyle
   };
-  const incoming = sanitizePrefsInput({ customization: rawCustomization, textStyle: req.body?.textStyle });
+  const incoming = sanitizePrefsInput({ customization: rawCustomization, textStyle: req.body?.textStyle }, userRole);
   const shouldUpdateCustomization = Object.prototype.hasOwnProperty.call(incoming || {}, "customization");
   if (!shouldUpdateCustomization) return res.status(400).send("Invalid customization");
 
@@ -9211,18 +9286,19 @@ app.post("/api/profile/customization", strictLimiter, requireLogin, async (req, 
     if (await pgUserExists(userId)) {
       const { rows } = await pgPool.query("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
       const current = safeJsonParse(rows?.[0]?.prefs_json, {});
-      const currentPrefs = normalizePrefs(current || {});
+      const currentPrefs = normalizePrefs(current || {}, userRole);
       const mergedCustomization = sanitizeCustomization(
         { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
-        currentPrefs.textStyle || incoming.textStyle
+        currentPrefs.textStyle || incoming.textStyle,
+        userRole
       );
       const merged = enforcePinnedLimit(
-        normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }),
-        req.session.user.role
+        normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }, userRole),
+        userRole
       );
       await pgPool.query("UPDATE users SET prefs_json = $1::jsonb WHERE id = $2", [JSON.stringify(merged), userId]);
       db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId]);
-      req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle);
+      req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle, userRole);
       updateLiveCustomization(userId, merged.customization, merged.textStyle);
       return res.json({ ok: true, customization: merged.customization, prefs: merged });
     }
@@ -9232,18 +9308,19 @@ app.post("/api/profile/customization", strictLimiter, requireLogin, async (req, 
 
   db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
     const current = safeJsonParse(row?.prefs_json, {});
-    const currentPrefs = normalizePrefs(current || {});
+    const currentPrefs = normalizePrefs(current || {}, userRole);
     const mergedCustomization = sanitizeCustomization(
       { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
-      currentPrefs.textStyle || incoming.textStyle
+      currentPrefs.textStyle || incoming.textStyle,
+      userRole
     );
     const merged = enforcePinnedLimit(
-      normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }),
-      req.session.user.role
+      normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }, userRole),
+      userRole
     );
     db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId], (err2) => {
       if (err2) return res.status(500).send("Failed");
-      req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle);
+      req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle, userRole);
       updateLiveCustomization(userId, merged.customization, merged.textStyle);
       return res.json({ ok: true, customization: merged.customization, prefs: merged });
     });
@@ -14389,8 +14466,8 @@ async function emitUserList(room) {
         mood: s.user.mood || "",
         avatar: s.user.avatar || "",
         vibe_tags: sanitizeVibeTags(s.user.vibe_tags || []),
-        chatFx: mergeChatFxWithCustomization(s.user.chatFx, s.user.customization, s.user.textStyle),
-        customization: sanitizeCustomization(s.user.customization, s.user.textStyle),
+        chatFx: mergeChatFxWithCustomization(s.user.chatFx, s.user.customization, s.user.textStyle, s.user.role),
+        customization: sanitizeCustomization(s.user.customization, s.user.textStyle, s.user.role),
       });
     }
   }
@@ -14643,8 +14720,8 @@ io.on("connection", async (socket) => {
     avatar: sessUser.avatar || "",
     vibe_tags: Array.isArray(sessUser.vibe_tags) ? sessUser.vibe_tags : [],
     chatFx: sanitizeChatFx(sessUser.chatFx),
-    textStyle: sanitizeTextStyle(sessUser.textStyle),
-    customization: sanitizeCustomization(sessUser.customization, sessUser.textStyle),
+    textStyle: sanitizeTextStyle(sessUser.textStyle, sessUser.role),
+    customization: sanitizeCustomization(sessUser.customization, sessUser.textStyle, sessUser.role),
   };
 
   // --- Owner session map: register basic meta
@@ -14749,8 +14826,8 @@ if (existingSid && existingSid !== socket.id) {
         socket.user.vibe_tags = sanitizeVibeTags(r.vibe_tags || []);
         const prefs = safeJsonParse(r?.prefs_json, {});
         socket.user.chatFx = sanitizeChatFx(prefs?.chatFx);
-        socket.user.textStyle = sanitizeTextStyle(prefs?.textStyle);
-        socket.user.customization = sanitizeCustomization(prefs?.customization, prefs?.textStyle);
+        socket.user.textStyle = sanitizeTextStyle(prefs?.textStyle, socket.user.role);
+        socket.user.customization = sanitizeCustomization(prefs?.customization, prefs?.textStyle, socket.user.role);
         if (socket.currentRoom) emitUserList(socket.currentRoom);
       }
       return;
@@ -14770,8 +14847,8 @@ if (existingSid && existingSid !== socket.id) {
         socket.user.vibe_tags = sanitizeVibeTags(row.vibe_tags || []);
         const prefs = safeJsonParse(row?.prefs_json, {});
         socket.user.chatFx = sanitizeChatFx(prefs?.chatFx);
-        socket.user.textStyle = sanitizeTextStyle(prefs?.textStyle);
-        socket.user.customization = sanitizeCustomization(prefs?.customization, prefs?.textStyle);
+        socket.user.textStyle = sanitizeTextStyle(prefs?.textStyle, socket.user.role);
+        socket.user.customization = sanitizeCustomization(prefs?.customization, prefs?.textStyle, socket.user.role);
         if (socket.currentRoom) emitUserList(socket.currentRoom);
       }
     }
