@@ -138,11 +138,8 @@ if (checks.failed.length > 0) {
 
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-const total = checks.passed.length + checks.warnings.length + checks.failed.length;
-const score = ((checks.passed.length / total) * 100).toFixed(0);
-
 if (checks.failed.length === 0) {
-  console.log(`\n✅ Environment ready! (${checks.passed.length}/${total} checks passed)\n`);
+  console.log(`\n✅ Environment ready! (${checks.passed.length}/${checks.passed.length + checks.warnings.length} checks passed)\n`);
   console.log('Next steps:');
   console.log('  1. Run: npm run dev');
   console.log('  2. Open: http://localhost:3000');
