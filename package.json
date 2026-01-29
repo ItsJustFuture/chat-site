@@ -8,6 +8,7 @@
     "start": "node server.js",
     "dev": "LOCAL_DEV=1 node server.js",
     "dev:seed": "LOCAL_DEV=1 node scripts/dev-seed.js",
+    "dev:verify": "node scripts/verify-env.js",
     "test": "echo \"No tests yet\" && exit 0",
     "test:dice": "node scripts/dice-variant-smoke.js",
     "test:couples": "node scripts/couples-regression.js",
@@ -44,7 +45,10 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "supertest": "^7.2.2"
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.1.0",
+    "supertest": "^7.2.2",
+    "typescript": "^5.9.3"
   },
   "overrides": {
     "qs": "^6.14.1"
