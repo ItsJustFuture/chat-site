@@ -3256,9 +3256,56 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
 </script>
 
 <script>
-// Profile Save Handler
+// Profile Load and Save Handler
 (function() {
   'use strict';
+  
+  /**
+   * Load user's profile data into the edit form
+   */
+  async function loadProfileData() {
+    try {
+      const response = await fetch('/profile');
+      
+      if (!response.ok) {
+        console.error('[profile] Failed to load profile:', response.status);
+        return;
+      }
+      
+      const profile = await response.json();
+      
+      if (!profile) {
+        console.error('[profile] No profile data returned');
+        return;
+      }
+      
+      // Populate form fields
+      const moodInput = document.getElementById('editMood');
+      const bioInput = document.getElementById('editBio');
+      const ageInput = document.getElementById('editAge');
+      const genderSelect = document.getElementById('editGender');
+      
+      if (moodInput) moodInput.value = profile.mood || '';
+      if (bioInput) bioInput.value = profile.bio || '';
+      if (ageInput) ageInput.value = profile.age || '';
+      if (genderSelect) genderSelect.value = profile.gender || '';
+      
+      // Load vibe tags if the function is available
+      if (profile.vibe_tags && window.setSelectedVibeTags) {
+        window.setSelectedVibeTags(profile.vibe_tags);
+      }
+      
+      // Load header gradient colors if they exist
+      const headerColorA = document.getElementById('headerColorA');
+      const headerColorB = document.getElementById('headerColorB');
+      if (headerColorA && profile.header_grad_a) headerColorA.value = profile.header_grad_a;
+      if (headerColorB && profile.header_grad_b) headerColorB.value = profile.header_grad_b;
+      
+      console.log('[profile] Profile data loaded successfully');
+    } catch (error) {
+      console.error('[profile] Error loading profile:', error);
+    }
+  }
   
   /**
    * Handle profile save button click
@@ -3338,13 +3385,35 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
   }
   
   /**
-   * Initialize profile save handler
+   * Initialize profile save handler and load data when edit section is shown
    */
   function initProfileSave() {
     const saveBtn = document.getElementById('saveProfileBtn');
     if (saveBtn) {
       saveBtn.addEventListener('click', handleProfileSave);
       console.log('[profile] Save handler initialized');
+    }
+    
+    // Load profile data when edit section becomes visible
+    const profileEditSection = document.getElementById('profileEditSection');
+    if (profileEditSection) {
+      const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+          if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+            const isVisible = profileEditSection.style.display !== 'none';
+            if (isVisible) {
+              loadProfileData();
+            }
+          }
+        });
+      });
+      
+      observer.observe(profileEditSection, { attributes: true });
+      
+      // Also load immediately if section is already visible
+      if (profileEditSection.style.display !== 'none') {
+        loadProfileData();
+      }
     }
   }
   
