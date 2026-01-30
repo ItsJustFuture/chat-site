@@ -220,6 +220,41 @@
     }
   };
 
+  // ===== Leaderboard Category Dropdown =====
+  function initLeaderboardDropdown() {
+    const categorySelect = document.getElementById('leaderboardCategorySelect');
+    const leaderboardCards = document.querySelectorAll('.leaderboardCard');
+    
+    if (!categorySelect || leaderboardCards.length === 0) {
+      return; // Elements not found, likely not on leaderboards page
+    }
+    
+    // Handle dropdown change
+    categorySelect.addEventListener('change', function() {
+      const selectedCategory = this.value;
+      
+      // Hide all leaderboard cards
+      leaderboardCards.forEach(card => {
+        card.classList.add('hidden');
+      });
+      
+      // Show only the selected category
+      const selectedCard = document.querySelector(`.leaderboardCard[data-leaderboard-category="${selectedCategory}"]`);
+      if (selectedCard) {
+        selectedCard.classList.remove('hidden');
+      }
+    });
+    
+    console.log('[app.js] Leaderboard dropdown initialized');
+  }
+
+  // Initialize leaderboard dropdown when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initLeaderboardDropdown);
+  } else {
+    initLeaderboardDropdown();
+  }
+
   console.log('[app.js] Enhanced client-side features loaded');
 
 })();
