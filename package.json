@@ -15,6 +15,7 @@
     "test:chess": "node scripts/chess-elo-smoke.js",
     "test:smoke": "LOCAL_DEV=1 node scripts/smoke-test.js",
     "test:memory": "node scripts/memory-sanity.js",
+    "test:room-management": "node scripts/test-room-management.js",
     "check": "node --check server.js && node --check public/app.js && node --check public/theme-init.js && node --check database.js",
     "audit": "npm audit --audit-level=high",
     "fund": "npm fund",

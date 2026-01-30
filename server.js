@@ -18154,16 +18154,20 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
         const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [sanitizedNewName]);
         if (rows && rows.length > 0) return safe({ ok: false, error: "Room name already exists" });
         
-        await pgPool.query(`UPDATE rooms SET name = $1 WHERE name = $2`, [sanitizedNewName, roomName]);
         await pgPool.query(`UPDATE room_members SET room_name = $1 WHERE room_name = $2`, [sanitizedNewName, roomName]);
         await pgPool.query(`UPDATE room_bans SET room_name = $1 WHERE room_name = $2`, [sanitizedNewName, roomName]);
+        await pgPool.query(`UPDATE rooms SET name = $1 WHERE name = $2`, [sanitizedNewName, roomName]);
       } else {
         const exists = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [sanitizedNewName]);
         if (exists) return safe({ ok: false, error: "Room name already exists" });
         
-        await dbRunAsync(`UPDATE rooms SET name = ? WHERE name = ?`, [sanitizedNewName, roomName]);
+        // For SQLite, we need to update child tables first since rooms.name is the PK
+        await dbRunAsync(`PRAGMA foreign_keys = OFF`);
         await dbRunAsync(`UPDATE room_members SET room_name = ? WHERE room_name = ?`, [sanitizedNewName, roomName]);
         await dbRunAsync(`UPDATE room_bans SET room_name = ? WHERE room_name = ?`, [sanitizedNewName, roomName]);
+        await dbRunAsync(`UPDATE messages SET room = ? WHERE room = ?`, [sanitizedNewName, roomName]);
+        await dbRunAsync(`UPDATE rooms SET name = ? WHERE name = ?`, [sanitizedNewName, roomName]);
+        await dbRunAsync(`PRAGMA foreign_keys = ON`);
       }
       
       await applyRoomStructureChange({
