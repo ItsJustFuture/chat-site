@@ -13,6 +13,9 @@ if (!fs.existsSync(dbDir)) {
 }
 const db = new sqlite3.Database(DB_FILE);
 
+// Enable foreign keys for SQLite
+db.run("PRAGMA foreign_keys = ON");
+
 function run(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function (err) {

@@ -757,6 +757,44 @@ const pgInitPromise = PG_ENABLED ? (async () => {
       console.warn("[pg-init] room audit table failed:", e?.message || e);
     }
 
+    // Room management tables (owner, admins, bans)
+    try {
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS room_members (
+          id SERIAL PRIMARY KEY,
+          room_name TEXT NOT NULL,
+          user_id INTEGER NOT NULL,
+          role TEXT NOT NULL,
+          assigned_by_user_id INTEGER,
+          assigned_at BIGINT NOT NULL,
+          FOREIGN KEY (room_name) REFERENCES rooms(name) ON DELETE CASCADE,
+          UNIQUE(room_name, user_id)
+        );
+      `);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_members_room ON room_members(room_name)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(user_id)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_members_role ON room_members(room_name, role)`);
+
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS room_bans (
+          id SERIAL PRIMARY KEY,
+          room_name TEXT NOT NULL,
+          user_id INTEGER NOT NULL,
+          banned_by_user_id INTEGER NOT NULL,
+          reason TEXT,
+          banned_at BIGINT NOT NULL,
+          expires_at BIGINT,
+          FOREIGN KEY (room_name) REFERENCES rooms(name) ON DELETE CASCADE,
+          UNIQUE(room_name, user_id)
+        );
+      `);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_bans_room ON room_bans(room_name)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_bans_user ON room_bans(user_id)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_bans_expires ON room_bans(expires_at)`);
+    } catch (e) {
+      console.warn("[pg-init] room management tables failed:", e?.message || e);
+    }
+
     // Changelog tables (Postgres) — ensures changelog persists across restarts
     await pgPool.query(`
       CREATE SEQUENCE IF NOT EXISTS changelog_seq;
@@ -4529,6 +4567,26 @@ const commandRegistry = {
         actorUserId: actor?.id,
         auditPayload: { name, category_id: categoryId },
       });
+      
+      // Assign creator as room owner
+      if (actor?.id) {
+        const now = Date.now();
+        if (await pgUsersEnabled()) {
+          await pgPool.query(
+            `INSERT INTO room_members (room_name, user_id, role, assigned_by_user_id, assigned_at)
+             VALUES ($1, $2, 'owner', $2, $3)
+             ON CONFLICT (room_name, user_id) DO UPDATE SET role = 'owner'`,
+            [name, actor.id, now]
+          );
+        } else {
+          await dbRunAsync(
+            `INSERT OR REPLACE INTO room_members (room_name, user_id, role, assigned_by_user_id, assigned_at)
+             VALUES (?, ?, 'owner', ?, ?)`,
+            [name, actor.id, actor.id, now]
+          );
+        }
+      }
+      
       return { ok: true, message: `Created room #${name}` };
     },
   },
@@ -15485,8 +15543,19 @@ enforceVipGate(desired, (allowed) => {
   db.get(
   `SELECT name, vip_only, staff_only, min_level, is_locked, maintenance_mode, archived FROM rooms WHERE name=?`,
   [desired],
-  (_err, row) => {
+  async (_err, row) => {
     if (!row) return doJoin("main", status);
+
+    // Check room ban first
+    if (socket.user?.id) {
+      const isBanned = await isUserBannedFromRoom(desired, socket.user.id);
+      if (isBanned) {
+        try { 
+          socket.emit("system", buildSystemPayload("__global__", "You are banned from that room.", { kind: "global" })); 
+        } catch (_) {}
+        return doJoin("main", status);
+      }
+    }
 
     // Enforce room visibility gates
     if (!canAccessRoomBySettings(sessUser, row)) {
@@ -18018,6 +18087,375 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
       });
     });
   });
+
+  // ======== Room Management Handlers ========
+  
+  // Helper to check room role
+  async function getUserRoomRole(roomName, userId) {
+    try {
+      if (await pgUsersEnabled()) {
+        const { rows } = await pgPool.query(
+          `SELECT role FROM room_members WHERE room_name = $1 AND user_id = $2 LIMIT 1`,
+          [roomName, userId]
+        );
+        return rows?.[0]?.role || null;
+      } else {
+        const row = await dbGetAsync(
+          `SELECT role FROM room_members WHERE room_name = ? AND user_id = ? LIMIT 1`,
+          [roomName, userId]
+        );
+        return row?.role || null;
+      }
+    } catch (e) {
+      console.error("[getUserRoomRole] error:", e);
+      return null;
+    }
+  }
+
+  // Helper to check if user is banned from room
+  async function isUserBannedFromRoom(roomName, userId) {
+    try {
+      const now = Date.now();
+      if (await pgUsersEnabled()) {
+        const { rows } = await pgPool.query(
+          `SELECT expires_at FROM room_bans WHERE room_name = $1 AND user_id = $2 AND (expires_at IS NULL OR expires_at > $3) LIMIT 1`,
+          [roomName, userId, now]
+        );
+        return rows && rows.length > 0;
+      } else {
+        const row = await dbGetAsync(
+          `SELECT expires_at FROM room_bans WHERE room_name = ? AND user_id = ? AND (expires_at IS NULL OR expires_at > ?) LIMIT 1`,
+          [roomName, userId, now]
+        );
+        return !!row;
+      }
+    } catch (e) {
+      console.error("[isUserBannedFromRoom] error:", e);
+      return false;
+    }
+  }
+
+  // Rename room (owner only)
+  socket.on("room:rename", async ({ roomName, newName }, respond) => {
+    const safe = typeof respond === "function" ? respond : () => {};
+    
+    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
+    if (!roomName || !newName) return safe({ ok: false, error: "Missing room name" });
+    
+    try {
+      const sanitizedNewName = sanitizeRoomName(newName);
+      if (!sanitizedNewName) return safe({ ok: false, error: "Invalid room name" });
+      
+      const role = await getUserRoomRole(roomName, socket.user.id);
+      if (role !== "owner") return safe({ ok: false, error: "Only room owner can rename" });
+      
+      // Check if new name already exists
+      if (await pgUsersEnabled()) {
+        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [sanitizedNewName]);
+        if (rows && rows.length > 0) return safe({ ok: false, error: "Room name already exists" });
+        
+        await pgPool.query(`UPDATE room_members SET room_name = $1 WHERE room_name = $2`, [sanitizedNewName, roomName]);
+        await pgPool.query(`UPDATE room_bans SET room_name = $1 WHERE room_name = $2`, [sanitizedNewName, roomName]);
+        await pgPool.query(`UPDATE rooms SET name = $1 WHERE name = $2`, [sanitizedNewName, roomName]);
+      } else {
+        const exists = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [sanitizedNewName]);
+        if (exists) return safe({ ok: false, error: "Room name already exists" });
+        
+        // For SQLite, we need to update child tables first since rooms.name is the PK
+        await dbRunAsync(`PRAGMA foreign_keys = OFF`);
+        await dbRunAsync(`UPDATE room_members SET room_name = ? WHERE room_name = ?`, [sanitizedNewName, roomName]);
+        await dbRunAsync(`UPDATE room_bans SET room_name = ? WHERE room_name = ?`, [sanitizedNewName, roomName]);
+        await dbRunAsync(`UPDATE messages SET room = ? WHERE room = ?`, [sanitizedNewName, roomName]);
+        await dbRunAsync(`UPDATE rooms SET name = ? WHERE name = ?`, [sanitizedNewName, roomName]);
+        await dbRunAsync(`PRAGMA foreign_keys = ON`);
+      }
+      
+      await applyRoomStructureChange({
+        action: "room.rename",
+        actorUserId: socket.user.id,
+        auditPayload: { oldName: roomName, newName: sanitizedNewName },
+      });
+      
+      safe({ ok: true, oldName: roomName, newName: sanitizedNewName });
+    } catch (e) {
+      console.error("[room:rename] error:", e);
+      safe({ ok: false, error: "Rename failed" });
+    }
+  });
+
+  // Promote user to room admin or helper (owner only)
+  socket.on("room:promote", async ({ roomName, userId, role }, respond) => {
+    const safe = typeof respond === "function" ? respond : () => {};
+    
+    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
+    if (!roomName || !userId || !role) return safe({ ok: false, error: "Missing parameters" });
+    if (!["admin", "helper"].includes(role)) return safe({ ok: false, error: "Invalid role" });
+    
+    try {
+      const actorRole = await getUserRoomRole(roomName, socket.user.id);
+      if (actorRole !== "owner") return safe({ ok: false, error: "Only room owner can promote users" });
+      
+      const now = Date.now();
+      if (await pgUsersEnabled()) {
+        await pgPool.query(
+          `INSERT INTO room_members (room_name, user_id, role, assigned_by_user_id, assigned_at)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (room_name, user_id) DO UPDATE SET role = $3, assigned_by_user_id = $4, assigned_at = $5`,
+          [roomName, userId, role, socket.user.id, now]
+        );
+      } else {
+        await dbRunAsync(
+          `INSERT OR REPLACE INTO room_members (room_name, user_id, role, assigned_by_user_id, assigned_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          [roomName, userId, role, socket.user.id, now]
+        );
+      }
+      
+      safe({ ok: true, userId, role });
+    } catch (e) {
+      console.error("[room:promote] error:", e);
+      safe({ ok: false, error: "Promotion failed" });
+    }
+  });
+
+  // Demote user (owner only)
+  socket.on("room:demote", async ({ roomName, userId }, respond) => {
+    const safe = typeof respond === "function" ? respond : () => {};
+    
+    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
+    if (!roomName || !userId) return safe({ ok: false, error: "Missing parameters" });
+    
+    try {
+      const actorRole = await getUserRoomRole(roomName, socket.user.id);
+      if (actorRole !== "owner") return safe({ ok: false, error: "Only room owner can demote users" });
+      
+      if (await pgUsersEnabled()) {
+        await pgPool.query(
+          `DELETE FROM room_members WHERE room_name = $1 AND user_id = $2 AND role != 'owner'`,
+          [roomName, userId]
+        );
+      } else {
+        await dbRunAsync(
+          `DELETE FROM room_members WHERE room_name = ? AND user_id = ? AND role != 'owner'`,
+          [roomName, userId]
+        );
+      }
+      
+      safe({ ok: true, userId });
+    } catch (e) {
+      console.error("[room:demote] error:", e);
+      safe({ ok: false, error: "Demotion failed" });
+    }
+  });
+
+  // Ban user from room (owner or admin)
+  socket.on("room:ban", async ({ roomName, userId, duration, reason }, respond) => {
+    const safe = typeof respond === "function" ? respond : () => {};
+    
+    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
+    if (!roomName || !userId) return safe({ ok: false, error: "Missing parameters" });
+    
+    try {
+      const actorRole = await getUserRoomRole(roomName, socket.user.id);
+      if (!["owner", "admin"].includes(actorRole)) {
+        return safe({ ok: false, error: "Only room owner or admin can ban users" });
+      }
+      
+      // Duration in milliseconds, null for permanent
+      const now = Date.now();
+      let expiresAt = null;
+      
+      if (duration && duration !== "forever") {
+        const durationMs = parseBanDuration(duration);
+        if (durationMs) {
+          expiresAt = now + durationMs;
+        }
+      }
+      
+      // Only room owner can ban for more than 7 days
+      const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+      const durationMs = parseBanDuration(duration);
+      const isLongBan = duration === "forever" || (durationMs && durationMs > sevenDaysMs);
+      
+      if (isLongBan && actorRole !== "owner") {
+        return safe({ ok: false, error: "Only room owner can ban for more than 7 days" });
+      }
+      
+      if (await pgUsersEnabled()) {
+        await pgPool.query(
+          `INSERT INTO room_bans (room_name, user_id, banned_by_user_id, reason, banned_at, expires_at)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (room_name, user_id) DO UPDATE SET 
+           banned_by_user_id = $3, reason = $4, banned_at = $5, expires_at = $6`,
+          [roomName, userId, socket.user.id, reason || null, now, expiresAt]
+        );
+      } else {
+        await dbRunAsync(
+          `INSERT OR REPLACE INTO room_bans (room_name, user_id, banned_by_user_id, reason, banned_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [roomName, userId, socket.user.id, reason || null, now, expiresAt]
+        );
+      }
+      
+      // Kick user from room if they're currently in it
+      const targetSocketId = socketIdByUserId.get(userId);
+      if (targetSocketId) {
+        const targetSocket = io.sockets.sockets.get(targetSocketId);
+        if (targetSocket && targetSocket.currentRoom === roomName) {
+          targetSocket.leave(roomName);
+          targetSocket.emit("room:banned", { roomName, reason, expiresAt });
+        }
+      }
+      
+      safe({ ok: true, userId, expiresAt });
+    } catch (e) {
+      console.error("[room:ban] error:", e);
+      safe({ ok: false, error: "Ban failed" });
+    }
+  });
+
+  // Unban user from room (owner or admin)
+  socket.on("room:unban", async ({ roomName, userId }, respond) => {
+    const safe = typeof respond === "function" ? respond : () => {};
+    
+    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
+    if (!roomName || !userId) return safe({ ok: false, error: "Missing parameters" });
+    
+    try {
+      const actorRole = await getUserRoomRole(roomName, socket.user.id);
+      if (!["owner", "admin"].includes(actorRole)) {
+        return safe({ ok: false, error: "Only room owner or admin can unban users" });
+      }
+      
+      if (await pgUsersEnabled()) {
+        await pgPool.query(`DELETE FROM room_bans WHERE room_name = $1 AND user_id = $2`, [roomName, userId]);
+      } else {
+        await dbRunAsync(`DELETE FROM room_bans WHERE room_name = ? AND user_id = ?`, [roomName, userId]);
+      }
+      
+      safe({ ok: true, userId });
+    } catch (e) {
+      console.error("[room:unban] error:", e);
+      safe({ ok: false, error: "Unban failed" });
+    }
+  });
+
+  // Get room members and their roles
+  socket.on("room:members", async ({ roomName }, respond) => {
+    const safe = typeof respond === "function" ? respond : () => {};
+    
+    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
+    if (!roomName) return safe({ ok: false, error: "Missing room name" });
+    
+    try {
+      let members = [];
+      
+      if (await pgUsersEnabled()) {
+        const { rows } = await pgPool.query(
+          `SELECT rm.user_id, rm.role, u.username, rm.assigned_at 
+           FROM room_members rm
+           JOIN users u ON u.id = rm.user_id
+           WHERE rm.room_name = $1
+           ORDER BY 
+             CASE rm.role 
+               WHEN 'owner' THEN 1 
+               WHEN 'admin' THEN 2 
+               WHEN 'helper' THEN 3 
+               ELSE 4 
+             END, 
+             rm.assigned_at ASC`,
+          [roomName]
+        );
+        members = rows || [];
+      } else {
+        members = await dbAllAsync(
+          `SELECT rm.user_id, rm.role, u.username, rm.assigned_at 
+           FROM room_members rm
+           JOIN users u ON u.id = rm.user_id
+           WHERE rm.room_name = ?
+           ORDER BY 
+             CASE rm.role 
+               WHEN 'owner' THEN 1 
+               WHEN 'admin' THEN 2 
+               WHEN 'helper' THEN 3 
+               ELSE 4 
+             END, 
+             rm.assigned_at ASC`,
+          [roomName]
+        );
+      }
+      
+      safe({ ok: true, members });
+    } catch (e) {
+      console.error("[room:members] error:", e);
+      safe({ ok: false, error: "Failed to fetch members" });
+    }
+  });
+
+  // Get room bans
+  socket.on("room:bans", async ({ roomName }, respond) => {
+    const safe = typeof respond === "function" ? respond : () => {};
+    
+    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
+    if (!roomName) return safe({ ok: false, error: "Missing room name" });
+    
+    try {
+      const actorRole = await getUserRoomRole(roomName, socket.user.id);
+      if (!["owner", "admin"].includes(actorRole)) {
+        return safe({ ok: false, error: "Only room owner or admin can view bans" });
+      }
+      
+      let bans = [];
+      
+      if (await pgUsersEnabled()) {
+        const { rows } = await pgPool.query(
+          `SELECT rb.user_id, u.username, rb.reason, rb.banned_at, rb.expires_at, b.username as banned_by
+           FROM room_bans rb
+           JOIN users u ON u.id = rb.user_id
+           LEFT JOIN users b ON b.id = rb.banned_by_user_id
+           WHERE rb.room_name = $1
+           ORDER BY rb.banned_at DESC`,
+          [roomName]
+        );
+        bans = rows || [];
+      } else {
+        bans = await dbAllAsync(
+          `SELECT rb.user_id, u.username, rb.reason, rb.banned_at, rb.expires_at, b.username as banned_by
+           FROM room_bans rb
+           JOIN users u ON u.id = rb.user_id
+           LEFT JOIN users b ON b.id = rb.banned_by_user_id
+           WHERE rb.room_name = ?
+           ORDER BY rb.banned_at DESC`,
+          [roomName]
+        );
+      }
+      
+      safe({ ok: true, bans });
+    } catch (e) {
+      console.error("[room:bans] error:", e);
+      safe({ ok: false, error: "Failed to fetch bans" });
+    }
+  });
+
+  // Helper function to parse ban duration strings
+  function parseBanDuration(duration) {
+    const durations = {
+      "5m": 5 * 60 * 1000,
+      "10m": 10 * 60 * 1000,
+      "30m": 30 * 60 * 1000,
+      "1h": 60 * 60 * 1000,
+      "2h": 2 * 60 * 60 * 1000,
+      "4h": 4 * 60 * 60 * 1000,
+      "8h": 8 * 60 * 60 * 1000,
+      "24h": 24 * 60 * 60 * 1000,
+      "7d": 7 * 24 * 60 * 60 * 1000,
+      "30d": 30 * 24 * 60 * 60 * 1000,
+      "6mo": 6 * 30 * 24 * 60 * 60 * 1000,
+      "1y": 365 * 24 * 60 * 60 * 1000,
+      "forever": null // Permanent
+    };
+    return durations[duration] || null;
+  }
 
   
   socket.on("refresh user list", () => {
