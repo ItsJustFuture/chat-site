@@ -1930,6 +1930,8 @@ body.auth-pending #authLoading{
 @media (max-width: 860px){
   .loginShell{
     grid-template-columns: 1fr;
+    max-width: 520px;
+    margin: 0 auto;
   }
   .loginBrand{
     text-align:center;
@@ -1942,6 +1944,9 @@ body.auth-pending #authLoading{
 }
 
 @media (max-width: 540px){
+  .loginShell{
+    max-width: 420px;
+  }
   .loginCard{
     padding:20px;
   }
