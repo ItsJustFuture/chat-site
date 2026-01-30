@@ -8153,34 +8153,48 @@ app.post("/register", registerLimiter, async (req, res) => {
 
     const theme = DEFAULT_THEME;
 
-    // 1) Create user in Postgres
-    const createdAtValue = PG_USERS_CREATED_AT_IS_TIMESTAMP ? new Date(createdAt) : createdAt;
-    const { rows } = await pgPool.query(
-      `INSERT INTO users (username, password_hash, role, created_at, theme)
-       VALUES ($1,$2,$3,$4,$5)
-       RETURNING id, username, role, theme`,
-      [username, hash, role, createdAtValue, theme]
-    );
+    let user = null;
+    if (PG_READY && pgPool) {
+      const createdAtValue = PG_USERS_CREATED_AT_IS_TIMESTAMP ? new Date(createdAt) : createdAt;
+      const { rows } = await pgPool.query(
+        `INSERT INTO users (username, password_hash, role, created_at, theme)
+         VALUES ($1,$2,$3,$4,$5)
+         RETURNING id, username, role, theme`,
+        [username, hash, role, createdAtValue, theme]
+      );
+      user = rows[0] || null;
+    } else {
+      const result = await dbRunAsync(
+        `INSERT INTO users (username, password_hash, role, created_at, gold, xp, theme)
+         VALUES (?,?,?,?,?,?,?)`,
+        [username, hash, role, createdAt, 0, 0, sanitizeThemeNameServer(theme)]
+      );
+      const sqliteUser = await dbGetAsync(
+        "SELECT id, username, role, theme FROM users WHERE id = ?",
+        [result?.lastID]
+      );
+      user = sqliteUser || null;
+    }
 
-    const user = rows[0];
     if (!user) return res.status(500).send("Registration failed");
 
-    // 2) Mirror into SQLite
-    try {
-      await dbRunAsync(
-        `INSERT INTO users (id, username, password_hash, role, created_at, gold, xp, theme)
-         VALUES (?,?,?,?,?,?,?,?)`,
-        [user.id, username, hash, role, createdAt, 0, 0, sanitizeThemeNameServer(theme)]
-      );
-    } catch (_e) {
-      await dbRunAsync(
-        `UPDATE users
-            SET username = ?, password_hash = ?, role = ?,
-                created_at = COALESCE(created_at, ?),
-                theme = COALESCE(theme, ?)
-          WHERE id = ?`,
-        [username, hash, role, createdAt, sanitizeThemeNameServer(theme), user.id]
-      );
+    if (PG_READY && pgPool) {
+      try {
+        await dbRunAsync(
+          `INSERT INTO users (id, username, password_hash, role, created_at, gold, xp, theme)
+           VALUES (?,?,?,?,?,?,?,?)`,
+          [user.id, username, hash, role, createdAt, 0, 0, sanitizeThemeNameServer(theme)]
+        );
+      } catch (_e) {
+        await dbRunAsync(
+          `UPDATE users
+              SET username = ?, password_hash = ?, role = ?,
+                  created_at = COALESCE(created_at, ?),
+                  theme = COALESCE(theme, ?)
+            WHERE id = ?`,
+          [username, hash, role, createdAt, sanitizeThemeNameServer(theme), user.id]
+        );
+      }
     }
 
     req.session.regenerate((regenErr) => {
@@ -8424,27 +8438,28 @@ app.post("/login", loginIpLimiter, async (req, res) => {
       });
     }
 
-    // Mirror into Postgres (so /me + progression + persistent systems work)
-    await pgPool.query(
-      `INSERT INTO users (id, username, password_hash, role, created_at, theme, gold, xp)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       ON CONFLICT (username) DO UPDATE
-         SET password_hash = EXCLUDED.password_hash,
-             role = EXCLUDED.role,
-             theme = COALESCE(users.theme, EXCLUDED.theme),
-             gold = COALESCE(users.gold, EXCLUDED.gold),
-             xp = COALESCE(users.xp, EXCLUDED.xp)`,
-      [
-        row.id,
-        row.username,
-        passwordHash,
-        row.role || "User",
-        Number(row.created_at || Date.now()),
-        theme,
-        Number(row.gold || 0),
-        Number(row.xp || 0),
-      ]
-    ).catch((e) => console.error("PG mirror on login failed:", e));
+    if (PG_READY && pgPool) {
+      await pgPool.query(
+        `INSERT INTO users (id, username, password_hash, role, created_at, theme, gold, xp)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (username) DO UPDATE
+           SET password_hash = EXCLUDED.password_hash,
+               role = EXCLUDED.role,
+               theme = COALESCE(users.theme, EXCLUDED.theme),
+               gold = COALESCE(users.gold, EXCLUDED.gold),
+               xp = COALESCE(users.xp, EXCLUDED.xp)`,
+        [
+          row.id,
+          row.username,
+          passwordHash,
+          row.role || "User",
+          Number(row.created_at || Date.now()),
+          theme,
+          Number(row.gold || 0),
+          Number(row.xp || 0),
+        ]
+      ).catch((e) => console.error("PG mirror on login failed:", e));
+    }
 
     req.session.regenerate((regenErr) => {
       if (regenErr) return res.status(500).send("Session failed");
