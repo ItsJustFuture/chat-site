@@ -554,6 +554,7 @@ const pgInitPromise = PG_ENABLED ? (async () => {
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
+        email TEXT,
         password_hash TEXT,
         role TEXT NOT NULL DEFAULT 'User',
         created_at BIGINT,
@@ -988,6 +989,7 @@ try {
     // If your table already existed (older minimal schema), ensure columns exist
     const addCols = [
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'User'`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at BIGINT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT`,
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`,
