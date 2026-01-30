@@ -4590,7 +4590,7 @@ body:not(.polish-pack) .tonePicker{
   transform: rotate(180deg);
 }
 .profileSectionBody{
-  padding: 12px 14px 14px;
+  padding: 8px 10px 10px;
   border-top: 1px solid var(--border);
   display:flex;
   flex-direction:column;

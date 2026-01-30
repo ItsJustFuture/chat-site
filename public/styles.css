@@ -4589,7 +4589,7 @@ body:not(.polish-pack) .tonePicker{
 .profileSections{
   display:flex;
   flex-direction:column;
-  gap:12px;
+  gap:10px;
 }
 .profileSection{
   border:1px solid var(--border);
@@ -4603,10 +4603,14 @@ body:not(.polish-pack) .tonePicker{
   align-items:center;
   justify-content:space-between;
   gap:12px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   font-weight: 700;
   cursor:pointer;
-  min-height: 44px;
+  min-height: 40px;
+  transition: background 120ms ease;
+}
+.profileSection summary:hover{
+  background: var(--hover);
 }
 .profileSection summary::-webkit-details-marker{ display:none; }
 .profileSection summary::after{
@@ -4619,12 +4623,110 @@ body:not(.polish-pack) .tonePicker{
   transform: rotate(180deg);
 }
 .profileSectionBody{
-  padding: 12px 14px 14px;
+  padding: 8px 10px 10px;
   border-top: 1px solid var(--border);
   display:flex;
   flex-direction:column;
-  gap:12px;
+  gap:10px;
 }
+
+/* Nested details within profile sections */
+.profileSectionBody details {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.profileSectionBody details summary {
+  list-style: none;
+  padding: 8px 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.9em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: background 120ms ease;
+}
+
+.profileSectionBody details summary:hover {
+  background: var(--hover);
+}
+
+.profileSectionBody details summary::-webkit-details-marker {
+  display: none;
+}
+
+.profileSectionBody details summary::after {
+  content: "▾";
+  font-size: 11px;
+  opacity: 0.6;
+  transition: transform 140ms ease;
+}
+
+.profileSectionBody details[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.profileSectionBody details > div {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* Nested details within nested details (3rd level) */
+.profileSectionBody details details {
+  margin-top: 6px;
+  margin-bottom: 0;
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.profileSectionBody details details summary {
+  padding: 6px 10px;
+  font-size: 0.85em;
+  font-weight: 500;
+}
+
+.profileSectionBody details details > div {
+  padding: 8px 10px;
+}
+
+/* Compact couples section */
+.couplesCompact .row {
+  gap: 6px !important;
+}
+
+.couplesCompact select,
+.couplesCompact input,
+.couplesCompact button {
+  font-size: 0.9em;
+}
+
+.couplesCompact select[aria-label*="emoji"] {
+  width: 64px !important;
+}
+
+.couplesCompact textarea {
+  min-height: 60px !important;
+  font-size: 0.9em;
+}
+
+.couplesCompact .toggleRow {
+  padding: 6px 0;
+}
+
+/* Stats grid in overview - make it more compact */
+.profileSection[data-section="overview"] .profileInfoGrid {
+  margin-top: 12px;
+  gap: 8px;
+}
+
+.profileSection[data-section="overview"] .profileInfoCard {
+  padding: 8px 10px;
+}
+
 .notificationsModal{
   position: fixed;
   inset: 0;
@@ -5430,7 +5532,7 @@ body:not(.polish-pack) .tonePicker{
 .avatarFrame.role-vip .avatarInner{ color:#0B2B3A; background: rgba(255,255,255,0.65); }
 
 .small{ font-size:12px; color:var(--muted); }
-.sectionTitle{ font-weight:900; margin:10px 0 6px; }
+.sectionTitle{ font-weight:900; margin:8px 0 6px; }
 .panelBox{ background:var(--panel2); border:1px solid var(--border); border-radius:14px; padding:10px; }
 .panelBox .badge{ background:var(--accent); color:var(--btnPrimaryText); }
 .panelBox .small{ color:var(--muted); }
@@ -8516,26 +8618,26 @@ body.polish-pack.polish-auras .presenceAura.isVip::after{
   padding: 6px 8px;
 }
 .profileCompactTabs .tab:active{ transform: scale(0.98); }
-.profileQuickActions{ display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
-.quickActionGroup{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.profileQuickActions{ display:flex; gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+.quickActionGroup{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
 .quickActionGroup .badge{ height:100%; display:flex; align-items:center; justify-content:center; }
 #profileQuickActions{
-  padding: 8px 0 4px;
+  padding: 4px 0;
 }
 .profileInfoGrid{
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
   margin-top: 6px;
 }
 .profileInfoCard{
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1px solid rgba(255,255,255,.08);
   background: rgba(255,255,255,.04);
-  padding: 10px 12px;
+  padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 .profileInfoCard.profileInfoWide{
   grid-column: span 2;
@@ -8556,7 +8658,7 @@ body.polish-pack.polish-auras .presenceAura.isVip::after{
   gap: 6px;
 }
 .profileBioCard{
-  margin-top: 12px;
+  margin-top: 8px;
 }
 .profileEditToggleRow{
   margin-top: 12px;
