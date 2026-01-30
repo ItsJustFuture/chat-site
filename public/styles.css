@@ -4603,10 +4603,14 @@ body:not(.polish-pack) .tonePicker{
   align-items:center;
   justify-content:space-between;
   gap:12px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   font-weight: 700;
   cursor:pointer;
-  min-height: 44px;
+  min-height: 40px;
+  transition: background 120ms ease;
+}
+.profileSection summary:hover{
+  background: var(--hover);
 }
 .profileSection summary::-webkit-details-marker{ display:none; }
 .profileSection summary::after{
@@ -4644,6 +4648,11 @@ body:not(.polish-pack) .tonePicker{
   display: flex;
   align-items: center;
   justify-content: space-between;
+  transition: background 120ms ease;
+}
+
+.profileSectionBody details summary:hover {
+  background: var(--hover);
 }
 
 .profileSectionBody details summary::-webkit-details-marker {
@@ -4664,6 +4673,24 @@ body:not(.polish-pack) .tonePicker{
 .profileSectionBody details > div {
   padding: 10px 12px;
   border-top: 1px solid var(--border);
+}
+
+/* Nested details within nested details (3rd level) */
+.profileSectionBody details details {
+  margin-top: 6px;
+  margin-bottom: 0;
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.profileSectionBody details details summary {
+  padding: 6px 10px;
+  font-size: 0.85em;
+  font-weight: 500;
+}
+
+.profileSectionBody details details > div {
+  padding: 8px 10px;
 }
 
 /* Compact couples section */
@@ -8600,17 +8627,17 @@ body.polish-pack.polish-auras .presenceAura.isVip::after{
 .profileInfoGrid{
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
   margin-top: 6px;
 }
 .profileInfoCard{
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1px solid rgba(255,255,255,.08);
   background: rgba(255,255,255,.04);
-  padding: 10px 12px;
+  padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 .profileInfoCard.profileInfoWide{
   grid-column: span 2;
