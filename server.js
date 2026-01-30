@@ -1908,9 +1908,12 @@ const sessionStore = pgPool
       createTableIfMissing: true,
     })
   : new session.MemoryStore();
+const SESSION_SECRET =
+  process.env.SESSION_SECRET || (NODE_ENV !== "production" ? "dev-secret" : undefined);
+
 const sessionMiddleware = session({
   store: sessionStore,
-  secret: process.env.SESSION_SECRET,
+  secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   proxy: true,
