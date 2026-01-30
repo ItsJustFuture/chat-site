@@ -8112,11 +8112,18 @@ app.post("/guest-login", async (req, res) => {
     );
 
     const user = result.rows[0];
-    req.session.userId = user.id;
-    req.session.username = user.username;
-    req.session.role = user.role;
-    
-    res.json({ ok: true, user });
+    req.session.user = {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      theme: DEFAULT_THEME,
+      avatar: "",
+      avatar_updated: null,
+    };
+    req.session.save((saveErr) => {
+      if (saveErr) return res.status(500).send("Session save failed");
+      return res.json({ ok: true, user });
+    });
   } catch (err) {
     console.error("Guest login error:", err);
     res.status(500).send("Guest login failed.");
