@@ -88,6 +88,12 @@
         const text = messageInput.value.trim();
         if (!text) return;
 
+        // Check socket connection before emitting
+        if (!socket || !socket.connected) {
+          console.warn('[chat.js] Cannot send message: socket not connected');
+          return;
+        }
+
         console.log('[chat.js] Sending message:', text);
         socket.emit('chat message', {
           room: currentRoom,
@@ -99,13 +105,8 @@
 
       sendBtn.addEventListener('click', sendMessage);
       
-      // Enter key to send
-      messageInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          sendMessage();
-        }
-      });
+      // Note: app.js already handles Enter key for message sending
+      // We don't need to duplicate that functionality here
 
       console.log('[chat.js] Message sending configured');
     } else {
@@ -117,6 +118,10 @@
     if (logoutTopBtn) {
       logoutTopBtn.addEventListener('click', async () => {
         try {
+          // Disconnect socket before logout
+          if (socket && socket.connected) {
+            socket.disconnect();
+          }
           await fetch('/logout', { method: 'POST', credentials: 'include' });
           window.location.reload();
         } catch (err) {
@@ -162,7 +167,7 @@
       notificationsBtn.addEventListener('click', () => {
         console.log('[chat.js] Notifications button clicked');
         const modal = document.getElementById('notificationsModal');
-        if (modal) modal.hidden = false;
+        if (modal) modal.style.display = '';
       });
       console.log('[chat.js] Notifications button configured');
     }
@@ -172,7 +177,7 @@
     if (notificationsCloseBtn) {
       notificationsCloseBtn.addEventListener('click', () => {
         const modal = document.getElementById('notificationsModal');
-        if (modal) modal.hidden = true;
+        if (modal) modal.style.display = 'none';
       });
     }
 
@@ -221,20 +226,25 @@
 
   // ===== Initialization =====
   function initialize() {
+    // Check at the very beginning to prevent race conditions
     if (isInitialized) {
       console.log('[chat.js] Already initialized');
       return;
     }
+
+    // Set immediately to prevent race conditions with multiple initialization calls
+    isInitialized = true;
 
     console.log('[chat.js] Initializing chat application...');
 
     try {
       initializeSocket();
       attachEventListeners();
-      isInitialized = true;
       console.log('[chat.js] Chat application initialized successfully ✓');
     } catch (err) {
       console.error('[chat.js] Initialization failed:', err);
+      // Reset flag on error so retry is possible
+      isInitialized = false;
     }
   }
 
