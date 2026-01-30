@@ -1913,16 +1913,18 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
 <div class="inlineModalCard modPopupCard">
 <div id="memberActionsOverlay" style="display:none;">
 <div class="inlineModalHeader modPopupHeader">
-<div class="sectionTitle" style="margin:0;">🛡️ Quick Actions</div>
+<div class="sectionTitle" style="margin:0;"><span aria-hidden="true">🛡️</span> Quick Actions</div>
 <button aria-label="Close" class="iconBtn" id="closeMemberActionsBtn" type="button">✕</button>
 </div>
 <div class="panelBox modCard modPopupBody">
 <!-- Primary Actions - Most common operations in a compact grid -->
 <div class="modActionButtons">
-<button class="modBtn modBtnKick" id="quickKickBtn" type="button" title="Kick user from room">
-<span class="modBtnIcon">👢</span>
+<div class="modBtnWrapper">
+<button class="modBtn modBtnKick" id="quickKickBtn" type="button" aria-label="Kick user from room">
+<span class="modBtnIcon" aria-hidden="true">👢</span>
 <span class="modBtnLabel">Kick</span>
-<select class="modBtnDuration" id="quickKickSeconds" onclick="event.stopPropagation()">
+</button>
+<select class="modBtnDuration" id="quickKickSeconds" aria-label="Kick duration">
 <option value="60">1m</option>
 <option value="300" selected="">5m</option>
 <option value="900">15m</option>
@@ -1931,35 +1933,39 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
 <option value="86400">24h</option>
 <option value="604800">1w</option>
 </select>
-</button>
-<button class="modBtn modBtnMute" id="quickMuteBtn" type="button" title="Mute user in room">
-<span class="modBtnIcon">🔇</span>
+</div>
+<div class="modBtnWrapper">
+<button class="modBtn modBtnMute" id="quickMuteBtn" type="button" aria-label="Mute user in room">
+<span class="modBtnIcon" aria-hidden="true">🔇</span>
 <span class="modBtnLabel">Mute</span>
-<select class="modBtnDuration" id="quickMuteMins" onclick="event.stopPropagation()">
+</button>
+<select class="modBtnDuration" id="quickMuteMins" aria-label="Mute duration">
 <option value="10">10m</option>
 <option value="30">30m</option>
 <option value="60">1h</option>
 <option value="240">4h</option>
 <option value="1440">24h</option>
 </select>
-</button>
-<button class="modBtn modBtnBan" id="quickBanBtn" type="button" title="Ban user from room">
-<span class="modBtnIcon">🚫</span>
+</div>
+<div class="modBtnWrapper">
+<button class="modBtn modBtnBan" id="quickBanBtn" type="button" aria-label="Ban user from room">
+<span class="modBtnIcon" aria-hidden="true">🚫</span>
 <span class="modBtnLabel">Ban</span>
-<select class="modBtnDuration" id="quickBanMins" onclick="event.stopPropagation()">
+</button>
+<select class="modBtnDuration" id="quickBanMins" aria-label="Ban duration">
 <option value="0">Perm</option>
 <option value="60">1h</option>
 <option value="720">12h</option>
 <option value="1440">24h</option>
 <option value="10080">7d</option>
 </select>
-</button>
+</div>
 </div>
 
 <!-- Secondary Actions - Reversal actions -->
 <div class="modSecondaryActions">
-<button class="modBtnSmall modBtnUndo" id="quickUnkickBtn" type="button" title="Remove kick">↩️ Unkick</button>
-<button class="modBtnSmall modBtnUndo" id="quickUnmuteBtn" type="button" title="Remove mute">🔊 Unmute</button>
+<button class="modBtnSmall modBtnUndo" id="quickUnkickBtn" type="button" aria-label="Remove kick from user"><span aria-hidden="true">↩️</span> Unkick</button>
+<button class="modBtnSmall modBtnUndo" id="quickUnmuteBtn" type="button" aria-label="Remove mute from user"><span aria-hidden="true">🔊</span> Unmute</button>
 </div>
 
 <!-- Reason Section - Compact with quick presets -->
@@ -1979,7 +1985,7 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
 
 <!-- Message Capture Section - Collapsible -->
 <div class="modMessageCapture" id="quickMessageCaptureSection" style="display:none;">
-<div class="modMessageCaptureHeader">📋 Select message for log (last 5)</div>
+<div class="modMessageCaptureHeader"><span aria-hidden="true">📋</span> Select message for log (last 5)</div>
 <div id="quickMessageList" class="messagePreviewList"></div>
 </div>
 
