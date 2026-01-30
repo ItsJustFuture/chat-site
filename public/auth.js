@@ -83,17 +83,34 @@
       setAuthState('restricted');
     };
 
-    const hydrateSession = async () => {
+    async function hydrateSession() {
       try {
         const res = await fetch('/me', { credentials: 'include' });
         if (!res.ok) return showLoginView();
         const data = await res.json();
         if (!data || !data.id) return showLoginView();
         showChatView();
-      } catch {
+      } catch (err) {
+        console.warn('[auth.js] session hydrate failed:', err?.message || err);
         showLoginView();
       }
-    };
+    }
+
+    async function applyRestrictionState() {
+      try {
+        const res = await fetch('/api/restriction', { credentials: 'include' });
+        if (!res.ok) return showLoginView();
+        const data = await res.json();
+        if (data?.type && data.type !== 'none') {
+          showRestrictedView(data);
+        } else {
+          await hydrateSession();
+        }
+      } catch (err) {
+        console.warn('[auth.js] restriction check failed:', err?.message || err);
+        showLoginView();
+      }
+    }
 
     const setCaptchaNote = (text) => {
       if (captchaNote) captchaNote.textContent = text || '';
@@ -220,7 +237,7 @@
         return;
       }
       if (data?.ok) {
-        showChatView();
+        await applyRestrictionState();
         return;
       }
       throw new Error(data?.message || 'Login failed');
@@ -238,7 +255,7 @@
       }
       const data = await resp.json();
       if (data?.ok) {
-        showChatView();
+        await applyRestrictionState();
         return;
       }
       throw new Error(data?.message || 'Registration failed');
@@ -289,7 +306,7 @@
           if (!resp.ok) throw new Error(await resp.text());
           const data = await resp.json();
           if (data?.ok) {
-            showChatView();
+            await applyRestrictionState();
             return;
           }
           throw new Error(data?.message || 'Guest login failed');
@@ -298,21 +315,6 @@
         }
       });
     }
-
-    const applyRestrictionState = async () => {
-      try {
-        const res = await fetch('/api/restriction', { credentials: 'include' });
-        if (!res.ok) return showLoginView();
-        const data = await res.json();
-        if (data?.type && data.type !== 'none') {
-          showRestrictedView(data);
-        } else {
-          hydrateSession();
-        }
-      } catch {
-        showLoginView();
-      }
-    };
 
     setAuthState('loading');
     initCaptcha();
