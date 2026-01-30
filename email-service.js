@@ -4,6 +4,10 @@
  * Email Service
  * Handles sending verification codes and password reset emails
  * Supports multiple providers: nodemailer (SMTP), SendGrid, AWS SES
+ * 
+ * NOTE: This email service is kept in place but DEACTIVATED.
+ * Email verification is NOT required for login or registration.
+ * This module can be reactivated in the future if needed.
  */
 
 const crypto = require("crypto");
