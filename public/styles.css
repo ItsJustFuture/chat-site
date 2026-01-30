@@ -1869,10 +1869,13 @@ body.auth-pending #authLoading{
 .loginCard{
   width:100%;
   background: color-mix(in oklab, var(--panel) 90%, rgba(0,0,0,0.35));
-  border:1px solid color-mix(in oklab, var(--line) 80%, rgba(255,255,255,0.1));
+  border:1px solid rgba(100, 255, 150, 0.35);
   border-radius:20px;
   padding:24px;
-  box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.45),
+              0 0 40px rgba(100, 255, 150, 0.3),
+              0 0 80px rgba(100, 255, 150, 0.15),
+              inset 0 0 30px rgba(100, 255, 150, 0.08);
   backdrop-filter: blur(12px);
 }
 
@@ -1896,8 +1899,8 @@ body.auth-pending #authLoading{
 }
 
 .loginForm input:focus-visible{
-  border-color: rgba(140,180,255,0.8);
-  box-shadow: 0 0 0 3px rgba(120,160,255,0.25);
+  border-color: rgba(100, 255, 150, 0.7);
+  box-shadow: 0 0 0 3px rgba(100, 255, 150, 0.2);
 }
 
 .loginValidation{
