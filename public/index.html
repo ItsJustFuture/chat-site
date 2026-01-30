@@ -3145,6 +3145,8 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
       if (selectedVibeTags.length >= vibeTagLimit) {
         // Show a brief message that limit is reached
         const container = document.getElementById('vibeTagOptions');
+        if (!container || !container.parentElement) return;
+        
         const existingMsg = container.querySelector('.vibe-limit-msg');
         if (!existingMsg) {
           const msg = document.createElement('div');
@@ -3272,6 +3274,12 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
         return;
       }
       
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        console.error('[profile] Invalid response type:', contentType);
+        return;
+      }
+      
       const profile = await response.json();
       
       if (!profile) {
@@ -3358,6 +3366,22 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
         method: 'POST',
         body: formData
       });
+      
+      if (!response.ok) {
+        const text = await response.text();
+        profileMsg.textContent = `Failed to save profile (${response.status})`;
+        profileMsg.className = 'msgline error';
+        console.error('[profile] Save failed:', response.status, text);
+        return;
+      }
+      
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        profileMsg.textContent = 'Invalid server response';
+        profileMsg.className = 'msgline error';
+        console.error('[profile] Invalid response type:', contentType);
+        return;
+      }
       
       const data = await response.json();
       
