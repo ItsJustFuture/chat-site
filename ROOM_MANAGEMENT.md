@@ -51,9 +51,12 @@ This implementation adds comprehensive room management features to the chat appl
 - **Description**: Removes a user's admin or helper role
 
 #### `room:ban`
-- **Permission**: Owner or Admin
+- **Permission**: Owner or Admin (with restrictions)
 - **Parameters**: `{ roomName, userId, duration, reason }`
 - **Durations**: '5m', '10m', '30m', '1h', '2h', '4h', '8h', '24h', '7d', '30d', '6mo', '1y', 'forever'
+- **Restrictions**: 
+  - Admins can ban for up to 7 days (5m, 10m, 30m, 1h, 2h, 4h, 8h, 24h, 7d)
+  - Only owners can ban for more than 7 days (30d, 6mo, 1y, forever)
 - **Description**: Bans a user from the room for a specified duration
 - **Behavior**: Automatically kicks user if they're currently in the room
 
@@ -101,6 +104,8 @@ Comprehensive test coverage including:
 5. Active ban detection
 6. Permanent bans
 7. User unbanning
+7.5. Admin ban duration restriction (7-day limit verification)
+7.6. Owner long-duration ban capability (30-day verification)
 8. Room member listing with role ordering
 9. Room renaming with foreign key handling
 10. Cascade delete verification

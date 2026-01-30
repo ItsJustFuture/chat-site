@@ -61,8 +61,9 @@ socket.emit('room:ban', {
 });
 
 // Duration options for bans:
-// '5m', '10m', '30m', '1h', '2h', '4h', '8h', '24h',
-// '7d', '30d', '6mo', '1y', 'forever'
+// Admins can use: '5m', '10m', '30m', '1h', '2h', '4h', '8h', '24h', '7d'
+// Only owners can use: '30d', '6mo', '1y', 'forever'
+// Note: Only room owners can ban for more than 7 days
 
 // Unban a user
 socket.emit('room:unban', {
@@ -171,20 +172,30 @@ socket.emit('room:members', { roomName: 'current-room' }, (response) => {
 
 function getBanDurationOptions() {
   return [
-    { value: '5m', label: '5 minutes' },
-    { value: '10m', label: '10 minutes' },
-    { value: '30m', label: '30 minutes' },
-    { value: '1h', label: '1 hour' },
-    { value: '2h', label: '2 hours' },
-    { value: '4h', label: '4 hours' },
-    { value: '8h', label: '8 hours' },
-    { value: '24h', label: '24 hours' },
-    { value: '7d', label: '7 days' },
-    { value: '30d', label: '30 days' },
-    { value: '6mo', label: '6 months' },
-    { value: '1y', label: '1 year' },
-    { value: 'forever', label: 'Permanent' }
+    { value: '5m', label: '5 minutes', ownerOnly: false },
+    { value: '10m', label: '10 minutes', ownerOnly: false },
+    { value: '30m', label: '30 minutes', ownerOnly: false },
+    { value: '1h', label: '1 hour', ownerOnly: false },
+    { value: '2h', label: '2 hours', ownerOnly: false },
+    { value: '4h', label: '4 hours', ownerOnly: false },
+    { value: '8h', label: '8 hours', ownerOnly: false },
+    { value: '24h', label: '24 hours', ownerOnly: false },
+    { value: '7d', label: '7 days', ownerOnly: false },
+    { value: '30d', label: '30 days (Owner only)', ownerOnly: true },
+    { value: '6mo', label: '6 months (Owner only)', ownerOnly: true },
+    { value: '1y', label: '1 year (Owner only)', ownerOnly: true },
+    { value: 'forever', label: 'Permanent (Owner only)', ownerOnly: true }
   ];
+}
+
+// Filter ban options based on user role
+function getBanDurationOptionsForRole(userRole) {
+  const allOptions = getBanDurationOptions();
+  if (userRole === 'owner') {
+    return allOptions; // Owners can use all durations
+  }
+  // Admins can only use durations up to 7 days
+  return allOptions.filter(opt => !opt.ownerOnly);
 }
 
 /* ========================================
@@ -198,6 +209,7 @@ function handleRoomManagementError(error, action) {
     'Invalid role': 'Invalid role specified',
     'Only room owner can': 'You must be the room owner to do this',
     'Only room owner or admin can': 'You must be owner or admin to do this',
+    'Only room owner can ban for more than 7 days': 'Only the room owner can issue bans longer than 7 days',
     'Room name already exists': 'A room with that name already exists',
     'Permission denied': 'You do not have permission to do this'
   };

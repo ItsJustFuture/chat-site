@@ -18272,6 +18272,15 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
         }
       }
       
+      // Only room owner can ban for more than 7 days
+      const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+      const durationMs = parseBanDuration(duration);
+      const isLongBan = duration === "forever" || (durationMs && durationMs > sevenDaysMs);
+      
+      if (isLongBan && actorRole !== "owner") {
+        return safe({ ok: false, error: "Only room owner can ban for more than 7 days" });
+      }
+      
       if (await pgUsersEnabled()) {
         await pgPool.query(
           `INSERT INTO room_bans (room_name, user_id, banned_by_user_id, reason, banned_at, expires_at)

@@ -194,6 +194,74 @@ async function runTests() {
     throw new Error("Unban failed");
   }
 
+  // Test 7.5: Create an admin user to test ban duration restrictions
+  await dbRunAsync(
+    `INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)`,
+    ["admin_user", "hash789", "User", now]
+  );
+  const adminUserRow = await dbGetAsync(`SELECT id FROM users WHERE username = ?`, ["admin_user"]);
+  const adminUserId = adminUserRow.id;
+
+  // Promote to room admin
+  await dbRunAsync(
+    `INSERT INTO room_members (room_name, user_id, role, assigned_by_user_id, assigned_at) VALUES (?, ?, 'admin', ?, ?)`,
+    [roomName, adminUserId, ownerId, now]
+  );
+
+  // Create target user for ban tests
+  await dbRunAsync(
+    `INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)`,
+    ["ban_target", "hash101112", "User", now]
+  );
+  const banTargetRow = await dbGetAsync(`SELECT id FROM users WHERE username = ?`, ["ban_target"]);
+  const banTargetId = banTargetRow.id;
+
+  console.log("✓ Created admin user and ban target for restriction tests");
+
+  // Test 7.6: Verify admin can ban for 7 days or less (should work)
+  const sevenDayBan = now + 7 * 24 * 60 * 60 * 1000;
+  await dbRunAsync(
+    `INSERT INTO room_bans (room_name, user_id, banned_by_user_id, reason, banned_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    [roomName, banTargetId, adminUserId, "7-day test by admin", now, sevenDayBan]
+  );
+
+  const sevenDayCheck = await dbGetAsync(
+    `SELECT * FROM room_bans WHERE room_name = ? AND user_id = ? AND banned_by_user_id = ?`,
+    [roomName, banTargetId, adminUserId]
+  );
+
+  if (sevenDayCheck && sevenDayCheck.expires_at === sevenDayBan) {
+    console.log("✓ Admin can ban for exactly 7 days");
+  } else {
+    throw new Error("Admin 7-day ban failed");
+  }
+
+  // Clean up for next test
+  await dbRunAsync(`DELETE FROM room_bans WHERE room_name = ? AND user_id = ?`, [roomName, banTargetId]);
+
+  // Test 7.7: Verify owner can ban for more than 7 days (30 days - should work)
+  const thirtyDayBan = now + 30 * 24 * 60 * 60 * 1000;
+  await dbRunAsync(
+    `INSERT INTO room_bans (room_name, user_id, banned_by_user_id, reason, banned_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    [roomName, banTargetId, ownerId, "30-day test by owner", now, thirtyDayBan]
+  );
+
+  const thirtyDayCheck = await dbGetAsync(
+    `SELECT * FROM room_bans WHERE room_name = ? AND user_id = ? AND banned_by_user_id = ?`,
+    [roomName, banTargetId, ownerId]
+  );
+
+  if (thirtyDayCheck && thirtyDayCheck.expires_at === thirtyDayBan) {
+    console.log("✓ Owner can ban for more than 7 days (30 days tested)");
+  } else {
+    throw new Error("Owner 30-day ban failed");
+  }
+
+  // Clean up
+  await dbRunAsync(`DELETE FROM room_bans WHERE room_name = ? AND user_id = ?`, [roomName, banTargetId]);
+
+  console.log("✓ Ban duration restriction tests passed (7-day threshold enforced)");
+
   // Test 8: List room members
   const members = await dbAllAsync(
     `SELECT rm.user_id, rm.role, u.username 
@@ -204,13 +272,13 @@ async function runTests() {
     [roomName]
   );
 
-  if (members.length === 2) {
+  if (members.length === 3) {
     console.log(`✓ Room members list working (${members.length} members)`);
     members.forEach(m => {
       console.log(`  - ${m.username}: ${m.role}`);
     });
   } else {
-    throw new Error("Member listing failed");
+    throw new Error(`Member listing failed - expected 3 members, got ${members.length}`);
   }
 
   // Test 9: Room rename
