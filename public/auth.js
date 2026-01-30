@@ -52,7 +52,26 @@
 
     const showLoginView = () => setAuthState('login');
 
-    const showChatView = () => setAuthState('chat');
+    const showChatView = () => {
+      setAuthState('chat');
+      // Initialize chat application after view is shown
+      if (window.chatApp && typeof window.chatApp.initialize === 'function') {
+        // Small delay to ensure DOM is ready
+        setTimeout(() => {
+          window.chatApp.initialize();
+        }, 100);
+      } else {
+        console.warn('[auth.js] chatApp not available, retrying...');
+        // Retry if chat.js hasn't loaded yet
+        setTimeout(() => {
+          if (window.chatApp && typeof window.chatApp.initialize === 'function') {
+            window.chatApp.initialize();
+          } else {
+            console.error('[auth.js] chatApp still not available');
+          }
+        }, 500);
+      }
+    };
 
     const showPasswordUpgradeView = () => setAuthState('upgrade');
 
