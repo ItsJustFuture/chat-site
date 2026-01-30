@@ -2961,7 +2961,7 @@ body.survival-room .survivalPanel{
 .survivalModalTabs{
   display:flex;
   gap:8px;
-  padding:0 16px 12px;
+  padding:0 16px 8px;
   border-bottom:1px solid var(--line);
   flex-wrap:wrap;
 }
@@ -2969,7 +2969,7 @@ body.survival-room .survivalPanel{
   overflow:auto;
   display:flex;
   flex-direction:column;
-  gap:16px;
+  gap:12px;
 }
 .survivalModalSection{
   display:none;
@@ -4539,7 +4539,7 @@ body:not(.polish-pack) .tonePicker{
   .profileSheetName{ font-size: 20px; }
   .tabs{ gap: 8px; }
 }
-.modalTop{ display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;flex-shrink: 0; }
+.modalTop{ display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px;flex-shrink: 0; }
 .modalTop strong{ font-size:14px; }
 .profileModalTop{
   margin-bottom: 0;
@@ -5284,7 +5284,7 @@ body:not(.polish-pack) .tonePicker{
 .notificationsIcon{ font-size: 16px; }
 .notificationsText{ font-size: 13px; }
 .notificationsTime{ font-size: 11px; color: var(--muted); white-space: nowrap; }
-.modalContent{ flex:1 1 auto; overflow:auto; -webkit-overflow-scrolling: touch; padding-right:2px; min-height:0; }
+.modalContent{ flex:1 1 auto; overflow:auto; -webkit-overflow-scrolling: touch; min-height:0; }
 .tabs{
   display:flex;
   gap:8px;
@@ -7067,23 +7067,6 @@ body.drawer-right-open { --rightDrawerW: min(86vw, 340px); }
   padding-bottom: calc(16px + env(safe-area-inset-bottom));
 }
 
-.modalContent{
-  padding-bottom: calc(16px + env(safe-area-inset-bottom));
-}
-
-/* === Mobile: allow profile modal to scroll fully and avoid safe-area overlap === */
-.modalBody{
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding-bottom: calc(16px + env(safe-area-inset-bottom));
-  min-height: 0;
-}
-.modalCard{
-  max-height: calc(var(--vvhPx) - 20px);
-}
-.bottomBar{
-  padding-bottom: calc(10px + env(safe-area-inset-bottom));
-}
 
 /* UI scale: adjust key sizes without CSS transforms (transforms break taps on iOS) */
 html, body {
