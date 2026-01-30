@@ -368,6 +368,8 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
 
 // ---- App + Server
   const app = express();
+  // Behind proxies (e.g., Render), trust forwarded headers so secure cookies work.
+  app.set("trust proxy", 1);
   const httpServer = http.createServer(app);
   const io = new Server(httpServer, {
     // Render uses HTTPS -> allow websocket upgrade
