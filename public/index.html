@@ -2867,47 +2867,5 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
 })();
 </script>
 
-<script>
-// Leaderboard category dropdown functionality
-(function() {
-  'use strict';
-  
-  function initLeaderboardDropdown() {
-    const categorySelect = document.getElementById('leaderboardCategorySelect');
-    const leaderboardCards = document.querySelectorAll('.leaderboardCard');
-    
-    if (!categorySelect) {
-      console.warn('[leaderboard-dropdown] Category select not found, retrying...');
-      return;
-    }
-    
-    // Handle dropdown change
-    categorySelect.addEventListener('change', function() {
-      const selectedCategory = this.value;
-      
-      // Hide all leaderboard cards
-      leaderboardCards.forEach(card => {
-        card.style.display = 'none';
-      });
-      
-      // Show only the selected category
-      const selectedCard = document.querySelector(`.leaderboardCard[data-leaderboard-category="${selectedCategory}"]`);
-      if (selectedCard) {
-        selectedCard.style.display = 'block';
-      }
-    });
-    
-    console.log('[leaderboard-dropdown] Initialized');
-  }
-  
-  // Initialize after DOM is ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initLeaderboardDropdown);
-  } else {
-    setTimeout(initLeaderboardDropdown, 1000);
-  }
-})();
-</script>
-
 </body>
 </html>
