@@ -757,6 +757,44 @@ const pgInitPromise = PG_ENABLED ? (async () => {
       console.warn("[pg-init] room audit table failed:", e?.message || e);
     }
 
+    // Room management tables (owner, admins, bans)
+    try {
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS room_members (
+          id SERIAL PRIMARY KEY,
+          room_name TEXT NOT NULL,
+          user_id INTEGER NOT NULL,
+          role TEXT NOT NULL,
+          assigned_by_user_id INTEGER,
+          assigned_at BIGINT NOT NULL,
+          FOREIGN KEY (room_name) REFERENCES rooms(name) ON DELETE CASCADE,
+          UNIQUE(room_name, user_id)
+        );
+      `);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_members_room ON room_members(room_name)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(user_id)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_members_role ON room_members(room_name, role)`);
+
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS room_bans (
+          id SERIAL PRIMARY KEY,
+          room_name TEXT NOT NULL,
+          user_id INTEGER NOT NULL,
+          banned_by_user_id INTEGER NOT NULL,
+          reason TEXT,
+          banned_at BIGINT NOT NULL,
+          expires_at BIGINT,
+          FOREIGN KEY (room_name) REFERENCES rooms(name) ON DELETE CASCADE,
+          UNIQUE(room_name, user_id)
+        );
+      `);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_bans_room ON room_bans(room_name)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_bans_user ON room_bans(user_id)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_bans_expires ON room_bans(expires_at)`);
+    } catch (e) {
+      console.warn("[pg-init] room management tables failed:", e?.message || e);
+    }
+
     // Changelog tables (Postgres) — ensures changelog persists across restarts
     await pgPool.query(`
       CREATE SEQUENCE IF NOT EXISTS changelog_seq;
