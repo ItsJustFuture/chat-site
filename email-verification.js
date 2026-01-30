@@ -3,6 +3,12 @@
 /**
  * Email Verification Helper
  * Handles email verification and password reset logic
+ * 
+ * NOTE: This email verification module is kept in place but DEACTIVATED.
+ * Email verification is NOT required for login or registration.
+ * Users can register and login with just username and password.
+ * Guest accounts can login with just username (no password required).
+ * This module can be reactivated in the future if needed.
  */
 
 const {
