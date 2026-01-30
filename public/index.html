@@ -253,29 +253,36 @@
 <div class="small muted">XP, Gold, Dice sixes, and profile likes.</div>
 </div>
 <div class="menuActions">
+<select id="leaderboardCategorySelect" class="select" style="margin-right:8px;">
+<option value="xp">XP</option>
+<option value="gold">Gold</option>
+<option value="dice">Dice</option>
+<option value="likes">Profile Likes</option>
+<option value="chess">Chess</option>
+</select>
 <button class="btn secondary" id="refreshLeaderboardsBtn" type="button">Refresh</button>
 </div>
 </div>
 <div class="msgline" id="leaderboardsMsg"></div>
 <div class="small muted" id="leaderboardsUpdatedAt"></div>
 <div class="leaderboardGrid">
-<div class="card leaderboardCard">
+<div class="card leaderboardCard" data-leaderboard-category="xp">
 <div class="sectionTitle">XP leaderboard</div>
 <div class="leaderboardList" id="leaderboardXp"></div>
 </div>
-<div class="card leaderboardCard">
+<div class="card leaderboardCard" data-leaderboard-category="gold" style="display:none;">
 <div class="sectionTitle">Gold leaderboard</div>
 <div class="leaderboardList" id="leaderboardGold"></div>
 </div>
-<div class="card leaderboardCard">
+<div class="card leaderboardCard" data-leaderboard-category="dice" style="display:none;">
 <div class="sectionTitle">Dice leaderboard</div>
 <div class="leaderboardList" id="leaderboardDice"></div>
 </div>
-<div class="card leaderboardCard">
+<div class="card leaderboardCard" data-leaderboard-category="likes" style="display:none;">
 <div class="sectionTitle">Profile likes</div>
 <div class="leaderboardList" id="leaderboardLikes"></div>
 </div>
-<div class="card leaderboardCard">
+<div class="card leaderboardCard" data-leaderboard-category="chess" style="display:none;">
 <div class="sectionTitle">Chess leaderboard</div>
 <div class="leaderboardList" id="leaderboardChess"></div>
 </div>
@@ -2856,6 +2863,48 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
     document.addEventListener('DOMContentLoaded', init);
   } else {
     setTimeout(init, 1000);
+  }
+})();
+</script>
+
+<script>
+// Leaderboard category dropdown functionality
+(function() {
+  'use strict';
+  
+  function initLeaderboardDropdown() {
+    const categorySelect = document.getElementById('leaderboardCategorySelect');
+    const leaderboardCards = document.querySelectorAll('.leaderboardCard');
+    
+    if (!categorySelect) {
+      console.warn('[leaderboard-dropdown] Category select not found, retrying...');
+      return;
+    }
+    
+    // Handle dropdown change
+    categorySelect.addEventListener('change', function() {
+      const selectedCategory = this.value;
+      
+      // Hide all leaderboard cards
+      leaderboardCards.forEach(card => {
+        card.style.display = 'none';
+      });
+      
+      // Show only the selected category
+      const selectedCard = document.querySelector(`.leaderboardCard[data-leaderboard-category="${selectedCategory}"]`);
+      if (selectedCard) {
+        selectedCard.style.display = 'block';
+      }
+    });
+    
+    console.log('[leaderboard-dropdown] Initialized');
+  }
+  
+  // Initialize after DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initLeaderboardDropdown);
+  } else {
+    setTimeout(initLeaderboardDropdown, 1000);
   }
 })();
 </script>
