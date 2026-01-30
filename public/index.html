@@ -250,10 +250,10 @@
 <div class="menuSectionHeader">
 <div>
 <div class="title">Leaderboards</div>
-<div class="small muted">XP, Gold, Dice sixes, and profile likes.</div>
+<div class="small muted">XP, Gold, Dice sixes, Chess, and profile likes.</div>
 </div>
 <div class="menuActions">
-<select id="leaderboardCategorySelect" class="select" style="margin-right:8px;">
+<select id="leaderboardCategorySelect" class="select" style="margin-right:8px;" aria-label="Leaderboard category">
 <option value="xp">XP</option>
 <option value="gold">Gold</option>
 <option value="dice">Dice</option>
@@ -270,19 +270,19 @@
 <div class="sectionTitle">XP leaderboard</div>
 <div class="leaderboardList" id="leaderboardXp"></div>
 </div>
-<div class="card leaderboardCard" data-leaderboard-category="gold" style="display:none;">
+<div class="card leaderboardCard hidden" data-leaderboard-category="gold">
 <div class="sectionTitle">Gold leaderboard</div>
 <div class="leaderboardList" id="leaderboardGold"></div>
 </div>
-<div class="card leaderboardCard" data-leaderboard-category="dice" style="display:none;">
+<div class="card leaderboardCard hidden" data-leaderboard-category="dice">
 <div class="sectionTitle">Dice leaderboard</div>
 <div class="leaderboardList" id="leaderboardDice"></div>
 </div>
-<div class="card leaderboardCard" data-leaderboard-category="likes" style="display:none;">
+<div class="card leaderboardCard hidden" data-leaderboard-category="likes">
 <div class="sectionTitle">Profile likes</div>
 <div class="leaderboardList" id="leaderboardLikes"></div>
 </div>
-<div class="card leaderboardCard" data-leaderboard-category="chess" style="display:none;">
+<div class="card leaderboardCard hidden" data-leaderboard-category="chess">
 <div class="sectionTitle">Chess leaderboard</div>
 <div class="leaderboardList" id="leaderboardChess"></div>
 </div>

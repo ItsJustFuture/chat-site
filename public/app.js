@@ -235,13 +235,13 @@
       
       // Hide all leaderboard cards
       leaderboardCards.forEach(card => {
-        card.style.display = 'none';
+        card.classList.add('hidden');
       });
       
       // Show only the selected category
       const selectedCard = document.querySelector(`.leaderboardCard[data-leaderboard-category="${selectedCategory}"]`);
       if (selectedCard) {
-        selectedCard.style.display = 'block';
+        selectedCard.classList.remove('hidden');
       }
     });
     
