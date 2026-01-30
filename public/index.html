@@ -1770,6 +1770,16 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
   async function loadWordFilters() {
     try {
       const response = await fetch('/api/word-filters');
+      
+      // Guard against non-JSON responses (e.g., login redirect or error page)
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('[word-filter] Load failed: non-JSON response', { status: response.status, text: text?.slice?.(0, 200) });
+        showWordFilterMessage('Failed to load filters (not signed in?)', 'error');
+        return;
+      }
+
       const data = await response.json();
       
       if (!data.ok) {
