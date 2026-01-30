@@ -1773,7 +1773,7 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
       
       // Guard against error statuses or non-JSON responses (e.g., auth redirect or HTML error)
       if (!response.ok) {
-        showWordFilterMessage('Failed to load filters (auth required?)', 'error');
+        showWordFilterMessage('Failed to load filters (authentication required)', 'error');
         return;
       }
 
@@ -1781,7 +1781,7 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
       if (!contentType.includes('application/json')) {
         const text = await response.text();
         console.error('[word-filter] Load failed: non-JSON response', { status: response.status, text: text.slice(0, 200) });
-        showWordFilterMessage('Failed to load filters (not signed in?)', 'error');
+        showWordFilterMessage('Failed to load filters (authentication required)', 'error');
         return;
       }
 
@@ -1860,7 +1860,7 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
       });
       
       if (!response.ok) {
-        showWordFilterMessage('Failed to add filter (auth required?)', 'error');
+        showWordFilterMessage('Failed to add filter (authentication required)', 'error');
         return;
       }
       
@@ -1868,7 +1868,7 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
       if (!contentType.includes('application/json')) {
         const text = await response.text();
         console.error('[word-filter] Add failed: non-JSON response', { status: response.status, text: text.slice(0, 200) });
-        showWordFilterMessage('Failed to add filter (not signed in?)', 'error');
+        showWordFilterMessage('Failed to add filter (authentication required)', 'error');
         return;
       }
       
@@ -1902,7 +1902,7 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
       });
       
       if (!response.ok) {
-        showWordFilterMessage('Failed to delete filter (auth required?)', 'error');
+        showWordFilterMessage('Failed to delete filter (authentication required)', 'error');
         return;
       }
       
@@ -1910,7 +1910,7 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
       if (!contentType.includes('application/json')) {
         const text = await response.text();
         console.error('[word-filter] Delete failed: non-JSON response', { status: response.status, text: text.slice(0, 200) });
-        showWordFilterMessage('Failed to delete filter (not signed in?)', 'error');
+        showWordFilterMessage('Failed to delete filter (authentication required)', 'error');
         return;
       }
       
