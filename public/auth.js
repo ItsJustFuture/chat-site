@@ -50,6 +50,8 @@
       if (ready) return resolve();
       const existing = document.querySelector(`script[data-captcha-provider="${provider}"]`);
       if (existing) {
+        if (existing.dataset.captchaLoaded === 'true') return resolve();
+        if (existing.dataset.captchaError === 'true') return reject(new Error('Captcha script failed.'));
         existing.addEventListener('load', () => resolve(), { once: true });
         existing.addEventListener('error', () => reject(new Error('Captcha script failed.')), { once: true });
         return;
@@ -61,8 +63,14 @@
       script.src = provider === 'turnstile'
         ? 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
         : 'https://js.hcaptcha.com/1/api.js?render=explicit';
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error('Captcha script failed.'));
+      script.onload = () => {
+        script.dataset.captchaLoaded = 'true';
+        resolve();
+      };
+      script.onerror = () => {
+        script.dataset.captchaError = 'true';
+        reject(new Error('Captcha script failed.'));
+      };
       document.head.appendChild(script);
     });
 
@@ -152,7 +160,7 @@
       const resp = await fetch('/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, captchaToken }),
       });
       if (!resp.ok) {
         throw new Error(await resp.text());
@@ -177,7 +185,7 @@
 
       try {
         setMsg(mode === 'register' ? 'Creating account...' : 'Signing in...');
-        if (mode === 'login' && captchaConfig.provider !== 'none' && !captchaToken) {
+        if (captchaConfig.provider !== 'none' && !captchaToken) {
           setMsg('Complete the captcha to continue.', true);
           return;
         }
