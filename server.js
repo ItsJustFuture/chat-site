@@ -1875,7 +1875,7 @@ app.use((req, res, next) => {
     "Content-Security-Policy",
     [
       "default-src 'self'",
-      // Inline hashes map to: admin word-filter UI, mod message capture overlay, and auxiliary inline helpers in index.html.
+      // Inline hashes map to: admin word-filter UI, mod message capture overlay, and username history management UI in index.html.
       "script-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=' 'sha256-oWpLZycNOHPRAKwunf75GOBemv1jh7TmBxWivRAc6a4=' 'sha256-7sXnZ2TVMnxHVWCkmooJgY2WLwuABY3ORO4U2HyqhCk=' 'sha256-i/aTBp59Im0Ii8AbJaj/fpbmIm5uEe2SBSUfuz0qWdo=' 'sha256-FyuENKF0oqbS8GySBjZmSheWBnbSBzWln9hSmxXIMxY='",
       "script-src-elem 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=' 'sha256-oWpLZycNOHPRAKwunf75GOBemv1jh7TmBxWivRAc6a4=' 'sha256-7sXnZ2TVMnxHVWCkmooJgY2WLwuABY3ORO4U2HyqhCk=' 'sha256-i/aTBp59Im0Ii8AbJaj/fpbmIm5uEe2SBSUfuz0qWdo=' 'sha256-FyuENKF0oqbS8GySBjZmSheWBnbSBzWln9hSmxXIMxY='",
       // Inline style attributes are set by the client JS (e.g. show/hide panels),
