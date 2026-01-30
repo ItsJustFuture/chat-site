@@ -185,7 +185,6 @@ npm run audit
 ### Security Vulnerabilities
 
 Current known vulnerabilities:
-- **nodemailer** (moderate): DoS and email domain issues - non-critical for development
 - **tar** (high): File overwrite vulnerabilities in sqlite3 dependencies - non-critical for development
 
 These are in development dependencies and don't affect production security when using managed databases.

@@ -10,7 +10,6 @@
     const regBtn = document.getElementById('regBtn');
     const guestBtn = document.getElementById('guestLoginBtn');
     const authMsg = document.getElementById('authMsg');
-    const emailFieldWrap = document.getElementById('emailFieldWrap');
 
     let mode = 'login'; // 'login' | 'register'
 
@@ -23,7 +22,6 @@
 
     const setMode = (next) => {
       mode = next;
-      if (emailFieldWrap) emailFieldWrap.hidden = mode !== 'register';
       if (loginBtn) loginBtn.textContent = mode === 'register' ? 'Create account' : 'Join chat';
       if (regBtn) regBtn.textContent = mode === 'register' ? 'Back to login' : 'Create account';
       setMsg('');
@@ -56,11 +54,11 @@
       throw new Error(data?.message || 'Login failed');
     };
 
-    const doRegister = async (username, email, password) => {
+    const doRegister = async (username, password) => {
       const resp = await fetch('/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, email, password }),
+        body: JSON.stringify({ username, password }),
       });
       if (!resp.ok) {
         throw new Error(await resp.text());
@@ -77,7 +75,6 @@
       e.preventDefault();
       const username = String(document.getElementById('authUser')?.value || '').trim();
       const password = String(document.getElementById('authPass')?.value || '');
-      const email = String(document.getElementById('authEmail')?.value || '').trim();
 
       if (!username || !password) {
         setMsg('Username and password are required.', true);
@@ -87,7 +84,7 @@
       try {
         setMsg(mode === 'register' ? 'Creating account...' : 'Signing in...');
         if (mode === 'register') {
-          await doRegister(username, email || null, password);
+          await doRegister(username, password);
         } else {
           await doLogin(username, password);
         }

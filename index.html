@@ -30,10 +30,6 @@
           <label for="authUser">Username</label>
           <input autocomplete="username" id="authUser" placeholder="your username" required=""/>
         </div>
-        <div class="field" id="emailFieldWrap" hidden>
-          <label for="authEmail">Email</label>
-          <input autocomplete="email" id="authEmail" placeholder="your email" type="email"/>
-        </div>
         <div class="field">
           <label for="authPass">Password</label>
           <div class="passWrap">
@@ -53,25 +49,6 @@
       </form>
     </div>
 
-    <!-- Forgot Password Modal -->
-    <div class="modal" hidden="" id="forgotPasswordModal">
-      <div class="modalCard loginCard">
-        <div class="loginHeader">
-          <h2>Reset Password</h2>
-        </div>
-        <form class="loginForm" id="forgotPasswordForm">
-          <div class="field">
-            <label for="resetEmail">Email</label>
-            <input id="resetEmail" placeholder="your email" required="" type="email"/>
-          </div>
-          <div aria-live="polite" class="loginValidation" id="forgotPasswordMsg"></div>
-          <div class="row loginActions">
-            <button class="btn" type="submit">Send reset link</button>
-            <button class="btn secondary" id="forgotPasswordCloseBtn" type="button">Cancel</button>
-          </div>
-        </form>
-      </div>
-    </div>
 </div>
 </div>
 <!-- PASSWORD UPGRADE -->
