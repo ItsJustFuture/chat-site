@@ -4589,7 +4589,7 @@ body:not(.polish-pack) .tonePicker{
 .profileSections{
   display:flex;
   flex-direction:column;
-  gap:12px;
+  gap:10px;
 }
 .profileSection{
   border:1px solid var(--border);
@@ -4619,12 +4619,87 @@ body:not(.polish-pack) .tonePicker{
   transform: rotate(180deg);
 }
 .profileSectionBody{
-  padding: 12px 14px 14px;
+  padding: 8px 10px 10px;
   border-top: 1px solid var(--border);
   display:flex;
   flex-direction:column;
-  gap:12px;
+  gap:10px;
 }
+
+/* Nested details within profile sections */
+.profileSectionBody details {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.profileSectionBody details summary {
+  list-style: none;
+  padding: 8px 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.9em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.profileSectionBody details summary::-webkit-details-marker {
+  display: none;
+}
+
+.profileSectionBody details summary::after {
+  content: "▾";
+  font-size: 11px;
+  opacity: 0.6;
+  transition: transform 140ms ease;
+}
+
+.profileSectionBody details[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.profileSectionBody details > div {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* Compact couples section */
+.couplesCompact .row {
+  gap: 6px !important;
+}
+
+.couplesCompact select,
+.couplesCompact input,
+.couplesCompact button {
+  font-size: 0.9em;
+}
+
+.couplesCompact select[aria-label*="emoji"] {
+  width: 64px !important;
+}
+
+.couplesCompact textarea {
+  min-height: 60px !important;
+  font-size: 0.9em;
+}
+
+.couplesCompact .toggleRow {
+  padding: 6px 0;
+}
+
+/* Stats grid in overview - make it more compact */
+.profileSection[data-section="overview"] .profileInfoGrid {
+  margin-top: 12px;
+  gap: 8px;
+}
+
+.profileSection[data-section="overview"] .profileInfoCard {
+  padding: 8px 10px;
+}
+
 .notificationsModal{
   position: fixed;
   inset: 0;
