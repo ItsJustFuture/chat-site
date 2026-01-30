@@ -93,23 +93,31 @@ socket.emit("mod kick", {
 
 #### Client-Side MAC Address Tracking
 
-To enable MAC address tracking, the client should send the MAC address in a header when establishing the socket connection. This can be done by:
+⚠️ **IMPORTANT SECURITY WARNING**: MAC address tracking has significant limitations and security issues:
 
-1. Obtaining the MAC address on the client (may require user permission or browser APIs)
-2. Sending it in the socket handshake headers:
+1. **Browser Restriction**: Web browsers cannot access MAC addresses due to security restrictions. This feature only works with custom desktop or mobile applications.
+
+2. **Trivial to Spoof**: MAC addresses are sent in HTTP headers and can be easily changed by any client. An attacker can:
+   - Bypass MAC-based bans by changing the header value
+   - Frame innocent users by spoofing their MAC address
+   - Create false positive linked account detections
+
+3. **No Real Security**: Do not rely on MAC addresses for security decisions. They should only be used as supplementary information alongside other moderation factors.
+
+If you still want to implement MAC address tracking (understanding the limitations above):
+
+1. Obtain the MAC address on the client (may require user permission or native APIs)
+2. Send it in the socket handshake headers:
 
 ```javascript
 const socket = io({
   extraHeaders: {
-    'x-client-mac': 'aa:bb:cc:dd:ee:ff'  // User's MAC address
+    'x-client-mac': 'aa:bb:cc:dd:ee:ff'  // User's MAC address (easily spoofed!)
   }
 });
 ```
 
-**Note:** Browser-based clients typically cannot access MAC addresses directly due to security restrictions. This feature is more suitable for:
-- Desktop applications
-- Mobile apps
-- Custom clients with appropriate permissions
+**Recommendation**: Consider removing MAC address tracking entirely, or use it only for informational purposes with clear warnings to moderators about its unreliability.
 
 ## Database Schema
 
@@ -154,10 +162,21 @@ Stores banned IP and MAC addresses.
 ## Security Notes
 
 1. **IP Addresses**: Always tracked automatically from socket connections
-2. **MAC Addresses**: Only tracked if sent by the client (requires client support)
-3. **Address Spoofing**: Be aware that both IP and MAC addresses can potentially be spoofed
+2. **MAC Addresses**: 
+   - ⚠️ **IMPORTANT**: MAC addresses are client-provided via HTTP headers and are **trivially spoofable**
+   - Any client can send any MAC address they want in the header
+   - Should **NOT** be relied upon as the primary or sole factor for moderation decisions
+   - Useful only as supplementary data in conjunction with other factors
+   - Only works with custom clients (not browser-based applications)
+3. **Address Spoofing**: Both IP and MAC addresses can potentially be spoofed, but IPs are harder
 4. **VPNs/Proxies**: Users on VPNs may share IP addresses with unrelated users
 5. **NAT**: Multiple users behind the same router share an IP address
+6. **Collateral Bans**: Banning all addresses of a user may inadvertently affect:
+   - Family members or roommates sharing the same IP
+   - Users on the same VPN service
+   - Users on shared/public networks (coffee shops, libraries, etc.)
+   
+**Recommendation**: Use address-based bans carefully. Consider whether to ban addresses only for serious offenses, and provide a clear appeal process for false positives.
 
 ## Future Enhancements
 

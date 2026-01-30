@@ -14572,12 +14572,15 @@ function getSocketIp(socket) {
 
 function getSocketMac(socket) {
   // MAC address from client-sent header (must be sent by client)
+  // WARNING: This is easily spoofed and should NOT be relied upon for security.
+  // MAC addresses can be changed by the client at will.
   const macHeader = socket.handshake.headers["x-client-mac"] || socket.handshake.headers["x-mac-address"];
   if (macHeader) {
     const cleaned = String(macHeader).trim().toLowerCase();
-    // Basic validation: MAC address format (xx:xx:xx:xx:xx:xx or similar)
+    // Basic validation: MAC address format (xx:xx:xx:xx:xx:xx or xx-xx-xx-xx-xx-xx)
     if (/^([0-9a-f]{2}[:-]){5}([0-9a-f]{2})$/i.test(cleaned)) {
-      return cleaned;
+      // Normalize to colon format for consistency
+      return cleaned.replace(/-/g, ':');
     }
   }
   return null;
@@ -14590,31 +14593,21 @@ async function trackUserAddress(userId, addressType, addressValue) {
   
   try {
     if (PG_READY) {
-      // Try to update existing record
-      const result = await pgPool.query(
-        `UPDATE user_addresses 
-         SET last_seen = $1, connection_count = connection_count + 1 
-         WHERE user_id = $2 AND address_type = $3 AND address_value = $4`,
-        [now, userId, addressType, addressValue]
+      // Use INSERT with ON CONFLICT for atomic upsert
+      await pgPool.query(
+        `INSERT INTO user_addresses (user_id, address_type, address_value, first_seen, last_seen, connection_count)
+         VALUES ($1, $2, $3, $4, $5, 1)
+         ON CONFLICT (user_id, address_type, address_value) DO UPDATE
+         SET last_seen = $5, connection_count = user_addresses.connection_count + 1`,
+        [userId, addressType, addressValue, now, now]
       );
-      
-      // If no record was updated, insert new one
-      if (result.rowCount === 0) {
-        await pgPool.query(
-          `INSERT INTO user_addresses (user_id, address_type, address_value, first_seen, last_seen, connection_count)
-           VALUES ($1, $2, $3, $4, $5, 1)
-           ON CONFLICT (user_id, address_type, address_value) DO UPDATE
-           SET last_seen = $4, connection_count = user_addresses.connection_count + 1`,
-          [userId, addressType, addressValue, now, now]
-        );
-      }
     }
   } catch (e) {
     console.warn('[trackUserAddress][pg] failed:', e?.message || e);
   }
   
   try {
-    // Also track in SQLite
+    // Also track in SQLite - use INSERT OR REPLACE for upsert
     const existing = await dbGetAsync(
       "SELECT id, connection_count FROM user_addresses WHERE user_id = ? AND address_type = ? AND address_value = ?",
       [userId, addressType, addressValue]
@@ -14685,7 +14678,8 @@ async function banAllUserAddresses(userId, reason, bannedByUserId, bannedByUsern
           `INSERT INTO address_bans (address_type, address_value, reason, banned_by_user_id, banned_by_username, expires_at, created_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7)
            ON CONFLICT (address_type, address_value) DO UPDATE
-           SET reason = $3, banned_by_user_id = $4, banned_by_username = $5, expires_at = $6, created_at = $7`,
+           SET reason = EXCLUDED.reason, banned_by_user_id = EXCLUDED.banned_by_user_id, 
+               banned_by_username = EXCLUDED.banned_by_username, expires_at = EXCLUDED.expires_at`,
           [addr.address_type, addr.address_value, reason, bannedByUserId, bannedByUsername, expiresAt, now]
         );
       }
@@ -14701,11 +14695,25 @@ async function banAllUserAddresses(userId, reason, bannedByUserId, bannedByUsern
     );
     
     for (const addr of addresses || []) {
-      await dbRunAsync(
-        `INSERT OR REPLACE INTO address_bans (address_type, address_value, reason, banned_by_user_id, banned_by_username, expires_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [addr.address_type, addr.address_value, reason, bannedByUserId, bannedByUsername, expiresAt, now]
+      // Check if ban already exists to preserve created_at
+      const existing = await dbGetAsync(
+        "SELECT created_at FROM address_bans WHERE address_type = ? AND address_value = ?",
+        [addr.address_type, addr.address_value]
       );
+      
+      if (existing) {
+        await dbRunAsync(
+          `UPDATE address_bans SET reason = ?, banned_by_user_id = ?, banned_by_username = ?, expires_at = ? 
+           WHERE address_type = ? AND address_value = ?`,
+          [reason, bannedByUserId, bannedByUsername, expiresAt, addr.address_type, addr.address_value]
+        );
+      } else {
+        await dbRunAsync(
+          `INSERT INTO address_bans (address_type, address_value, reason, banned_by_user_id, banned_by_username, expires_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [addr.address_type, addr.address_value, reason, bannedByUserId, bannedByUsername, expiresAt, now]
+        );
+      }
     }
   } catch (e) {
     console.warn('[banAllUserAddresses][sqlite] failed:', e?.message || e);
@@ -14724,7 +14732,8 @@ async function getLinkedAccounts(userId) {
          JOIN user_addresses ua2 ON ua1.address_value = ua2.address_value AND ua1.address_type = ua2.address_type
          JOIN users u ON ua2.user_id = u.id
          WHERE ua1.user_id = $1 AND ua2.user_id != $1
-         ORDER BY ua2.last_seen DESC`,
+         ORDER BY ua2.last_seen DESC
+         LIMIT 100`,
         [userId]
       );
       return rows || [];
@@ -14740,7 +14749,8 @@ async function getLinkedAccounts(userId) {
        JOIN user_addresses ua2 ON ua1.address_value = ua2.address_value AND ua1.address_type = ua2.address_type
        JOIN users u ON ua2.user_id = u.id
        WHERE ua1.user_id = ? AND ua2.user_id != ?
-       ORDER BY ua2.last_seen DESC`,
+       ORDER BY ua2.last_seen DESC
+       LIMIT 100`,
       [userId, userId]
     );
     return linked || [];
@@ -15216,10 +15226,16 @@ io.on("connection", async (socket) => {
   // Track user addresses for moderation
   const userId = sessUser.id;
   if (socketIp) {
-    trackUserAddress(userId, "ip", socketIp).catch(() => {});
+    trackUserAddress(userId, "ip", socketIp).catch((e) => {
+      console.warn('[connection] Failed to track IP address:', e?.message || e);
+    });
   }
   if (socketMac) {
-    trackUserAddress(userId, "mac", socketMac).catch(() => {});
+    // WARNING: MAC addresses are client-provided and easily spoofed
+    // Should not be relied upon as the sole factor for moderation decisions
+    trackUserAddress(userId, "mac", socketMac).catch((e) => {
+      console.warn('[connection] Failed to track MAC address:', e?.message || e);
+    });
   }
 
   socket.user = {
@@ -17541,11 +17557,15 @@ if (sid) {
   // ---- Linked Accounts (Moderator/Admin view)
   socket.on("mod get linked accounts", async ({ username } = {}, ack) => {
     const respond = (payload) => { if (typeof ack === "function") ack(payload); };
-    const actorRole = socket.request.session.user.role;
+    const actorRole = socket.request?.session?.user?.role;
     
     // Only Moderators, Admins, Co-owners, and Owner can view linked accounts
-    if (!requireMinRole(actorRole, "Moderator")) {
+    if (!actorRole || !requireMinRole(actorRole, "Moderator")) {
       return respond({ ok: false, error: "Not permitted." });
+    }
+
+    if (!username) {
+      return respond({ ok: false, error: "Username required." });
     }
 
     username = sanitizeUsername(username);
@@ -17576,6 +17596,9 @@ if (sid) {
         }
         
         const linkedUsers = Array.from(userMap.values());
+        
+        // Log access for audit trail
+        console.log(`[audit] User ${socket.user?.username} (${socket.user?.id}) viewed linked accounts for ${target.username} (${target.id})`);
         
         respond({ 
           ok: true, 
