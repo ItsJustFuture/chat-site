@@ -81,7 +81,7 @@ try {
 }
 
 // Check main files exist
-const criticalFiles = ['server.js', 'database.js', 'package.json', 'index.html'];
+const criticalFiles = ['server.js', 'database.js', 'package.json'];
 criticalFiles.forEach(file => {
   if (fs.existsSync(path.join(__dirname, '..', file))) {
     addCheck('passed', `✓ ${file} exists`);
@@ -89,6 +89,13 @@ criticalFiles.forEach(file => {
     addCheck('failed', `✗ ${file} missing!`);
   }
 });
+
+// Check public/index.html exists (served by the app)
+if (fs.existsSync(path.join(__dirname, '..', 'public', 'index.html'))) {
+  addCheck('passed', '✓ public/index.html exists');
+} else {
+  addCheck('failed', '✗ public/index.html missing!');
+}
 
 // Check migrations directory
 if (fs.existsSync(path.join(__dirname, '..', 'migrations'))) {
