@@ -2483,6 +2483,7 @@ async function syncGoldXpThemeToPg(uid) {
 }
 
 async function pgGetUserByUsername(username) {
+  if (!pgPool || !PG_READY) return null;
   const { rows } = await pgPool.query(
     `SELECT * FROM users WHERE lower(username) = lower($1) LIMIT 1`,
     [username]
@@ -2491,6 +2492,7 @@ async function pgGetUserByUsername(username) {
 }
 
 async function pgGetUserById(id) {
+  if (!pgPool || !PG_READY) return null;
   const { rows } = await pgPool.query(
     `SELECT * FROM users WHERE id = $1 LIMIT 1`,
     [id]
