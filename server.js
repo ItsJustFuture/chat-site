@@ -8732,6 +8732,33 @@ app.get("/api/mod/heat", requireLogin, async (req, res) => {
   }
 });
 
+// Get username history for a user (moderator only)
+app.get("/api/mod/users/:userId/username-history", requireLogin, async (req, res) => {
+  try {
+    if (!requireMinRole(req.session.user.role, "Moderator")) {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+    
+    const userId = parseInt(req.params.userId);
+    if (!userId || isNaN(userId)) {
+      return res.status(400).json({ ok: false, message: "Invalid user ID" });
+    }
+
+    const history = await dbAllAsync(
+      `SELECT old_username, new_username, changed_at, changed_by 
+       FROM username_history 
+       WHERE user_id = ? 
+       ORDER BY changed_at DESC`,
+      [userId]
+    );
+
+    res.json({ ok: true, history: history || [] });
+  } catch (e) {
+    console.error("[username history fetch]", e);
+    res.status(500).json({ ok: false, message: "Failed to load username history" });
+  }
+});
+
 //
 // Daily micro-challenges
 //
@@ -8979,6 +9006,7 @@ app.get("/api/me/gold", requireLogin, async (req, res) => {
 
 app.post("/api/me/username", strictLimiter, requireLogin, async (req, res) => {
   const userId = req.session.user.id;
+  const oldUsername = req.session.user.username;
   const raw = String(req.body?.username || "").trim();
   const newName = sanitizeUsername(raw);
 
@@ -9024,6 +9052,16 @@ app.post("/api/me/username", strictLimiter, requireLogin, async (req, res) => {
     return res.status(500).json({ ok: false, message: "Failed to update username." });
   } finally {
     client.release();
+  }
+
+  // Log username history to SQLite
+  try {
+    await dbRunAsync(
+      "INSERT INTO username_history (user_id, old_username, new_username, changed_at, changed_by) VALUES (?, ?, ?, ?, ?)",
+      [userId, oldUsername, newName, Date.now(), 'self']
+    );
+  } catch (e) {
+    console.warn("[username history]", e?.message || e);
   }
 
   // Best-effort mirror to SQLite so legacy lookups remain consistent.
