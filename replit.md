@@ -32,7 +32,7 @@ Banter & Brats is an 18+ community chat application built with Node.js and Expre
 - **Real-time**: Socket.IO (with optional Redis adapter)
 - **Auth**: bcrypt for password hashing, express-session
 - **Markdown**: marked.js with DOMPurify sanitization
-- **Other**: Helmet (security), multer (file uploads), nodemailer (emails)
+- **Other**: Helmet (security), multer (file uploads)
 
 ## Environment Variables
 
@@ -80,4 +80,3 @@ SELECT * FROM migrations_log;
 - The app uses both SQLite and PostgreSQL - SQLite for local development, PostgreSQL for production
 - Migrations in `migrations/` folder work for both SQLite and PostgreSQL
 - All new features are opt-in via environment variables (no breaking changes)
-

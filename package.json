@@ -38,7 +38,6 @@
     "isomorphic-dompurify": "^2.9.0",
     "marked": "^11.1.1",
     "multer": "^2.0.2",
-    "nodemailer": "^6.10.1",
     "pg": "^8.16.3",
     "redis": "^4.6.12",
     "socket.io": "^4.8.3",
