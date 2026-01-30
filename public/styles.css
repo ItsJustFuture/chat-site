@@ -1945,7 +1945,7 @@ body.auth-pending #authLoading{
 
 @media (max-width: 540px){
   .loginShell{
-    max-width: 420px;
+    max-width: 320px;
   }
   .loginCard{
     padding:20px;
