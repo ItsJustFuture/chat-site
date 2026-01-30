@@ -815,8 +815,8 @@
 <div class="modalContent" id="modalContent">
 <div id="viewProfile">
 <div class="profileSections" id="profileSections">
-<details class="profileSection" data-section="actions" open="">
-<summary>Actions</summary>
+<details class="profileSection" data-section="overview" open="">
+<summary>📊 Overview</summary>
 <div class="profileSectionBody">
 <div class="profileQuickActions" id="profileQuickActions">
 <div class="quickActionGroup">
@@ -828,11 +828,6 @@
 <button class="btn btnSecondary" data-profile-action="profile:toggle-edit" id="profileEditToggleBtn" style="display:none;" type="button">Edit profile</button>
 </div>
 </div>
-</div>
-</details>
-<details class="profileSection" data-section="stats">
-<summary>Stats</summary>
-<div class="profileSectionBody">
 <div class="profileInfoGrid">
 <div class="profileInfoCard">
 <div class="infoLabel">Age</div>
@@ -883,7 +878,7 @@
 </div>
 </details>
 <details class="profileSection" data-section="about">
-<summary>About</summary>
+<summary>📝 About</summary>
 <div class="profileSectionBody">
 <div class="profileBioCard" id="viewAbout">
 <div class="sectionTitle">Bio</div>
@@ -892,152 +887,18 @@
 </div>
 </details>
 <details class="profileSection" data-section="customize">
-<summary>Customization</summary>
+<summary>⚙️ Settings</summary>
 <div class="profileSectionBody">
-<div class="panelBox">
-<div class="small">Jump into the full customization panel or apply a theme.</div>
-<div class="row" style="margin-top:10px; gap:8px; flex-wrap:wrap;">
-<button class="btn btnSecondary" data-profile-action="profile:customize" type="button">Open customize panel</button>
-<button class="btn btnSecondary" data-profile-action="profile:themes" type="button">Themes</button>
-</div>
-</div>
-<div class="panelBox profileEditSection" id="profileEditSection" style="display:none;">
+<div class="profileEditSection" id="profileEditSection" style="display:none;">
 <div id="myProfileEdit" style="display:none;">
 <div class="sectionTitle">Edit my profile</div>
-<div class="panelBox">
+<details class="panelBox" style="margin-bottom:10px;" open="">
+<summary style="cursor:pointer; font-weight:500; padding:8px 0;">Profile Info</summary>
+<div style="padding-top:8px;">
 <div class="field">
 <label>Avatar</label>
 <input accept="image/*" id="avatarFile" type="file"/>
 <div class="small">Max 5MB. PNG/JPG/WEBP/GIF.</div>
-</div>
-<div class="field" id="couplesField">
-<label id="couplesLabel">Couples <span class="pillCount" id="couplesLabelBadge" style="display:none;"></span></label>
-<div class="small">All couples features are opt-in and can be disabled at any time.</div>
-<div class="row" style="margin-top:8px; gap:8px; align-items:center;">
-<input id="couplesPartnerInput" placeholder="Partner username" style="flex:1;"/>
-<button class="btn secondary" id="couplesRequestBtn" type="button">Send link request</button>
-</div>
-<div class="panelBox" id="couplesPendingBox" style="margin-top:10px; display:none;">
-<div class="small" style="margin-bottom:6px;">Pending</div>
-<div id="couplesPendingList"></div>
-</div>
-<div class="panelBox" id="couplesActiveBox" style="margin-top:10px; display:none;">
-<div class="small" id="couplesActiveTitle">Linked</div>
-<div class="row couplesStatusRow" style="margin-top:8px; gap:8px; align-items:center;">
-<select aria-label="Couple status emoji" id="couplesStatusEmoji" style="width:72px;">
-<option value="💜">💜</option>
-<option value="💕">💕</option>
-<option value="✨">✨</option>
-<option value="🫶">🫶</option>
-<option value="🌙">🌙</option>
-<option value="🔥">🔥</option>
-<option value="🧸">🧸</option>
-</select>
-<input id="couplesStatusLabel" maxlength="24" placeholder="Status label (e.g. Linked)" style="flex:1;"/>
-<button class="btn secondary" id="couplesStatusSaveBtn" type="button">Save</button>
-</div>
-<div class="row couplesMoodRow" style="margin-top:8px; gap:8px; align-items:center;">
-<select aria-label="Couple mood emoji" id="couplesMoodEmoji" style="width:72px;">
-<option value="">—</option>
-<option value="🌙">🌙</option>
-<option value="💫">💫</option>
-<option value="🧸">🧸</option>
-<option value="☕">☕</option>
-<option value="🔥">🔥</option>
-<option value="🥺">🥺</option>
-<option value="🫶">🫶</option>
-<option value="💜">💜</option>
-</select>
-<div class="small" style="flex:1;">Shared mood (optional)</div>
-<button class="btn secondary" id="couplesMoodSaveBtn" type="button">Save</button>
-<button class="btn secondary" id="couplesPingBtn" type="button">Ping</button>
-</div>
-<div class="small">Shown as the couples badge (if enabled) and in your profile when both of you allow it.</div>
-<div class="toggleRow">
-<label class="switch">
-<input id="couplesEnabledToggle" type="checkbox"/>
-<span class="slider"></span>
-</label>
-<div class="toggleLabel">Enable couples features</div>
-</div>
-<div class="toggleRow">
-<label class="switch">
-<input id="couplesShowProfileToggle" type="checkbox"/>
-<span class="slider"></span>
-</label>
-<div class="toggleLabel">Show link on profiles</div>
-</div>
-<div class="toggleRow">
-<label class="switch">
-<input id="couplesBadgeToggle" type="checkbox"/>
-<span class="slider"></span>
-</label>
-<div class="toggleLabel">Show badge (💜) in members list</div>
-</div>
-<div class="toggleRow">
-<label class="switch">
-<input id="couplesAuraToggle" type="checkbox"/>
-<span class="slider"></span>
-</label>
-<div class="toggleLabel">Enable shared aura when together</div>
-</div>
-<div class="toggleRow">
-<label class="switch">
-<input id="couplesShowMembersToggle" type="checkbox"/>
-<span class="slider"></span>
-</label>
-<div class="toggleLabel">Show link in members list</div>
-</div>
-<div class="toggleRow">
-<label class="switch">
-<input id="couplesGroupToggle" type="checkbox"/>
-<span class="slider"></span>
-</label>
-<div class="toggleLabel">Pull us together in members list</div>
-</div>
-<div class="toggleRow">
-<label class="switch">
-<input id="couplesAllowPingToggle" type="checkbox"/>
-<span class="slider"></span>
-</label>
-<div class="toggleLabel">Allow partner pings</div>
-</div>
-<div class="panelBox couplesV2Box" id="couplesV2Box" style="margin-top:12px; display:none;">
-<div class="small">Couple card (shared settings)</div>
-<div class="row" style="margin-top:8px; gap:8px; align-items:center;">
-<select aria-label="Couple privacy" id="couplesPrivacySelect">
-<option value="private">Private</option>
-<option value="friends">Friends</option>
-<option value="public">Public</option>
-</select>
-<input id="couplesNameInput" maxlength="48" placeholder="Couple name (optional)" style="flex:1;"/>
-</div>
-<textarea id="couplesBioInput" maxlength="220" placeholder="Couple bio (optional)" style="width:100%; min-height:70px; margin-top:8px;"></textarea>
-<div class="toggleRow" style="margin-top:8px;">
-<label class="switch">
-<input id="couplesShowBadgeToggle" type="checkbox"/>
-<span class="slider"></span>
-</label>
-<div class="toggleLabel">Show couple badge publicly</div>
-</div>
-<div class="toggleRow">
-<label class="switch">
-<input id="couplesBonusesToggle" type="checkbox"/>
-<span class="slider"></span>
-</label>
-<div class="toggleLabel">Enable couple bonuses (tiny)</div>
-</div>
-<div class="row" style="margin-top:8px; gap:8px; align-items:center;">
-<button class="btn secondary" id="couplesSettingsSaveBtn" type="button">Save couple card</button>
-<button class="btn secondary" id="couplesNudgeBtn" type="button" aria-label="Nudge your partner">Nudge</button>
-</div>
-<div class="small" id="couplesV2Status" style="margin-top:6px;"></div>
-</div>
-<div class="row" style="margin-top:10px; gap:8px;">
-<button class="btn danger" id="couplesUnlinkBtn" type="button">Unlink</button>
-</div>
-</div>
-<div class="msgline" id="couplesMsg"></div>
 </div>
 <div class="field">
 <label>Mood</label>
@@ -1095,8 +956,165 @@
 <div class="small muted">Use BBCode for simple formatting. Links/images require full URLs.</div>
 </div>
 </div>
-<div class="panelBox" id="memorySettingsPanel" style="display:none;">
-<div class="sectionTitle">Memory &amp; Lore System</div>
+</div>
+</details>
+<details class="panelBox" style="margin-bottom:10px;" id="couplesField">
+<summary style="cursor:pointer; font-weight:500; padding:8px 0;" id="couplesLabel">Couples <span class="pillCount" id="couplesLabelBadge" style="display:none;"></span></summary>
+<div style="padding-top:8px;">
+<div class="small">All couples features are opt-in and can be disabled at any time.</div>
+<div class="row" style="margin-top:8px; gap:8px; align-items:center;">
+<input id="couplesPartnerInput" placeholder="Partner username" style="flex:1;"/>
+<button class="btn secondary" id="couplesRequestBtn" type="button">Send link request</button>
+</div>
+<div class="panelBox" id="couplesPendingBox" style="margin-top:10px; display:none;">
+<div class="small" style="margin-bottom:6px;">Pending</div>
+<div id="couplesPendingList"></div>
+</div>
+<div class="panelBox" id="couplesActiveBox" style="margin-top:10px; display:none;">
+<div class="small" id="couplesActiveTitle">Linked</div>
+<details style="margin-top:8px;">
+<summary style="cursor:pointer; font-size:0.9em; padding:4px 0;">Status & Mood</summary>
+<div style="padding-top:8px;">
+<div class="row" style="gap:6px; align-items:center; margin-bottom:6px;">
+<select aria-label="Couple status emoji" id="couplesStatusEmoji" style="width:64px; font-size:0.9em;">
+<option value="💜">💜</option>
+<option value="💕">💕</option>
+<option value="✨">✨</option>
+<option value="🫶">🫶</option>
+<option value="🌙">🌙</option>
+<option value="🔥">🔥</option>
+<option value="🧸">🧸</option>
+</select>
+<input id="couplesStatusLabel" maxlength="24" placeholder="Status label" style="flex:1; font-size:0.9em;"/>
+<button class="btn secondary" id="couplesStatusSaveBtn" type="button" style="font-size:0.9em;">Save</button>
+</div>
+<div class="row" style="gap:6px; align-items:center;">
+<select aria-label="Couple mood emoji" id="couplesMoodEmoji" style="width:64px; font-size:0.9em;">
+<option value="">—</option>
+<option value="🌙">🌙</option>
+<option value="💫">💫</option>
+<option value="🧸">🧸</option>
+<option value="☕">☕</option>
+<option value="🔥">🔥</option>
+<option value="🥺">🥺</option>
+<option value="🫶">🫶</option>
+<option value="💜">💜</option>
+</select>
+<div class="small" style="flex:1;">Shared mood (optional)</div>
+<button class="btn secondary" id="couplesMoodSaveBtn" type="button" style="font-size:0.9em;">Save</button>
+<button class="btn secondary" id="couplesPingBtn" type="button" style="font-size:0.9em;">Ping</button>
+</div>
+<div class="small" style="margin-top:6px;">Shown as the couples badge (if enabled) and in your profile when both of you allow it.</div>
+</div>
+</details>
+<details style="margin-top:8px;">
+<summary style="cursor:pointer; font-size:0.9em; padding:4px 0;">Display Settings</summary>
+<div style="padding-top:8px;">
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesEnabledToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Enable couples features</div>
+</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesShowProfileToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Show link on profiles</div>
+</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesBadgeToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Show badge (💜) in members list</div>
+</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesAuraToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Enable shared aura when together</div>
+</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesShowMembersToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Show link in members list</div>
+</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesGroupToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Pull us together in members list</div>
+</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesAllowPingToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Allow partner pings</div>
+</div>
+</div>
+</details>
+<details class="panelBox" id="couplesV2Box" style="margin-top:8px; display:none;">
+<summary style="cursor:pointer; font-size:0.9em; padding:4px 0;">Couple Card</summary>
+<div style="padding-top:8px;">
+<div class="small">Shared settings for couple card</div>
+<div class="row" style="margin-top:8px; gap:6px; align-items:center;">
+<select aria-label="Couple privacy" id="couplesPrivacySelect" style="font-size:0.9em;">
+<option value="private">Private</option>
+<option value="friends">Friends</option>
+<option value="public">Public</option>
+</select>
+<input id="couplesNameInput" maxlength="48" placeholder="Couple name (optional)" style="flex:1; font-size:0.9em;"/>
+</div>
+<textarea id="couplesBioInput" maxlength="220" placeholder="Couple bio (optional)" style="width:100%; min-height:60px; margin-top:6px; font-size:0.9em;"></textarea>
+<div class="toggleRow" style="margin-top:6px;">
+<label class="switch">
+<input id="couplesShowBadgeToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Show couple badge publicly</div>
+</div>
+<div class="toggleRow">
+<label class="switch">
+<input id="couplesBonusesToggle" type="checkbox"/>
+<span class="slider"></span>
+</label>
+<div class="toggleLabel">Enable couple bonuses (tiny)</div>
+</div>
+<div class="row" style="margin-top:8px; gap:6px; align-items:center;">
+<button class="btn secondary" id="couplesSettingsSaveBtn" type="button" style="font-size:0.9em;">Save couple card</button>
+<button class="btn secondary" id="couplesNudgeBtn" type="button" aria-label="Nudge your partner" style="font-size:0.9em;">Nudge</button>
+</div>
+<div class="small" id="couplesV2Status" style="margin-top:6px;"></div>
+</div>
+</details>
+<div class="row" style="margin-top:10px; gap:8px;">
+<button class="btn danger" id="couplesUnlinkBtn" type="button">Unlink</button>
+</div>
+</div>
+<div class="msgline" id="couplesMsg"></div>
+</div>
+</details>
+<details class="panelBox" style="margin-bottom:10px;">
+<summary style="cursor:pointer; font-weight:500; padding:8px 0;">Appearance</summary>
+<div style="padding-top:8px;">
+<div class="small">Jump into the full customization panel or apply a theme.</div>
+<div class="row" style="margin-top:10px; gap:8px; flex-wrap:wrap;">
+<button class="btn btnSecondary" data-profile-action="profile:customize" type="button">Open customize panel</button>
+<button class="btn btnSecondary" data-profile-action="profile:themes" type="button">Themes</button>
+</div>
+</div>
+</details>
+<details class="panelBox" id="memorySettingsPanel" style="margin-bottom:10px; display:none;">
+<summary style="cursor:pointer; font-weight:500; padding:8px 0;">Memory System</summary>
+<div style="padding-top:8px;">
 <div class="toggleRow">
 <label class="switch">
 <input id="memoryEnabledToggle" type="checkbox"/>
@@ -1107,6 +1125,7 @@
 <div class="small muted">Unlock memory cards and your profile timeline (Owner only during early rollout).</div>
 <div class="msgline" id="memorySettingsMsg"></div>
 </div>
+</details>
 <div class="row">
 <button class="btn btnPrimary" id="saveProfileBtn" type="button">Save</button>
 <button class="btn btnSecondary" id="refreshProfileBtn" type="button">Cancel</button>
@@ -1118,7 +1137,7 @@
 </div>
 </details>
 <details class="profileSection" data-section="moderation" id="profileModerationSection" style="display:none;">
-<summary>Moderation</summary>
+<summary>🛡️ Moderation</summary>
 <div class="profileSectionBody">
 <div class="panelBox">
 <div class="small">Moderator tools for this member.</div>
