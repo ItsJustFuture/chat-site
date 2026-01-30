@@ -6,6 +6,12 @@
     if (!authForm || authForm.dataset.authBound) return;
     authForm.dataset.authBound = 'true';
 
+    const authLoading = document.getElementById('authLoading');
+    const loginView = document.getElementById('loginView');
+    const chatView = document.getElementById('chatView');
+    const passwordUpgradeView = document.getElementById('passwordUpgradeView');
+    const restrictedView = document.getElementById('restrictedView');
+
     const loginBtn = document.getElementById('loginBtn');
     const regBtn = document.getElementById('regBtn');
     const guestBtn = document.getElementById('guestLoginBtn');
@@ -25,6 +31,86 @@
         authMsg.style.color = isError ? '#ff6b6b' : '';
       }
     };
+
+    const setAuthState = (state) => {
+      const show = (el, shouldShow) => {
+        if (!el) return;
+        if (typeof el.hidden === 'boolean') {
+          el.hidden = !shouldShow;
+        } else {
+          el.style.display = shouldShow ? '' : 'none';
+        }
+      };
+
+      document.body?.classList?.toggle('auth-pending', state === 'loading');
+      show(authLoading, state === 'loading');
+      show(loginView, state === 'login');
+      show(chatView, state === 'chat');
+      show(passwordUpgradeView, state === 'upgrade');
+      show(restrictedView, state === 'restricted');
+    };
+
+    const showLoginView = () => setAuthState('login');
+
+    const showChatView = () => setAuthState('chat');
+
+    const showPasswordUpgradeView = () => setAuthState('upgrade');
+
+    const showRestrictedView = (status) => {
+      const title = document.getElementById('restrictedTitle');
+      const sub = document.getElementById('restrictedSub');
+      const reasonText = document.getElementById('restrictedReasonText');
+      const timerWrap = document.getElementById('restrictedTimerWrap');
+      const timer = document.getElementById('restrictedTimer');
+      const statusType = status?.type || 'restricted';
+      const label = statusType === 'banned'
+        ? 'Banned'
+        : statusType === 'kicked'
+          ? 'Kicked'
+          : 'Restricted';
+
+      if (title) title.textContent = label;
+      if (sub) sub.textContent = status?.message || 'You cannot access the chat right now.';
+      if (reasonText) reasonText.textContent = status?.reason || '—';
+      if (timerWrap) timerWrap.hidden = !status?.expiresAt;
+      if (timer && status?.expiresAt) {
+        const remaining = Math.max(0, status.expiresAt - Date.now());
+        const hours = Math.floor(remaining / 3600000);
+        const mins = Math.floor((remaining % 3600000) / 60000);
+        const secs = Math.floor((remaining % 60000) / 1000);
+        timer.textContent = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+      }
+      setAuthState('restricted');
+    };
+
+    async function hydrateSession() {
+      try {
+        const res = await fetch('/me', { credentials: 'include' });
+        if (!res.ok) return showLoginView();
+        const data = await res.json();
+        if (!data || !data.id) return showLoginView();
+        showChatView();
+      } catch (err) {
+        console.warn('[auth.js] session hydrate failed:', err?.message || err);
+        showLoginView();
+      }
+    }
+
+    async function applyRestrictionState() {
+      try {
+        const res = await fetch('/api/restriction', { credentials: 'include' });
+        if (!res.ok) return showLoginView();
+        const data = await res.json();
+        if (data?.type && data.type !== 'none') {
+          showRestrictedView(data);
+        } else {
+          await hydrateSession();
+        }
+      } catch (err) {
+        console.warn('[auth.js] restriction check failed:', err?.message || err);
+        showLoginView();
+      }
+    }
 
     const setCaptchaNote = (text) => {
       if (captchaNote) captchaNote.textContent = text || '';
@@ -140,17 +226,18 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password, captchaToken }),
+        credentials: 'include',
       });
       if (!resp.ok) {
         throw new Error(await resp.text());
       }
       const data = await resp.json();
       if (data?.code === 'PASSWORD_UPGRADE_REQUIRED') {
-        window.location.href = '/password-upgrade';
+        showPasswordUpgradeView();
         return;
       }
       if (data?.ok) {
-        window.location.reload();
+        await applyRestrictionState();
         return;
       }
       throw new Error(data?.message || 'Login failed');
@@ -161,13 +248,14 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password, captchaToken }),
+        credentials: 'include',
       });
       if (!resp.ok) {
         throw new Error(await resp.text());
       }
       const data = await resp.json();
       if (data?.ok) {
-        window.location.reload();
+        await applyRestrictionState();
         return;
       }
       throw new Error(data?.message || 'Registration failed');
@@ -213,11 +301,12 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username }),
+            credentials: 'include',
           });
           if (!resp.ok) throw new Error(await resp.text());
           const data = await resp.json();
           if (data?.ok) {
-            window.location.reload();
+            await applyRestrictionState();
             return;
           }
           throw new Error(data?.message || 'Guest login failed');
@@ -227,7 +316,9 @@
       });
     }
 
+    setAuthState('loading');
     initCaptcha();
+    applyRestrictionState();
   }
 
   if (document.readyState === 'loading') {

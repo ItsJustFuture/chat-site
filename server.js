@@ -1876,8 +1876,8 @@ app.use((req, res, next) => {
     [
       "default-src 'self'",
       // Inline hashes map to: admin word-filter UI, mod message capture overlay, and username history management UI in index.html.
-      "script-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=' 'sha256-oWpLZycNOHPRAKwunf75GOBemv1jh7TmBxWivRAc6a4=' 'sha256-7sXnZ2TVMnxHVWCkmooJgY2WLwuABY3ORO4U2HyqhCk=' 'sha256-i/aTBp59Im0Ii8AbJaj/fpbmIm5uEe2SBSUfuz0qWdo=' 'sha256-FyuENKF0oqbS8GySBjZmSheWBnbSBzWln9hSmxXIMxY='",
-      "script-src-elem 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=' 'sha256-oWpLZycNOHPRAKwunf75GOBemv1jh7TmBxWivRAc6a4=' 'sha256-7sXnZ2TVMnxHVWCkmooJgY2WLwuABY3ORO4U2HyqhCk=' 'sha256-i/aTBp59Im0Ii8AbJaj/fpbmIm5uEe2SBSUfuz0qWdo=' 'sha256-FyuENKF0oqbS8GySBjZmSheWBnbSBzWln9hSmxXIMxY='",
+      "script-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=' 'sha256-oWpLZycNOHPRAKwunf75GOBemv1jh7TmBxWivRAc6a4=' 'sha256-7sXnZ2TVMnxHVWCkmooJgY2WLwuABY3ORO4U2HyqhCk=' 'sha256-i/aTBp59Im0Ii8AbJaj/fpbmIm5uEe2SBSUfuz0qWdo=' 'sha256-FyuENKF0oqbS8GySBjZmSheWBnbSBzWln9hSmxXIMxY=' 'sha256-RbHiP1owkaFYxhobIPZZPoETOLi+bWnIbX7EeyA0rOc='",
+      "script-src-elem 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=' 'sha256-oWpLZycNOHPRAKwunf75GOBemv1jh7TmBxWivRAc6a4=' 'sha256-7sXnZ2TVMnxHVWCkmooJgY2WLwuABY3ORO4U2HyqhCk=' 'sha256-i/aTBp59Im0Ii8AbJaj/fpbmIm5uEe2SBSUfuz0qWdo=' 'sha256-FyuENKF0oqbS8GySBjZmSheWBnbSBzWln9hSmxXIMxY=' 'sha256-RbHiP1owkaFYxhobIPZZPoETOLi+bWnIbX7EeyA0rOc='",
       // Inline style attributes are set by the client JS (e.g. show/hide panels),
       // so allow them alongside our external stylesheet.
       // Also allow Google Fonts stylesheets for optional custom fonts.
@@ -8143,6 +8143,10 @@ app.post("/register", registerLimiter, async (req, res) => {
     const existingPg = await pgGetUserByUsername(username);
     if (existingPg) return res.status(409).send("Username already taken");
 
+    const captchaToken = String(req.body?.captchaToken || "");
+    const captcha = await verifyCaptcha(captchaToken, getClientIp(req));
+    if (!captcha.ok) return res.status(400).send(captcha.message || "Captcha failed");
+
     const hash = await bcrypt.hash(password, 10);
     const createdAt = Date.now();
 
@@ -8153,34 +8157,53 @@ app.post("/register", registerLimiter, async (req, res) => {
 
     const theme = DEFAULT_THEME;
 
-    // 1) Create user in Postgres
-    const createdAtValue = PG_USERS_CREATED_AT_IS_TIMESTAMP ? new Date(createdAt) : createdAt;
-    const { rows } = await pgPool.query(
-      `INSERT INTO users (username, password_hash, role, created_at, theme)
-       VALUES ($1,$2,$3,$4,$5)
-       RETURNING id, username, role, theme`,
-      [username, hash, role, createdAtValue, theme]
-    );
+    let user = null;
+    if (PG_READY && pgPool) {
+      const createdAtValue = PG_USERS_CREATED_AT_IS_TIMESTAMP ? new Date(createdAt) : createdAt;
+      const { rows } = await pgPool.query(
+        `INSERT INTO users (username, password_hash, role, created_at, theme)
+         VALUES ($1,$2,$3,$4,$5)
+         RETURNING id, username, role, theme`,
+        [username, hash, role, createdAtValue, theme]
+      );
+      user = rows[0] || null;
+    } else {
+      const existingSqlite = await dbGetAsync(
+        "SELECT id FROM users WHERE username = ? OR lower(username) = lower(?)",
+        [username, username]
+      ).catch(() => null);
+      if (existingSqlite?.id) return res.status(409).send("Username already taken");
+      const result = await dbRunAsync(
+        `INSERT INTO users (username, password_hash, role, created_at, gold, xp, theme)
+         VALUES (?,?,?,?,?,?,?)`,
+        [username, hash, role, createdAt, 0, 0, sanitizeThemeNameServer(theme)]
+      );
+      const sqliteUser = await dbGetAsync(
+        "SELECT id, username, role, theme, avatar, avatar_updated FROM users WHERE id = ?",
+        [result?.lastID]
+      );
+      user = sqliteUser || null;
+    }
 
-    const user = rows[0];
     if (!user) return res.status(500).send("Registration failed");
 
-    // 2) Mirror into SQLite
-    try {
-      await dbRunAsync(
-        `INSERT INTO users (id, username, password_hash, role, created_at, gold, xp, theme)
-         VALUES (?,?,?,?,?,?,?,?)`,
-        [user.id, username, hash, role, createdAt, 0, 0, sanitizeThemeNameServer(theme)]
-      );
-    } catch (_e) {
-      await dbRunAsync(
-        `UPDATE users
-            SET username = ?, password_hash = ?, role = ?,
-                created_at = COALESCE(created_at, ?),
-                theme = COALESCE(theme, ?)
-          WHERE id = ?`,
-        [username, hash, role, createdAt, sanitizeThemeNameServer(theme), user.id]
-      );
+    if (PG_READY && pgPool) {
+      try {
+        await dbRunAsync(
+          `INSERT INTO users (id, username, password_hash, role, created_at, gold, xp, theme)
+           VALUES (?,?,?,?,?,?,?,?)`,
+          [user.id, username, hash, role, createdAt, 0, 0, sanitizeThemeNameServer(theme)]
+        );
+      } catch (_e) {
+        await dbRunAsync(
+          `UPDATE users
+              SET username = ?, password_hash = ?, role = ?,
+                  created_at = COALESCE(created_at, ?),
+                  theme = COALESCE(theme, ?)
+            WHERE id = ?`,
+          [username, hash, role, createdAt, sanitizeThemeNameServer(theme), user.id]
+        );
+      }
     }
 
     req.session.regenerate((regenErr) => {
@@ -8424,27 +8447,28 @@ app.post("/login", loginIpLimiter, async (req, res) => {
       });
     }
 
-    // Mirror into Postgres (so /me + progression + persistent systems work)
-    await pgPool.query(
-      `INSERT INTO users (id, username, password_hash, role, created_at, theme, gold, xp)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       ON CONFLICT (username) DO UPDATE
-         SET password_hash = EXCLUDED.password_hash,
-             role = EXCLUDED.role,
-             theme = COALESCE(users.theme, EXCLUDED.theme),
-             gold = COALESCE(users.gold, EXCLUDED.gold),
-             xp = COALESCE(users.xp, EXCLUDED.xp)`,
-      [
-        row.id,
-        row.username,
-        passwordHash,
-        row.role || "User",
-        Number(row.created_at || Date.now()),
-        theme,
-        Number(row.gold || 0),
-        Number(row.xp || 0),
-      ]
-    ).catch((e) => console.error("PG mirror on login failed:", e));
+    if (PG_READY && pgPool) {
+      await pgPool.query(
+        `INSERT INTO users (id, username, password_hash, role, created_at, theme, gold, xp)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (username) DO UPDATE
+           SET password_hash = EXCLUDED.password_hash,
+               role = EXCLUDED.role,
+               theme = COALESCE(users.theme, EXCLUDED.theme),
+               gold = COALESCE(users.gold, EXCLUDED.gold),
+               xp = COALESCE(users.xp, EXCLUDED.xp)`,
+        [
+          row.id,
+          row.username,
+          passwordHash,
+          row.role || "User",
+          Number(row.created_at || Date.now()),
+          theme,
+          Number(row.gold || 0),
+          Number(row.xp || 0),
+        ]
+      ).catch((e) => console.error("PG mirror on login failed:", e));
+    }
 
     req.session.regenerate((regenErr) => {
       if (regenErr) return res.status(500).send("Session failed");
