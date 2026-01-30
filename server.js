@@ -1273,6 +1273,42 @@ try {
     console.warn('[pg-init] survival tables failed:', e?.message || e);
   }
 
+  // === User address tracking for moderation and linked accounts ===
+  try {
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS user_addresses (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        address_type TEXT NOT NULL CHECK(address_type IN ('ip', 'mac')),
+        address_value TEXT NOT NULL,
+        first_seen BIGINT NOT NULL,
+        last_seen BIGINT NOT NULL,
+        connection_count INTEGER NOT NULL DEFAULT 1,
+        UNIQUE(user_id, address_type, address_value)
+      );
+
+      CREATE TABLE IF NOT EXISTS address_bans (
+        id SERIAL PRIMARY KEY,
+        address_type TEXT NOT NULL CHECK(address_type IN ('ip', 'mac')),
+        address_value TEXT NOT NULL,
+        reason TEXT,
+        banned_by_user_id INTEGER,
+        banned_by_username TEXT,
+        expires_at BIGINT,
+        created_at BIGINT NOT NULL,
+        UNIQUE(address_type, address_value)
+      );
+    `);
+
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_user_addresses_user ON user_addresses(user_id)`);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_user_addresses_value ON user_addresses(address_value, address_type)`);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_user_addresses_last_seen ON user_addresses(last_seen)`);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_address_bans_value ON address_bans(address_value, address_type)`);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_address_bans_expires ON address_bans(expires_at)`);
+  } catch (e) {
+    console.warn('[pg-init] user address tracking tables failed:', e?.message || e);
+  }
+
     PG_READY = true;
     PG_INIT_ERROR = null;
     DB_BACKEND = "postgres";
@@ -14534,6 +14570,187 @@ function getSocketIp(socket) {
   return xfwd || socket.handshake.address || "";
 }
 
+function getSocketMac(socket) {
+  // MAC address from client-sent header (must be sent by client)
+  const macHeader = socket.handshake.headers["x-client-mac"] || socket.handshake.headers["x-mac-address"];
+  if (macHeader) {
+    const cleaned = String(macHeader).trim().toLowerCase();
+    // Basic validation: MAC address format (xx:xx:xx:xx:xx:xx or similar)
+    if (/^([0-9a-f]{2}[:-]){5}([0-9a-f]{2})$/i.test(cleaned)) {
+      return cleaned;
+    }
+  }
+  return null;
+}
+
+// Track user address (IP or MAC) in database
+async function trackUserAddress(userId, addressType, addressValue) {
+  if (!userId || !addressType || !addressValue) return;
+  const now = Date.now();
+  
+  try {
+    if (PG_READY) {
+      // Try to update existing record
+      const result = await pgPool.query(
+        `UPDATE user_addresses 
+         SET last_seen = $1, connection_count = connection_count + 1 
+         WHERE user_id = $2 AND address_type = $3 AND address_value = $4`,
+        [now, userId, addressType, addressValue]
+      );
+      
+      // If no record was updated, insert new one
+      if (result.rowCount === 0) {
+        await pgPool.query(
+          `INSERT INTO user_addresses (user_id, address_type, address_value, first_seen, last_seen, connection_count)
+           VALUES ($1, $2, $3, $4, $5, 1)
+           ON CONFLICT (user_id, address_type, address_value) DO UPDATE
+           SET last_seen = $4, connection_count = user_addresses.connection_count + 1`,
+          [userId, addressType, addressValue, now, now]
+        );
+      }
+    }
+  } catch (e) {
+    console.warn('[trackUserAddress][pg] failed:', e?.message || e);
+  }
+  
+  try {
+    // Also track in SQLite
+    const existing = await dbGetAsync(
+      "SELECT id, connection_count FROM user_addresses WHERE user_id = ? AND address_type = ? AND address_value = ?",
+      [userId, addressType, addressValue]
+    );
+    
+    if (existing) {
+      await dbRunAsync(
+        "UPDATE user_addresses SET last_seen = ?, connection_count = ? WHERE id = ?",
+        [now, (existing.connection_count || 0) + 1, existing.id]
+      );
+    } else {
+      await dbRunAsync(
+        "INSERT INTO user_addresses (user_id, address_type, address_value, first_seen, last_seen, connection_count) VALUES (?, ?, ?, ?, ?, 1)",
+        [userId, addressType, addressValue, now, now]
+      );
+    }
+  } catch (e) {
+    console.warn('[trackUserAddress][sqlite] failed:', e?.message || e);
+  }
+}
+
+// Check if an address is banned
+async function isAddressBanned(addressType, addressValue) {
+  if (!addressType || !addressValue) return false;
+  const now = Date.now();
+  
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query(
+        `SELECT id, reason, expires_at FROM address_bans 
+         WHERE address_type = $1 AND address_value = $2 
+         AND (expires_at IS NULL OR expires_at > $3)`,
+        [addressType, addressValue, now]
+      );
+      return rows && rows.length > 0;
+    }
+  } catch (e) {
+    console.warn('[isAddressBanned][pg] failed:', e?.message || e);
+  }
+  
+  try {
+    const row = await dbGetAsync(
+      "SELECT id FROM address_bans WHERE address_type = ? AND address_value = ? AND (expires_at IS NULL OR expires_at > ?)",
+      [addressType, addressValue, now]
+    );
+    return !!row;
+  } catch (e) {
+    console.warn('[isAddressBanned][sqlite] failed:', e?.message || e);
+  }
+  
+  return false;
+}
+
+// Ban all addresses associated with a user
+async function banAllUserAddresses(userId, reason, bannedByUserId, bannedByUsername, expiresAt = null) {
+  if (!userId) return;
+  const now = Date.now();
+  
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query(
+        "SELECT DISTINCT address_type, address_value FROM user_addresses WHERE user_id = $1",
+        [userId]
+      );
+      
+      for (const addr of rows || []) {
+        await pgPool.query(
+          `INSERT INTO address_bans (address_type, address_value, reason, banned_by_user_id, banned_by_username, expires_at, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (address_type, address_value) DO UPDATE
+           SET reason = $3, banned_by_user_id = $4, banned_by_username = $5, expires_at = $6, created_at = $7`,
+          [addr.address_type, addr.address_value, reason, bannedByUserId, bannedByUsername, expiresAt, now]
+        );
+      }
+    }
+  } catch (e) {
+    console.warn('[banAllUserAddresses][pg] failed:', e?.message || e);
+  }
+  
+  try {
+    const addresses = await dbAllAsync(
+      "SELECT DISTINCT address_type, address_value FROM user_addresses WHERE user_id = ?",
+      [userId]
+    );
+    
+    for (const addr of addresses || []) {
+      await dbRunAsync(
+        `INSERT OR REPLACE INTO address_bans (address_type, address_value, reason, banned_by_user_id, banned_by_username, expires_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [addr.address_type, addr.address_value, reason, bannedByUserId, bannedByUsername, expiresAt, now]
+      );
+    }
+  } catch (e) {
+    console.warn('[banAllUserAddresses][sqlite] failed:', e?.message || e);
+  }
+}
+
+// Get linked accounts (users who share IP or MAC addresses)
+async function getLinkedAccounts(userId) {
+  if (!userId) return [];
+  
+  try {
+    if (PG_READY) {
+      const { rows } = await pgPool.query(
+        `SELECT DISTINCT u.id, u.username, u.role, ua2.address_type, ua2.address_value, ua2.last_seen
+         FROM user_addresses ua1
+         JOIN user_addresses ua2 ON ua1.address_value = ua2.address_value AND ua1.address_type = ua2.address_type
+         JOIN users u ON ua2.user_id = u.id
+         WHERE ua1.user_id = $1 AND ua2.user_id != $1
+         ORDER BY ua2.last_seen DESC`,
+        [userId]
+      );
+      return rows || [];
+    }
+  } catch (e) {
+    console.warn('[getLinkedAccounts][pg] failed:', e?.message || e);
+  }
+  
+  try {
+    const linked = await dbAllAsync(
+      `SELECT DISTINCT u.id, u.username, u.role, ua2.address_type, ua2.address_value, ua2.last_seen
+       FROM user_addresses ua1
+       JOIN user_addresses ua2 ON ua1.address_value = ua2.address_value AND ua1.address_type = ua2.address_type
+       JOIN users u ON ua2.user_id = u.id
+       WHERE ua1.user_id = ? AND ua2.user_id != ?
+       ORDER BY ua2.last_seen DESC`,
+      [userId, userId]
+    );
+    return linked || [];
+  } catch (e) {
+    console.warn('[getLinkedAccounts][sqlite] failed:', e?.message || e);
+  }
+  
+  return [];
+}
+
 function allowSocketEvent(socket, key, limit, windowMs) {
   const now = Date.now();
   let perSocket = socketEventRate.get(socket.id);
@@ -14972,6 +15189,21 @@ io.on("connection", async (socket) => {
   }
 
   const socketIp = getSocketIp(socket);
+  const socketMac = getSocketMac(socket);
+  
+  // Check if IP or MAC address is banned
+  if (socketIp && await isAddressBanned("ip", socketIp)) {
+    socket.emit("system", buildSystemPayload("__global__", "Your IP address has been banned.", { kind: "global" }));
+    socket.disconnect(true);
+    return;
+  }
+  
+  if (socketMac && await isAddressBanned("mac", socketMac)) {
+    socket.emit("system", buildSystemPayload("__global__", "Your device has been banned.", { kind: "global" }));
+    socket.disconnect(true);
+    return;
+  }
+  
   if (socketIp) {
     const count = trackSocketConnection(socketIp);
     if (count > MAX_SOCKET_CONN_PER_IP) {
@@ -14979,6 +15211,15 @@ io.on("connection", async (socket) => {
       socket.disconnect(true);
       return;
     }
+  }
+
+  // Track user addresses for moderation
+  const userId = sessUser.id;
+  if (socketIp) {
+    trackUserAddress(userId, "ip", socketIp).catch(() => {});
+  }
+  if (socketMac) {
+    trackUserAddress(userId, "mac", socketMac).catch(() => {});
   }
 
   socket.user = {
@@ -17011,6 +17252,9 @@ socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300, cas
       return respond({ ok: false, error: "Kick failed." });
     }
 
+    // Ban all IP and MAC addresses associated with this user (temporary)
+    banAllUserAddresses(target.id, why, socket.user.id, actorName, expiresAt).catch(() => {});
+
     // Notify + disconnect
     const sid = socketIdByUserId.get(target.id);
     if (sid) {
@@ -17170,6 +17414,10 @@ const actorName = socket.user?.username || socket.request?.session?.user?.userna
 const why = String(reason || "").slice(0, 180) || "Banned by staff";
 // Persist ban restriction for the restriction/appeals system (in addition to legacy punishments table)
 setBanEverywhere(username, actorName, why).catch(()=>{});
+
+// Ban all IP and MAC addresses associated with this user
+banAllUserAddresses(target.id, why, socket.user.id, actorName, expiresAt).catch(() => {});
+
 const sid = socketIdByUserId.get(target.id);
 if (sid) {
   io.to(sid).emit("restriction:status", { type: "ban", reason: why, expiresAt: null, now: Date.now() });
@@ -17286,6 +17534,59 @@ if (sid) {
         }
         respond({ ok: true, username: target.username });
       });
+    });
+  });
+
+
+  // ---- Linked Accounts (Moderator/Admin view)
+  socket.on("mod get linked accounts", async ({ username } = {}, ack) => {
+    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+    const actorRole = socket.request.session.user.role;
+    
+    // Only Moderators, Admins, Co-owners, and Owner can view linked accounts
+    if (!requireMinRole(actorRole, "Moderator")) {
+      return respond({ ok: false, error: "Not permitted." });
+    }
+
+    username = sanitizeUsername(username);
+    if (!username) return respond({ ok: false, error: "Invalid username." });
+
+    db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
+      if (!target) return respond({ ok: false, error: "User not found." });
+
+      try {
+        const linkedAccounts = await getLinkedAccounts(target.id);
+        
+        // Group by user for cleaner output
+        const userMap = new Map();
+        for (const link of linkedAccounts) {
+          if (!userMap.has(link.id)) {
+            userMap.set(link.id, {
+              userId: link.id,
+              username: link.username,
+              role: link.role,
+              addresses: []
+            });
+          }
+          userMap.get(link.id).addresses.push({
+            type: link.address_type,
+            value: link.address_value,
+            lastSeen: link.last_seen
+          });
+        }
+        
+        const linkedUsers = Array.from(userMap.values());
+        
+        respond({ 
+          ok: true, 
+          targetUserId: target.id,
+          targetUsername: target.username,
+          linkedUsers 
+        });
+      } catch (e) {
+        console.error("[mod get linked accounts] error:", e);
+        respond({ ok: false, error: "Failed to retrieve linked accounts." });
+      }
     });
   });
 
