@@ -8730,64 +8730,6 @@ function releaseSocketConnection(ip) {
   if (!state.count) socketConnByIp.delete(ip);
 }
 
-// ---- Socket auth middleware (session)
-io.use((socket, next) => {
-  const origin = String(socket.handshake.headers.origin || "");
-  const hostHeader = String(socket.handshake.headers.host || "");
-  const referer = String(socket.handshake.headers.referer || "");
-  const secFetchSite = String(socket.handshake.headers["sec-fetch-site"] || "").toLowerCase();
-  const secFetchMode = String(socket.handshake.headers["sec-fetch-mode"] || "").toLowerCase();
-  const secFetchDest = String(socket.handshake.headers["sec-fetch-dest"] || "").toLowerCase();
-  const allowRefererFallbackInDev = !IS_PROD;
-  if (SOCKET_IO_DEBUG_ENABLED) {
-    console.log("[socket.io] Handshake headers", {
-      origin,
-      host: hostHeader,
-      referer,
-      secFetchSite,
-      secFetchMode,
-      secFetchDest,
-    });
-  }
-  if (origin) {
-    if (!isAllowedOrigin(origin, hostHeader)) {
-      console.warn("[socket.io] Origin not allowed", { origin, host: hostHeader });
-      return next(new Error("Origin not allowed"));
-    }
-    return next();
-  }
-  if (secFetchSite === "same-origin" && secFetchMode === "websocket" && secFetchDest === "websocket") {
-    return next();
-  }
-  if (hostHeader && isAllowedHostHeader(hostHeader)) {
-    return next();
-  }
-  if (referer && allowRefererFallbackInDev) {
-    // Referrer (Referer header) can be spoofed or omitted; only use as a best-effort fallback.
-    const refOrigin = safeParseUrl(referer)?.origin || "";
-    if (refOrigin && isAllowedOrigin(refOrigin, hostHeader)) return next();
-  }
-  if (IS_PROD) {
-    console.warn("[socket.io] Origin required", { host: hostHeader });
-    return next(new Error("Origin required"));
-  }
-  return next();
-});
-
-io.use((socket, next) => {
-  const fakeRes = socket.request.res || {
-    getHeader: () => undefined,
-    setHeader: () => {},
-    writeHead: () => {},
-  };
-  sessionMiddleware(socket.request, fakeRes, () => {
-    if (!socket.request.session?.user?.id) {
-      return next(new Error("Not authenticated"));
-    }
-    next();
-  });
-});
-
 function broadcastTyping(room) {
   const set = typingByRoom.get(room);
   const names = set ? Array.from(set) : [];
@@ -9155,3268 +9097,6 @@ function applyLuckForRoll({ luck, rollStreak, lastQualMsgAt, userId, now }) {
   return { nextLuck, nextStreak };
 }
 
-// ---- Socket handlers
-io.on("connection", async (socket) => {
-  const sessUser = socket.request.session?.user;
-  if (!sessUser?.id) {
-    socket.disconnect(true);
-    return;
-  }
-
-  const socketIp = getSocketIp(socket);
-  const socketMac = getSocketMac(socket);
-  
-  // Check if IP or MAC address is banned
-  if (socketIp && await isAddressBanned("ip", socketIp)) {
-    socket.emit("system", buildSystemPayload("__global__", "Your IP address has been banned.", { kind: "global" }));
-    socket.disconnect(true);
-    return;
-  }
-  
-  if (socketMac && await isAddressBanned("mac", socketMac)) {
-    socket.emit("system", buildSystemPayload("__global__", "Your device has been banned.", { kind: "global" }));
-    socket.disconnect(true);
-    return;
-  }
-  
-  if (socketIp) {
-    const count = trackSocketConnection(socketIp);
-    if (count > MAX_SOCKET_CONN_PER_IP) {
-      socket.emit("system", buildSystemPayload("__global__", "Too many active connections. Try again shortly.", { kind: "global" }));
-      socket.disconnect(true);
-      return;
-    }
-  }
-
-  // Track user addresses for moderation
-  const userId = sessUser.id;
-  if (socketIp) {
-    trackUserAddress(userId, "ip", socketIp).catch((e) => {
-      console.warn('[connection] Failed to track IP address:', e?.message || e);
-    });
-  }
-  if (socketMac) {
-    // WARNING: MAC addresses are client-provided and easily spoofed
-    // Should not be relied upon as the sole factor for moderation decisions
-    trackUserAddress(userId, "mac", socketMac).catch((e) => {
-      console.warn('[connection] Failed to track MAC address:', e?.message || e);
-    });
-  }
-
-  socket.user = {
-    id: sessUser.id,
-    username: sessUser.username,
-    role: sessUser.role,
-    theme: sessUser.theme || null,
-    status: sessUser.status || "Online",
-    mood: sessUser.mood || "",
-    avatar: sessUser.avatar || "",
-    vibe_tags: Array.isArray(sessUser.vibe_tags) ? sessUser.vibe_tags : [],
-    chatFx: sanitizeChatFx(sessUser.chatFx),
-    textStyle: sanitizeTextStyle(sessUser.textStyle, sessUser.role),
-    customization: sanitizeCustomization(sessUser.customization, sessUser.textStyle, sessUser.role),
-  };
-
-  // === SOCKET EVENT LISTENER REGISTRATION (ALL LISTENERS MUST BE REGISTERED BEFORE ANY EMITS) ===
-  // server-ready will be emitted at the end after all listeners are registered
-  // to ensure strict event registration order per reliability requirements
-
-  // --- Owner session map: register basic meta
-  try {
-    const uid = socket.user?.id;
-    const set = sessionByUserId.get(uid) || new Set();
-    set.add(socket.id);
-    sessionByUserId.set(uid, set);
-
-    sessionMetaBySocketId.set(socket.id, {
-      userId: uid,
-      username: socket.user?.username || "",
-      role: socket.user?.role || "",
-      room: null,
-      connectedAt: Date.now(),
-      userAgent: String(socket.request?.headers?.["user-agent"] || ""),
-      ip: socketIp || "",
-      tz: null,
-      locale: null,
-      platform: null,
-    });
-  } catch {}
-
-  socket.on("client:hello", (info = {}) => {
-    if (IS_DEV_MODE) console.log("[socket] client:hello", { socketId: socket.id, info });
-    try {
-      const meta = sessionMetaBySocketId.get(socket.id) || {};
-      meta.tz = info.tz ? String(info.tz).slice(0, 64) : meta.tz;
-      meta.locale = info.locale ? String(info.locale).slice(0, 32) : meta.locale;
-      meta.platform = info.platform ? String(info.platform).slice(0, 64) : meta.platform;
-      meta.lastSeenAt = Date.now();
-      sessionMetaBySocketId.set(socket.id, meta);
-    } catch {}
-  });
-
-  socket.on("luck:get", () => {
-    if (IS_DEV_MODE) console.log("[socket] luck:get", { socketId: socket.id });
-    void emitLuckStateToSocket(socket);
-  });
-
-
-
-
-
-  // --- Enforce kick/ban restrictions immediately on connect (before presence/auto-join)
-  socket.restriction = { type: "none" };
-  try {
-    const r = await getRestrictionByUsername(socket.user.username);
-    socket.restriction = r || { type: "none" };
-    if (r?.type && r.type !== "none") {
-      io.to(socket.id).emit("restriction:status", {
-        type: r.type,
-        reason: r.reason || "",
-        expiresAt: r.expiresAt || null,
-        now: Date.now(),
-      });
-    }
-  } catch {}
-
-  // Track global online usernames (for private theme "together online" effects)
-  if (socket.user?.username && (socket.restriction?.type === "none" || !socket.restriction?.type)) {
-    ONLINE_USERS.add(socket.user.username);
-  }
-  emitOnlineUsers();
-// Enforce single active connection per user (prevents duplicate presence)
-const existingSid = socketIdByUserId.get(socket.user.id);
-if (existingSid && existingSid !== socket.id) {
-  const oldSocket = io.sockets.sockets.get(existingSid);
-  if (oldSocket) {
-    oldSocket.disconnect(true);
-  }
-}
-  socketIdByUserId.set(socket.user.id, socket.id);
-  primeOnlineXpTracker(socket.user.id);
-  initGoldTick(socket.user.id);
-
-// Load profile bits for presence (PG-first, SQLite fallback) + refresh member list when ready
-(async () => {
-  try {
-    if (await pgUserExists(socket.user.id)) {
-      const result54 = await pgSafe(
-        "SELECT avatar, avatar_updated, mood, vibe_tags, prefs_json FROM users WHERE id=$1 LIMIT 1",
-        [socket.user.id]
-      );
-      const rows = result54?.rows || [];
-      const r = rows?.[0];
-      if (r) {
-        // IMPORTANT: don't overwrite a session-provided avatar with an empty value
-        // from a fallback/partial row. This was causing avatars to "reset" on refresh.
-        const computedAvatar = avatarUrlFromRow(r);
-        if (computedAvatar) socket.user.avatar = computedAvatar;
-        if (typeof r.mood === "string") socket.user.mood = r.mood;
-        socket.user.vibe_tags = sanitizeVibeTags(r.vibe_tags || []);
-        const prefs = safeJsonParse(r?.prefs_json, {});
-        socket.user.chatFx = sanitizeChatFx(prefs?.chatFx);
-        socket.user.textStyle = sanitizeTextStyle(prefs?.textStyle, socket.user.role);
-        socket.user.customization = sanitizeCustomization(prefs?.customization, prefs?.textStyle, socket.user.role);
-        if (socket.currentRoom) emitUserList(socket.currentRoom);
-      }
-      return;
-    }
-  } catch (e) {
-    console.warn("[presence][pg] failed:", e?.message || e);
-  }
-
-  db.get(
-    "SELECT avatar, mood, vibe_tags, prefs_json FROM users WHERE id = ?",
-    [socket.user.id],
-    (_e, row) => {
-      if (row) {
-        const computedAvatar = avatarUrlFromRow(row);
-        if (computedAvatar) socket.user.avatar = computedAvatar;
-        if (typeof row.mood === "string") socket.user.mood = row.mood;
-        socket.user.vibe_tags = sanitizeVibeTags(row.vibe_tags || []);
-        const prefs = safeJsonParse(row?.prefs_json, {});
-        socket.user.chatFx = sanitizeChatFx(prefs?.chatFx);
-        socket.user.textStyle = sanitizeTextStyle(prefs?.textStyle, socket.user.role);
-        socket.user.customization = sanitizeCustomization(prefs?.customization, prefs?.textStyle, socket.user.role);
-        if (socket.currentRoom) emitUserList(socket.currentRoom);
-      }
-    }
-  );
-})();
-
-  socket.currentRoom = null;
-  socket.data.currentRoom = null;
-    // --- SAFETY: ensure user is always in a room so messages can appear
-  // If client fails to emit "join room" (mobile / reconnect / race), auto-join main.
-  // IMPORTANT: never auto-join if the user is kicked/banned.
-  setTimeout(() => {
-    if (!socket.currentRoom && (socket.restriction?.type === "none" || !socket.restriction?.type)) {
-      try {
-        doJoin("main", socket.user.status || "Online");
-      } catch (e) {
-        console.warn("[auto-join main] failed:", e?.message || e);
-      }
-    }
-  }, 500);
-  socket.dmThreads = new Set();
-
-  db.all(
-    `SELECT thread_id FROM dm_participants WHERE user_id = ?`,
-    [socket.user.id],
-    (_e, rows) => {
-      for (const r of rows || []) {
-        const tid = Number(r.thread_id);
-        if (!Number.isFinite(tid)) continue;
-        socket.dmThreads.add(tid);
-        socket.join(`dm:${tid}`);
-      }
-    }
-  );
-
-socket.on("join room", ({ room, status }) => {
-  if (IS_DEV_MODE) console.log("[socket] join room", { socketId: socket.id, room, status });
-  if (socket.restriction?.type && socket.restriction.type !== "none") {
-    io.to(socket.id).emit("restriction:status", {
-      type: socket.restriction.type,
-      reason: socket.restriction.reason || "",
-      expiresAt: socket.restriction.expiresAt || null,
-      now: Date.now(),
-    });
-    return;
-  }
-const desired = sanitizeRoomName(room) || "main";
-
-// VIP rooms: names prefixed with vip_ or vip- are only visible/accessible to VIP+ with level >= 25
-const desiredIsVip = /^vip[_-]/i.test(desired);
-const enforceVipGate = (roomName, cb) => {
-  if(!desiredIsVip) return cb(true);
-  const roleOk = isVipPlus(sessUser.role);
-  if(!roleOk) return cb(false);
-  db.get(`SELECT level FROM users WHERE id=? LIMIT 1`, [sessUser.id], (_e, urow) => {
-    const lvl = Number(urow?.level || 0);
-    cb(lvl >= 25);
-  });
-};
-
-enforceVipGate(desired, (allowed) => {
-  if(!allowed){
-    try {
-      socket.emit("system", buildSystemPayload("__global__", "That VIP room is locked (VIP + level 25 required).", { kind: "global" }));
-    } catch(_){}
-    return db.get(`SELECT name FROM rooms WHERE name=?`, ["main"], (_err2, row2) => doJoin(row2 ? "main" : "main", status));
-  }
-
-  db.get(
-  `SELECT name, vip_only, staff_only, min_level, is_locked, maintenance_mode, archived FROM rooms WHERE name=?`,
-  [desired],
-  async (_err, row) => {
-    if (!row) return doJoin("main", status);
-
-    // Check room ban first
-    if (socket.user?.id) {
-      const isBanned = await isUserBannedFromRoom(desired, socket.user.id);
-      if (isBanned) {
-        try { 
-          socket.emit("system", buildSystemPayload("__global__", "You are banned from that room.", { kind: "global" })); 
-        } catch (_) {}
-        return doJoin("main", status);
-      }
-    }
-
-    // Enforce room visibility gates
-    if (!canAccessRoomBySettings(sessUser, row)) {
-      try { socket.emit("system", buildSystemPayload("__global__", "You don't have access to that room.", { kind: "global" })); } catch (_) {}
-      return doJoin("main", status);
-    }
-
-    // Maintenance gate: Admin+ only
-    if (Number(row.maintenance_mode || 0) === 1 && roleRankServer(sessUser.role) < roleRankServer("Admin")) {
-      try { socket.emit("system", buildSystemPayload("__global__", "That room is in maintenance.", { kind: "global" })); } catch (_) {}
-      return doJoin("main", status);
-    }
-
-    if (Number(row.archived || 0) === 1) {
-      try { socket.emit("system", buildSystemPayload("__global__", "That room is archived.", { kind: "global" })); } catch (_) {}
-      return doJoin("main", status);
-    }
-
-    // Locked gate: Mod+ only
-    if (Number(row.is_locked || 0) === 1 && roleRankServer(sessUser.role) < roleRankServer("Moderator")) {
-      try { socket.emit("system", buildSystemPayload("__global__", "That room is locked.", { kind: "global" })); } catch (_) {}
-      return doJoin("main", status);
-    }
-
-    doJoin(desired, status);
-  }
-);
-});
-
-      });
-
-  // Dice Room mini-game
-  socket.on("dice:roll", (payload = {}) => {
-    if (IS_DEV_MODE) console.log("[socket] dice:roll", { socketId: socket.id, variant: payload.variant });
-    const room = socket.currentRoom;
-    const requestedRoom = typeof payload.room === "string" ? sanitizeRoomName(payload.room) : null;
-    if (requestedRoom && requestedRoom !== room) {
-      socket.emit("dice:error", "Invalid room for dice roll.");
-      return;
-
-
-    }
-    if (room !== "diceroom") {
-      socket.emit("dice:error", "You can only roll dice in Dice Room.");
-      return;
-    }
-
-    const variant = normalizeDiceVariant(payload.variant);
-    if (!variant || !DICE_VARIANTS.includes(variant)) {
-      socket.emit("dice:error", "Invalid dice variant.");
-      return;
-    }
-
-    const now = Date.now();
-    const uid = socket.user.id;
-    const lastLocal = diceRollRateByUserId.get(uid) || 0;
-    if (now - lastLocal < DICE_ROLL_MIN_INTERVAL_MS) {
-      socket.emit(
-        "dice:error",
-        `Roll available in ${Math.ceil((DICE_ROLL_MIN_INTERVAL_MS - (now - lastLocal)) / 1000)}s.`
-      );
-      return;
-    }
-    diceRollRateByUserId.set(uid, now);
-
-    const formatDiceSystemMessage = ({ result, breakdown, deltaGold, outcome } = {}) => {
-      const faceMap = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
-      let display = String(result);
-      if (variant === "d6") {
-        display = faceMap[Number(result) - 1] || result;
-      } else if (variant === "2d6" && Array.isArray(breakdown)) {
-        display = `${result} (2d6: ${breakdown.join("+")})`;
-      } else {
-        display = `${result} (${DICE_VARIANT_LABELS[variant] || variant})`;
-      }
-      const dg = Number(deltaGold || 0);
-      const sign = dg >= 0 ? "+" : "";
-      const emoji = outcome === "jackpot" ? "💥" : outcome === "bigwin" ? "🎉" : outcome === "win" ? "✨" : outcome === "nice" ? "😏" : "🎲";
-      return `${socket.user.username} rolled ${display} ${emoji} (${sign}${dg} Gold)`;
-    };
-
-    (async () => {
-      try {
-        if (await pgUserExists(uid)) {
-          const row = await pgGetUserRowById(uid, [
-            "gold",
-            "lastDiceRollAt",
-            "luck",
-            "roll_streak",
-            "last_qual_msg_at",
-          ]);
-          if (!row) {
-            socket.emit("dice:error", "Could not roll dice right now.");
-            return;
-          }
-
-          const last = Number(row.lastDiceRollAt || 0);
-          if (now - last < DICE_ROLL_MIN_INTERVAL_MS) {
-            socket.emit(
-              "dice:error",
-              `Roll available in ${Math.ceil((DICE_ROLL_MIN_INTERVAL_MS - (now - last)) / 1000)}s.`
-            );
-            return;
-          }
-
-          const gold = Number(row.gold || 0);
-          const luckState = applyLuckForRoll({
-            luck: row.luck,
-            rollStreak: row.roll_streak,
-            lastQualMsgAt: row.last_qual_msg_at,
-            userId: uid,
-            now,
-          });
-          const roll = rollDiceVariantWithLuck(variant, luckState.nextLuck);
-          const reward = computeDiceReward(variant, roll.result, roll.breakdown);
-          if (gold < (reward.minBalanceRequired || 0)) {
-            socket.emit(
-              "dice:error",
-              `You need at least ${reward.minBalanceRequired || 0} Gold to roll ${DICE_VARIANT_LABELS[variant] || variant}.`
-            );
-            return;
-          }
-
-          const deltaGold = Number(reward.deltaGold || 0);
-          const breakdownArr = Array.isArray(roll.breakdown) ? roll.breakdown : [];
-          const sixGain =
-            variant === "d6" ? (roll.result === 6 ? 1 : 0) : variant === "2d6" ? breakdownArr.filter((n) => n === 6).length : 0;
-          const didWinForLuck = isLuckWin(variant, roll.result, roll.breakdown);
-          const finalLuck = clampLuck(applyWinCut(luckState.nextLuck, didWinForLuck));
-
-          await pgSafe(
-            `UPDATE users
-               SET gold = GREATEST(0, gold + $1),
-                   lastDiceRollAt = $2,
-                   dice_sixes = dice_sixes + $3,
-                   luck = $4,
-                   roll_streak = $5
-             WHERE id = $6`,
-            [deltaGold, now, sixGain, finalLuck, luckState.nextStreak, uid]
-          );
-
-          const payloadBase = {
-            userId: uid,
-            username: socket.user.username,
-            variant,
-            result: roll.result,
-            value: roll.result,
-            breakdown: roll.breakdown,
-            won: reward.isJackpot || deltaGold > 0,
-            outcome: reward.outcome,
-            isJackpot: !!reward.isJackpot,
-            serverTs: now,
-          };
-
-          socket.emit("dice:result", { ...payloadBase, deltaGold });
-          socket.to(room).emit("dice:result", { ...payloadBase, deltaGold });
-          emitProgressionUpdate(uid);
-          emitLuckUpdate(uid, finalLuck, luckState.nextStreak);
-
-          emitRoomSystem(
-            room,
-            formatDiceSystemMessage({ result: roll.result, breakdown: roll.breakdown, deltaGold, outcome: reward.outcome }),
-            { kind: "dice" }
-          );
-
-          if (reward.isJackpot) {
-            void ensureMemory(
-              uid,
-              "dice_jackpot",
-              {
-                type: "rare",
-                title: "Dice jackpot!",
-                description: "Landed the jackpot roll in Dice Room.",
-                icon: "🎲",
-                room_id: room,
-                metadata: { value: roll.result, deltaGold, variant, outcome: reward.outcome },
-              },
-              socket.user
-            );
-          }
-          return;
-        }
-      } catch (e) {
-        console.warn("[dice][pg] failed, falling back to sqlite:", e?.message || e);
-      }
-
-      // SQLite fallback (original behavior)
-      db.get(
-        `SELECT gold, lastDiceRollAt, luck, roll_streak, last_qual_msg_at FROM users WHERE id=?`,
-        [uid],
-        (err, row) => {
-        if (err || !row) {
-          socket.emit("dice:error", "Could not roll dice right now.");
-          return;
-        }
-
-        const last = Number(row.lastDiceRollAt || 0);
-        if (now - last < DICE_ROLL_MIN_INTERVAL_MS) {
-          socket.emit(
-            "dice:error",
-            `Roll available in ${Math.ceil((DICE_ROLL_MIN_INTERVAL_MS - (now - last)) / 1000)}s.`
-          );
-          return;
-        }
-
-        const gold = Number(row.gold || 0);
-        const luckState = applyLuckForRoll({
-          luck: row.luck,
-          rollStreak: row.roll_streak,
-          lastQualMsgAt: row.last_qual_msg_at,
-          userId: uid,
-          now,
-        });
-        const roll = rollDiceVariantWithLuck(variant, luckState.nextLuck);
-        const reward = computeDiceReward(variant, roll.result, roll.breakdown);
-        if (gold < (reward.minBalanceRequired || 0)) {
-          socket.emit(
-            "dice:error",
-            `You need at least ${reward.minBalanceRequired || 0} Gold to roll ${DICE_VARIANT_LABELS[variant] || variant}.`
-          );
-          return;
-        }
-
-        const deltaGold = Number(reward.deltaGold || 0);
-        const breakdownArr = Array.isArray(roll.breakdown) ? roll.breakdown : [];
-        const sixGain =
-          variant === "d6" ? (roll.result === 6 ? 1 : 0) : variant === "2d6" ? breakdownArr.filter((n) => n === 6).length : 0;
-        const didWinForLuck = isLuckWin(variant, roll.result, roll.breakdown);
-        const finalLuck = clampLuck(applyWinCut(luckState.nextLuck, didWinForLuck));
-
-        db.run(
-          `UPDATE users
-             SET gold = MAX(0, gold + ?),
-                 lastDiceRollAt = ?,
-                 dice_sixes = dice_sixes + ?,
-                 luck = ?,
-                 roll_streak = ?
-           WHERE id = ?`,
-          [deltaGold, now, sixGain, finalLuck, luckState.nextStreak, uid],
-          (uerr) => {
-            if (uerr) {
-              socket.emit("dice:error", "Could not apply dice result.");
-              return;
-            }
-
-            const payloadBase = {
-              userId: uid,
-              username: socket.user.username,
-              variant,
-              result: roll.result,
-              value: roll.result,
-              breakdown: roll.breakdown,
-              won: reward.isJackpot || deltaGold > 0,
-              outcome: reward.outcome,
-              isJackpot: !!reward.isJackpot,
-              serverTs: now,
-            };
-
-            socket.emit("dice:result", { ...payloadBase, deltaGold });
-            socket.to(room).emit("dice:result", { ...payloadBase, deltaGold });
-            emitProgressionUpdate(uid);
-            emitLuckUpdate(uid, finalLuck, luckState.nextStreak);
-
-            emitRoomSystem(
-              room,
-              formatDiceSystemMessage({ result: roll.result, breakdown: roll.breakdown, deltaGold, outcome: reward.outcome }),
-              { kind: "dice" }
-            );
-
-            if (reward.isJackpot) {
-              void ensureMemory(
-                uid,
-                "dice_jackpot",
-                {
-                  type: "rare",
-                  title: "Dice jackpot!",
-                  description: "Landed the jackpot roll in Dice Room.",
-                  icon: "🎲",
-                  room_id: room,
-                  metadata: { value: roll.result, deltaGold, variant, outcome: reward.outcome },
-                },
-                socket.user
-              );
-            }
-          }
-        );
-      }
-      );
-    })();
-  });
-
-function doJoin(room, status) {
-  // Block joining rooms if the user is kicked/banned (prevents showing as online).
-  if (socket.restriction?.type && socket.restriction.type !== "none") {
-    io.to(socket.id).emit("restriction:status", {
-      type: socket.restriction.type,
-      reason: socket.restriction.reason || "",
-      expiresAt: socket.restriction.expiresAt || null,
-      now: Date.now(),
-    });
-    return;
-  }
-  const previousRoom = socket.data.currentRoom || socket.currentRoom || null;
-  const targetRoom = room;
-  if (previousRoom && previousRoom !== targetRoom) {
-    if (DEBUG_ROOMS) {
-      console.log("[rooms] leave", { sid: socket.id, room: previousRoom, next: targetRoom });
-    }
-    socket.leave(previousRoom);
-
-    const set = typingByRoom.get(previousRoom);
-    if (set) {
-      set.delete(socket.user.username);
-      broadcastTyping(previousRoom);
-    }
-
-    emitUserList(previousRoom);
-  }
-
-  if (previousRoom !== targetRoom) {
-    if (DEBUG_ROOMS) {
-      console.log("[rooms] join", { sid: socket.id, room: targetRoom, prev: previousRoom });
-    }
-    socket.join(targetRoom);
-  }
-  socket.currentRoom = targetRoom;
-  socket.data.currentRoom = targetRoom;
-
-  // session map + heat + daily unique rooms
-  try {
-    const meta = sessionMetaBySocketId.get(socket.id) || {};
-    meta.room = room;
-    meta.lastSeenAt = Date.now();
-    sessionMetaBySocketId.set(socket.id, meta);
-  } catch {}
-
-  try {
-    const uid = socket.user?.id;
-    const prev = lastRoomHopByUserId.get(uid);
-    const now = Date.now();
-    if (prev && prev.room && prev.room !== room && now - (prev.ts || 0) < 15_000) bumpHeat(uid, 2);
-    lastRoomHopByUserId.set(uid, { room, ts: now });
-    // daily challenge: unique rooms
-    bumpDailyUniqueRoom(uid, dayKeyNow(), String(room));
-  } catch {}
-
-
-  // send active room event (if any) to joining socket
-  try {
-    const ev = ACTIVE_ROOM_EVENTS.get(room);
-    if (ev) socket.emit("room:event", { room, active: ev, at: Date.now() });
-  } catch {}
-
-  socket.user.status = normalizeStatus(status || socket.user.status, "Online");
-
-  onlineState.set(socket.user.id, { room, status: socket.user.status });
-  onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
-  awardPassiveGold(socket.user.id);
-
-  db.run("UPDATE users SET last_room=?, last_status=? WHERE id=?", [
-    room,
-    socket.user.status,
-    socket.user.id,
-  ]);
-
-  // Send history (exclude deleted messages entirely)
-  // Backward-compatible room history: older builds stored rooms with a leading '#'.
-  const legacyRoom = `#${room}`;
-  db.all(
-    `SELECT id, room, username, role, avatar, text, tone, ts, attachment_url, attachment_type, attachment_mime, attachment_size,
-            reply_to_id, reply_to_user, reply_to_text
-     FROM messages
-     WHERE (room=? OR room=?) AND deleted=0
-     ORDER BY ts DESC LIMIT 200`,
-    [room, legacyRoom],
-    (_e, rows) => {
-      // Query newest-first, then reverse so clients render oldest -> newest.
-      const baseHistory = (rows || []).reverse().map((r) => ({
-        messageId: r.id,
-        room: r.room,
-        user: r.username,
-        role: r.role,
-        avatar: r.avatar || "",
-        text: (r.text || ""),
-        tone: r.tone || "",
-        ts: r.ts,
-        attachmentUrl: r.attachment_url || "",
-        attachmentType: r.attachment_type || "",
-        attachmentMime: r.attachment_mime || "",
-        attachmentSize: r.attachment_size || 0,
-        replyToId: r.reply_to_id || null,
-        replyToUser: r.reply_to_user || "",
-        replyToText: r.reply_to_text || "",
-            attachmentUrl: r.attachment_url || null,
-            attachmentMime: r.attachment_mime || null,
-            attachmentType: r.attachment_type || null,
-            attachmentSize: r.attachment_size || null,
-      }));
-
-      const usernames = baseHistory.map((m) => m.user).filter(Boolean);
-      buildAuthorsFxMap(usernames, (authorsFx) => {
-        const history = baseHistory.map((m) => ({
-          ...m,
-          chatFx: authorsFx[m.user] || mergeChatFxWithCustomization(null, null, null),
-        }));
-        socket.emit("history", history, { authorsFx });
-
-        const ids = history.map((m) => m.messageId).slice(-80);
-        if (ids.length) {
-          const placeholders = ids.map(() => "?").join(",");
-          db.all(
-            `SELECT message_id, username, emoji FROM reactions WHERE message_id IN (${placeholders})`,
-            ids,
-            (_e2, reacts) => {
-              const byMsg = {};
-              for (const r of reacts || []) {
-                byMsg[r.message_id] = byMsg[r.message_id] || {};
-                byMsg[r.message_id][r.username] = r.emoji;
-              }
-              for (const mid of Object.keys(byMsg)) {
-                socket.emit("reaction update", { messageId: mid, reactions: byMsg[mid] });
-              }
-            }
-          );
-        }
-      });
-    }
-  );
-
-  socket.emit("system", buildSystemPayload(room, "Joined " + room));
-  emitUserList(room);
-}
-
-  socket.on("typing", () => {
-    if (IS_DEV_MODE) console.log("[socket] typing", { socketId: socket.id, room: socket.currentRoom });
-    let room = socket.currentRoom;
-if (!room) {
-  // fallback: join main so the message shows up instead of disappearing
-  try { doJoin("main", socket.user.status || "Online"); } catch {}
-  room = socket.currentRoom;
-  if (!room) return;
-}
-    let set = typingByRoom.get(room);
-    if (!set) typingByRoom.set(room, (set = new Set()));
-    set.add(socket.user.username);
-    broadcastTyping(room);
-  });
-
-  socket.on("stop typing", () => {
-    if (IS_DEV_MODE) console.log("[socket] stop typing", { socketId: socket.id, room: socket.currentRoom });
-    const room = socket.currentRoom;
-    if (!room) return;
-
-    const set = typingByRoom.get(room);
-    if (set) {
-      set.delete(socket.user.username);
-      broadcastTyping(room);
-    }
-  });
-
-  socket.on("dm join", (payload = {}) => {
-    if (IS_DEV_MODE) console.log("[socket] dm join", { socketId: socket.id, threadId: payload.threadId });
-    const tid = Number(payload.threadId);
-    if (!Number.isInteger(tid)) return;
-
-    loadThreadForUser(tid, socket.user.id, (err, thread) => {
-      if (err) return;
-      socket.dmThreads.add(tid);
-      socket.join(`dm:${tid}`);
-
-      db.all(
-        `SELECT id, thread_id, user_id, username, text, tone, ts, edited_at, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_mime, attachment_type, attachment_size FROM dm_messages WHERE thread_id=? AND deleted=0 ORDER BY ts DESC LIMIT 50`,
-        [tid],
-        (_e, rows) => {
-          const msgs = (rows || []).reverse().map((r) => ({
-            messageId: r.id,
-            id: r.id,
-            threadId: r.thread_id,
-            userId: r.user_id,
-            user: r.username,
-            text: r.text,
-            tone: r.tone || "",
-            ts: r.ts,
-            editedAt: r.edited_at || 0,
-            replyToId: r.reply_to_id || null,
-            replyToUser: r.reply_to_user || "",
-            replyToText: r.reply_to_text || "",
-            attachmentUrl: r.attachment_url || null,
-            attachmentMime: r.attachment_mime || null,
-            attachmentType: r.attachment_type || null,
-            attachmentSize: r.attachment_size || null,
-          }));
-          const usernames = msgs.map((m) => m.user).filter(Boolean);
-          buildAuthorsFxMap(usernames, async (authorsFx) => {
-            socket.emit("dm history", {
-              threadId: tid,
-              title: thread.title || "",
-              isGroup: !!thread.is_group,
-              participants: thread.participants || [],
-              messages: msgs,
-              authorsFx,
-            });
-
-            // Prime read-receipt state for the joining client.
-            // The socket-side in-memory map (dmReadState) is best-effort and can be empty after
-            // reloads. We persist last_read_at per user in dm_participants; on join, translate
-            // that into a message id so the client can reliably render the "☑" tick.
-            try {
-              db.all(
-                `SELECT user_id, COALESCE(last_read_at,0) AS last_read_at
-                   FROM dm_participants
-                  WHERE thread_id = ?`,
-                [tid],
-                (_re0, readRows) => {
-                  const rows = readRows || [];
-                  for (const rr of rows) {
-                    const uid = Number(rr.user_id);
-                    const lastReadAt = Number(rr.last_read_at || 0);
-                    if (!Number.isInteger(uid) || uid <= 0) continue;
-                    if (!lastReadAt) continue;
-
-                    // Prefer the in-memory state if it's newer.
-                    try {
-                      const perThread = dmReadState.get(tid);
-                      const mem = perThread?.get(uid);
-                      if (mem?.ts && Number(mem.ts) > lastReadAt && Number.isInteger(Number(mem.messageId))) {
-                        socket.emit("dm read", {
-                          threadId: tid,
-                          userId: uid,
-                          messageId: Number(mem.messageId),
-                          ts: Number(mem.ts)
-                        });
-                        continue;
-                      }
-                    } catch {}
-
-                    // Translate timestamp -> message id in this thread.
-                    db.get(
-                      `SELECT id, ts
-                         FROM dm_messages
-                        WHERE thread_id = ? AND deleted=0 AND ts <= ?
-                        ORDER BY ts DESC, id DESC
-                        LIMIT 1`,
-                      [tid, lastReadAt],
-                      (_re1, hit) => {
-                        const mid = Number(hit?.id);
-                        const mts = Number(hit?.ts || lastReadAt);
-                        if (!Number.isInteger(mid) || mid <= 0) return;
-                        socket.emit("dm read", {
-                          threadId: tid,
-                          userId: uid,
-                          messageId: mid,
-                          ts: mts
-                        });
-                      }
-                    );
-                  }
-                }
-              );
-            } catch {}
-
-            // Send initial DM reactions for these messages (so the client can render immediately)
-            try {
-              const mids = (msgs || []).map(m => Number(m.messageId || m.id)).filter(n => Number.isInteger(n));
-              if (mids.length) {
-                const placeholders = mids.map(() => "?").join(",");
-                db.all(
-                  `SELECT message_id, username, emoji
-                     FROM dm_reactions
-                    WHERE thread_id = ?
-                      AND message_id IN (${placeholders})`,
-                  [tid, ...mids],
-                  (_re, rrows) => {
-                    const byMid = new Map();
-                    for (const rr of (rrows || [])) {
-                      const k = String(rr.message_id);
-                      if (!byMid.has(k)) byMid.set(k, {});
-                      byMid.get(k)[rr.username] = rr.emoji;
-                    }
-                    for (const mid of mids) {
-                      const reactions = byMid.get(String(mid)) || {};
-                      socket.emit("dm reaction update", { threadId: tid, messageId: mid, reactions });
-                    }
-                  }
-                );
-              }
-            } catch {}
-
-            try {
-              const latestChallenge = await chessGetLatestChallengeForThread(tid);
-              if (latestChallenge) {
-                await emitChessChallengeStateToSocket(socket, latestChallenge);
-              }
-            } catch (e) {
-              console.warn("[chess] dm join challenge state failed:", e?.message || e);
-            }
-          });
-
-        }
-      );
-    });
-  });
-
-  
-  socket.on("dm mark read", (payload = {}) => {
-    const tid = Number(payload.threadId);
-    const mid = Number(payload.messageId);
-    const tms = safeNumber(payload.ts, Date.now());
-    if (!socket.user) return;
-    if (!Number.isInteger(tid) || !Number.isInteger(mid)) return;
-
-    // ensure user is allowed in this thread
-    loadThreadForUser(tid, socket.user.id, (err, thread) => {
-      if (err || !thread) return;
-
-      let perThread = dmReadState.get(tid);
-      if (!perThread) dmReadState.set(tid, (perThread = new Map()));
-      perThread.set(socket.user.id, { messageId: mid, ts: tms });
-
-      // Persist last-read so unread counts/badges survive reloads/devices
-      db.run(
-        `UPDATE dm_participants
-           SET last_read_at = CASE WHEN COALESCE(last_read_at,0) < ? THEN ? ELSE COALESCE(last_read_at,0) END
-         WHERE thread_id = ? AND user_id = ?`,
-        [tms, tms, tid, socket.user.id],
-        () => {}
-      );
-
-      // Broadcast to everyone in the dm room (clients can ignore self)
-      io.to(`dm:${tid}`).emit("dm read", {
-        threadId: tid,
-        userId: socket.user.id,
-        messageId: mid,
-        ts: tms
-      });
-    });
-  });
-
-
-  socket.on("dm leave", (payload = {}) => {
-    const tid = Number(payload.threadId);
-    if (!Number.isInteger(tid)) return;
-    try { socket.leave(`dm:${tid}`); } catch {}
-    try { socket.dmThreads?.delete(tid); } catch {}
-
-    // Clear any lingering DM typing state for this user in that thread.
-    try {
-      const set = dmTypingByThread.get(tid);
-      if (set && socket.user?.username) {
-        set.delete(socket.user.username);
-        if (set.size === 0) dmTypingByThread.delete(tid);
-        broadcastDmTyping(tid);
-      }
-    } catch {}
-  });
-
-  // DM typing indicators (per thread)
-  socket.on("dm typing", (payload = {}) => {
-    const tid = Number(payload.threadId);
-    if (!Number.isInteger(tid)) return;
-    if (!socket.dmThreads?.has(tid)) return; // must have joined
-    let set = dmTypingByThread.get(tid);
-    if (!set) dmTypingByThread.set(tid, (set = new Set()));
-    if (socket.user?.username) set.add(socket.user.username);
-    broadcastDmTyping(tid);
-  });
-
-  socket.on("dm stop typing", (payload = {}) => {
-    const tid = Number(payload.threadId);
-    if (!Number.isInteger(tid)) return;
-    const set = dmTypingByThread.get(tid);
-    if (set && socket.user?.username) {
-      set.delete(socket.user.username);
-      if (set.size === 0) dmTypingByThread.delete(tid);
-      broadcastDmTyping(tid);
-    }
-  });
-
-  socket.on("dm message", async (payload = {}) => {
-    if (IS_DEV_MODE) console.log("[socket] dm message", { socketId: socket.id, threadId: payload.threadId });
-    const { threadId, text, replyToId, attachment, tone } = payload || {};
-    const tid = Number(threadId);
-    if (!allowSocketEvent(socket, "dm_message", 12, 4000)) return;
-    const rawBody = safeString(text, "").trim();
-    if (rawBody.length > MAX_DM_MESSAGE_CHARS) return;
-    let body = rawBody.slice(0, MAX_DM_MESSAGE_CHARS);
-    
-    // Apply word filter to DM text (async)
-    body = await applyWordFilter(body);
-    
-    const att = attachment && typeof attachment === "object" ? attachment : null;
-    const toneKey = sanitizeTone(tone);
-
-    // Allow messages with either text or an image attachment
-    if (!Number.isInteger(tid) || (!body && !att)) return;
-
-    // Basic attachment validation (DMs: images only)
-    let attUrl = null, attMime = null, attType = null, attSize = null;
-    if (att) {
-      attUrl = String(att.url || "").trim();
-      attMime = String(att.mime || "").trim();
-      attType = String(att.type || "").trim();
-      attSize = Number(att.size || 0) || 0;
-
-      const okUrl = attUrl.startsWith("/uploads/");
-      const okImg = attType === "image" && /^image\//i.test(attMime);
-      if (!okUrl || !okImg) return;
-      if (attSize > (10 * 1024 * 1024)) return; // 10MB
-    }
-
-    loadThreadForUser(tid, socket.user.id, (err, thread) => {
-      if (err) return;
-      const ts = Date.now();
-
-      const replyId = safeNumber(replyToId, NaN);
-      const doInsert = (replyMeta = {}) => {
-        const replyUser = replyMeta.user || null;
-        const replyText = replyMeta.text || null;
-        const replyPk = Number.isInteger(replyMeta.id) ? replyMeta.id : null;
-
-        db.run(
-          `INSERT INTO dm_messages (thread_id, user_id, username, text, tone, ts, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_mime, attachment_type, attachment_size)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            tid,
-            socket.user.id,
-            socket.user.username,
-            body,
-            toneKey,
-            ts,
-            replyPk,
-            replyUser,
-            replyText,
-            attUrl,
-            attMime,
-            attType,
-            attSize,
-          ],
-          function (insertErr) {
-            if (insertErr) return;
-            const payload = {
-              threadId: tid,
-              messageId: this.lastID,
-              userId: socket.user.id,
-              user: socket.user.username,
-              text: body,
-              tone: toneKey || "",
-              ts,
-              attachmentUrl: attUrl,
-              attachmentMime: attMime,
-              attachmentType: attType,
-              attachmentSize: attSize,
-              chatFx: mergeChatFxWithCustomization(socket.user.chatFx, socket.user.customization, socket.user.textStyle),
-              replyToId: replyPk,
-              replyToUser: replyUser || "",
-              replyToText: replyText || "",
-            };
-              db.run(
-                `UPDATE dm_threads SET last_message_id=?, last_message_at=? WHERE id=?`,
-                [this.lastID, ts, tid]
-              );
-              console.log(`[dm:send] thread ${tid} msg ${this.lastID} by user ${socket.user.id}`);
-              io.to(`dm:${tid}`).emit("dm message", payload);
-            }
-          );
-      };
-
-      if (Number.isInteger(replyId)) {
-        db.get(
-          `SELECT id, username, text FROM dm_messages WHERE id = ? AND thread_id = ? AND deleted=0`,
-          [replyId, tid],
-          (_e, row) => {
-            doInsert(row || {});
-          }
-        );
-      } else {
-        doInsert();
-      }
-    });
-  });
-
-    // ---- DM edit message (self-only, short window)
-  socket.on("dm edit message", (payload = {}) => {
-    const tid = Number(payload.threadId);
-    const mid = Number(payload.messageId);
-    if (!allowSocketEvent(socket, "dm_edit", 8, 5000)) return;
-    const body = safeString(payload.text, "").trim().slice(0, MAX_DM_MESSAGE_CHARS);
-    if (!socket.user) return;
-    if (!Number.isInteger(tid) || !Number.isInteger(mid) || !body) return;
-
-    loadThreadForUser(tid, socket.user.id, (err, thread) => {
-      if (err || !thread) return;
-
-      db.get(
-        `SELECT id, thread_id, user_id, ts FROM dm_messages WHERE id = ? AND thread_id = ? AND deleted=0`,
-        [mid, tid],
-        (e2, row) => {
-          if (e2 || !row) return;
-
-          const isOwner = Number(row.user_id) === Number(socket.user.id);
-          if (!isOwner) return;
-
-          const now = Date.now();
-          const ts = Number(row.ts) || 0;
-          if (now - ts > 5 * 60 * 1000) return;
-
-          db.run(
-            `UPDATE dm_messages SET text = ?, edited_at = ? WHERE id = ?`,
-            [body, now, mid],
-            () => {
-              io.to(`dm:${tid}`).emit("dm message edited", {
-                threadId: tid,
-                messageId: mid,
-                text: body,
-                editedAt: now
-              });
-            }
-          );
-        }
-      );
-    });
-  });
-
-  // ---- DM reactions (1 reaction per user per DM message)
-  socket.on("dm reaction", (payload = {}) => {
-    const tid = Number(payload.threadId);
-    const mid = Number(payload.messageId);
-    const em = safeString(payload.emoji, "").slice(0, 8);
-    if (!socket.user) return;
-    if (!Number.isInteger(tid) || !Number.isInteger(mid) || !em) return;
-
-    loadThreadForUser(tid, socket.user.id, (err, thread) => {
-      if (err || !thread) return;
-
-      db.run(
-        `INSERT INTO dm_reactions (thread_id, message_id, username, emoji)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(thread_id, message_id, username) DO UPDATE SET emoji=excluded.emoji`,
-        [tid, mid, socket.user.username, em],
-        () => {
-          db.all(
-            `SELECT username, emoji FROM dm_reactions WHERE thread_id=? AND message_id=?`,
-            [tid, mid],
-            (_e, rows) => {
-              const reactions = {};
-              for (const r of rows || []) reactions[r.username] = r.emoji;
-              io.to(`dm:${tid}`).emit("dm reaction update", { threadId: tid, messageId: mid, reactions });
-            }
-          );
-        }
-      );
-    });
-  });
-
-
-  socket.on("chess:challenge:create", async ({ dmThreadId, challengedUserId } = {}, ack) => {
-    const respond = (payload) => {
-      if (typeof ack === "function") ack(payload);
-    };
-    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
-    const tid = Number(dmThreadId);
-    const challengedId = Number(challengedUserId);
-    if (!Number.isInteger(tid) || !Number.isInteger(challengedId)) {
-      return respond({ ok: false, error: "Invalid challenge request" });
-    }
-    if (challengedId === Number(socket.user.id)) {
-      return respond({ ok: false, error: "Cannot challenge yourself" });
-    }
-
-    loadThreadForUser(tid, socket.user.id, async (err, thread) => {
-      if (err || !thread) return respond({ ok: false, error: "Thread not found" });
-      if (thread.is_group) return respond({ ok: false, error: "Chess challenges are direct DMs only" });
-      if (!thread.participantIds?.includes?.(challengedId)) {
-        return respond({ ok: false, error: "User not in this DM" });
-      }
-
-      try {
-        const latest = await chessGetLatestChallengeForThread(tid);
-        if (latest && latest.status === "pending") {
-          await emitChessChallengeStateToSocket(socket, latest);
-          return respond({ ok: false, error: "Challenge already pending", challengeId: latest.challenge_id });
-        }
-        const activeGame = await chessGetActiveGameForContext("dm", String(tid));
-        if (activeGame) {
-          await emitChessStateToSocket(socket, activeGame);
-          return respond({ ok: false, error: "Game already active", gameId: activeGame.game_id });
-        }
-        const challenge = await chessCreateChallenge(tid, socket.user.id, challengedId);
-        await insertDmChessMessage({
-          threadId: tid,
-          authorId: socket.user.id,
-          authorName: socket.user.username,
-          text: `[chess:challenge:${challenge.challenge_id}]`,
-        });
-        await emitChessChallengeStateToRoom(tid, challenge);
-        respond({ ok: true, challengeId: challenge.challenge_id });
-      } catch (e) {
-        console.warn("[chess] challenge create failed:", e?.message || e);
-        respond({ ok: false, error: "Failed to create challenge" });
-      }
-    });
-  });
-
-  socket.on("chess:challenge:respond", async ({ challengeId, accept } = {}, ack) => {
-    const respond = (payload) => {
-      if (typeof ack === "function") ack(payload);
-    };
-    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
-    if (!challengeId) return respond({ ok: false, error: "Missing challenge" });
-    try {
-      const challenge = await chessGetChallengeById(String(challengeId));
-      if (!challenge || challenge.status !== "pending") {
-        return respond({ ok: false, error: "Challenge not available" });
-      }
-      if (Number(challenge.challenged_user_id) !== Number(socket.user.id)) {
-        return respond({ ok: false, error: "Not allowed" });
-      }
-      const nextStatus = accept ? "accepted" : "declined";
-      const updated = await chessUpdateChallenge(challenge.challenge_id, { status: nextStatus });
-      await emitChessChallengeStateToRoom(updated.dm_thread_id, updated);
-      if (!accept) {
-        await insertDmChessMessage({
-          threadId: updated.dm_thread_id,
-          authorId: socket.user.id,
-          authorName: socket.user.username,
-          text: `[chess:challenge:declined:${updated.challenge_id}]`,
-        });
-        return respond({ ok: true, status: nextStatus });
-      }
-
-      const game = await chessCreateGame("dm", String(updated.dm_thread_id), updated.challenger_user_id, updated.challenged_user_id);
-      await insertDmChessMessage({
-        threadId: updated.dm_thread_id,
-        authorId: socket.user.id,
-        authorName: socket.user.username,
-        text: `[chess:challenge:accepted:${updated.challenge_id}]`,
-      });
-      await emitChessStateToGameRoom(game);
-      respond({ ok: true, status: nextStatus, gameId: game.game_id });
-    } catch (e) {
-      console.warn("[chess] challenge respond failed:", e?.message || e);
-      respond({ ok: false, error: "Failed to respond" });
-    }
-  });
-
-  socket.on("chess:game:create", async ({ contextType, contextId } = {}, ack) => {
-    const respond = (payload) => {
-      if (typeof ack === "function") ack(payload);
-    };
-    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
-    if (contextType !== "room") return respond({ ok: false, error: "Invalid context" });
-    const roomId = String(contextId || "");
-    if (!roomId) return respond({ ok: false, error: "Missing room" });
-    try {
-      const existing = await chessGetActiveGameForContext("room", roomId);
-      if (existing) {
-        await emitChessStateToSocket(socket, existing);
-        return respond({ ok: true, gameId: existing.game_id });
-      }
-      const game = await chessCreateGame("room", roomId);
-      socket.join(`chess:${game.game_id}`);
-      await emitChessStateToSocket(socket, game);
-      respond({ ok: true, gameId: game.game_id });
-    } catch (e) {
-      console.warn("[chess] game create failed:", e?.message || e);
-      respond({ ok: false, error: "Failed to create game" });
-    }
-  });
-
-  socket.on("chess:game:join", async ({ gameId, contextType, contextId } = {}, ack) => {
-    const respond = (payload) => {
-      if (typeof ack === "function") ack(payload);
-    };
-    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
-    try {
-      let game = null;
-      if (gameId) {
-        game = await chessGetGameById(String(gameId));
-      } else if (contextType && contextId) {
-        game = await chessGetActiveGameForContext(String(contextType), String(contextId));
-        if (!game && String(contextType) === "dm") {
-          game = await chessGetLatestGameForContext(String(contextType), String(contextId));
-        }
-      }
-      if (!game) {
-        await emitChessStateToSocket(socket, null);
-        return respond({ ok: false, error: "Game not found" });
-      }
-      if (game.context_type === "dm") {
-        const threadOk = await new Promise((resolve) => {
-          loadThreadForUser(Number(game.context_id), socket.user.id, (err, thread) => resolve(!err && !!thread));
-        });
-        if (!threadOk) return respond({ ok: false, error: "Not allowed" });
-      }
-      socket.join(`chess:${game.game_id}`);
-      await emitChessStateToSocket(socket, game);
-      respond({ ok: true, gameId: game.game_id });
-    } catch (e) {
-      console.warn("[chess] game join failed:", e?.message || e);
-      respond({ ok: false, error: "Failed to join game" });
-    }
-  });
-
-  socket.on("chess:game:seat", async ({ gameId, color } = {}, ack) => {
-    const respond = (payload) => {
-      if (typeof ack === "function") ack(payload);
-    };
-    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
-    const seatColor = color === "white" ? "white" : (color === "black" ? "black" : "");
-    if (!seatColor || !gameId) return respond({ ok: false, error: "Invalid seat" });
-    try {
-      let game = await chessGetGameById(String(gameId));
-      if (!game) return respond({ ok: false, error: "Game not found" });
-      if (game.context_type !== "room") return respond({ ok: false, error: "Seats only for rooms" });
-      const seatKey = seatColor === "white" ? "white_user_id" : "black_user_id";
-      const seatUserId = Number(game[seatKey] || 0);
-      if (seatUserId && seatUserId !== Number(socket.user.id)) {
-        const seatUser = await getUserIdentityForMemory(seatUserId);
-        if (!seatClaimable(game, seatUser)) {
-          return respond({ ok: false, error: "Seat occupied" });
-        }
-      }
-      const updates = { [seatKey]: socket.user.id };
-      if (game.status === "pending") {
-        const nextWhite = seatColor === "white" ? socket.user.id : game.white_user_id;
-        const nextBlack = seatColor === "black" ? socket.user.id : game.black_user_id;
-        if (nextWhite && nextBlack) updates.status = "active";
-      }
-      game = await chessUpdateGame(game.game_id, updates);
-      await emitChessStateToGameRoom(game);
-      respond({ ok: true });
-    } catch (e) {
-      console.warn("[chess] seat failed:", e?.message || e);
-      respond({ ok: false, error: "Failed to seat" });
-    }
-  });
-
-  socket.on("chess:game:move", async ({ gameId, from, to, promotion } = {}, ack) => {
-    const respond = (payload) => {
-      if (typeof ack === "function") ack(payload);
-    };
-    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
-    if (!allowSocketEvent(socket, "chess_move", 12, 4000)) return respond({ ok: false, error: "Rate limited" });
-    if (!gameId || !from || !to) return respond({ ok: false, error: "Invalid move" });
-    try {
-      let game = await chessGetGameById(String(gameId));
-      if (!game) return respond({ ok: false, error: "Game not found" });
-      if (game.status !== "active") return respond({ ok: false, error: "Game not active" });
-      const isWhite = Number(game.white_user_id || 0) === Number(socket.user.id);
-      const isBlack = Number(game.black_user_id || 0) === Number(socket.user.id);
-      if (!isWhite && !isBlack) return respond({ ok: false, error: "Spectators cannot move" });
-      if ((game.turn === "w" && !isWhite) || (game.turn === "b" && !isBlack)) {
-        return respond({ ok: false, error: "Not your turn" });
-      }
-      const chess = createChessInstance(game.fen);
-      const move = chess.move({ from, to, promotion: promotion || undefined });
-      if (!move) return respond({ ok: false, error: "Illegal move" });
-
-      const now = Date.now();
-      const nextStatus = chess.isCheckmate() ? "mate" : (chess.isStalemate() || chess.isDraw() ? "draw" : "active");
-      const result =
-        chess.isCheckmate()
-          ? (chess.turn() === "w" ? "black" : "white")
-          : (chess.isStalemate() || chess.isDraw()) ? "draw" : null;
-      const updates = {
-        fen: chess.fen(),
-        pgn: chess.pgn(),
-        turn: chess.turn(),
-        plies_count: Number(game.plies_count || 0) + 1,
-        last_move_at: now,
-        updated_at: now,
-        draw_offer_by_user_id: null,
-        draw_offer_at: null,
-      };
-      if (nextStatus !== "active") {
-        const updatedGame = await chessUpdateGame(game.game_id, updates);
-        const finalResult = await chessFinalizeGame(
-          updatedGame,
-          { result: result || "draw", status: nextStatus, reason: nextStatus }
-        );
-        game = finalResult.game;
-      } else {
-        game = await chessUpdateGame(game.game_id, updates);
-      }
-
-      await emitChessStateToGameRoom(game);
-      respond({ ok: true });
-
-      if (game.context_type === "room" && move?.san) {
-        const actorName = socket.user.username;
-        emitRoomSystem(game.context_id, `${actorName} played ${move.san}`);
-      }
-
-      if (game.status !== "active" && game.context_type === "dm") {
-        const summary = game.result === "draw"
-          ? "Draw"
-          : game.result === "white"
-            ? "White wins"
-            : "Black wins";
-        await insertDmChessMessage({
-          threadId: Number(game.context_id),
-          authorId: socket.user.id,
-          authorName: socket.user.username,
-          text: `[chess:result:${game.game_id}:${summary}]`,
-        });
-      }
-    } catch (e) {
-      console.warn("[chess] move failed:", e?.message || e);
-      respond({ ok: false, error: "Move failed" });
-    }
-  });
-
-  socket.on("chess:game:resign", async ({ gameId } = {}, ack) => {
-    const respond = (payload) => {
-      if (typeof ack === "function") ack(payload);
-    };
-    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
-    if (!gameId) return respond({ ok: false, error: "Missing game" });
-    try {
-      const game = await chessGetGameById(String(gameId));
-      if (!game || game.status !== "active") return respond({ ok: false, error: "Game not active" });
-      const isWhite = Number(game.white_user_id || 0) === Number(socket.user.id);
-      const isBlack = Number(game.black_user_id || 0) === Number(socket.user.id);
-      if (!isWhite && !isBlack) return respond({ ok: false, error: "Not a player" });
-      const result = isWhite ? "black" : "white";
-      const finalResult = await chessFinalizeGame(game, { result, status: "resigned", reason: "resign" });
-      await emitChessStateToGameRoom(finalResult.game);
-      if (finalResult.game.context_type === "dm") {
-        const summary = result === "white" ? "White wins" : "Black wins";
-        await insertDmChessMessage({
-          threadId: Number(finalResult.game.context_id),
-          authorId: socket.user.id,
-          authorName: socket.user.username,
-          text: `[chess:result:${finalResult.game.game_id}:${summary}]`,
-        });
-      }
-      respond({ ok: true });
-    } catch (e) {
-      console.warn("[chess] resign failed:", e?.message || e);
-      respond({ ok: false, error: "Failed to resign" });
-    }
-  });
-
-  socket.on("chess:game:drawOffer", async ({ gameId } = {}, ack) => {
-    const respond = (payload) => {
-      if (typeof ack === "function") ack(payload);
-    };
-    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
-    if (!gameId) return respond({ ok: false, error: "Missing game" });
-    try {
-      const game = await chessGetGameById(String(gameId));
-      if (!game || game.status !== "active") return respond({ ok: false, error: "Game not active" });
-      const isWhite = Number(game.white_user_id || 0) === Number(socket.user.id);
-      const isBlack = Number(game.black_user_id || 0) === Number(socket.user.id);
-      if (!isWhite && !isBlack) return respond({ ok: false, error: "Not a player" });
-      const updated = await chessUpdateGame(game.game_id, {
-        draw_offer_by_user_id: socket.user.id,
-        draw_offer_at: Date.now(),
-      });
-      await emitChessStateToGameRoom(updated);
-      respond({ ok: true });
-    } catch (e) {
-      console.warn("[chess] draw offer failed:", e?.message || e);
-      respond({ ok: false, error: "Failed to offer draw" });
-    }
-  });
-
-  socket.on("chess:game:drawRespond", async ({ gameId, accept } = {}, ack) => {
-    const respond = (payload) => {
-      if (typeof ack === "function") ack(payload);
-    };
-    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
-    if (!gameId) return respond({ ok: false, error: "Missing game" });
-    try {
-      const game = await chessGetGameById(String(gameId));
-      if (!game || game.status !== "active") return respond({ ok: false, error: "Game not active" });
-      if (!game.draw_offer_by_user_id) return respond({ ok: false, error: "No draw offer" });
-      if (Number(game.draw_offer_by_user_id) === Number(socket.user.id)) {
-        return respond({ ok: false, error: "Cannot respond to your own offer" });
-      }
-      if (!accept) {
-        const updated = await chessUpdateGame(game.game_id, { draw_offer_by_user_id: null, draw_offer_at: null });
-        await emitChessStateToGameRoom(updated);
-        return respond({ ok: true, status: "declined" });
-      }
-      const finalResult = await chessFinalizeGame(game, { result: "draw", status: "draw", reason: "draw" });
-      await emitChessStateToGameRoom(finalResult.game);
-      if (finalResult.game.context_type === "dm") {
-        await insertDmChessMessage({
-          threadId: Number(finalResult.game.context_id),
-          authorId: socket.user.id,
-          authorName: socket.user.username,
-          text: `[chess:result:${finalResult.game.game_id}:Draw]`,
-        });
-      }
-      respond({ ok: true, status: "accepted" });
-    } catch (e) {
-      console.warn("[chess] draw respond failed:", e?.message || e);
-      respond({ ok: false, error: "Failed to respond" });
-    }
-  });
-
-  socket.on("chess:leaderboard:get", async ({ limit, offset } = {}, ack) => {
-    try {
-      const rows = await fetchChessLeaderboard(limit, offset);
-      const payload = rows.map((row) => {
-        const games = Number(row.chess_games_played || 0);
-        const wins = Number(row.chess_wins || 0);
-        const losses = Number(row.chess_losses || 0);
-        const draws = Number(row.chess_draws || 0);
-        const winrate = games > 0 ? Math.round((wins / games) * 1000) / 10 : 0;
-        return {
-          userId: Number(row.user_id),
-          username: row.username,
-          elo: Number(row.chess_elo || CHESS_DEFAULT_ELO),
-          gamesPlayed: games,
-          wins,
-          losses,
-          draws,
-          winrate,
-          peakElo: Number(row.chess_peak_elo || row.chess_elo || CHESS_DEFAULT_ELO),
-        };
-      });
-      if (typeof ack === "function") {
-        ack({ rows: payload, limit: Number(limit || 50), offset: Number(offset || 0) });
-      }
-      socket.emit("chess:leaderboard:data", { rows: payload, limit: Number(limit || 50), offset: Number(offset || 0) });
-    } catch (e) {
-      console.warn("[chess] leaderboard socket failed:", e?.message || e);
-      if (typeof ack === "function") ack({ ok: false });
-    }
-  });
-
-
-  socket.on("status change", ({ status }) => {
-    status = normalizeStatus(status, "Online");
-    socket.user.status = status;
-
-    const st = onlineState.get(socket.user.id);
-    if (st) st.status = status;
-
-    db.run("UPDATE users SET last_status=? WHERE id=?", [status, socket.user.id]);
-
-    if (socket.currentRoom) emitUserList(socket.currentRoom);
-  });
-
-  socket.on("chat message", async (payload = {}) => {
-    if (IS_DEV_MODE) console.log("[socket] chat message", { socketId: socket.id, room: payload.room, textLen: payload.text?.length });
-    // ---- NEW: Validate input ----
-    const validation = validate(ChatMessageSchema, {
-      room: payload.room || socket.currentRoom || "main",
-      text: payload.text,
-      replyTo: payload.replyTo,
-    });
-    
-    if (!validation.success) {
-      socket.emit("system", buildSystemPayload(socket.currentRoom || "main", "Invalid message: " + validation.error));
-      return;
-    }
-    
-    // Sanitize text to prevent XSS
-    const sanitized = sanitizeText(validation.data.text);
-    if (!sanitized) {
-      socket.emit("system", buildSystemPayload(socket.currentRoom || "main", "Message cannot be empty"));
-      return;
-    }
-    
-    // Apply word filter (async)
-    const filtered = await applyWordFilter(sanitized);
-    
-    // Override payload with validated and filtered data
-    payload.text = filtered;
-    
-    // If a client sends before it has joined a room (mobile reconnect/race),
-    // auto-join main so the message doesn't silently disappear.
-    let room = socket.currentRoom;
-    if (!room) {
-      try {
-        doJoin("main", socket.user.status || "Online");
-      } catch (_) {}
-      room = socket.currentRoom;
-      if (!room) return;
-    }
-
-    if (!allowSocketEvent(socket, "chat_message", 16, 4000)) {
-      socket.emit("system", buildSystemPayload(socket.currentRoom || "main", "You are sending messages too quickly."));
-      return;
-    }
-
-    // basic spam rate limiting
-    const now = Date.now();
-    const r = msgRate.get(socket.id) || { lastTs: now, count: 0 };
-    if (now - r.lastTs > 4000) {
-      r.lastTs = now;
-      r.count = 0;
-    }
-    r.count++;
-    msgRate.set(socket.id, r);
-    if (r.count > 10) return;
-
-    isPunished(socket.user.id, "ban", (banned) => {
-      if (banned) return;
-      isPunished(socket.user.id, "mute", (muted) => {
-        if (muted) return;
-
-        const rawText = safeString(payload.text, "");
-        if (rawText.length > MAX_CHAT_MESSAGE_CHARS) {
-      socket.emit("system", buildSystemPayload(socket.currentRoom || "main", "Message too long (max " + MAX_CHAT_MESSAGE_CHARS + " characters)."));
-          return;
-        }
-        const text = rawText.slice(0, MAX_CHAT_MESSAGE_CHARS);
-        if (text.trim().startsWith("/")) {
-          executeCommand(socket, text, room);
-          return;
-        }
-        const attachmentUrl = safeString(payload.attachmentUrl, "").slice(0, 400);
-        const attachmentType = safeString(payload.attachmentType, "").slice(0, 20);
-        const attachmentMime = safeString(payload.attachmentMime, "").slice(0, 60);
-        const attachmentSize = safeNumber(payload.attachmentSize, 0);
-        const tone = sanitizeTone(payload.tone);
-
-        awardPassiveGold(socket.user.id);
-
-        // maintenance / lock / slowmode enforcement
-        if (maintenanceState.enabled && !requireMinRole(socket.user.role, "Moderator")) {
-          socket.emit("command response", { ok: false, message: "Site is in maintenance mode" });
-          return;
-        }
-
-        db.get(
-          `SELECT slowmode_seconds, is_locked, archived FROM rooms WHERE name=?`,
-          [room],
-          (_err, settings) => {
-            const slowSeconds = Number(settings?.slowmode_seconds || 0);
-            const locked = Number(settings?.is_locked || 0) === 1;
-            const archived = Number(settings?.archived || 0) === 1;
-            if (archived) {
-              socket.emit("command response", { ok: false, message: "Room is archived" });
-              return;
-            }
-            if (locked && !requireMinRole(socket.user.role, "Moderator")) {
-              socket.emit("command response", { ok: false, message: "Room is locked" });
-              return;
-            }
-            if (slowSeconds > 0 && !requireMinRole(socket.user.role, "Moderator")) {
-              const key = `${room}:${socket.user.id}`;
-              const last = slowmodeTracker.get(key) || 0;
-              if (Date.now() - last < slowSeconds * 1000) {
-                socket.emit("command response", { ok: false, message: `Slowmode: wait ${Math.ceil((slowSeconds * 1000 - (Date.now() - last)) / 1000)}s` });
-                return;
-              }
-              slowmodeTracker.set(key, Date.now());
-            }
-
-            const replyId = safeNumber(payload.replyToId, NaN);
-            const insertWithReply = (replyMeta = {}) => {
-              const replyPk = Number.isInteger(replyMeta.id) ? replyMeta.id : null;
-              const replyUser = replyMeta.username || replyMeta.user || null;
-              const replyText = replyMeta.text || null;
-              const tsNow = Date.now();
-
-              db.run(
-                `INSERT INTO messages (room, user_id, username, role, avatar, text, tone, ts, attachment_url, attachment_type, attachment_mime, attachment_size, reply_to_id, reply_to_user, reply_to_text)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [
-                  room,
-                  socket.user.id,
-                  socket.user.username,
-                  socket.user.role,
-                  socket.user.avatar || "",
-                  text,
-                  tone,
-                  tsNow,
-                  attachmentUrl || null,
-                  attachmentType || null,
-                  attachmentMime || null,
-                  attachmentSize || null,
-                  replyPk,
-                  replyUser,
-                  replyText,
-                ],
-                function () {
-                  awardMessageXp(socket.user.id, socket.user.role, room).catch((e) => console.warn("[xp][msg]", e?.message || e));
-                  awardMessageGold(socket.user.id);
-                  const msg = {
-                    messageId: this.lastID,
-                    room,
-                    user: socket.user.username,
-                    role: socket.user.role,
-                    avatar: socket.user.avatar || "",
-                    text,
-                    tone: tone || "",
-                    ts: tsNow,
-                    attachmentUrl: attachmentUrl || "",
-                    attachmentType: attachmentType || "",
-                    attachmentMime: attachmentMime || "",
-                    attachmentSize: attachmentSize || 0,
-                    replyToId: replyPk,
-                    replyToUser: replyUser || "",
-                    replyToText: replyText || "",
-                    chatFx: mergeChatFxWithCustomization(socket.user.chatFx, socket.user.customization, socket.user.textStyle),
-                  };
-                  // Daily challenges + smart mentions
-                  try { bumpDailyProgress(socket.user.id, dayKeyNow(), "room_msgs_5", 1); } catch {}
-                  try {
-                    emitSmartMentionPings({
-                      room,
-                      fromUser: { id: socket.user.id, username: socket.user.username, socketId: socket.id },
-                      messageId: msg.id || msg.messageId || null,
-                      text: msg.text || "",
-                    });
-                  } catch {}
-                  void applyLuckForQualifyingMessage({
-                    userId: socket.user.id,
-                    room,
-                    text,
-                  });
-                  io.to(room).emit("chat message", msg);
-                }
-              );
-            };
-
-            if (Number.isInteger(replyId)) {
-              db.get(
-                `SELECT id, username, text FROM messages WHERE id=? AND room=? AND deleted=0`,
-                [replyId, room],
-                (_rErr, row) => insertWithReply(row || {})
-              );
-            } else {
-              insertWithReply();
-            }
-          }
-        );
-      });
-    });
-  });
-
-  // ---- Edit message (self-only, short window)
-  socket.on("edit message", (payload = {}) => {
-    const mid = Number(payload.messageId);
-    const body = safeString(payload.text, "").trim().slice(0, 2000);
-    if (!socket.user) return;
-    if (!Number.isInteger(mid) || !body) return;
-
-    db.get(
-      `SELECT id, room, user_id, ts, deleted, text FROM messages WHERE id = ?`,
-      [mid],
-      (err, row) => {
-        if (err || !row || Number(row.deleted || 0) === 1) return;
-
-        const isOwner = Number(row.user_id) === Number(socket.user.id);
-        if (!isOwner) return;
-
-        const now = Date.now();
-        const ts = Number(row.ts) || 0;
-        if (now - ts > 5 * 60 * 1000) return;
-
-        // Store edit history using message-utils
-        messageUtils.persistEdit({
-          message_id: mid,
-          user_id: socket.user.id,
-          previous_text: row.text,
-          new_text: body,
-          edited_at: now
-        }).then(() => {
-          io.to(String(row.room)).emit("message edited", {
-            messageId: mid,
-            text: body,
-            editedAt: now
-          });
-        }).catch(err => {
-          console.error("[edit message] persist error:", err);
-          // Fallback to direct update
-          db.run(
-            `UPDATE messages SET text = ?, edited_at = ? WHERE id = ?`,
-            [body, now, mid],
-            () => {
-              io.to(String(row.room)).emit("message edited", {
-                messageId: mid,
-                text: body,
-                editedAt: now
-              });
-            }
-          );
-        });
-      }
-    );
-  });
-
-
-  // Reactions: 1 reaction per user per message (enforced by PRIMARY KEY)
-  socket.on("reaction", ({ messageId, emoji }) => {
-    const room = socket.currentRoom;
-    if (!room) return;
-    const mid = String(messageId || "").trim();
-    const em = String(emoji || "").slice(0, 8);
-    if (!mid || !em) return;
-
-    try {
-      const uid = socket.user?.id;
-      const now = Date.now();
-      const last = lastReactionByUserId.get(uid) || 0;
-      if (now - last < 800) bumpHeat(uid, 1);
-      if (now - last >= 800) {
-        bumpDailyProgress(uid, dayKeyNow(), "react_3", 1);
-        lastReactionByUserId.set(uid, now);
-      }
-    } catch {}
-
-    // Store in legacy reactions table
-    db.run(
-      `INSERT INTO reactions (message_id, username, emoji)
-       VALUES (?, ?, ?)
-       ON CONFLICT(message_id, username) DO UPDATE SET emoji=excluded.emoji`,
-      [mid, socket.user.username, em],
-      () => {
-        db.all("SELECT username, emoji FROM reactions WHERE message_id=?", [mid], (_e, rows) => {
-          const reactions = {};
-          for (const r of rows || []) reactions[r.username] = r.emoji;
-          io.to(room).emit("reaction update", { messageId: mid, reactions });
-        });
-      }
-    );
-
-    // Also store in new message_reactions table for history tracking
-    messageUtils.persistReaction({
-      message_id: mid,
-      user_id: socket.user.id,
-      username: socket.user.username,
-      emoji: em,
-      created_at: Date.now()
-    }).catch(err => console.error("[reaction] persist error:", err));
-  });
-
-  // ---- NEW: Message delivery receipt handler ----
-  socket.on("message:delivered", ({ messageId }) => {
-    if (!messageId) return;
-    
-    // Fetch message to get room and validate it exists
-    db.get("SELECT id, room FROM messages WHERE id = ?", [messageId], (err, msg) => {
-      if (err || !msg) return;
-      
-      messageUtils.markMessageDelivered(messageId)
-        .then(() => {
-          io.to(msg.room).emit("message:delivered", { 
-            messageId, 
-            deliveredAt: Date.now() 
-          });
-        })
-        .catch(err => console.error("[message:delivered] error:", err));
-    });
-  });
-
-  // ---- NEW: Message read receipt handler ----
-  socket.on("message:read", ({ messageId }) => {
-    if (!messageId) return;
-    
-    // Fetch message to get room and validate it exists
-    db.get("SELECT id, room FROM messages WHERE id = ?", [messageId], (err, msg) => {
-      if (err || !msg) return;
-      
-      messageUtils.markMessageRead(messageId)
-        .then(() => {
-          io.to(msg.room).emit("message:read", { 
-            messageId, 
-            readAt: Date.now() 
-          });
-        })
-        .catch(err => console.error("[message:read] error:", err));
-    });
-  });
-
-  // ---- NEW: Typing indicator with state persistence ----
-  socket.on("typing", ({ room, isTyping }) => {
-    if (!room || !socket.user?.username) return;
-    
-    // Validate socket is actually in this room
-    if (socket.currentRoom !== room) return;
-    
-    try {
-      const username = socket.user.username;
-      
-      // Update state persistence
-      if (isTyping) {
-        setTyping(room, username, 5).catch(() => {}); // 5 second TTL
-      } else {
-        // Clear typing state
-        deleteState(`typing:${room}:${username}`).catch(() => {});
-      }
-      
-      // Broadcast to room
-      socket.to(room).emit("user:typing", {
-        room,
-        username,
-        isTyping
-      });
-    } catch (err) {
-      console.error("[typing] error:", err);
-    }
-  });
-
-
-  const logDeleteFailure = ({ scope, messageId, actorId, actorRole, reason, roomId, threadId }) => {
-    console.warn(`[delete:${scope}]`, { messageId, actorId, actorRole, roomId, threadId, reason });
-  };
-
-  const respondDelete = (ack, payload) => {
-    if (typeof ack === "function") ack(payload);
-  };
-
-  const emitMainMessageDeleted = (messageId, roomId) => {
-    const rawRoom = String(roomId || "").trim();
-    if (!rawRoom) return;
-    const emitRoom = rawRoom.startsWith("#") ? rawRoom.slice(1) : rawRoom;
-    io.to(emitRoom).emit("messageDeleted", { messageId, roomId: emitRoom });
-    io.to(emitRoom).emit("message deleted", { messageId });
-  };
-
-  const handleMainDeleteMessage = ({ messageId } = {}, ack) => {
-    const actor = socket.user;
-    if (!actor) {
-      respondDelete(ack, { ok: false, message: "Not authenticated." });
-      return;
-    }
-
-    const actorRole = actor.role || socket.request?.session?.user?.role || "User";
-    const mid = Number(messageId);
-    if (!Number.isInteger(mid)) {
-      respondDelete(ack, { ok: false, message: "Invalid message id." });
-      logDeleteFailure({ scope: "main", messageId, actorId: actor.id, actorRole, reason: "invalid_id" });
-      return;
-    }
-
-    db.get(
-      "SELECT id, room, user_id, username, role, deleted FROM messages WHERE id=?",
-      [mid],
-      (err, msg) => {
-        if (err) {
-          respondDelete(ack, { ok: false, message: "Failed to load message." });
-          logDeleteFailure({ scope: "main", messageId: mid, actorId: actor.id, actorRole, reason: "load_failed" });
-          return;
-        }
-        if (!msg) {
-          respondDelete(ack, { ok: false, message: "Message not found." });
-          logDeleteFailure({ scope: "main", messageId: mid, actorId: actor.id, actorRole, reason: "not_found" });
-          return;
-        }
-
-        const isModerator = requireMinRole(actorRole, "Moderator");
-        const isVip = requireMinRole(actorRole, "VIP");
-        const isOwner = Number(msg.user_id) === Number(actor.id);
-        if (!isModerator && !(isVip && isOwner)) {
-          respondDelete(ack, { ok: false, message: "Not allowed to delete this message." });
-          logDeleteFailure({ scope: "main", messageId: mid, actorId: actor.id, actorRole, roomId: msg.room, reason: "forbidden" });
-          return;
-        }
-
-        const wasDeleted = Number(msg.deleted || 0) === 1;
-        if (wasDeleted) {
-          respondDelete(ack, { ok: true, alreadyDeleted: true });
-          emitMainMessageDeleted(mid, msg.room);
-          return;
-        }
-
-        // Use soft delete with deleted_at timestamp
-        const deletedAt = Date.now();
-        db.run("UPDATE messages SET deleted=1, deleted_at=? WHERE id=?", [deletedAt, mid], (updateErr) => {
-          if (updateErr) {
-            respondDelete(ack, { ok: false, message: "Failed to delete message." });
-            logDeleteFailure({ scope: "main", messageId: mid, actorId: actor.id, actorRole, roomId: msg.room, reason: "update_failed" });
-            return;
-          }
-
-          db.run("DELETE FROM reactions WHERE message_id=?", [mid], (reactErr) => {
-            if (reactErr) {
-              console.warn("[delete:main] reaction cleanup failed", { messageId: mid, error: reactErr?.message || reactErr });
-            }
-            if (requireMinRole(actorRole, "Moderator")) {
-              logModAction({
-                actor,
-                action: "DELETE_MESSAGE",
-                targetUserId: msg.user_id,
-                targetUsername: msg.username,
-                room: msg.room,
-                details: `messageId=${mid}`,
-              });
-            }
-            respondDelete(ack, { ok: true });
-            emitMainMessageDeleted(mid, msg.room);
-          });
-        });
-      }
-    );
-  };
-
-  socket.on("delete message", handleMainDeleteMessage);
-  // Backward compatibility for older clients
-  socket.on("mod delete message", handleMainDeleteMessage);
-
-  socket.on("dm delete message", ({ threadId, messageId } = {}, ack) => {
-    const actor = socket.user;
-    if (!actor) {
-      respondDelete(ack, { ok: false, message: "Not authenticated." });
-      return;
-    }
-
-    const tid = Number(threadId);
-    const mid = Number(messageId);
-    if (!Number.isInteger(tid) || !Number.isInteger(mid)) {
-      respondDelete(ack, { ok: false, message: "Invalid message id." });
-      logDeleteFailure({ scope: "dm", messageId, actorId: actor.id, actorRole: actor.role, threadId, reason: "invalid_id" });
-      return;
-    }
-
-    loadThreadForUser(tid, actor.id, (err, thread) => {
-      if (err || !thread) {
-        respondDelete(ack, { ok: false, message: "Not allowed in this thread." });
-        logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole: actor.role, threadId: tid, reason: "thread_access" });
-        return;
-      }
-
-      const actorRole = actor.role || socket.request?.session?.user?.role || "User";
-      db.get(
-        "SELECT id, thread_id, user_id, deleted FROM dm_messages WHERE id=? AND thread_id=?",
-        [mid, tid],
-        (msgErr, msg) => {
-          if (msgErr) {
-            respondDelete(ack, { ok: false, message: "Failed to load message." });
-            logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole, threadId: tid, reason: "load_failed" });
-            return;
-          }
-          if (!msg) {
-            respondDelete(ack, { ok: false, message: "Message not found." });
-            logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole, threadId: tid, reason: "not_found" });
-            return;
-          }
-
-          const isModerator = requireMinRole(actorRole, "Moderator");
-          const isVip = requireMinRole(actorRole, "VIP");
-          const isOwner = Number(msg.user_id) === Number(actor.id);
-          if (!isModerator && !(isVip && isOwner)) {
-            respondDelete(ack, { ok: false, message: "Not allowed to delete this message." });
-            logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole, threadId: tid, reason: "forbidden" });
-            return;
-          }
-
-          const wasDeleted = Number(msg.deleted || 0) === 1;
-          if (wasDeleted) {
-            respondDelete(ack, { ok: true, alreadyDeleted: true });
-            io.to(`dm:${tid}`).emit("dm message deleted", { threadId: tid, messageId: mid });
-            return;
-          }
-
-          db.run("UPDATE dm_messages SET deleted=1 WHERE id=? AND thread_id=?", [mid, tid], (delErr) => {
-            if (delErr) {
-              respondDelete(ack, { ok: false, message: "Failed to delete message." });
-              logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole, threadId: tid, reason: "update_failed" });
-              return;
-            }
-
-            db.run("DELETE FROM dm_reactions WHERE thread_id=? AND message_id=?", [tid, mid], (reactErr) => {
-              if (reactErr) {
-                console.warn("[delete:dm] reaction cleanup failed", { messageId: mid, threadId: tid, error: reactErr?.message || reactErr });
-              }
-              respondDelete(ack, { ok: true });
-              io.to(`dm:${tid}`).emit("dm message deleted", { threadId: tid, messageId: mid });
-            });
-          });
-        }
-      );
-    });
-  });
-
-  // ---- Kick / Mute / Ban + Unmute/Unban/Warn + Set role
-  
-  // Get user's last messages for moderation (preview before kick/ban)
-  socket.on("mod get user messages", async ({ username, limit = 5 } = {}, ack) => {
-    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
-    const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
-
-    username = sanitizeUsername(username);
-    if (!username) return respond({ ok: false, error: "Invalid username." });
-
-    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
-      if (!target) return respond({ ok: false, error: "User not found." });
-      
-      const messages = await getUserLastMessages(target.id, Math.min(Number(limit) || 5, 10));
-      respond({ ok: true, messages });
-    });
-  });
-  
-socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300, caseId = null, autoClear = false, capturedMessage = null } = {}, ack) => {
-  if (IS_DEV_MODE) console.log("[socket] mod kick", { socketId: socket.id, username, durationSeconds });
-  const respond = (payload) => { if (typeof ack === "function") ack(payload); };
-  if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
-  const room = socket.currentRoom;
-  if (!room) return respond({ ok: false, error: "No active room." });
-
-  const actorRole = socket.request.session.user.role;
-  if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
-
-  username = sanitizeUsername(username);
-  if (!username) return respond({ ok: false, error: "Invalid username." });
-
-  db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
-    if (!target) return respond({ ok: false, error: "User not found." });
-    if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
-
-    // Auto-clear messages if enabled
-    let clearedCount = 0;
-    if (autoClear) {
-      clearedCount = await clearUserMessages(target.id, room);
-    }
-
-    // Persist restriction + log
-    const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
-    const why = String(reason || "").slice(0, 180) || "Kicked by staff";
-    const dur = clamp(Number(durationSeconds) || 300, 30, 7 * 24 * 60 * 60);
-    let expiresAt = null;
-    try {
-      ({ expiresAt } = await setKickEverywhere(target.username, actorName, why, dur));
-    } catch {
-      return respond({ ok: false, error: "Kick failed." });
-    }
-
-    // Ban all IP and MAC addresses associated with this user (temporary)
-    banAllUserAddresses(target.id, why, socket.user.id, actorName, expiresAt).catch(() => {});
-
-    // Notify + disconnect
-    const sid = socketIdByUserId.get(target.id);
-    if (sid) {
-      io.to(sid).emit("restriction:status", { type: "kick", reason: why, expiresAt, now: Date.now() });
-      io.sockets.sockets.get(sid)?.disconnect(true);
-    }
-    invalidateSessionsForUserId(target.id);
-
-    // Build details with captured message info
-    let details = `duration=${dur}s reason=${why}`;
-    if (autoClear) {
-      details += ` cleared=${clearedCount}`;
-    }
-    if (capturedMessage) {
-      const msgPreview = String(capturedMessage.text || '')
-        .slice(0, 100)
-        .replace(/\\/g, '\\\\')
-        .replace(/"/g, '\\"');
-      const msgTime = capturedMessage.timestampUTC || new Date(capturedMessage.timestamp).toISOString();
-      details += ` captured_msg="${msgPreview}" msg_time="${msgTime}" msg_user="${capturedMessage.username}"`;
-    }
-
-    emitRoomSystem(room, `${username} was kicked.`, { kind: "mod" });
-    logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: target.username, room, details });
-    if (caseId) {
-      addModCaseEvent(Number(caseId), {
-        actorUserId: socket.user?.id || null,
-        eventType: "kick",
-        payload: { targetUserId: target.id, durationSeconds: dur, reason: why, capturedMessage, clearedCount },
-      }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "kick" })).catch(() => {});
-    }
-    respond({ ok: true, username: target.username, durationSeconds: dur, clearedCount });
-  });
-});
-
-socket.on("mod unkick", async ({ username, caseId = null } = {}, ack) => {
-  const respond = (payload) => { if (typeof ack === "function") ack(payload); };
-  if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
-  const room = socket.currentRoom;
-  if (!room) return respond({ ok: false, error: "No active room." });
-
-  const actorRole = socket.request.session.user.role;
-  if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
-
-  username = sanitizeUsername(username);
-  if (!username) return respond({ ok: false, error: "Invalid username." });
-
-  db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
-    if (!target) return respond({ ok: false, error: "User not found." });
-    if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
-
-    const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
-    try{
-      await clearRestrictionEverywhere(target.username, actorName, "unkick");
-    }catch{
-      return respond({ ok: false, error: "Unkick failed." });
-    }
-
-    // Notify target (if online)
-    const sid = socketIdByUserId.get(target.id);
-    if (sid) {
-      io.to(sid).emit("restriction:status", { type: "none", reason: "", expiresAt: null, now: Date.now() });
-    }
-
-    emitOnlineUsers();
-    emitRoomSystem(room, "User " + (target && target.username ? target.username : "") + " has been un-kicked by " + actorName + ".", { kind: "mod" });
-    if (caseId) {
-      addModCaseEvent(Number(caseId), {
-        actorUserId: socket.user?.id || null,
-        eventType: "unkick",
-        payload: { targetUserId: target.id },
-      }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "unkick" })).catch(() => {});
-    }
-    respond({ ok: true, username: target.username });
-  });
-});
-
-
-  socket.on("mod mute", ({ username, minutes = 10, reason = "", caseId = null } = {}, ack) => {
-    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
-    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
-    const room = socket.currentRoom;
-    if (!room) return respond({ ok: false, error: "No active room." });
-
-    const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
-
-    username = sanitizeUsername(username);
-    const mins = clamp(minutes, 1, 1440);
-    const expiresAt = Date.now() + mins * 60 * 1000;
-
-    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
-      if (!target) return respond({ ok: false, error: "User not found." });
-      if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
-
-      db.run(
-        `INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id, created_at)
-         VALUES (?, 'mute', ?, ?, ?, ?)`,
-        [target.id, expiresAt, String(reason || "").slice(0, 180), socket.user.id, Date.now()],
-        () => {
-          emitRoomSystem(room, `${username} was muted for ${mins} minutes.`, { kind: "mod" });
-          logModAction({
-            actor: socket.user,
-            action: "MUTE",
-            targetUserId: target.id,
-            targetUsername: target.username,
-            room,
-            details: `minutes=${mins} reason=${String(reason || "").slice(0, 180)}`,
-          });
-          if (caseId) {
-            addModCaseEvent(Number(caseId), {
-              actorUserId: socket.user?.id || null,
-              eventType: "mute",
-              payload: { targetUserId: target.id, minutes: mins, reason: String(reason || "").slice(0, 180) },
-            }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "mute" })).catch(() => {});
-          }
-          respond({ ok: true, username: target.username, minutes: mins });
-        }
-      );
-    });
-  });
-
-  socket.on("mod ban", async ({ username, minutes = 0, reason = "", caseId = null, autoClear = false, capturedMessage = null } = {}, ack) => {
-    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
-    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
-    const room = socket.currentRoom;
-    if (!room) return respond({ ok: false, error: "No active room." });
-
-    const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Admin")) return respond({ ok: false, error: "Not permitted." });
-
-    username = sanitizeUsername(username);
-    const mins = Number(minutes);
-    const expiresAt = Number.isFinite(mins) && mins > 0 ? Date.now() + mins * 60 * 1000 : null;
-
-    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
-      if (!target) return respond({ ok: false, error: "User not found." });
-      if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
-
-      // Auto-clear messages if enabled
-      let clearedCount = 0;
-      if (autoClear) {
-        clearedCount = await clearUserMessages(target.id, room);
-      }
-
-      db.run(
-        `INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id, created_at)
-         VALUES (?, 'ban', ?, ?, ?, ?)`,
-        [target.id, expiresAt, String(reason || "").slice(0, 180), socket.user.id, Date.now()],
-        () => {
-          emitRoomSystem(
-            room,
-            `${username} was banned${expiresAt ? ` for ${mins} minutes` : " permanently"}.`,
-            { kind: "mod" }
-          );
-const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
-const why = String(reason || "").slice(0, 180) || "Banned by staff";
-// Persist ban restriction for the restriction/appeals system (in addition to legacy punishments table)
-setBanEverywhere(username, actorName, why).catch(()=>{});
-
-// Ban all IP and MAC addresses associated with this user
-banAllUserAddresses(target.id, why, socket.user.id, actorName, expiresAt).catch(() => {});
-
-const sid = socketIdByUserId.get(target.id);
-if (sid) {
-  io.to(sid).emit("restriction:status", { type: "ban", reason: why, expiresAt: null, now: Date.now() });
-  io.sockets.sockets.get(sid)?.disconnect(true);
-}
-invalidateSessionsForUserId(target.id);
-
-          // Build details with captured message info
-          let details = expiresAt ? `minutes=${mins}` : `permanent reason=${String(reason || "").slice(0, 180)}`;
-          if (autoClear) {
-            details += ` cleared=${clearedCount}`;
-          }
-          if (capturedMessage) {
-            const msgPreview = String(capturedMessage.text || '')
-              .slice(0, 100)
-              .replace(/\\/g, '\\\\')
-              .replace(/"/g, '\\"');
-            const msgTime = capturedMessage.timestampUTC || new Date(capturedMessage.timestamp).toISOString();
-            details += ` captured_msg="${msgPreview}" msg_time="${msgTime}" msg_user="${capturedMessage.username}"`;
-          }
-
-          logModAction({
-            actor: socket.user,
-            action: "BAN",
-            targetUserId: target.id,
-            targetUsername: target.username,
-            room,
-            details,
-          });
-          if (caseId) {
-            addModCaseEvent(Number(caseId), {
-              actorUserId: socket.user?.id || null,
-              eventType: "ban",
-              payload: { targetUserId: target.id, minutes: mins, reason: String(reason || "").slice(0, 180), capturedMessage, clearedCount },
-            }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "ban" })).catch(() => {});
-          }
-          respond({ ok: true, username: target.username, minutes: mins, clearedCount });
-        }
-      );
-    });
-  });
-
-  socket.on("mod unmute", ({ username, reason = "", caseId = null } = {}, ack) => {
-    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
-    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
-    const room = socket.currentRoom;
-    if (!room) return respond({ ok: false, error: "No active room." });
-    const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
-
-    username = sanitizeUsername(username);
-    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
-      if (!target) return respond({ ok: false, error: "User not found." });
-      if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
-
-      db.run("DELETE FROM punishments WHERE user_id=? AND type='mute'", [target.id], () => {
-        emitRoomSystem(room, `${username} was unmuted.`, { kind: "mod" });
-        logModAction({
-          actor: socket.user,
-          action: "UNMUTE",
-          targetUserId: target.id,
-          targetUsername: target.username,
-          room,
-          details: String(reason || "").slice(0, 180),
-        });
-        if (caseId) {
-          addModCaseEvent(Number(caseId), {
-            actorUserId: socket.user?.id || null,
-            eventType: "unmute",
-            payload: { targetUserId: target.id, reason: String(reason || "").slice(0, 180) },
-          }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "unmute" })).catch(() => {});
-        }
-        respond({ ok: true, username: target.username });
-      });
-    });
-  });
-
-  socket.on("mod unban", ({ username, reason = "", caseId = null } = {}, ack) => {
-    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
-    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
-    const room = socket.currentRoom;
-    if (!room) return respond({ ok: false, error: "No active room." });
-    const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Admin")) return respond({ ok: false, error: "Not permitted." });
-
-    username = sanitizeUsername(username);
-    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
-      if (!target) return respond({ ok: false, error: "User not found." });
-      if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
-
-      db.run("DELETE FROM punishments WHERE user_id=? AND type='ban'", [target.id], () => {
-        emitRoomSystem(room, `${username} was unbanned.`, { kind: "mod" });
-// Clear persistent restriction as well
-const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
-clearRestrictionEverywhere(username, actorName, String(reason || "").slice(0, 180) || "unban").catch(()=>{});
-const sid = socketIdByUserId.get(target.id);
-if (sid) {
-  io.to(sid).emit("restriction:status", { type: "none", reason: "", expiresAt: null, now: Date.now() });
-}
-        logModAction({
-          actor: socket.user,
-          action: "UNBAN",
-          targetUserId: target.id,
-          targetUsername: target.username,
-          room,
-          details: String(reason || "").slice(0, 180),
-        });
-        if (caseId) {
-          addModCaseEvent(Number(caseId), {
-            actorUserId: socket.user?.id || null,
-            eventType: "unban",
-            payload: { targetUserId: target.id, reason: String(reason || "").slice(0, 180) },
-          }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "unban" })).catch(() => {});
-        }
-        respond({ ok: true, username: target.username });
-      });
-    });
-  });
-
-
-  // ---- Linked Accounts (Moderator/Admin view)
-  socket.on("mod get linked accounts", async ({ username } = {}, ack) => {
-    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
-    const actorRole = socket.request?.session?.user?.role;
-    
-    // Only Moderators, Admins, Co-owners, and Owner can view linked accounts
-    if (!actorRole || !requireMinRole(actorRole, "Moderator")) {
-      return respond({ ok: false, error: "Not permitted." });
-    }
-
-    if (!username) {
-      return respond({ ok: false, error: "Username required." });
-    }
-
-    username = sanitizeUsername(username);
-    if (!username) return respond({ ok: false, error: "Invalid username." });
-
-    db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
-      if (!target) return respond({ ok: false, error: "User not found." });
-
-      try {
-        const linkedAccounts = await getLinkedAccounts(target.id);
-        
-        // Group by user for cleaner output
-        const userMap = new Map();
-        for (const link of linkedAccounts) {
-          if (!userMap.has(link.id)) {
-            userMap.set(link.id, {
-              userId: link.id,
-              username: link.username,
-              role: link.role,
-              addresses: []
-            });
-          }
-          userMap.get(link.id).addresses.push({
-            type: link.address_type,
-            value: link.address_value,
-            lastSeen: link.last_seen
-          });
-        }
-        
-        const linkedUsers = Array.from(userMap.values());
-        
-        // Log access for audit trail
-        console.log(`[audit] User ${socket.user?.username} (${socket.user?.id}) viewed linked accounts for ${target.username} (${target.id})`);
-        
-        respond({ 
-          ok: true, 
-          targetUserId: target.id,
-          targetUsername: target.username,
-          linkedUsers 
-        });
-      } catch (e) {
-        console.error("[mod get linked accounts] error:", e);
-        respond({ ok: false, error: "Failed to retrieve linked accounts." });
-      }
-    });
-  });
-
-
-// ---- Appeals (user + admin)
-socket.on("restriction:check", async (_payload, ack) => {
-  const username = socket.user?.username;
-  const r = await getRestrictionByUsername(username);
-  const payload = { type: r.type || "none", reason: r.reason || "", expiresAt: r.expiresAt || null, now: Date.now() };
-  if (typeof ack === "function") ack(payload);
-  else socket.emit("restriction:status", payload);
-});
-
-socket.on("appeal:fetchMine", async (_payload, ack) => {
-  const username = socket.user?.username;
-  const r = await getRestrictionByUsername(username);
-  const open = await findOpenAppeal(username);
-  let messages = [];
-  if (open?.id) messages = await getAppealThread(open.id);
-  const payload = { restriction: { type: r.type || "none", reason: r.reason || "", expiresAt: r.expiresAt || null, now: Date.now() }, appeal: open || null, messages };
-  if (typeof ack === "function") ack(payload);
-  else socket.emit("appeal:mine", payload);
-});
-
-socket.on("appeal:create", async ({ message } = {}, ack) => {
-  const username = socket.user?.username;
-  if (!allowSocketEvent(socket, "appeal_create", 3, 30_000)) {
-    return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
-  }
-  const r = await getRestrictionByUsername(username);
-  if (!username) return typeof ack === "function" ? ack({ ok: false, error: "Not authenticated" }) : null;
-  if (!r?.type || r.type === "none") return typeof ack === "function" ? ack({ ok: false, error: "No active kick/ban." }) : null;
-
-  let open = await findOpenAppeal(username);
-  if (!open) open = await createAppeal(username, r.type, r.reason || "");
-  if (!open?.id) return typeof ack === "function" ? ack({ ok: false, error: "Failed to create appeal." }) : null;
-
-  await addAppealMessage(open.id, { authorRole: "user", authorName: username, message: String(message || "").slice(0, 2000) });
-  const messages = await getAppealThread(open.id);
-
-  // Notify staff
-  io.emit("appeals:updated");
-
-  if (typeof ack === "function") ack({ ok: true, appeal: open, messages });
-});
-
-socket.on("appeal:send", async ({ message } = {}, ack) => {
-  const username = socket.user?.username;
-  if (!allowSocketEvent(socket, "appeal_send", 5, 30_000)) {
-    return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
-  }
-  if (!username) return typeof ack === "function" ? ack({ ok: false, error: "Not authenticated" }) : null;
-  const open = await findOpenAppeal(username);
-  if (!open?.id) return typeof ack === "function" ? ack({ ok: false, error: "No open appeal." }) : null;
-
-  await addAppealMessage(open.id, { authorRole: "user", authorName: username, message: String(message || "").slice(0, 2000) });
-  const messages = await getAppealThread(open.id);
-
-  io.emit("appeals:updated");
-
-  if (typeof ack === "function") ack({ ok: true, appeal: open, messages });
-});
-
-function isAppealsStaff(role){
-  return requireMinRole(role, "Admin") || requireMinRole(role, "Co owner") || requireMinRole(role, "Owner");
-}
-
-// Referrals: Moderators can submit ban referrals; Admin+ can review and resolve.
-function isReferralReviewer(role){
-  return requireMinRole(role, "Admin") || requireMinRole(role, "Co-owner") || requireMinRole(role, "Owner");
-}
-function canCreateReferral(role){
-  // Only Moderators submit referrals (Admins+ already have ban tools)
-  return String(role || "") === "Moderator";
-}
-
-async function createReferral({ username, referredBy, referredByRole, reason }){
-  const now = Date.now();
-  const result = await dbRunAsync(
-    `INSERT INTO referrals (username, referred_by, reason, notes, status, action_by, action_type, action_minutes, action_reason, created_at, updated_at)
-     VALUES (?, ?, ?, NULL, 'open', NULL, NULL, NULL, NULL, ?, ?)`,
-    [username, referredBy, reason, now, now]
-  );
-  try {
-    const subjectUserId = await findUserIdByUsername(username);
-    const actorUserId = await findUserIdByUsername(referredBy);
-    const caseRow = await createModCase({
-      type: "referral",
-      subjectUserId,
-      createdByUserId: actorUserId,
-      title: `Referral #${result?.lastID || ""}`.trim(),
-      summary: String(reason || "").slice(0, 800),
-    });
-    if (caseRow?.id) {
-      await addModCaseEvent(caseRow.id, {
-        actorUserId,
-        eventType: "referral_created",
-        payload: { referralId: result?.lastID || null, fromRole: referredByRole || null },
-      });
-      emitToStaff("mod:case_created", { id: caseRow.id, type: caseRow.type, status: caseRow.status });
-    }
-  } catch {}
-}
-async function listOpenReferrals(){
-  return dbAllAsync(
-    `SELECT id, username AS target_username, referred_by AS from_username, reason, status, created_at, updated_at
-     FROM referrals
-     WHERE status='open'
-     ORDER BY created_at DESC
-     LIMIT 200`
-  );
-}
-async function resolveReferral({ id, actionBy }){
-  const now = Date.now();
-  await dbRunAsync(
-    `UPDATE referrals SET status='acted', action_by=?, action_type='dismiss', updated_at=? WHERE id=?`,
-    [actionBy, now, id]
-  );
-}
-
-socket.on("appeals:list", async (_payload, ack) => {
-  const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
-  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
-  const items = await listOpenAppeals();
-  if (typeof ack === "function") ack({ ok: true, items });
-});
-
-socket.on("appeals:read", async ({ appealId } = {}, ack) => {
-  const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
-  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
-
-  const id = Number(appealId);
-  if (!Number.isFinite(id)) return typeof ack === "function" ? ack({ ok: false, error: "Invalid appeal" }) : null;
-
-  let appeal = null;
-  try {
-    if (PG_READY) {
-      const result55 = await pgSafe("SELECT * FROM appeals WHERE id=$1 LIMIT 1", [id]);
-      const rows = result55?.rows || [];
-      appeal = rows?.[0] || null;
-    }
-  } catch {}
-  if (!appeal) {
-    try { appeal = await dbGetAsync("SELECT * FROM appeals WHERE id=? LIMIT 1", [id]); } catch {}
-  }
-  if (!appeal) return typeof ack === "function" ? ack({ ok: false, error: "Not found" }) : null;
-
-  const messages = await getAppealThread(id);
-  const modlogs = await getModerationLogsForUser(appeal.username, 200);
-  const restriction = await getRestrictionByUsername(appeal.username);
-
-  if (typeof ack === "function") ack({ ok: true, appeal, messages, modlogs, restriction });
-});
-
-socket.on("appeals:reply", async ({ appealId, message } = {}, ack) => {
-  const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
-  if (!allowSocketEvent(socket, "appeal_reply", 6, 30_000)) {
-    return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
-  }
-  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
-
-  const id = Number(appealId);
-  if (!Number.isFinite(id)) return typeof ack === "function" ? ack({ ok: false, error: "Invalid appeal" }) : null;
-
-  const actorName = socket.user?.username || "staff";
-  await addAppealMessage(id, { authorRole: "admin", authorName: actorName, message: String(message || "").slice(0, 2000) });
-  io.emit("appeals:updated");
-  if (typeof ack === "function") ack({ ok: true });
-});
-
-socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, ack) => {
-  const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
-  if (!allowSocketEvent(socket, "appeal_action", 6, 30_000)) {
-    return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
-  }
-  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
-
-  const id = Number(appealId);
-  if (!Number.isFinite(id)) return typeof ack === "function" ? ack({ ok: false, error: "Invalid appeal" }) : null;
-
-  // Load appeal
-  let appeal = null;
-  try {
-    if (PG_READY) {
-      const result56 = await pgSafe("SELECT * FROM appeals WHERE id=$1 LIMIT 1", [id]);
-      const rows = result56?.rows || [];
-      appeal = rows?.[0] || null;
-    }
-  } catch {}
-  if (!appeal) {
-    try { appeal = await dbGetAsync("SELECT * FROM appeals WHERE id=? LIMIT 1", [id]); } catch {}
-  }
-  if (!appeal) return typeof ack === "function" ? ack({ ok: false, error: "Not found" }) : null;
-
-  const actorName = socket.user?.username || "staff";
-  const act = String(action || "");
-
-  if (act === "unlock" || act === "unban") {
-    await clearRestrictionEverywhere(appeal.username, actorName, "staff unlock");
-    // also clear legacy ban punishment if exists (best-effort)
-    try {
-      const urow = await dbGetAsync("SELECT id FROM users WHERE lower(username)=lower(?)", [appeal.username]);
-      if (urow?.id) dbRunAsync("DELETE FROM punishments WHERE user_id=? AND type='ban'", [urow.id]).catch(()=>{});
-    } catch {}
-  } else if (act === "ban_to_kick") {
-    const dur = Number(durationSeconds) || 3600;
-    const { expiresAt } = await setKickEverywhere(appeal.username, actorName, "ban converted to kick", dur);
-    // notify target if online
-    const tid = await dbGetAsync("SELECT id FROM users WHERE lower(username)=lower(?)", [appeal.username]).catch(()=>null);
-    const sid = tid?.id ? socketIdByUserId.get(tid.id) : null;
-    if (sid) io.to(sid).emit("restriction:status", { type: "kick", reason: "Ban converted to kick", expiresAt, now: Date.now() });
-  } else if (act === "update_kick") {
-    const dur = Number(durationSeconds) || 3600;
-    const { expiresAt } = await setKickEverywhere(appeal.username, actorName, "kick duration updated", dur);
-    const tid = await dbGetAsync("SELECT id FROM users WHERE lower(username)=lower(?)", [appeal.username]).catch(()=>null);
-    const sid = tid?.id ? socketIdByUserId.get(tid.id) : null;
-    if (sid) io.to(sid).emit("restriction:status", { type: "kick", reason: "Kick updated", expiresAt, now: Date.now() });
-  }
-
-  // Optionally resolve appeal
-  try {
-    const now = Date.now();
-    await dbRunAsync("UPDATE appeals SET status='resolved', updated_at=? WHERE id=?", [now, id]).catch(()=>{});
-    if (PG_READY) await pgSafe("UPDATE appeals SET status='resolved', updated_at=$1 WHERE id=$2", [now, id]).catch(()=>{});
-  } catch {}
-
-  io.emit("appeals:updated");
-  if (typeof ack === "function") ack({ ok: true });
-});
-
-  // ---- Referrals ----
-  socket.on("referrals:create", async ({ username, reason } = {}, ack) => {
-    if (!allowSocketEvent(socket, "referral_create", 3, 30_000)) {
-      return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
-    }
-    try{
-      const actor = socket.request?.session?.user || socket.user || {};
-      const actorRole = actor.role || "User";
-      if(!canCreateReferral(actorRole)){
-        return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
-      }
-      const target = sanitizeUsername(username);
-      const why = String(reason || "").trim().slice(0, 500);
-      if(!target || !why){
-        return typeof ack === "function" ? ack({ ok:false, error:"Missing username or reason" }) : null;
-      }
-      await createReferral({ username: target, referredBy: actor.username || "unknown", referredByRole: actorRole, reason: why });
-      if(typeof ack === "function") ack({ ok:true });
-    }catch(e){
-      if(typeof ack === "function") ack({ ok:false, error:"Failed to create referral" });
-    }
-  });
-
-  socket.on("referrals:list", async (_payload, ack) => {
-    const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
-    if(!isReferralReviewer(actorRole)) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
-    const items = await listOpenReferrals();
-    if(typeof ack === "function") ack({ ok:true, items });
-  });
-
-  socket.on("referrals:resolve", async ({ id } = {}, ack) => {
-    if (!allowSocketEvent(socket, "referral_resolve", 6, 30_000)) {
-      return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
-    }
-    try{
-      const actor = socket.request?.session?.user || socket.user || {};
-      const actorRole = actor.role || "User";
-      if(!isReferralReviewer(actorRole)) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
-      const rid = Number(id);
-      if(!Number.isFinite(rid)) return typeof ack === "function" ? ack({ ok:false, error:"Invalid id" }) : null;
-      await resolveReferral({ id: rid, actionBy: actor.username || "unknown" });
-      if(typeof ack === "function") ack({ ok:true });
-    }catch(e){
-      if(typeof ack === "function") ack({ ok:false, error:"Failed to resolve" });
-    }
-  });
-
-  socket.on("mod warn", ({ username, reason = "" }) => {
-    const room = socket.currentRoom;
-    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return;
-    if (!room) return;
-    const actorRole = socket.request.session.user.role;
-    if (!requireMinRole(actorRole, "Moderator")) return;
-
-    username = sanitizeUsername(username);
-            db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
-      if (!target) return;
-      if (!canModerate(actorRole, target.role)) return;
-
-      emitRoomSystem(room, `${username} was warned: ${String(reason || "").slice(0, 120)}`, { kind: "mod" });
-      logModAction({
-        actor: socket.user,
-        action: "WARN",
-        targetUserId: target.id,
-        targetUsername: target.username,
-        room,
-        details: String(reason || "").slice(0, 180),
-      });
-    });
-  });
-
-  socket.on("mod set role", ({ username, role, reason = "" } = {}, ack) => {
-    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
-    if (!allowSocketEvent(socket, "mod_action", 4, 5000)) return respond({ ok: false, error: "Rate limited." });
-    const room = socket.currentRoom;
-    if (!room) return respond({ ok: false, error: "No active room." });
-
-    const actor = socket.user;
-    const actorRole = godmodeUsers.has(actor.id)
-      ? "Owner"
-      : (socket.user?.role || socket.request?.session?.user?.role || "User");
-
-    // Admin+ can update roles via the moderation panel.
-    if (!requireMinRole(actorRole, "Admin")) return respond({ ok: false, error: "Not permitted." });
-
-    const rawName = String(username || "").trim().slice(0, 64);
-    const sanitized = sanitizeUsername(rawName);
-    role = String(role || "").trim();
-
-    const normalizedRole = ROLES.find((r) => r.toLowerCase() === role.toLowerCase());
-    if (!normalizedRole) return respond({ ok: false, error: "Invalid role." });
-    role = normalizedRole;
-
-    const lookupName = rawName || sanitized;
-    if (!lookupName) return respond({ ok: false, error: "Invalid username." });
-
-    findUserByMention(lookupName, (_e, found) => {
-      if (!found) {
-        io.to(socket.id).emit("system", buildSystemPayload(socket.currentRoom || "main", "User not found: " + lookupName));
-        return respond({ ok: false, error: "User not found." });
-      }
-
-      const target = { id: found.id, username: found.username, oldRole: found.role };
-
-      // Permission checks: you can only modify users below you.
-      if (actorRole !== "Owner" && !canModerate(actorRole, target.oldRole)) return respond({ ok: false, error: "Not permitted." });
-
-      // Prevent non-owners from assigning roles at/above themselves (or Admin+).
-      if (actorRole !== "Owner") {
-        if (roleRank(role) >= roleRank(actorRole)) return respond({ ok: false, error: "Not permitted." });
-        if (roleRank(role) >= roleRank("Admin")) return respond({ ok: false, error: "Not permitted." });
-      }
-
-      setRoleEverywhere(target.id, target.username, role).then(() => {
-        logModAction({
-          actor: socket.user,
-          action: "SET_ROLE",
-          targetUserId: target.id,
-          targetUsername: target.username,
-          room,
-          details: `role=${role} reason=${String(reason || "").slice(0, 180)}`,
-        });
-
-        // if user is online, update session-ish info
-        const sid = socketIdByUserId.get(target.id);
-        if (sid) {
-          const s = io.sockets.sockets.get(sid);
-          if (s?.request?.session?.user) {
-            s.request.session.user.role = role;
-            s.user.role = role;
-          }
-        }
-
-        emitRoomSystem(room, `${target.username} role set to ${role}.${reason ? "" : ""}`, { kind: "mod" });
-        emitUserList(room);
-        respond({ ok: true, username: target.username, role });
-      }).catch((e) => {
-        console.error("[mod set role]", e);
-        respond({ ok: false, error: "Role update failed." });
-      });
-    });
-  });
-
-  // ======== Room Management Handlers ========
-  
-  // Helper to check room role
-  async function getUserRoomRole(roomName, userId) {
-    try {
-      if (await pgUsersEnabled()) {
-        const result24 = await pgSafe(
-          `SELECT role FROM room_members WHERE room_name = $1 AND user_id = $2 LIMIT 1`,
-          [roomName, userId]
-        );
-        const rows = result24?.rows || [];
-        return rows?.[0]?.role || null;
-      } else {
-        const row = await dbGetAsync(
-          `SELECT role FROM room_members WHERE room_name = ? AND user_id = ? LIMIT 1`,
-          [roomName, userId]
-        );
-        return row?.role || null;
-      }
-    } catch (e) {
-      console.error("[getUserRoomRole] error:", e);
-      return null;
-    }
-  }
-
-  // Helper to check if user is banned from room
-  async function isUserBannedFromRoom(roomName, userId) {
-    try {
-      const now = Date.now();
-      if (await pgUsersEnabled()) {
-        const result25 = await pgSafe(
-          `SELECT expires_at FROM room_bans WHERE room_name = $1 AND user_id = $2 AND (expires_at IS NULL OR expires_at > $3) LIMIT 1`,
-          [roomName, userId, now]
-        );
-        const rows = result25?.rows || [];
-        return rows && rows.length > 0;
-      } else {
-        const row = await dbGetAsync(
-          `SELECT expires_at FROM room_bans WHERE room_name = ? AND user_id = ? AND (expires_at IS NULL OR expires_at > ?) LIMIT 1`,
-          [roomName, userId, now]
-        );
-        return !!row;
-      }
-    } catch (e) {
-      console.error("[isUserBannedFromRoom] error:", e);
-      return false;
-    }
-  }
-
-  // Rename room (owner only)
-  socket.on("room:rename", async ({ roomName, newName }, respond) => {
-    const safe = typeof respond === "function" ? respond : () => {};
-    
-    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
-    if (!roomName || !newName) return safe({ ok: false, error: "Missing room name" });
-    
-    try {
-      const sanitizedNewName = sanitizeRoomName(newName);
-      if (!sanitizedNewName) return safe({ ok: false, error: "Invalid room name" });
-      
-      const role = await getUserRoomRole(roomName, socket.user.id);
-      if (role !== "owner") return safe({ ok: false, error: "Only room owner can rename" });
-      
-      // Check if new name already exists
-      if (await pgUsersEnabled()) {
-        const result26 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [sanitizedNewName]);
-        const rows = result26?.rows || [];
-        if (rows && rows.length > 0) return safe({ ok: false, error: "Room name already exists" });
-        
-        await pgSafe(`UPDATE room_members SET room_name = $1 WHERE room_name = $2`, [sanitizedNewName, roomName]);
-        await pgSafe(`UPDATE room_bans SET room_name = $1 WHERE room_name = $2`, [sanitizedNewName, roomName]);
-        await pgSafe(`UPDATE rooms SET name = $1 WHERE name = $2`, [sanitizedNewName, roomName]);
-      } else {
-        const exists = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [sanitizedNewName]);
-        if (exists) return safe({ ok: false, error: "Room name already exists" });
-        
-        // For SQLite, we need to update child tables first since rooms.name is the PK
-        await dbRunAsync(`PRAGMA foreign_keys = OFF`);
-        await dbRunAsync(`UPDATE room_members SET room_name = ? WHERE room_name = ?`, [sanitizedNewName, roomName]);
-        await dbRunAsync(`UPDATE room_bans SET room_name = ? WHERE room_name = ?`, [sanitizedNewName, roomName]);
-        await dbRunAsync(`UPDATE messages SET room = ? WHERE room = ?`, [sanitizedNewName, roomName]);
-        await dbRunAsync(`UPDATE rooms SET name = ? WHERE name = ?`, [sanitizedNewName, roomName]);
-        await dbRunAsync(`PRAGMA foreign_keys = ON`);
-      }
-      
-      await applyRoomStructureChange({
-        action: "room.rename",
-        actorUserId: socket.user.id,
-        auditPayload: { oldName: roomName, newName: sanitizedNewName },
-      });
-      
-      safe({ ok: true, oldName: roomName, newName: sanitizedNewName });
-    } catch (e) {
-      console.error("[room:rename] error:", e);
-      safe({ ok: false, error: "Rename failed" });
-    }
-  });
-
-  // Promote user to room admin or helper (owner only)
-  socket.on("room:promote", async ({ roomName, userId, role }, respond) => {
-    const safe = typeof respond === "function" ? respond : () => {};
-    
-    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
-    if (!roomName || !userId || !role) return safe({ ok: false, error: "Missing parameters" });
-    if (!["admin", "helper"].includes(role)) return safe({ ok: false, error: "Invalid role" });
-    
-    try {
-      const actorRole = await getUserRoomRole(roomName, socket.user.id);
-      if (actorRole !== "owner") return safe({ ok: false, error: "Only room owner can promote users" });
-      
-      const now = Date.now();
-      if (await pgUsersEnabled()) {
-        await pgSafe(
-          `INSERT INTO room_members (room_name, user_id, role, assigned_by_user_id, assigned_at)
-           VALUES ($1, $2, $3, $4, $5)
-           ON CONFLICT (room_name, user_id) DO UPDATE SET role = $3, assigned_by_user_id = $4, assigned_at = $5`,
-          [roomName, userId, role, socket.user.id, now]
-        );
-      } else {
-        await dbRunAsync(
-          `INSERT OR REPLACE INTO room_members (room_name, user_id, role, assigned_by_user_id, assigned_at)
-           VALUES (?, ?, ?, ?, ?)`,
-          [roomName, userId, role, socket.user.id, now]
-        );
-      }
-      
-      safe({ ok: true, userId, role });
-    } catch (e) {
-      console.error("[room:promote] error:", e);
-      safe({ ok: false, error: "Promotion failed" });
-    }
-  });
-
-  // Demote user (owner only)
-  socket.on("room:demote", async ({ roomName, userId }, respond) => {
-    const safe = typeof respond === "function" ? respond : () => {};
-    
-    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
-    if (!roomName || !userId) return safe({ ok: false, error: "Missing parameters" });
-    
-    try {
-      const actorRole = await getUserRoomRole(roomName, socket.user.id);
-      if (actorRole !== "owner") return safe({ ok: false, error: "Only room owner can demote users" });
-      
-      if (await pgUsersEnabled()) {
-        await pgSafe(
-          `DELETE FROM room_members WHERE room_name = $1 AND user_id = $2 AND role != 'owner'`,
-          [roomName, userId]
-        );
-      } else {
-        await dbRunAsync(
-          `DELETE FROM room_members WHERE room_name = ? AND user_id = ? AND role != 'owner'`,
-          [roomName, userId]
-        );
-      }
-      
-      safe({ ok: true, userId });
-    } catch (e) {
-      console.error("[room:demote] error:", e);
-      safe({ ok: false, error: "Demotion failed" });
-    }
-  });
-
-  // Ban user from room (owner or admin)
-  socket.on("room:ban", async ({ roomName, userId, duration, reason }, respond) => {
-    const safe = typeof respond === "function" ? respond : () => {};
-    
-    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
-    if (!roomName || !userId) return safe({ ok: false, error: "Missing parameters" });
-    
-    try {
-      const actorRole = await getUserRoomRole(roomName, socket.user.id);
-      if (!["owner", "admin"].includes(actorRole)) {
-        return safe({ ok: false, error: "Only room owner or admin can ban users" });
-      }
-      
-      // Duration in milliseconds, null for permanent
-      const now = Date.now();
-      let expiresAt = null;
-      
-      if (duration && duration !== "forever") {
-        const durationMs = parseBanDuration(duration);
-        if (durationMs) {
-          expiresAt = now + durationMs;
-        }
-      }
-      
-      // Only room owner can ban for more than 7 days
-      const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-      const durationMs = parseBanDuration(duration);
-      const isLongBan = duration === "forever" || (durationMs && durationMs > sevenDaysMs);
-      
-      if (isLongBan && actorRole !== "owner") {
-        return safe({ ok: false, error: "Only room owner can ban for more than 7 days" });
-      }
-      
-      if (await pgUsersEnabled()) {
-        await pgSafe(
-          `INSERT INTO room_bans (room_name, user_id, banned_by_user_id, reason, banned_at, expires_at)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           ON CONFLICT (room_name, user_id) DO UPDATE SET 
-           banned_by_user_id = $3, reason = $4, banned_at = $5, expires_at = $6`,
-          [roomName, userId, socket.user.id, reason || null, now, expiresAt]
-        );
-      } else {
-        await dbRunAsync(
-          `INSERT OR REPLACE INTO room_bans (room_name, user_id, banned_by_user_id, reason, banned_at, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [roomName, userId, socket.user.id, reason || null, now, expiresAt]
-        );
-      }
-      
-      // Kick user from room if they're currently in it
-      const targetSocketId = socketIdByUserId.get(userId);
-      if (targetSocketId) {
-        const targetSocket = io.sockets.sockets.get(targetSocketId);
-        if (targetSocket && targetSocket.currentRoom === roomName) {
-          targetSocket.leave(roomName);
-          targetSocket.emit("room:banned", { roomName, reason, expiresAt });
-        }
-      }
-      
-      safe({ ok: true, userId, expiresAt });
-    } catch (e) {
-      console.error("[room:ban] error:", e);
-      safe({ ok: false, error: "Ban failed" });
-    }
-  });
-
-  // Unban user from room (owner or admin)
-  socket.on("room:unban", async ({ roomName, userId }, respond) => {
-    const safe = typeof respond === "function" ? respond : () => {};
-    
-    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
-    if (!roomName || !userId) return safe({ ok: false, error: "Missing parameters" });
-    
-    try {
-      const actorRole = await getUserRoomRole(roomName, socket.user.id);
-      if (!["owner", "admin"].includes(actorRole)) {
-        return safe({ ok: false, error: "Only room owner or admin can unban users" });
-      }
-      
-      if (await pgUsersEnabled()) {
-        await pgSafe(`DELETE FROM room_bans WHERE room_name = $1 AND user_id = $2`, [roomName, userId]);
-      } else {
-        await dbRunAsync(`DELETE FROM room_bans WHERE room_name = ? AND user_id = ?`, [roomName, userId]);
-      }
-      
-      safe({ ok: true, userId });
-    } catch (e) {
-      console.error("[room:unban] error:", e);
-      safe({ ok: false, error: "Unban failed" });
-    }
-  });
-
-  // Get room members and their roles
-  socket.on("room:members", async ({ roomName }, respond) => {
-    const safe = typeof respond === "function" ? respond : () => {};
-    
-    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
-    if (!roomName) return safe({ ok: false, error: "Missing room name" });
-    
-    try {
-      let members = [];
-      
-      if (await pgUsersEnabled()) {
-        const result27 = await pgSafe(
-          `SELECT rm.user_id, rm.role, u.username, rm.assigned_at 
-           FROM room_members rm
-           JOIN users u ON u.id = rm.user_id
-           WHERE rm.room_name = $1
-           ORDER BY 
-             CASE rm.role 
-               WHEN 'owner' THEN 1 
-               WHEN 'admin' THEN 2 
-               WHEN 'helper' THEN 3 
-               ELSE 4 
-             END, 
-             rm.assigned_at ASC`,
-          [roomName]
-        );
-        const rows = result27?.rows || [];
-        members = rows || [];
-      } else {
-        members = await dbAllAsync(
-          `SELECT rm.user_id, rm.role, u.username, rm.assigned_at 
-           FROM room_members rm
-           JOIN users u ON u.id = rm.user_id
-           WHERE rm.room_name = ?
-           ORDER BY 
-             CASE rm.role 
-               WHEN 'owner' THEN 1 
-               WHEN 'admin' THEN 2 
-               WHEN 'helper' THEN 3 
-               ELSE 4 
-             END, 
-             rm.assigned_at ASC`,
-          [roomName]
-        );
-      }
-      
-      safe({ ok: true, members });
-    } catch (e) {
-      console.error("[room:members] error:", e);
-      safe({ ok: false, error: "Failed to fetch members" });
-    }
-  });
-
-  // Get room bans
-  socket.on("room:bans", async ({ roomName }, respond) => {
-    const safe = typeof respond === "function" ? respond : () => {};
-    
-    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
-    if (!roomName) return safe({ ok: false, error: "Missing room name" });
-    
-    try {
-      const actorRole = await getUserRoomRole(roomName, socket.user.id);
-      if (!["owner", "admin"].includes(actorRole)) {
-        return safe({ ok: false, error: "Only room owner or admin can view bans" });
-      }
-      
-      let bans = [];
-      
-      if (await pgUsersEnabled()) {
-        const result28 = await pgSafe(
-          `SELECT rb.user_id, u.username, rb.reason, rb.banned_at, rb.expires_at, b.username as banned_by
-           FROM room_bans rb
-           JOIN users u ON u.id = rb.user_id
-           LEFT JOIN users b ON b.id = rb.banned_by_user_id
-           WHERE rb.room_name = $1
-           ORDER BY rb.banned_at DESC`,
-          [roomName]
-        );
-        const rows = result28?.rows || [];
-        bans = rows || [];
-      } else {
-        bans = await dbAllAsync(
-          `SELECT rb.user_id, u.username, rb.reason, rb.banned_at, rb.expires_at, b.username as banned_by
-           FROM room_bans rb
-           JOIN users u ON u.id = rb.user_id
-           LEFT JOIN users b ON b.id = rb.banned_by_user_id
-           WHERE rb.room_name = ?
-           ORDER BY rb.banned_at DESC`,
-          [roomName]
-        );
-      }
-      
-      safe({ ok: true, bans });
-    } catch (e) {
-      console.error("[room:bans] error:", e);
-      safe({ ok: false, error: "Failed to fetch bans" });
-    }
-  });
-
-  // Helper function to parse ban duration strings
-  function parseBanDuration(duration) {
-    const durations = {
-      "5m": 5 * 60 * 1000,
-      "10m": 10 * 60 * 1000,
-      "30m": 30 * 60 * 1000,
-      "1h": 60 * 60 * 1000,
-      "2h": 2 * 60 * 60 * 1000,
-      "4h": 4 * 60 * 60 * 1000,
-      "8h": 8 * 60 * 60 * 1000,
-      "24h": 24 * 60 * 60 * 1000,
-      "7d": 7 * 24 * 60 * 60 * 1000,
-      "30d": 30 * 24 * 60 * 60 * 1000,
-      "6mo": 6 * 30 * 24 * 60 * 60 * 1000,
-      "1y": 365 * 24 * 60 * 60 * 1000,
-      "forever": null // Permanent
-    };
-    return durations[duration] || null;
-  }
-
-  
-  socket.on("refresh user list", () => {
-    if (IS_DEV_MODE) console.log("[socket] refresh user list", { socketId: socket.id });
-    try {
-      if (socket.currentRoom) emitUserList(socket.currentRoom);
-    } catch {}
-  });
-
-socket.on("disconnect", (reason) => {
-    // Enhanced disconnect handler with comprehensive cleanup and logging
-    if (IS_DEV_MODE) console.log("[socket] disconnect", { socketId: socket.id, reason, username: socket.user?.username });
-    
-    try {
-      // Clean up session metadata
-      sessionMetaBySocketId.delete(socket.id);
-      const uid = socket.user?.id;
-      const set = sessionByUserId.get(uid);
-      if (set) {
-        set.delete(socket.id);
-        if (!set.size) sessionByUserId.delete(uid);
-      }
-    } catch (err) {
-      if (IS_DEV_MODE) console.warn("[socket] disconnect: session cleanup failed", err);
-    }
-
-    // socket.user is attached after successful auth; guard for anonymous / early disconnects
-    if (socket.user?.username) ONLINE_USERS.delete(socket.user.username);
-    emitOnlineUsers();
-
-    const room = socket.currentRoom;
-
-    // Always clear per-socket rate tracking
-    msgRate.delete(socket.id);
-    socketEventRate.delete(socket.id);
-    releaseSocketConnection(getSocketIp(socket));
-
-    // Only clear per-user mappings if THIS socket is still the active one
-    if (socket.user?.id && socketIdByUserId.get(socket.user.id) === socket.id) {
-      socketIdByUserId.delete(socket.user.id);
-      onlineState.delete(socket.user.id);
-      onlineXpTrack.delete(socket.user.id);
-    }
-
-    // last_seen + typing indicators only apply to authenticated users
-    if (socket.user?.id) {
-      db.run("UPDATE users SET last_seen=? WHERE id=?", [Date.now(), socket.user.id]);
-    }
-
-    if (room) {
-      const set = typingByRoom.get(room);
-      if (set) {
-        if (socket.user?.username) set.delete(socket.user.username);
-        broadcastTyping(room);
-      }
-      emitUserList(room);
-    }
-
-    // Clear DM typing indicators for any DM rooms this socket was in.
-    try {
-      const u = socket.user?.username;
-      if (u && socket.dmThreads && socket.dmThreads.size) {
-        for (const tid of socket.dmThreads) {
-          const set = dmTypingByThread.get(tid);
-          if (set && set.has(u)) {
-            set.delete(u);
-            if (set.size === 0) dmTypingByThread.delete(tid);
-            broadcastDmTyping(tid);
-          }
-        }
-      }
-    } catch {}
-  });
-
-  // === EMIT SERVER-READY AFTER ALL LISTENERS ARE REGISTERED ===
-  // This confirms to the client that the server is fully initialized and ready to handle events.
-  // All socket.on(...) listeners are now registered and will not miss any client events.
-  // Emitting this at the end (after all listener setup) ensures strict event registration order.
-  socket.emit("server-ready", { ok: true, socketId: socket.id });
-  if (IS_DEV_MODE) console.log("[socket] server-ready emitted", { socketId: socket.id, username: socket.user?.username });
-
-});
 
 // ===================================================================
 // STRUCTURED STARTUP SEQUENCE
@@ -19132,12 +15812,3332 @@ function registerRoutes(app) {
 /**
  * Register all Socket.IO event handlers
  * Called during Phase 9 of startup
- * Note: Socket handlers are already registered at module level (historical architecture)
  */
-function registerSocketHandlers() {
-  console.log('[startup] Phase 9: Socket handlers registration check...');
-  console.log('[startup]   ℹ️ Socket handlers registered at module load (historical architecture)');
-  console.log('[startup]   ✓ Phase 9 complete');
+function registerSocketHandlers(io) {
+  console.log('[startup] Phase 9: Registering Socket.IO handlers...');
+
+// ---- Socket auth middleware (session)
+io.use((socket, next) => {
+  const origin = String(socket.handshake.headers.origin || "");
+  const hostHeader = String(socket.handshake.headers.host || "");
+  const referer = String(socket.handshake.headers.referer || "");
+  const secFetchSite = String(socket.handshake.headers["sec-fetch-site"] || "").toLowerCase();
+  const secFetchMode = String(socket.handshake.headers["sec-fetch-mode"] || "").toLowerCase();
+  const secFetchDest = String(socket.handshake.headers["sec-fetch-dest"] || "").toLowerCase();
+  const allowRefererFallbackInDev = !IS_PROD;
+  if (SOCKET_IO_DEBUG_ENABLED) {
+    console.log("[socket.io] Handshake headers", {
+      origin,
+      host: hostHeader,
+      referer,
+      secFetchSite,
+      secFetchMode,
+      secFetchDest,
+    });
+  }
+  if (origin) {
+    if (!isAllowedOrigin(origin, hostHeader)) {
+      console.warn("[socket.io] Origin not allowed", { origin, host: hostHeader });
+      return next(new Error("Origin not allowed"));
+    }
+    return next();
+  }
+  if (secFetchSite === "same-origin" && secFetchMode === "websocket" && secFetchDest === "websocket") {
+    return next();
+  }
+  if (hostHeader && isAllowedHostHeader(hostHeader)) {
+    return next();
+  }
+  if (referer && allowRefererFallbackInDev) {
+    // Referrer (Referer header) can be spoofed or omitted; only use as a best-effort fallback.
+    const refOrigin = safeParseUrl(referer)?.origin || "";
+    if (refOrigin && isAllowedOrigin(refOrigin, hostHeader)) return next();
+  }
+  if (IS_PROD) {
+    console.warn("[socket.io] Origin required", { host: hostHeader });
+    return next(new Error("Origin required"));
+  }
+  return next();
+});
+
+io.use((socket, next) => {
+  const fakeRes = socket.request.res || {
+    getHeader: () => undefined,
+    setHeader: () => {},
+    writeHead: () => {},
+  };
+  sessionMiddleware(socket.request, fakeRes, () => {
+    if (!socket.request.session?.user?.id) {
+      return next(new Error("Not authenticated"));
+    }
+    next();
+  });
+});
+
+
+io.on("connection", async (socket) => {
+  const sessUser = socket.request.session?.user;
+  if (!sessUser?.id) {
+    socket.disconnect(true);
+    return;
+  }
+
+  const socketIp = getSocketIp(socket);
+  const socketMac = getSocketMac(socket);
+  
+  // Check if IP or MAC address is banned
+  if (socketIp && await isAddressBanned("ip", socketIp)) {
+    socket.emit("system", buildSystemPayload("__global__", "Your IP address has been banned.", { kind: "global" }));
+    socket.disconnect(true);
+    return;
+  }
+  
+  if (socketMac && await isAddressBanned("mac", socketMac)) {
+    socket.emit("system", buildSystemPayload("__global__", "Your device has been banned.", { kind: "global" }));
+    socket.disconnect(true);
+    return;
+  }
+  
+  if (socketIp) {
+    const count = trackSocketConnection(socketIp);
+    if (count > MAX_SOCKET_CONN_PER_IP) {
+      socket.emit("system", buildSystemPayload("__global__", "Too many active connections. Try again shortly.", { kind: "global" }));
+      socket.disconnect(true);
+      return;
+    }
+  }
+
+  // Track user addresses for moderation
+  const userId = sessUser.id;
+  if (socketIp) {
+    trackUserAddress(userId, "ip", socketIp).catch((e) => {
+      console.warn('[connection] Failed to track IP address:', e?.message || e);
+    });
+  }
+  if (socketMac) {
+    // WARNING: MAC addresses are client-provided and easily spoofed
+    // Should not be relied upon as the sole factor for moderation decisions
+    trackUserAddress(userId, "mac", socketMac).catch((e) => {
+      console.warn('[connection] Failed to track MAC address:', e?.message || e);
+    });
+  }
+
+  socket.user = {
+    id: sessUser.id,
+    username: sessUser.username,
+    role: sessUser.role,
+    theme: sessUser.theme || null,
+    status: sessUser.status || "Online",
+    mood: sessUser.mood || "",
+    avatar: sessUser.avatar || "",
+    vibe_tags: Array.isArray(sessUser.vibe_tags) ? sessUser.vibe_tags : [],
+    chatFx: sanitizeChatFx(sessUser.chatFx),
+    textStyle: sanitizeTextStyle(sessUser.textStyle, sessUser.role),
+    customization: sanitizeCustomization(sessUser.customization, sessUser.textStyle, sessUser.role),
+  };
+
+  // === SOCKET EVENT LISTENER REGISTRATION (ALL LISTENERS MUST BE REGISTERED BEFORE ANY EMITS) ===
+  // server-ready will be emitted at the end after all listeners are registered
+  // to ensure strict event registration order per reliability requirements
+
+  // --- Owner session map: register basic meta
+  try {
+    const uid = socket.user?.id;
+    const set = sessionByUserId.get(uid) || new Set();
+    set.add(socket.id);
+    sessionByUserId.set(uid, set);
+
+    sessionMetaBySocketId.set(socket.id, {
+      userId: uid,
+      username: socket.user?.username || "",
+      role: socket.user?.role || "",
+      room: null,
+      connectedAt: Date.now(),
+      userAgent: String(socket.request?.headers?.["user-agent"] || ""),
+      ip: socketIp || "",
+      tz: null,
+      locale: null,
+      platform: null,
+    });
+  } catch {}
+
+  socket.on("client:hello", (info = {}) => {
+    if (IS_DEV_MODE) console.log("[socket] client:hello", { socketId: socket.id, info });
+    try {
+      const meta = sessionMetaBySocketId.get(socket.id) || {};
+      meta.tz = info.tz ? String(info.tz).slice(0, 64) : meta.tz;
+      meta.locale = info.locale ? String(info.locale).slice(0, 32) : meta.locale;
+      meta.platform = info.platform ? String(info.platform).slice(0, 64) : meta.platform;
+      meta.lastSeenAt = Date.now();
+      sessionMetaBySocketId.set(socket.id, meta);
+    } catch {}
+  });
+
+  socket.on("luck:get", () => {
+    if (IS_DEV_MODE) console.log("[socket] luck:get", { socketId: socket.id });
+    void emitLuckStateToSocket(socket);
+  });
+
+
+
+
+
+  // --- Enforce kick/ban restrictions immediately on connect (before presence/auto-join)
+  socket.restriction = { type: "none" };
+  try {
+    const r = await getRestrictionByUsername(socket.user.username);
+    socket.restriction = r || { type: "none" };
+    if (r?.type && r.type !== "none") {
+      io.to(socket.id).emit("restriction:status", {
+        type: r.type,
+        reason: r.reason || "",
+        expiresAt: r.expiresAt || null,
+        now: Date.now(),
+      });
+    }
+  } catch {}
+
+  // Track global online usernames (for private theme "together online" effects)
+  if (socket.user?.username && (socket.restriction?.type === "none" || !socket.restriction?.type)) {
+    ONLINE_USERS.add(socket.user.username);
+  }
+  emitOnlineUsers();
+// Enforce single active connection per user (prevents duplicate presence)
+const existingSid = socketIdByUserId.get(socket.user.id);
+if (existingSid && existingSid !== socket.id) {
+  const oldSocket = io.sockets.sockets.get(existingSid);
+  if (oldSocket) {
+    oldSocket.disconnect(true);
+  }
+}
+  socketIdByUserId.set(socket.user.id, socket.id);
+  primeOnlineXpTracker(socket.user.id);
+  initGoldTick(socket.user.id);
+
+// Load profile bits for presence (PG-first, SQLite fallback) + refresh member list when ready
+(async () => {
+  try {
+    if (await pgUserExists(socket.user.id)) {
+      const result54 = await pgSafe(
+        "SELECT avatar, avatar_updated, mood, vibe_tags, prefs_json FROM users WHERE id=$1 LIMIT 1",
+        [socket.user.id]
+      );
+      const rows = result54?.rows || [];
+      const r = rows?.[0];
+      if (r) {
+        // IMPORTANT: don't overwrite a session-provided avatar with an empty value
+        // from a fallback/partial row. This was causing avatars to "reset" on refresh.
+        const computedAvatar = avatarUrlFromRow(r);
+        if (computedAvatar) socket.user.avatar = computedAvatar;
+        if (typeof r.mood === "string") socket.user.mood = r.mood;
+        socket.user.vibe_tags = sanitizeVibeTags(r.vibe_tags || []);
+        const prefs = safeJsonParse(r?.prefs_json, {});
+        socket.user.chatFx = sanitizeChatFx(prefs?.chatFx);
+        socket.user.textStyle = sanitizeTextStyle(prefs?.textStyle, socket.user.role);
+        socket.user.customization = sanitizeCustomization(prefs?.customization, prefs?.textStyle, socket.user.role);
+        if (socket.currentRoom) emitUserList(socket.currentRoom);
+      }
+      return;
+    }
+  } catch (e) {
+    console.warn("[presence][pg] failed:", e?.message || e);
+  }
+
+  db.get(
+    "SELECT avatar, mood, vibe_tags, prefs_json FROM users WHERE id = ?",
+    [socket.user.id],
+    (_e, row) => {
+      if (row) {
+        const computedAvatar = avatarUrlFromRow(row);
+        if (computedAvatar) socket.user.avatar = computedAvatar;
+        if (typeof row.mood === "string") socket.user.mood = row.mood;
+        socket.user.vibe_tags = sanitizeVibeTags(row.vibe_tags || []);
+        const prefs = safeJsonParse(row?.prefs_json, {});
+        socket.user.chatFx = sanitizeChatFx(prefs?.chatFx);
+        socket.user.textStyle = sanitizeTextStyle(prefs?.textStyle, socket.user.role);
+        socket.user.customization = sanitizeCustomization(prefs?.customization, prefs?.textStyle, socket.user.role);
+        if (socket.currentRoom) emitUserList(socket.currentRoom);
+      }
+    }
+  );
+})();
+
+  socket.currentRoom = null;
+  socket.data.currentRoom = null;
+    // --- SAFETY: ensure user is always in a room so messages can appear
+  // If client fails to emit "join room" (mobile / reconnect / race), auto-join main.
+  // IMPORTANT: never auto-join if the user is kicked/banned.
+  setTimeout(() => {
+    if (!socket.currentRoom && (socket.restriction?.type === "none" || !socket.restriction?.type)) {
+      try {
+        doJoin("main", socket.user.status || "Online");
+      } catch (e) {
+        console.warn("[auto-join main] failed:", e?.message || e);
+      }
+    }
+  }, 500);
+  socket.dmThreads = new Set();
+
+  db.all(
+    `SELECT thread_id FROM dm_participants WHERE user_id = ?`,
+    [socket.user.id],
+    (_e, rows) => {
+      for (const r of rows || []) {
+        const tid = Number(r.thread_id);
+        if (!Number.isFinite(tid)) continue;
+        socket.dmThreads.add(tid);
+        socket.join(`dm:${tid}`);
+      }
+    }
+  );
+
+socket.on("join room", ({ room, status }) => {
+  if (IS_DEV_MODE) console.log("[socket] join room", { socketId: socket.id, room, status });
+  if (socket.restriction?.type && socket.restriction.type !== "none") {
+    io.to(socket.id).emit("restriction:status", {
+      type: socket.restriction.type,
+      reason: socket.restriction.reason || "",
+      expiresAt: socket.restriction.expiresAt || null,
+      now: Date.now(),
+    });
+    return;
+  }
+const desired = sanitizeRoomName(room) || "main";
+
+// VIP rooms: names prefixed with vip_ or vip- are only visible/accessible to VIP+ with level >= 25
+const desiredIsVip = /^vip[_-]/i.test(desired);
+const enforceVipGate = (roomName, cb) => {
+  if(!desiredIsVip) return cb(true);
+  const roleOk = isVipPlus(sessUser.role);
+  if(!roleOk) return cb(false);
+  db.get(`SELECT level FROM users WHERE id=? LIMIT 1`, [sessUser.id], (_e, urow) => {
+    const lvl = Number(urow?.level || 0);
+    cb(lvl >= 25);
+  });
+};
+
+enforceVipGate(desired, (allowed) => {
+  if(!allowed){
+    try {
+      socket.emit("system", buildSystemPayload("__global__", "That VIP room is locked (VIP + level 25 required).", { kind: "global" }));
+    } catch(_){}
+    return db.get(`SELECT name FROM rooms WHERE name=?`, ["main"], (_err2, row2) => doJoin(row2 ? "main" : "main", status));
+  }
+
+  db.get(
+  `SELECT name, vip_only, staff_only, min_level, is_locked, maintenance_mode, archived FROM rooms WHERE name=?`,
+  [desired],
+  async (_err, row) => {
+    if (!row) return doJoin("main", status);
+
+    // Check room ban first
+    if (socket.user?.id) {
+      const isBanned = await isUserBannedFromRoom(desired, socket.user.id);
+      if (isBanned) {
+        try { 
+          socket.emit("system", buildSystemPayload("__global__", "You are banned from that room.", { kind: "global" })); 
+        } catch (_) {}
+        return doJoin("main", status);
+      }
+    }
+
+    // Enforce room visibility gates
+    if (!canAccessRoomBySettings(sessUser, row)) {
+      try { socket.emit("system", buildSystemPayload("__global__", "You don't have access to that room.", { kind: "global" })); } catch (_) {}
+      return doJoin("main", status);
+    }
+
+    // Maintenance gate: Admin+ only
+    if (Number(row.maintenance_mode || 0) === 1 && roleRankServer(sessUser.role) < roleRankServer("Admin")) {
+      try { socket.emit("system", buildSystemPayload("__global__", "That room is in maintenance.", { kind: "global" })); } catch (_) {}
+      return doJoin("main", status);
+    }
+
+    if (Number(row.archived || 0) === 1) {
+      try { socket.emit("system", buildSystemPayload("__global__", "That room is archived.", { kind: "global" })); } catch (_) {}
+      return doJoin("main", status);
+    }
+
+    // Locked gate: Mod+ only
+    if (Number(row.is_locked || 0) === 1 && roleRankServer(sessUser.role) < roleRankServer("Moderator")) {
+      try { socket.emit("system", buildSystemPayload("__global__", "That room is locked.", { kind: "global" })); } catch (_) {}
+      return doJoin("main", status);
+    }
+
+    doJoin(desired, status);
+  }
+);
+});
+
+      });
+
+  // Dice Room mini-game
+  socket.on("dice:roll", (payload = {}) => {
+    if (IS_DEV_MODE) console.log("[socket] dice:roll", { socketId: socket.id, variant: payload.variant });
+    const room = socket.currentRoom;
+    const requestedRoom = typeof payload.room === "string" ? sanitizeRoomName(payload.room) : null;
+    if (requestedRoom && requestedRoom !== room) {
+      socket.emit("dice:error", "Invalid room for dice roll.");
+      return;
+
+
+    }
+    if (room !== "diceroom") {
+      socket.emit("dice:error", "You can only roll dice in Dice Room.");
+      return;
+    }
+
+    const variant = normalizeDiceVariant(payload.variant);
+    if (!variant || !DICE_VARIANTS.includes(variant)) {
+      socket.emit("dice:error", "Invalid dice variant.");
+      return;
+    }
+
+    const now = Date.now();
+    const uid = socket.user.id;
+    const lastLocal = diceRollRateByUserId.get(uid) || 0;
+    if (now - lastLocal < DICE_ROLL_MIN_INTERVAL_MS) {
+      socket.emit(
+        "dice:error",
+        `Roll available in ${Math.ceil((DICE_ROLL_MIN_INTERVAL_MS - (now - lastLocal)) / 1000)}s.`
+      );
+      return;
+    }
+    diceRollRateByUserId.set(uid, now);
+
+    const formatDiceSystemMessage = ({ result, breakdown, deltaGold, outcome } = {}) => {
+      const faceMap = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+      let display = String(result);
+      if (variant === "d6") {
+        display = faceMap[Number(result) - 1] || result;
+      } else if (variant === "2d6" && Array.isArray(breakdown)) {
+        display = `${result} (2d6: ${breakdown.join("+")})`;
+      } else {
+        display = `${result} (${DICE_VARIANT_LABELS[variant] || variant})`;
+      }
+      const dg = Number(deltaGold || 0);
+      const sign = dg >= 0 ? "+" : "";
+      const emoji = outcome === "jackpot" ? "💥" : outcome === "bigwin" ? "🎉" : outcome === "win" ? "✨" : outcome === "nice" ? "😏" : "🎲";
+      return `${socket.user.username} rolled ${display} ${emoji} (${sign}${dg} Gold)`;
+    };
+
+    (async () => {
+      try {
+        if (await pgUserExists(uid)) {
+          const row = await pgGetUserRowById(uid, [
+            "gold",
+            "lastDiceRollAt",
+            "luck",
+            "roll_streak",
+            "last_qual_msg_at",
+          ]);
+          if (!row) {
+            socket.emit("dice:error", "Could not roll dice right now.");
+            return;
+          }
+
+          const last = Number(row.lastDiceRollAt || 0);
+          if (now - last < DICE_ROLL_MIN_INTERVAL_MS) {
+            socket.emit(
+              "dice:error",
+              `Roll available in ${Math.ceil((DICE_ROLL_MIN_INTERVAL_MS - (now - last)) / 1000)}s.`
+            );
+            return;
+          }
+
+          const gold = Number(row.gold || 0);
+          const luckState = applyLuckForRoll({
+            luck: row.luck,
+            rollStreak: row.roll_streak,
+            lastQualMsgAt: row.last_qual_msg_at,
+            userId: uid,
+            now,
+          });
+          const roll = rollDiceVariantWithLuck(variant, luckState.nextLuck);
+          const reward = computeDiceReward(variant, roll.result, roll.breakdown);
+          if (gold < (reward.minBalanceRequired || 0)) {
+            socket.emit(
+              "dice:error",
+              `You need at least ${reward.minBalanceRequired || 0} Gold to roll ${DICE_VARIANT_LABELS[variant] || variant}.`
+            );
+            return;
+          }
+
+          const deltaGold = Number(reward.deltaGold || 0);
+          const breakdownArr = Array.isArray(roll.breakdown) ? roll.breakdown : [];
+          const sixGain =
+            variant === "d6" ? (roll.result === 6 ? 1 : 0) : variant === "2d6" ? breakdownArr.filter((n) => n === 6).length : 0;
+          const didWinForLuck = isLuckWin(variant, roll.result, roll.breakdown);
+          const finalLuck = clampLuck(applyWinCut(luckState.nextLuck, didWinForLuck));
+
+          await pgSafe(
+            `UPDATE users
+               SET gold = GREATEST(0, gold + $1),
+                   lastDiceRollAt = $2,
+                   dice_sixes = dice_sixes + $3,
+                   luck = $4,
+                   roll_streak = $5
+             WHERE id = $6`,
+            [deltaGold, now, sixGain, finalLuck, luckState.nextStreak, uid]
+          );
+
+          const payloadBase = {
+            userId: uid,
+            username: socket.user.username,
+            variant,
+            result: roll.result,
+            value: roll.result,
+            breakdown: roll.breakdown,
+            won: reward.isJackpot || deltaGold > 0,
+            outcome: reward.outcome,
+            isJackpot: !!reward.isJackpot,
+            serverTs: now,
+          };
+
+          socket.emit("dice:result", { ...payloadBase, deltaGold });
+          socket.to(room).emit("dice:result", { ...payloadBase, deltaGold });
+          emitProgressionUpdate(uid);
+          emitLuckUpdate(uid, finalLuck, luckState.nextStreak);
+
+          emitRoomSystem(
+            room,
+            formatDiceSystemMessage({ result: roll.result, breakdown: roll.breakdown, deltaGold, outcome: reward.outcome }),
+            { kind: "dice" }
+          );
+
+          if (reward.isJackpot) {
+            void ensureMemory(
+              uid,
+              "dice_jackpot",
+              {
+                type: "rare",
+                title: "Dice jackpot!",
+                description: "Landed the jackpot roll in Dice Room.",
+                icon: "🎲",
+                room_id: room,
+                metadata: { value: roll.result, deltaGold, variant, outcome: reward.outcome },
+              },
+              socket.user
+            );
+          }
+          return;
+        }
+      } catch (e) {
+        console.warn("[dice][pg] failed, falling back to sqlite:", e?.message || e);
+      }
+
+      // SQLite fallback (original behavior)
+      db.get(
+        `SELECT gold, lastDiceRollAt, luck, roll_streak, last_qual_msg_at FROM users WHERE id=?`,
+        [uid],
+        (err, row) => {
+        if (err || !row) {
+          socket.emit("dice:error", "Could not roll dice right now.");
+          return;
+        }
+
+        const last = Number(row.lastDiceRollAt || 0);
+        if (now - last < DICE_ROLL_MIN_INTERVAL_MS) {
+          socket.emit(
+            "dice:error",
+            `Roll available in ${Math.ceil((DICE_ROLL_MIN_INTERVAL_MS - (now - last)) / 1000)}s.`
+          );
+          return;
+        }
+
+        const gold = Number(row.gold || 0);
+        const luckState = applyLuckForRoll({
+          luck: row.luck,
+          rollStreak: row.roll_streak,
+          lastQualMsgAt: row.last_qual_msg_at,
+          userId: uid,
+          now,
+        });
+        const roll = rollDiceVariantWithLuck(variant, luckState.nextLuck);
+        const reward = computeDiceReward(variant, roll.result, roll.breakdown);
+        if (gold < (reward.minBalanceRequired || 0)) {
+          socket.emit(
+            "dice:error",
+            `You need at least ${reward.minBalanceRequired || 0} Gold to roll ${DICE_VARIANT_LABELS[variant] || variant}.`
+          );
+          return;
+        }
+
+        const deltaGold = Number(reward.deltaGold || 0);
+        const breakdownArr = Array.isArray(roll.breakdown) ? roll.breakdown : [];
+        const sixGain =
+          variant === "d6" ? (roll.result === 6 ? 1 : 0) : variant === "2d6" ? breakdownArr.filter((n) => n === 6).length : 0;
+        const didWinForLuck = isLuckWin(variant, roll.result, roll.breakdown);
+        const finalLuck = clampLuck(applyWinCut(luckState.nextLuck, didWinForLuck));
+
+        db.run(
+          `UPDATE users
+             SET gold = MAX(0, gold + ?),
+                 lastDiceRollAt = ?,
+                 dice_sixes = dice_sixes + ?,
+                 luck = ?,
+                 roll_streak = ?
+           WHERE id = ?`,
+          [deltaGold, now, sixGain, finalLuck, luckState.nextStreak, uid],
+          (uerr) => {
+            if (uerr) {
+              socket.emit("dice:error", "Could not apply dice result.");
+              return;
+            }
+
+            const payloadBase = {
+              userId: uid,
+              username: socket.user.username,
+              variant,
+              result: roll.result,
+              value: roll.result,
+              breakdown: roll.breakdown,
+              won: reward.isJackpot || deltaGold > 0,
+              outcome: reward.outcome,
+              isJackpot: !!reward.isJackpot,
+              serverTs: now,
+            };
+
+            socket.emit("dice:result", { ...payloadBase, deltaGold });
+            socket.to(room).emit("dice:result", { ...payloadBase, deltaGold });
+            emitProgressionUpdate(uid);
+            emitLuckUpdate(uid, finalLuck, luckState.nextStreak);
+
+            emitRoomSystem(
+              room,
+              formatDiceSystemMessage({ result: roll.result, breakdown: roll.breakdown, deltaGold, outcome: reward.outcome }),
+              { kind: "dice" }
+            );
+
+            if (reward.isJackpot) {
+              void ensureMemory(
+                uid,
+                "dice_jackpot",
+                {
+                  type: "rare",
+                  title: "Dice jackpot!",
+                  description: "Landed the jackpot roll in Dice Room.",
+                  icon: "🎲",
+                  room_id: room,
+                  metadata: { value: roll.result, deltaGold, variant, outcome: reward.outcome },
+                },
+                socket.user
+              );
+            }
+          }
+        );
+      }
+      );
+    })();
+  });
+
+function doJoin(room, status) {
+  // Block joining rooms if the user is kicked/banned (prevents showing as online).
+  if (socket.restriction?.type && socket.restriction.type !== "none") {
+    io.to(socket.id).emit("restriction:status", {
+      type: socket.restriction.type,
+      reason: socket.restriction.reason || "",
+      expiresAt: socket.restriction.expiresAt || null,
+      now: Date.now(),
+    });
+    return;
+  }
+  const previousRoom = socket.data.currentRoom || socket.currentRoom || null;
+  const targetRoom = room;
+  if (previousRoom && previousRoom !== targetRoom) {
+    if (DEBUG_ROOMS) {
+      console.log("[rooms] leave", { sid: socket.id, room: previousRoom, next: targetRoom });
+    }
+    socket.leave(previousRoom);
+
+    const set = typingByRoom.get(previousRoom);
+    if (set) {
+      set.delete(socket.user.username);
+      broadcastTyping(previousRoom);
+    }
+
+    emitUserList(previousRoom);
+  }
+
+  if (previousRoom !== targetRoom) {
+    if (DEBUG_ROOMS) {
+      console.log("[rooms] join", { sid: socket.id, room: targetRoom, prev: previousRoom });
+    }
+    socket.join(targetRoom);
+  }
+  socket.currentRoom = targetRoom;
+  socket.data.currentRoom = targetRoom;
+
+  // session map + heat + daily unique rooms
+  try {
+    const meta = sessionMetaBySocketId.get(socket.id) || {};
+    meta.room = room;
+    meta.lastSeenAt = Date.now();
+    sessionMetaBySocketId.set(socket.id, meta);
+  } catch {}
+
+  try {
+    const uid = socket.user?.id;
+    const prev = lastRoomHopByUserId.get(uid);
+    const now = Date.now();
+    if (prev && prev.room && prev.room !== room && now - (prev.ts || 0) < 15_000) bumpHeat(uid, 2);
+    lastRoomHopByUserId.set(uid, { room, ts: now });
+    // daily challenge: unique rooms
+    bumpDailyUniqueRoom(uid, dayKeyNow(), String(room));
+  } catch {}
+
+
+  // send active room event (if any) to joining socket
+  try {
+    const ev = ACTIVE_ROOM_EVENTS.get(room);
+    if (ev) socket.emit("room:event", { room, active: ev, at: Date.now() });
+  } catch {}
+
+  socket.user.status = normalizeStatus(status || socket.user.status, "Online");
+
+  onlineState.set(socket.user.id, { room, status: socket.user.status });
+  onlineXpTrack.set(socket.user.id, { lastTs: Date.now(), carryMs: 0 });
+  awardPassiveGold(socket.user.id);
+
+  db.run("UPDATE users SET last_room=?, last_status=? WHERE id=?", [
+    room,
+    socket.user.status,
+    socket.user.id,
+  ]);
+
+  // Send history (exclude deleted messages entirely)
+  // Backward-compatible room history: older builds stored rooms with a leading '#'.
+  const legacyRoom = `#${room}`;
+  db.all(
+    `SELECT id, room, username, role, avatar, text, tone, ts, attachment_url, attachment_type, attachment_mime, attachment_size,
+            reply_to_id, reply_to_user, reply_to_text
+     FROM messages
+     WHERE (room=? OR room=?) AND deleted=0
+     ORDER BY ts DESC LIMIT 200`,
+    [room, legacyRoom],
+    (_e, rows) => {
+      // Query newest-first, then reverse so clients render oldest -> newest.
+      const baseHistory = (rows || []).reverse().map((r) => ({
+        messageId: r.id,
+        room: r.room,
+        user: r.username,
+        role: r.role,
+        avatar: r.avatar || "",
+        text: (r.text || ""),
+        tone: r.tone || "",
+        ts: r.ts,
+        attachmentUrl: r.attachment_url || "",
+        attachmentType: r.attachment_type || "",
+        attachmentMime: r.attachment_mime || "",
+        attachmentSize: r.attachment_size || 0,
+        replyToId: r.reply_to_id || null,
+        replyToUser: r.reply_to_user || "",
+        replyToText: r.reply_to_text || "",
+            attachmentUrl: r.attachment_url || null,
+            attachmentMime: r.attachment_mime || null,
+            attachmentType: r.attachment_type || null,
+            attachmentSize: r.attachment_size || null,
+      }));
+
+      const usernames = baseHistory.map((m) => m.user).filter(Boolean);
+      buildAuthorsFxMap(usernames, (authorsFx) => {
+        const history = baseHistory.map((m) => ({
+          ...m,
+          chatFx: authorsFx[m.user] || mergeChatFxWithCustomization(null, null, null),
+        }));
+        socket.emit("history", history, { authorsFx });
+
+        const ids = history.map((m) => m.messageId).slice(-80);
+        if (ids.length) {
+          const placeholders = ids.map(() => "?").join(",");
+          db.all(
+            `SELECT message_id, username, emoji FROM reactions WHERE message_id IN (${placeholders})`,
+            ids,
+            (_e2, reacts) => {
+              const byMsg = {};
+              for (const r of reacts || []) {
+                byMsg[r.message_id] = byMsg[r.message_id] || {};
+                byMsg[r.message_id][r.username] = r.emoji;
+              }
+              for (const mid of Object.keys(byMsg)) {
+                socket.emit("reaction update", { messageId: mid, reactions: byMsg[mid] });
+              }
+            }
+          );
+        }
+      });
+    }
+  );
+
+  socket.emit("system", buildSystemPayload(room, "Joined " + room));
+  emitUserList(room);
+}
+
+  socket.on("typing", () => {
+    if (IS_DEV_MODE) console.log("[socket] typing", { socketId: socket.id, room: socket.currentRoom });
+    let room = socket.currentRoom;
+if (!room) {
+  // fallback: join main so the message shows up instead of disappearing
+  try { doJoin("main", socket.user.status || "Online"); } catch {}
+  room = socket.currentRoom;
+  if (!room) return;
+}
+    let set = typingByRoom.get(room);
+    if (!set) typingByRoom.set(room, (set = new Set()));
+    set.add(socket.user.username);
+    broadcastTyping(room);
+  });
+
+  socket.on("stop typing", () => {
+    if (IS_DEV_MODE) console.log("[socket] stop typing", { socketId: socket.id, room: socket.currentRoom });
+    const room = socket.currentRoom;
+    if (!room) return;
+
+    const set = typingByRoom.get(room);
+    if (set) {
+      set.delete(socket.user.username);
+      broadcastTyping(room);
+    }
+  });
+
+  socket.on("dm join", (payload = {}) => {
+    if (IS_DEV_MODE) console.log("[socket] dm join", { socketId: socket.id, threadId: payload.threadId });
+    const tid = Number(payload.threadId);
+    if (!Number.isInteger(tid)) return;
+
+    loadThreadForUser(tid, socket.user.id, (err, thread) => {
+      if (err) return;
+      socket.dmThreads.add(tid);
+      socket.join(`dm:${tid}`);
+
+      db.all(
+        `SELECT id, thread_id, user_id, username, text, tone, ts, edited_at, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_mime, attachment_type, attachment_size FROM dm_messages WHERE thread_id=? AND deleted=0 ORDER BY ts DESC LIMIT 50`,
+        [tid],
+        (_e, rows) => {
+          const msgs = (rows || []).reverse().map((r) => ({
+            messageId: r.id,
+            id: r.id,
+            threadId: r.thread_id,
+            userId: r.user_id,
+            user: r.username,
+            text: r.text,
+            tone: r.tone || "",
+            ts: r.ts,
+            editedAt: r.edited_at || 0,
+            replyToId: r.reply_to_id || null,
+            replyToUser: r.reply_to_user || "",
+            replyToText: r.reply_to_text || "",
+            attachmentUrl: r.attachment_url || null,
+            attachmentMime: r.attachment_mime || null,
+            attachmentType: r.attachment_type || null,
+            attachmentSize: r.attachment_size || null,
+          }));
+          const usernames = msgs.map((m) => m.user).filter(Boolean);
+          buildAuthorsFxMap(usernames, async (authorsFx) => {
+            socket.emit("dm history", {
+              threadId: tid,
+              title: thread.title || "",
+              isGroup: !!thread.is_group,
+              participants: thread.participants || [],
+              messages: msgs,
+              authorsFx,
+            });
+
+            // Prime read-receipt state for the joining client.
+            // The socket-side in-memory map (dmReadState) is best-effort and can be empty after
+            // reloads. We persist last_read_at per user in dm_participants; on join, translate
+            // that into a message id so the client can reliably render the "☑" tick.
+            try {
+              db.all(
+                `SELECT user_id, COALESCE(last_read_at,0) AS last_read_at
+                   FROM dm_participants
+                  WHERE thread_id = ?`,
+                [tid],
+                (_re0, readRows) => {
+                  const rows = readRows || [];
+                  for (const rr of rows) {
+                    const uid = Number(rr.user_id);
+                    const lastReadAt = Number(rr.last_read_at || 0);
+                    if (!Number.isInteger(uid) || uid <= 0) continue;
+                    if (!lastReadAt) continue;
+
+                    // Prefer the in-memory state if it's newer.
+                    try {
+                      const perThread = dmReadState.get(tid);
+                      const mem = perThread?.get(uid);
+                      if (mem?.ts && Number(mem.ts) > lastReadAt && Number.isInteger(Number(mem.messageId))) {
+                        socket.emit("dm read", {
+                          threadId: tid,
+                          userId: uid,
+                          messageId: Number(mem.messageId),
+                          ts: Number(mem.ts)
+                        });
+                        continue;
+                      }
+                    } catch {}
+
+                    // Translate timestamp -> message id in this thread.
+                    db.get(
+                      `SELECT id, ts
+                         FROM dm_messages
+                        WHERE thread_id = ? AND deleted=0 AND ts <= ?
+                        ORDER BY ts DESC, id DESC
+                        LIMIT 1`,
+                      [tid, lastReadAt],
+                      (_re1, hit) => {
+                        const mid = Number(hit?.id);
+                        const mts = Number(hit?.ts || lastReadAt);
+                        if (!Number.isInteger(mid) || mid <= 0) return;
+                        socket.emit("dm read", {
+                          threadId: tid,
+                          userId: uid,
+                          messageId: mid,
+                          ts: mts
+                        });
+                      }
+                    );
+                  }
+                }
+              );
+            } catch {}
+
+            // Send initial DM reactions for these messages (so the client can render immediately)
+            try {
+              const mids = (msgs || []).map(m => Number(m.messageId || m.id)).filter(n => Number.isInteger(n));
+              if (mids.length) {
+                const placeholders = mids.map(() => "?").join(",");
+                db.all(
+                  `SELECT message_id, username, emoji
+                     FROM dm_reactions
+                    WHERE thread_id = ?
+                      AND message_id IN (${placeholders})`,
+                  [tid, ...mids],
+                  (_re, rrows) => {
+                    const byMid = new Map();
+                    for (const rr of (rrows || [])) {
+                      const k = String(rr.message_id);
+                      if (!byMid.has(k)) byMid.set(k, {});
+                      byMid.get(k)[rr.username] = rr.emoji;
+                    }
+                    for (const mid of mids) {
+                      const reactions = byMid.get(String(mid)) || {};
+                      socket.emit("dm reaction update", { threadId: tid, messageId: mid, reactions });
+                    }
+                  }
+                );
+              }
+            } catch {}
+
+            try {
+              const latestChallenge = await chessGetLatestChallengeForThread(tid);
+              if (latestChallenge) {
+                await emitChessChallengeStateToSocket(socket, latestChallenge);
+              }
+            } catch (e) {
+              console.warn("[chess] dm join challenge state failed:", e?.message || e);
+            }
+          });
+
+        }
+      );
+    });
+  });
+
+  
+  socket.on("dm mark read", (payload = {}) => {
+    const tid = Number(payload.threadId);
+    const mid = Number(payload.messageId);
+    const tms = safeNumber(payload.ts, Date.now());
+    if (!socket.user) return;
+    if (!Number.isInteger(tid) || !Number.isInteger(mid)) return;
+
+    // ensure user is allowed in this thread
+    loadThreadForUser(tid, socket.user.id, (err, thread) => {
+      if (err || !thread) return;
+
+      let perThread = dmReadState.get(tid);
+      if (!perThread) dmReadState.set(tid, (perThread = new Map()));
+      perThread.set(socket.user.id, { messageId: mid, ts: tms });
+
+      // Persist last-read so unread counts/badges survive reloads/devices
+      db.run(
+        `UPDATE dm_participants
+           SET last_read_at = CASE WHEN COALESCE(last_read_at,0) < ? THEN ? ELSE COALESCE(last_read_at,0) END
+         WHERE thread_id = ? AND user_id = ?`,
+        [tms, tms, tid, socket.user.id],
+        () => {}
+      );
+
+      // Broadcast to everyone in the dm room (clients can ignore self)
+      io.to(`dm:${tid}`).emit("dm read", {
+        threadId: tid,
+        userId: socket.user.id,
+        messageId: mid,
+        ts: tms
+      });
+    });
+  });
+
+
+  socket.on("dm leave", (payload = {}) => {
+    const tid = Number(payload.threadId);
+    if (!Number.isInteger(tid)) return;
+    try { socket.leave(`dm:${tid}`); } catch {}
+    try { socket.dmThreads?.delete(tid); } catch {}
+
+    // Clear any lingering DM typing state for this user in that thread.
+    try {
+      const set = dmTypingByThread.get(tid);
+      if (set && socket.user?.username) {
+        set.delete(socket.user.username);
+        if (set.size === 0) dmTypingByThread.delete(tid);
+        broadcastDmTyping(tid);
+      }
+    } catch {}
+  });
+
+  // DM typing indicators (per thread)
+  socket.on("dm typing", (payload = {}) => {
+    const tid = Number(payload.threadId);
+    if (!Number.isInteger(tid)) return;
+    if (!socket.dmThreads?.has(tid)) return; // must have joined
+    let set = dmTypingByThread.get(tid);
+    if (!set) dmTypingByThread.set(tid, (set = new Set()));
+    if (socket.user?.username) set.add(socket.user.username);
+    broadcastDmTyping(tid);
+  });
+
+  socket.on("dm stop typing", (payload = {}) => {
+    const tid = Number(payload.threadId);
+    if (!Number.isInteger(tid)) return;
+    const set = dmTypingByThread.get(tid);
+    if (set && socket.user?.username) {
+      set.delete(socket.user.username);
+      if (set.size === 0) dmTypingByThread.delete(tid);
+      broadcastDmTyping(tid);
+    }
+  });
+
+  socket.on("dm message", async (payload = {}) => {
+    if (IS_DEV_MODE) console.log("[socket] dm message", { socketId: socket.id, threadId: payload.threadId });
+    const { threadId, text, replyToId, attachment, tone } = payload || {};
+    const tid = Number(threadId);
+    if (!allowSocketEvent(socket, "dm_message", 12, 4000)) return;
+    const rawBody = safeString(text, "").trim();
+    if (rawBody.length > MAX_DM_MESSAGE_CHARS) return;
+    let body = rawBody.slice(0, MAX_DM_MESSAGE_CHARS);
+    
+    // Apply word filter to DM text (async)
+    body = await applyWordFilter(body);
+    
+    const att = attachment && typeof attachment === "object" ? attachment : null;
+    const toneKey = sanitizeTone(tone);
+
+    // Allow messages with either text or an image attachment
+    if (!Number.isInteger(tid) || (!body && !att)) return;
+
+    // Basic attachment validation (DMs: images only)
+    let attUrl = null, attMime = null, attType = null, attSize = null;
+    if (att) {
+      attUrl = String(att.url || "").trim();
+      attMime = String(att.mime || "").trim();
+      attType = String(att.type || "").trim();
+      attSize = Number(att.size || 0) || 0;
+
+      const okUrl = attUrl.startsWith("/uploads/");
+      const okImg = attType === "image" && /^image\//i.test(attMime);
+      if (!okUrl || !okImg) return;
+      if (attSize > (10 * 1024 * 1024)) return; // 10MB
+    }
+
+    loadThreadForUser(tid, socket.user.id, (err, thread) => {
+      if (err) return;
+      const ts = Date.now();
+
+      const replyId = safeNumber(replyToId, NaN);
+      const doInsert = (replyMeta = {}) => {
+        const replyUser = replyMeta.user || null;
+        const replyText = replyMeta.text || null;
+        const replyPk = Number.isInteger(replyMeta.id) ? replyMeta.id : null;
+
+        db.run(
+          `INSERT INTO dm_messages (thread_id, user_id, username, text, tone, ts, reply_to_id, reply_to_user, reply_to_text, attachment_url, attachment_mime, attachment_type, attachment_size)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            tid,
+            socket.user.id,
+            socket.user.username,
+            body,
+            toneKey,
+            ts,
+            replyPk,
+            replyUser,
+            replyText,
+            attUrl,
+            attMime,
+            attType,
+            attSize,
+          ],
+          function (insertErr) {
+            if (insertErr) return;
+            const payload = {
+              threadId: tid,
+              messageId: this.lastID,
+              userId: socket.user.id,
+              user: socket.user.username,
+              text: body,
+              tone: toneKey || "",
+              ts,
+              attachmentUrl: attUrl,
+              attachmentMime: attMime,
+              attachmentType: attType,
+              attachmentSize: attSize,
+              chatFx: mergeChatFxWithCustomization(socket.user.chatFx, socket.user.customization, socket.user.textStyle),
+              replyToId: replyPk,
+              replyToUser: replyUser || "",
+              replyToText: replyText || "",
+            };
+              db.run(
+                `UPDATE dm_threads SET last_message_id=?, last_message_at=? WHERE id=?`,
+                [this.lastID, ts, tid]
+              );
+              console.log(`[dm:send] thread ${tid} msg ${this.lastID} by user ${socket.user.id}`);
+              io.to(`dm:${tid}`).emit("dm message", payload);
+            }
+          );
+      };
+
+      if (Number.isInteger(replyId)) {
+        db.get(
+          `SELECT id, username, text FROM dm_messages WHERE id = ? AND thread_id = ? AND deleted=0`,
+          [replyId, tid],
+          (_e, row) => {
+            doInsert(row || {});
+          }
+        );
+      } else {
+        doInsert();
+      }
+    });
+  });
+
+    // ---- DM edit message (self-only, short window)
+  socket.on("dm edit message", (payload = {}) => {
+    const tid = Number(payload.threadId);
+    const mid = Number(payload.messageId);
+    if (!allowSocketEvent(socket, "dm_edit", 8, 5000)) return;
+    const body = safeString(payload.text, "").trim().slice(0, MAX_DM_MESSAGE_CHARS);
+    if (!socket.user) return;
+    if (!Number.isInteger(tid) || !Number.isInteger(mid) || !body) return;
+
+    loadThreadForUser(tid, socket.user.id, (err, thread) => {
+      if (err || !thread) return;
+
+      db.get(
+        `SELECT id, thread_id, user_id, ts FROM dm_messages WHERE id = ? AND thread_id = ? AND deleted=0`,
+        [mid, tid],
+        (e2, row) => {
+          if (e2 || !row) return;
+
+          const isOwner = Number(row.user_id) === Number(socket.user.id);
+          if (!isOwner) return;
+
+          const now = Date.now();
+          const ts = Number(row.ts) || 0;
+          if (now - ts > 5 * 60 * 1000) return;
+
+          db.run(
+            `UPDATE dm_messages SET text = ?, edited_at = ? WHERE id = ?`,
+            [body, now, mid],
+            () => {
+              io.to(`dm:${tid}`).emit("dm message edited", {
+                threadId: tid,
+                messageId: mid,
+                text: body,
+                editedAt: now
+              });
+            }
+          );
+        }
+      );
+    });
+  });
+
+  // ---- DM reactions (1 reaction per user per DM message)
+  socket.on("dm reaction", (payload = {}) => {
+    const tid = Number(payload.threadId);
+    const mid = Number(payload.messageId);
+    const em = safeString(payload.emoji, "").slice(0, 8);
+    if (!socket.user) return;
+    if (!Number.isInteger(tid) || !Number.isInteger(mid) || !em) return;
+
+    loadThreadForUser(tid, socket.user.id, (err, thread) => {
+      if (err || !thread) return;
+
+      db.run(
+        `INSERT INTO dm_reactions (thread_id, message_id, username, emoji)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(thread_id, message_id, username) DO UPDATE SET emoji=excluded.emoji`,
+        [tid, mid, socket.user.username, em],
+        () => {
+          db.all(
+            `SELECT username, emoji FROM dm_reactions WHERE thread_id=? AND message_id=?`,
+            [tid, mid],
+            (_e, rows) => {
+              const reactions = {};
+              for (const r of rows || []) reactions[r.username] = r.emoji;
+              io.to(`dm:${tid}`).emit("dm reaction update", { threadId: tid, messageId: mid, reactions });
+            }
+          );
+        }
+      );
+    });
+  });
+
+
+  socket.on("chess:challenge:create", async ({ dmThreadId, challengedUserId } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    const tid = Number(dmThreadId);
+    const challengedId = Number(challengedUserId);
+    if (!Number.isInteger(tid) || !Number.isInteger(challengedId)) {
+      return respond({ ok: false, error: "Invalid challenge request" });
+    }
+    if (challengedId === Number(socket.user.id)) {
+      return respond({ ok: false, error: "Cannot challenge yourself" });
+    }
+
+    loadThreadForUser(tid, socket.user.id, async (err, thread) => {
+      if (err || !thread) return respond({ ok: false, error: "Thread not found" });
+      if (thread.is_group) return respond({ ok: false, error: "Chess challenges are direct DMs only" });
+      if (!thread.participantIds?.includes?.(challengedId)) {
+        return respond({ ok: false, error: "User not in this DM" });
+      }
+
+      try {
+        const latest = await chessGetLatestChallengeForThread(tid);
+        if (latest && latest.status === "pending") {
+          await emitChessChallengeStateToSocket(socket, latest);
+          return respond({ ok: false, error: "Challenge already pending", challengeId: latest.challenge_id });
+        }
+        const activeGame = await chessGetActiveGameForContext("dm", String(tid));
+        if (activeGame) {
+          await emitChessStateToSocket(socket, activeGame);
+          return respond({ ok: false, error: "Game already active", gameId: activeGame.game_id });
+        }
+        const challenge = await chessCreateChallenge(tid, socket.user.id, challengedId);
+        await insertDmChessMessage({
+          threadId: tid,
+          authorId: socket.user.id,
+          authorName: socket.user.username,
+          text: `[chess:challenge:${challenge.challenge_id}]`,
+        });
+        await emitChessChallengeStateToRoom(tid, challenge);
+        respond({ ok: true, challengeId: challenge.challenge_id });
+      } catch (e) {
+        console.warn("[chess] challenge create failed:", e?.message || e);
+        respond({ ok: false, error: "Failed to create challenge" });
+      }
+    });
+  });
+
+  socket.on("chess:challenge:respond", async ({ challengeId, accept } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    if (!challengeId) return respond({ ok: false, error: "Missing challenge" });
+    try {
+      const challenge = await chessGetChallengeById(String(challengeId));
+      if (!challenge || challenge.status !== "pending") {
+        return respond({ ok: false, error: "Challenge not available" });
+      }
+      if (Number(challenge.challenged_user_id) !== Number(socket.user.id)) {
+        return respond({ ok: false, error: "Not allowed" });
+      }
+      const nextStatus = accept ? "accepted" : "declined";
+      const updated = await chessUpdateChallenge(challenge.challenge_id, { status: nextStatus });
+      await emitChessChallengeStateToRoom(updated.dm_thread_id, updated);
+      if (!accept) {
+        await insertDmChessMessage({
+          threadId: updated.dm_thread_id,
+          authorId: socket.user.id,
+          authorName: socket.user.username,
+          text: `[chess:challenge:declined:${updated.challenge_id}]`,
+        });
+        return respond({ ok: true, status: nextStatus });
+      }
+
+      const game = await chessCreateGame("dm", String(updated.dm_thread_id), updated.challenger_user_id, updated.challenged_user_id);
+      await insertDmChessMessage({
+        threadId: updated.dm_thread_id,
+        authorId: socket.user.id,
+        authorName: socket.user.username,
+        text: `[chess:challenge:accepted:${updated.challenge_id}]`,
+      });
+      await emitChessStateToGameRoom(game);
+      respond({ ok: true, status: nextStatus, gameId: game.game_id });
+    } catch (e) {
+      console.warn("[chess] challenge respond failed:", e?.message || e);
+      respond({ ok: false, error: "Failed to respond" });
+    }
+  });
+
+  socket.on("chess:game:create", async ({ contextType, contextId } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    if (contextType !== "room") return respond({ ok: false, error: "Invalid context" });
+    const roomId = String(contextId || "");
+    if (!roomId) return respond({ ok: false, error: "Missing room" });
+    try {
+      const existing = await chessGetActiveGameForContext("room", roomId);
+      if (existing) {
+        await emitChessStateToSocket(socket, existing);
+        return respond({ ok: true, gameId: existing.game_id });
+      }
+      const game = await chessCreateGame("room", roomId);
+      socket.join(`chess:${game.game_id}`);
+      await emitChessStateToSocket(socket, game);
+      respond({ ok: true, gameId: game.game_id });
+    } catch (e) {
+      console.warn("[chess] game create failed:", e?.message || e);
+      respond({ ok: false, error: "Failed to create game" });
+    }
+  });
+
+  socket.on("chess:game:join", async ({ gameId, contextType, contextId } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    try {
+      let game = null;
+      if (gameId) {
+        game = await chessGetGameById(String(gameId));
+      } else if (contextType && contextId) {
+        game = await chessGetActiveGameForContext(String(contextType), String(contextId));
+        if (!game && String(contextType) === "dm") {
+          game = await chessGetLatestGameForContext(String(contextType), String(contextId));
+        }
+      }
+      if (!game) {
+        await emitChessStateToSocket(socket, null);
+        return respond({ ok: false, error: "Game not found" });
+      }
+      if (game.context_type === "dm") {
+        const threadOk = await new Promise((resolve) => {
+          loadThreadForUser(Number(game.context_id), socket.user.id, (err, thread) => resolve(!err && !!thread));
+        });
+        if (!threadOk) return respond({ ok: false, error: "Not allowed" });
+      }
+      socket.join(`chess:${game.game_id}`);
+      await emitChessStateToSocket(socket, game);
+      respond({ ok: true, gameId: game.game_id });
+    } catch (e) {
+      console.warn("[chess] game join failed:", e?.message || e);
+      respond({ ok: false, error: "Failed to join game" });
+    }
+  });
+
+  socket.on("chess:game:seat", async ({ gameId, color } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    const seatColor = color === "white" ? "white" : (color === "black" ? "black" : "");
+    if (!seatColor || !gameId) return respond({ ok: false, error: "Invalid seat" });
+    try {
+      let game = await chessGetGameById(String(gameId));
+      if (!game) return respond({ ok: false, error: "Game not found" });
+      if (game.context_type !== "room") return respond({ ok: false, error: "Seats only for rooms" });
+      const seatKey = seatColor === "white" ? "white_user_id" : "black_user_id";
+      const seatUserId = Number(game[seatKey] || 0);
+      if (seatUserId && seatUserId !== Number(socket.user.id)) {
+        const seatUser = await getUserIdentityForMemory(seatUserId);
+        if (!seatClaimable(game, seatUser)) {
+          return respond({ ok: false, error: "Seat occupied" });
+        }
+      }
+      const updates = { [seatKey]: socket.user.id };
+      if (game.status === "pending") {
+        const nextWhite = seatColor === "white" ? socket.user.id : game.white_user_id;
+        const nextBlack = seatColor === "black" ? socket.user.id : game.black_user_id;
+        if (nextWhite && nextBlack) updates.status = "active";
+      }
+      game = await chessUpdateGame(game.game_id, updates);
+      await emitChessStateToGameRoom(game);
+      respond({ ok: true });
+    } catch (e) {
+      console.warn("[chess] seat failed:", e?.message || e);
+      respond({ ok: false, error: "Failed to seat" });
+    }
+  });
+
+  socket.on("chess:game:move", async ({ gameId, from, to, promotion } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    if (!allowSocketEvent(socket, "chess_move", 12, 4000)) return respond({ ok: false, error: "Rate limited" });
+    if (!gameId || !from || !to) return respond({ ok: false, error: "Invalid move" });
+    try {
+      let game = await chessGetGameById(String(gameId));
+      if (!game) return respond({ ok: false, error: "Game not found" });
+      if (game.status !== "active") return respond({ ok: false, error: "Game not active" });
+      const isWhite = Number(game.white_user_id || 0) === Number(socket.user.id);
+      const isBlack = Number(game.black_user_id || 0) === Number(socket.user.id);
+      if (!isWhite && !isBlack) return respond({ ok: false, error: "Spectators cannot move" });
+      if ((game.turn === "w" && !isWhite) || (game.turn === "b" && !isBlack)) {
+        return respond({ ok: false, error: "Not your turn" });
+      }
+      const chess = createChessInstance(game.fen);
+      const move = chess.move({ from, to, promotion: promotion || undefined });
+      if (!move) return respond({ ok: false, error: "Illegal move" });
+
+      const now = Date.now();
+      const nextStatus = chess.isCheckmate() ? "mate" : (chess.isStalemate() || chess.isDraw() ? "draw" : "active");
+      const result =
+        chess.isCheckmate()
+          ? (chess.turn() === "w" ? "black" : "white")
+          : (chess.isStalemate() || chess.isDraw()) ? "draw" : null;
+      const updates = {
+        fen: chess.fen(),
+        pgn: chess.pgn(),
+        turn: chess.turn(),
+        plies_count: Number(game.plies_count || 0) + 1,
+        last_move_at: now,
+        updated_at: now,
+        draw_offer_by_user_id: null,
+        draw_offer_at: null,
+      };
+      if (nextStatus !== "active") {
+        const updatedGame = await chessUpdateGame(game.game_id, updates);
+        const finalResult = await chessFinalizeGame(
+          updatedGame,
+          { result: result || "draw", status: nextStatus, reason: nextStatus }
+        );
+        game = finalResult.game;
+      } else {
+        game = await chessUpdateGame(game.game_id, updates);
+      }
+
+      await emitChessStateToGameRoom(game);
+      respond({ ok: true });
+
+      if (game.context_type === "room" && move?.san) {
+        const actorName = socket.user.username;
+        emitRoomSystem(game.context_id, `${actorName} played ${move.san}`);
+      }
+
+      if (game.status !== "active" && game.context_type === "dm") {
+        const summary = game.result === "draw"
+          ? "Draw"
+          : game.result === "white"
+            ? "White wins"
+            : "Black wins";
+        await insertDmChessMessage({
+          threadId: Number(game.context_id),
+          authorId: socket.user.id,
+          authorName: socket.user.username,
+          text: `[chess:result:${game.game_id}:${summary}]`,
+        });
+      }
+    } catch (e) {
+      console.warn("[chess] move failed:", e?.message || e);
+      respond({ ok: false, error: "Move failed" });
+    }
+  });
+
+  socket.on("chess:game:resign", async ({ gameId } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    if (!gameId) return respond({ ok: false, error: "Missing game" });
+    try {
+      const game = await chessGetGameById(String(gameId));
+      if (!game || game.status !== "active") return respond({ ok: false, error: "Game not active" });
+      const isWhite = Number(game.white_user_id || 0) === Number(socket.user.id);
+      const isBlack = Number(game.black_user_id || 0) === Number(socket.user.id);
+      if (!isWhite && !isBlack) return respond({ ok: false, error: "Not a player" });
+      const result = isWhite ? "black" : "white";
+      const finalResult = await chessFinalizeGame(game, { result, status: "resigned", reason: "resign" });
+      await emitChessStateToGameRoom(finalResult.game);
+      if (finalResult.game.context_type === "dm") {
+        const summary = result === "white" ? "White wins" : "Black wins";
+        await insertDmChessMessage({
+          threadId: Number(finalResult.game.context_id),
+          authorId: socket.user.id,
+          authorName: socket.user.username,
+          text: `[chess:result:${finalResult.game.game_id}:${summary}]`,
+        });
+      }
+      respond({ ok: true });
+    } catch (e) {
+      console.warn("[chess] resign failed:", e?.message || e);
+      respond({ ok: false, error: "Failed to resign" });
+    }
+  });
+
+  socket.on("chess:game:drawOffer", async ({ gameId } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    if (!gameId) return respond({ ok: false, error: "Missing game" });
+    try {
+      const game = await chessGetGameById(String(gameId));
+      if (!game || game.status !== "active") return respond({ ok: false, error: "Game not active" });
+      const isWhite = Number(game.white_user_id || 0) === Number(socket.user.id);
+      const isBlack = Number(game.black_user_id || 0) === Number(socket.user.id);
+      if (!isWhite && !isBlack) return respond({ ok: false, error: "Not a player" });
+      const updated = await chessUpdateGame(game.game_id, {
+        draw_offer_by_user_id: socket.user.id,
+        draw_offer_at: Date.now(),
+      });
+      await emitChessStateToGameRoom(updated);
+      respond({ ok: true });
+    } catch (e) {
+      console.warn("[chess] draw offer failed:", e?.message || e);
+      respond({ ok: false, error: "Failed to offer draw" });
+    }
+  });
+
+  socket.on("chess:game:drawRespond", async ({ gameId, accept } = {}, ack) => {
+    const respond = (payload) => {
+      if (typeof ack === "function") ack(payload);
+    };
+    if (!socket.user) return respond({ ok: false, error: "Unauthorized" });
+    if (!gameId) return respond({ ok: false, error: "Missing game" });
+    try {
+      const game = await chessGetGameById(String(gameId));
+      if (!game || game.status !== "active") return respond({ ok: false, error: "Game not active" });
+      if (!game.draw_offer_by_user_id) return respond({ ok: false, error: "No draw offer" });
+      if (Number(game.draw_offer_by_user_id) === Number(socket.user.id)) {
+        return respond({ ok: false, error: "Cannot respond to your own offer" });
+      }
+      if (!accept) {
+        const updated = await chessUpdateGame(game.game_id, { draw_offer_by_user_id: null, draw_offer_at: null });
+        await emitChessStateToGameRoom(updated);
+        return respond({ ok: true, status: "declined" });
+      }
+      const finalResult = await chessFinalizeGame(game, { result: "draw", status: "draw", reason: "draw" });
+      await emitChessStateToGameRoom(finalResult.game);
+      if (finalResult.game.context_type === "dm") {
+        await insertDmChessMessage({
+          threadId: Number(finalResult.game.context_id),
+          authorId: socket.user.id,
+          authorName: socket.user.username,
+          text: `[chess:result:${finalResult.game.game_id}:Draw]`,
+        });
+      }
+      respond({ ok: true, status: "accepted" });
+    } catch (e) {
+      console.warn("[chess] draw respond failed:", e?.message || e);
+      respond({ ok: false, error: "Failed to respond" });
+    }
+  });
+
+  socket.on("chess:leaderboard:get", async ({ limit, offset } = {}, ack) => {
+    try {
+      const rows = await fetchChessLeaderboard(limit, offset);
+      const payload = rows.map((row) => {
+        const games = Number(row.chess_games_played || 0);
+        const wins = Number(row.chess_wins || 0);
+        const losses = Number(row.chess_losses || 0);
+        const draws = Number(row.chess_draws || 0);
+        const winrate = games > 0 ? Math.round((wins / games) * 1000) / 10 : 0;
+        return {
+          userId: Number(row.user_id),
+          username: row.username,
+          elo: Number(row.chess_elo || CHESS_DEFAULT_ELO),
+          gamesPlayed: games,
+          wins,
+          losses,
+          draws,
+          winrate,
+          peakElo: Number(row.chess_peak_elo || row.chess_elo || CHESS_DEFAULT_ELO),
+        };
+      });
+      if (typeof ack === "function") {
+        ack({ rows: payload, limit: Number(limit || 50), offset: Number(offset || 0) });
+      }
+      socket.emit("chess:leaderboard:data", { rows: payload, limit: Number(limit || 50), offset: Number(offset || 0) });
+    } catch (e) {
+      console.warn("[chess] leaderboard socket failed:", e?.message || e);
+      if (typeof ack === "function") ack({ ok: false });
+    }
+  });
+
+
+  socket.on("status change", ({ status }) => {
+    status = normalizeStatus(status, "Online");
+    socket.user.status = status;
+
+    const st = onlineState.get(socket.user.id);
+    if (st) st.status = status;
+
+    db.run("UPDATE users SET last_status=? WHERE id=?", [status, socket.user.id]);
+
+    if (socket.currentRoom) emitUserList(socket.currentRoom);
+  });
+
+  socket.on("chat message", async (payload = {}) => {
+    if (IS_DEV_MODE) console.log("[socket] chat message", { socketId: socket.id, room: payload.room, textLen: payload.text?.length });
+    // ---- NEW: Validate input ----
+    const validation = validate(ChatMessageSchema, {
+      room: payload.room || socket.currentRoom || "main",
+      text: payload.text,
+      replyTo: payload.replyTo,
+    });
+    
+    if (!validation.success) {
+      socket.emit("system", buildSystemPayload(socket.currentRoom || "main", "Invalid message: " + validation.error));
+      return;
+    }
+    
+    // Sanitize text to prevent XSS
+    const sanitized = sanitizeText(validation.data.text);
+    if (!sanitized) {
+      socket.emit("system", buildSystemPayload(socket.currentRoom || "main", "Message cannot be empty"));
+      return;
+    }
+    
+    // Apply word filter (async)
+    const filtered = await applyWordFilter(sanitized);
+    
+    // Override payload with validated and filtered data
+    payload.text = filtered;
+    
+    // If a client sends before it has joined a room (mobile reconnect/race),
+    // auto-join main so the message doesn't silently disappear.
+    let room = socket.currentRoom;
+    if (!room) {
+      try {
+        doJoin("main", socket.user.status || "Online");
+      } catch (_) {}
+      room = socket.currentRoom;
+      if (!room) return;
+    }
+
+    if (!allowSocketEvent(socket, "chat_message", 16, 4000)) {
+      socket.emit("system", buildSystemPayload(socket.currentRoom || "main", "You are sending messages too quickly."));
+      return;
+    }
+
+    // basic spam rate limiting
+    const now = Date.now();
+    const r = msgRate.get(socket.id) || { lastTs: now, count: 0 };
+    if (now - r.lastTs > 4000) {
+      r.lastTs = now;
+      r.count = 0;
+    }
+    r.count++;
+    msgRate.set(socket.id, r);
+    if (r.count > 10) return;
+
+    isPunished(socket.user.id, "ban", (banned) => {
+      if (banned) return;
+      isPunished(socket.user.id, "mute", (muted) => {
+        if (muted) return;
+
+        const rawText = safeString(payload.text, "");
+        if (rawText.length > MAX_CHAT_MESSAGE_CHARS) {
+      socket.emit("system", buildSystemPayload(socket.currentRoom || "main", "Message too long (max " + MAX_CHAT_MESSAGE_CHARS + " characters)."));
+          return;
+        }
+        const text = rawText.slice(0, MAX_CHAT_MESSAGE_CHARS);
+        if (text.trim().startsWith("/")) {
+          executeCommand(socket, text, room);
+          return;
+        }
+        const attachmentUrl = safeString(payload.attachmentUrl, "").slice(0, 400);
+        const attachmentType = safeString(payload.attachmentType, "").slice(0, 20);
+        const attachmentMime = safeString(payload.attachmentMime, "").slice(0, 60);
+        const attachmentSize = safeNumber(payload.attachmentSize, 0);
+        const tone = sanitizeTone(payload.tone);
+
+        awardPassiveGold(socket.user.id);
+
+        // maintenance / lock / slowmode enforcement
+        if (maintenanceState.enabled && !requireMinRole(socket.user.role, "Moderator")) {
+          socket.emit("command response", { ok: false, message: "Site is in maintenance mode" });
+          return;
+        }
+
+        db.get(
+          `SELECT slowmode_seconds, is_locked, archived FROM rooms WHERE name=?`,
+          [room],
+          (_err, settings) => {
+            const slowSeconds = Number(settings?.slowmode_seconds || 0);
+            const locked = Number(settings?.is_locked || 0) === 1;
+            const archived = Number(settings?.archived || 0) === 1;
+            if (archived) {
+              socket.emit("command response", { ok: false, message: "Room is archived" });
+              return;
+            }
+            if (locked && !requireMinRole(socket.user.role, "Moderator")) {
+              socket.emit("command response", { ok: false, message: "Room is locked" });
+              return;
+            }
+            if (slowSeconds > 0 && !requireMinRole(socket.user.role, "Moderator")) {
+              const key = `${room}:${socket.user.id}`;
+              const last = slowmodeTracker.get(key) || 0;
+              if (Date.now() - last < slowSeconds * 1000) {
+                socket.emit("command response", { ok: false, message: `Slowmode: wait ${Math.ceil((slowSeconds * 1000 - (Date.now() - last)) / 1000)}s` });
+                return;
+              }
+              slowmodeTracker.set(key, Date.now());
+            }
+
+            const replyId = safeNumber(payload.replyToId, NaN);
+            const insertWithReply = (replyMeta = {}) => {
+              const replyPk = Number.isInteger(replyMeta.id) ? replyMeta.id : null;
+              const replyUser = replyMeta.username || replyMeta.user || null;
+              const replyText = replyMeta.text || null;
+              const tsNow = Date.now();
+
+              db.run(
+                `INSERT INTO messages (room, user_id, username, role, avatar, text, tone, ts, attachment_url, attachment_type, attachment_mime, attachment_size, reply_to_id, reply_to_user, reply_to_text)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  room,
+                  socket.user.id,
+                  socket.user.username,
+                  socket.user.role,
+                  socket.user.avatar || "",
+                  text,
+                  tone,
+                  tsNow,
+                  attachmentUrl || null,
+                  attachmentType || null,
+                  attachmentMime || null,
+                  attachmentSize || null,
+                  replyPk,
+                  replyUser,
+                  replyText,
+                ],
+                function () {
+                  awardMessageXp(socket.user.id, socket.user.role, room).catch((e) => console.warn("[xp][msg]", e?.message || e));
+                  awardMessageGold(socket.user.id);
+                  const msg = {
+                    messageId: this.lastID,
+                    room,
+                    user: socket.user.username,
+                    role: socket.user.role,
+                    avatar: socket.user.avatar || "",
+                    text,
+                    tone: tone || "",
+                    ts: tsNow,
+                    attachmentUrl: attachmentUrl || "",
+                    attachmentType: attachmentType || "",
+                    attachmentMime: attachmentMime || "",
+                    attachmentSize: attachmentSize || 0,
+                    replyToId: replyPk,
+                    replyToUser: replyUser || "",
+                    replyToText: replyText || "",
+                    chatFx: mergeChatFxWithCustomization(socket.user.chatFx, socket.user.customization, socket.user.textStyle),
+                  };
+                  // Daily challenges + smart mentions
+                  try { bumpDailyProgress(socket.user.id, dayKeyNow(), "room_msgs_5", 1); } catch {}
+                  try {
+                    emitSmartMentionPings({
+                      room,
+                      fromUser: { id: socket.user.id, username: socket.user.username, socketId: socket.id },
+                      messageId: msg.id || msg.messageId || null,
+                      text: msg.text || "",
+                    });
+                  } catch {}
+                  void applyLuckForQualifyingMessage({
+                    userId: socket.user.id,
+                    room,
+                    text,
+                  });
+                  io.to(room).emit("chat message", msg);
+                }
+              );
+            };
+
+            if (Number.isInteger(replyId)) {
+              db.get(
+                `SELECT id, username, text FROM messages WHERE id=? AND room=? AND deleted=0`,
+                [replyId, room],
+                (_rErr, row) => insertWithReply(row || {})
+              );
+            } else {
+              insertWithReply();
+            }
+          }
+        );
+      });
+    });
+  });
+
+  // ---- Edit message (self-only, short window)
+  socket.on("edit message", (payload = {}) => {
+    const mid = Number(payload.messageId);
+    const body = safeString(payload.text, "").trim().slice(0, 2000);
+    if (!socket.user) return;
+    if (!Number.isInteger(mid) || !body) return;
+
+    db.get(
+      `SELECT id, room, user_id, ts, deleted, text FROM messages WHERE id = ?`,
+      [mid],
+      (err, row) => {
+        if (err || !row || Number(row.deleted || 0) === 1) return;
+
+        const isOwner = Number(row.user_id) === Number(socket.user.id);
+        if (!isOwner) return;
+
+        const now = Date.now();
+        const ts = Number(row.ts) || 0;
+        if (now - ts > 5 * 60 * 1000) return;
+
+        // Store edit history using message-utils
+        messageUtils.persistEdit({
+          message_id: mid,
+          user_id: socket.user.id,
+          previous_text: row.text,
+          new_text: body,
+          edited_at: now
+        }).then(() => {
+          io.to(String(row.room)).emit("message edited", {
+            messageId: mid,
+            text: body,
+            editedAt: now
+          });
+        }).catch(err => {
+          console.error("[edit message] persist error:", err);
+          // Fallback to direct update
+          db.run(
+            `UPDATE messages SET text = ?, edited_at = ? WHERE id = ?`,
+            [body, now, mid],
+            () => {
+              io.to(String(row.room)).emit("message edited", {
+                messageId: mid,
+                text: body,
+                editedAt: now
+              });
+            }
+          );
+        });
+      }
+    );
+  });
+
+
+  // Reactions: 1 reaction per user per message (enforced by PRIMARY KEY)
+  socket.on("reaction", ({ messageId, emoji }) => {
+    const room = socket.currentRoom;
+    if (!room) return;
+    const mid = String(messageId || "").trim();
+    const em = String(emoji || "").slice(0, 8);
+    if (!mid || !em) return;
+
+    try {
+      const uid = socket.user?.id;
+      const now = Date.now();
+      const last = lastReactionByUserId.get(uid) || 0;
+      if (now - last < 800) bumpHeat(uid, 1);
+      if (now - last >= 800) {
+        bumpDailyProgress(uid, dayKeyNow(), "react_3", 1);
+        lastReactionByUserId.set(uid, now);
+      }
+    } catch {}
+
+    // Store in legacy reactions table
+    db.run(
+      `INSERT INTO reactions (message_id, username, emoji)
+       VALUES (?, ?, ?)
+       ON CONFLICT(message_id, username) DO UPDATE SET emoji=excluded.emoji`,
+      [mid, socket.user.username, em],
+      () => {
+        db.all("SELECT username, emoji FROM reactions WHERE message_id=?", [mid], (_e, rows) => {
+          const reactions = {};
+          for (const r of rows || []) reactions[r.username] = r.emoji;
+          io.to(room).emit("reaction update", { messageId: mid, reactions });
+        });
+      }
+    );
+
+    // Also store in new message_reactions table for history tracking
+    messageUtils.persistReaction({
+      message_id: mid,
+      user_id: socket.user.id,
+      username: socket.user.username,
+      emoji: em,
+      created_at: Date.now()
+    }).catch(err => console.error("[reaction] persist error:", err));
+  });
+
+  // ---- NEW: Message delivery receipt handler ----
+  socket.on("message:delivered", ({ messageId }) => {
+    if (!messageId) return;
+    
+    // Fetch message to get room and validate it exists
+    db.get("SELECT id, room FROM messages WHERE id = ?", [messageId], (err, msg) => {
+      if (err || !msg) return;
+      
+      messageUtils.markMessageDelivered(messageId)
+        .then(() => {
+          io.to(msg.room).emit("message:delivered", { 
+            messageId, 
+            deliveredAt: Date.now() 
+          });
+        })
+        .catch(err => console.error("[message:delivered] error:", err));
+    });
+  });
+
+  // ---- NEW: Message read receipt handler ----
+  socket.on("message:read", ({ messageId }) => {
+    if (!messageId) return;
+    
+    // Fetch message to get room and validate it exists
+    db.get("SELECT id, room FROM messages WHERE id = ?", [messageId], (err, msg) => {
+      if (err || !msg) return;
+      
+      messageUtils.markMessageRead(messageId)
+        .then(() => {
+          io.to(msg.room).emit("message:read", { 
+            messageId, 
+            readAt: Date.now() 
+          });
+        })
+        .catch(err => console.error("[message:read] error:", err));
+    });
+  });
+
+  // ---- NEW: Typing indicator with state persistence ----
+  socket.on("typing", ({ room, isTyping }) => {
+    if (!room || !socket.user?.username) return;
+    
+    // Validate socket is actually in this room
+    if (socket.currentRoom !== room) return;
+    
+    try {
+      const username = socket.user.username;
+      
+      // Update state persistence
+      if (isTyping) {
+        setTyping(room, username, 5).catch(() => {}); // 5 second TTL
+      } else {
+        // Clear typing state
+        deleteState(`typing:${room}:${username}`).catch(() => {});
+      }
+      
+      // Broadcast to room
+      socket.to(room).emit("user:typing", {
+        room,
+        username,
+        isTyping
+      });
+    } catch (err) {
+      console.error("[typing] error:", err);
+    }
+  });
+
+
+  const logDeleteFailure = ({ scope, messageId, actorId, actorRole, reason, roomId, threadId }) => {
+    console.warn(`[delete:${scope}]`, { messageId, actorId, actorRole, roomId, threadId, reason });
+  };
+
+  const respondDelete = (ack, payload) => {
+    if (typeof ack === "function") ack(payload);
+  };
+
+  const emitMainMessageDeleted = (messageId, roomId) => {
+    const rawRoom = String(roomId || "").trim();
+    if (!rawRoom) return;
+    const emitRoom = rawRoom.startsWith("#") ? rawRoom.slice(1) : rawRoom;
+    io.to(emitRoom).emit("messageDeleted", { messageId, roomId: emitRoom });
+    io.to(emitRoom).emit("message deleted", { messageId });
+  };
+
+  const handleMainDeleteMessage = ({ messageId } = {}, ack) => {
+    const actor = socket.user;
+    if (!actor) {
+      respondDelete(ack, { ok: false, message: "Not authenticated." });
+      return;
+    }
+
+    const actorRole = actor.role || socket.request?.session?.user?.role || "User";
+    const mid = Number(messageId);
+    if (!Number.isInteger(mid)) {
+      respondDelete(ack, { ok: false, message: "Invalid message id." });
+      logDeleteFailure({ scope: "main", messageId, actorId: actor.id, actorRole, reason: "invalid_id" });
+      return;
+    }
+
+    db.get(
+      "SELECT id, room, user_id, username, role, deleted FROM messages WHERE id=?",
+      [mid],
+      (err, msg) => {
+        if (err) {
+          respondDelete(ack, { ok: false, message: "Failed to load message." });
+          logDeleteFailure({ scope: "main", messageId: mid, actorId: actor.id, actorRole, reason: "load_failed" });
+          return;
+        }
+        if (!msg) {
+          respondDelete(ack, { ok: false, message: "Message not found." });
+          logDeleteFailure({ scope: "main", messageId: mid, actorId: actor.id, actorRole, reason: "not_found" });
+          return;
+        }
+
+        const isModerator = requireMinRole(actorRole, "Moderator");
+        const isVip = requireMinRole(actorRole, "VIP");
+        const isOwner = Number(msg.user_id) === Number(actor.id);
+        if (!isModerator && !(isVip && isOwner)) {
+          respondDelete(ack, { ok: false, message: "Not allowed to delete this message." });
+          logDeleteFailure({ scope: "main", messageId: mid, actorId: actor.id, actorRole, roomId: msg.room, reason: "forbidden" });
+          return;
+        }
+
+        const wasDeleted = Number(msg.deleted || 0) === 1;
+        if (wasDeleted) {
+          respondDelete(ack, { ok: true, alreadyDeleted: true });
+          emitMainMessageDeleted(mid, msg.room);
+          return;
+        }
+
+        // Use soft delete with deleted_at timestamp
+        const deletedAt = Date.now();
+        db.run("UPDATE messages SET deleted=1, deleted_at=? WHERE id=?", [deletedAt, mid], (updateErr) => {
+          if (updateErr) {
+            respondDelete(ack, { ok: false, message: "Failed to delete message." });
+            logDeleteFailure({ scope: "main", messageId: mid, actorId: actor.id, actorRole, roomId: msg.room, reason: "update_failed" });
+            return;
+          }
+
+          db.run("DELETE FROM reactions WHERE message_id=?", [mid], (reactErr) => {
+            if (reactErr) {
+              console.warn("[delete:main] reaction cleanup failed", { messageId: mid, error: reactErr?.message || reactErr });
+            }
+            if (requireMinRole(actorRole, "Moderator")) {
+              logModAction({
+                actor,
+                action: "DELETE_MESSAGE",
+                targetUserId: msg.user_id,
+                targetUsername: msg.username,
+                room: msg.room,
+                details: `messageId=${mid}`,
+              });
+            }
+            respondDelete(ack, { ok: true });
+            emitMainMessageDeleted(mid, msg.room);
+          });
+        });
+      }
+    );
+  };
+
+  socket.on("delete message", handleMainDeleteMessage);
+  // Backward compatibility for older clients
+  socket.on("mod delete message", handleMainDeleteMessage);
+
+  socket.on("dm delete message", ({ threadId, messageId } = {}, ack) => {
+    const actor = socket.user;
+    if (!actor) {
+      respondDelete(ack, { ok: false, message: "Not authenticated." });
+      return;
+    }
+
+    const tid = Number(threadId);
+    const mid = Number(messageId);
+    if (!Number.isInteger(tid) || !Number.isInteger(mid)) {
+      respondDelete(ack, { ok: false, message: "Invalid message id." });
+      logDeleteFailure({ scope: "dm", messageId, actorId: actor.id, actorRole: actor.role, threadId, reason: "invalid_id" });
+      return;
+    }
+
+    loadThreadForUser(tid, actor.id, (err, thread) => {
+      if (err || !thread) {
+        respondDelete(ack, { ok: false, message: "Not allowed in this thread." });
+        logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole: actor.role, threadId: tid, reason: "thread_access" });
+        return;
+      }
+
+      const actorRole = actor.role || socket.request?.session?.user?.role || "User";
+      db.get(
+        "SELECT id, thread_id, user_id, deleted FROM dm_messages WHERE id=? AND thread_id=?",
+        [mid, tid],
+        (msgErr, msg) => {
+          if (msgErr) {
+            respondDelete(ack, { ok: false, message: "Failed to load message." });
+            logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole, threadId: tid, reason: "load_failed" });
+            return;
+          }
+          if (!msg) {
+            respondDelete(ack, { ok: false, message: "Message not found." });
+            logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole, threadId: tid, reason: "not_found" });
+            return;
+          }
+
+          const isModerator = requireMinRole(actorRole, "Moderator");
+          const isVip = requireMinRole(actorRole, "VIP");
+          const isOwner = Number(msg.user_id) === Number(actor.id);
+          if (!isModerator && !(isVip && isOwner)) {
+            respondDelete(ack, { ok: false, message: "Not allowed to delete this message." });
+            logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole, threadId: tid, reason: "forbidden" });
+            return;
+          }
+
+          const wasDeleted = Number(msg.deleted || 0) === 1;
+          if (wasDeleted) {
+            respondDelete(ack, { ok: true, alreadyDeleted: true });
+            io.to(`dm:${tid}`).emit("dm message deleted", { threadId: tid, messageId: mid });
+            return;
+          }
+
+          db.run("UPDATE dm_messages SET deleted=1 WHERE id=? AND thread_id=?", [mid, tid], (delErr) => {
+            if (delErr) {
+              respondDelete(ack, { ok: false, message: "Failed to delete message." });
+              logDeleteFailure({ scope: "dm", messageId: mid, actorId: actor.id, actorRole, threadId: tid, reason: "update_failed" });
+              return;
+            }
+
+            db.run("DELETE FROM dm_reactions WHERE thread_id=? AND message_id=?", [tid, mid], (reactErr) => {
+              if (reactErr) {
+                console.warn("[delete:dm] reaction cleanup failed", { messageId: mid, threadId: tid, error: reactErr?.message || reactErr });
+              }
+              respondDelete(ack, { ok: true });
+              io.to(`dm:${tid}`).emit("dm message deleted", { threadId: tid, messageId: mid });
+            });
+          });
+        }
+      );
+    });
+  });
+
+  // ---- Kick / Mute / Ban + Unmute/Unban/Warn + Set role
+  
+  // Get user's last messages for moderation (preview before kick/ban)
+  socket.on("mod get user messages", async ({ username, limit = 5 } = {}, ack) => {
+    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+    const actorRole = socket.request.session.user.role;
+    if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
+
+    username = sanitizeUsername(username);
+    if (!username) return respond({ ok: false, error: "Invalid username." });
+
+    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
+      if (!target) return respond({ ok: false, error: "User not found." });
+      
+      const messages = await getUserLastMessages(target.id, Math.min(Number(limit) || 5, 10));
+      respond({ ok: true, messages });
+    });
+  });
+  
+socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300, caseId = null, autoClear = false, capturedMessage = null } = {}, ack) => {
+  if (IS_DEV_MODE) console.log("[socket] mod kick", { socketId: socket.id, username, durationSeconds });
+  const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+  if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
+  const room = socket.currentRoom;
+  if (!room) return respond({ ok: false, error: "No active room." });
+
+  const actorRole = socket.request.session.user.role;
+  if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
+
+  username = sanitizeUsername(username);
+  if (!username) return respond({ ok: false, error: "Invalid username." });
+
+  db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
+    if (!target) return respond({ ok: false, error: "User not found." });
+    if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
+
+    // Auto-clear messages if enabled
+    let clearedCount = 0;
+    if (autoClear) {
+      clearedCount = await clearUserMessages(target.id, room);
+    }
+
+    // Persist restriction + log
+    const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
+    const why = String(reason || "").slice(0, 180) || "Kicked by staff";
+    const dur = clamp(Number(durationSeconds) || 300, 30, 7 * 24 * 60 * 60);
+    let expiresAt = null;
+    try {
+      ({ expiresAt } = await setKickEverywhere(target.username, actorName, why, dur));
+    } catch {
+      return respond({ ok: false, error: "Kick failed." });
+    }
+
+    // Ban all IP and MAC addresses associated with this user (temporary)
+    banAllUserAddresses(target.id, why, socket.user.id, actorName, expiresAt).catch(() => {});
+
+    // Notify + disconnect
+    const sid = socketIdByUserId.get(target.id);
+    if (sid) {
+      io.to(sid).emit("restriction:status", { type: "kick", reason: why, expiresAt, now: Date.now() });
+      io.sockets.sockets.get(sid)?.disconnect(true);
+    }
+    invalidateSessionsForUserId(target.id);
+
+    // Build details with captured message info
+    let details = `duration=${dur}s reason=${why}`;
+    if (autoClear) {
+      details += ` cleared=${clearedCount}`;
+    }
+    if (capturedMessage) {
+      const msgPreview = String(capturedMessage.text || '')
+        .slice(0, 100)
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"');
+      const msgTime = capturedMessage.timestampUTC || new Date(capturedMessage.timestamp).toISOString();
+      details += ` captured_msg="${msgPreview}" msg_time="${msgTime}" msg_user="${capturedMessage.username}"`;
+    }
+
+    emitRoomSystem(room, `${username} was kicked.`, { kind: "mod" });
+    logModAction({ actor: socket.user, action: "KICK", targetUserId: target.id, targetUsername: target.username, room, details });
+    if (caseId) {
+      addModCaseEvent(Number(caseId), {
+        actorUserId: socket.user?.id || null,
+        eventType: "kick",
+        payload: { targetUserId: target.id, durationSeconds: dur, reason: why, capturedMessage, clearedCount },
+      }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "kick" })).catch(() => {});
+    }
+    respond({ ok: true, username: target.username, durationSeconds: dur, clearedCount });
+  });
+});
+
+socket.on("mod unkick", async ({ username, caseId = null } = {}, ack) => {
+  const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+  if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
+  const room = socket.currentRoom;
+  if (!room) return respond({ ok: false, error: "No active room." });
+
+  const actorRole = socket.request.session.user.role;
+  if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
+
+  username = sanitizeUsername(username);
+  if (!username) return respond({ ok: false, error: "Invalid username." });
+
+  db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
+    if (!target) return respond({ ok: false, error: "User not found." });
+    if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
+
+    const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
+    try{
+      await clearRestrictionEverywhere(target.username, actorName, "unkick");
+    }catch{
+      return respond({ ok: false, error: "Unkick failed." });
+    }
+
+    // Notify target (if online)
+    const sid = socketIdByUserId.get(target.id);
+    if (sid) {
+      io.to(sid).emit("restriction:status", { type: "none", reason: "", expiresAt: null, now: Date.now() });
+    }
+
+    emitOnlineUsers();
+    emitRoomSystem(room, "User " + (target && target.username ? target.username : "") + " has been un-kicked by " + actorName + ".", { kind: "mod" });
+    if (caseId) {
+      addModCaseEvent(Number(caseId), {
+        actorUserId: socket.user?.id || null,
+        eventType: "unkick",
+        payload: { targetUserId: target.id },
+      }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "unkick" })).catch(() => {});
+    }
+    respond({ ok: true, username: target.username });
+  });
+});
+
+
+  socket.on("mod mute", ({ username, minutes = 10, reason = "", caseId = null } = {}, ack) => {
+    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
+    const room = socket.currentRoom;
+    if (!room) return respond({ ok: false, error: "No active room." });
+
+    const actorRole = socket.request.session.user.role;
+    if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
+
+    username = sanitizeUsername(username);
+    const mins = clamp(minutes, 1, 1440);
+    const expiresAt = Date.now() + mins * 60 * 1000;
+
+    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+      if (!target) return respond({ ok: false, error: "User not found." });
+      if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
+
+      db.run(
+        `INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id, created_at)
+         VALUES (?, 'mute', ?, ?, ?, ?)`,
+        [target.id, expiresAt, String(reason || "").slice(0, 180), socket.user.id, Date.now()],
+        () => {
+          emitRoomSystem(room, `${username} was muted for ${mins} minutes.`, { kind: "mod" });
+          logModAction({
+            actor: socket.user,
+            action: "MUTE",
+            targetUserId: target.id,
+            targetUsername: target.username,
+            room,
+            details: `minutes=${mins} reason=${String(reason || "").slice(0, 180)}`,
+          });
+          if (caseId) {
+            addModCaseEvent(Number(caseId), {
+              actorUserId: socket.user?.id || null,
+              eventType: "mute",
+              payload: { targetUserId: target.id, minutes: mins, reason: String(reason || "").slice(0, 180) },
+            }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "mute" })).catch(() => {});
+          }
+          respond({ ok: true, username: target.username, minutes: mins });
+        }
+      );
+    });
+  });
+
+  socket.on("mod ban", async ({ username, minutes = 0, reason = "", caseId = null, autoClear = false, capturedMessage = null } = {}, ack) => {
+    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
+    const room = socket.currentRoom;
+    if (!room) return respond({ ok: false, error: "No active room." });
+
+    const actorRole = socket.request.session.user.role;
+    if (!requireMinRole(actorRole, "Admin")) return respond({ ok: false, error: "Not permitted." });
+
+    username = sanitizeUsername(username);
+    const mins = Number(minutes);
+    const expiresAt = Number.isFinite(mins) && mins > 0 ? Date.now() + mins * 60 * 1000 : null;
+
+    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
+      if (!target) return respond({ ok: false, error: "User not found." });
+      if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
+
+      // Auto-clear messages if enabled
+      let clearedCount = 0;
+      if (autoClear) {
+        clearedCount = await clearUserMessages(target.id, room);
+      }
+
+      db.run(
+        `INSERT INTO punishments (user_id, type, expires_at, reason, by_user_id, created_at)
+         VALUES (?, 'ban', ?, ?, ?, ?)`,
+        [target.id, expiresAt, String(reason || "").slice(0, 180), socket.user.id, Date.now()],
+        () => {
+          emitRoomSystem(
+            room,
+            `${username} was banned${expiresAt ? ` for ${mins} minutes` : " permanently"}.`,
+            { kind: "mod" }
+          );
+const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
+const why = String(reason || "").slice(0, 180) || "Banned by staff";
+// Persist ban restriction for the restriction/appeals system (in addition to legacy punishments table)
+setBanEverywhere(username, actorName, why).catch(()=>{});
+
+// Ban all IP and MAC addresses associated with this user
+banAllUserAddresses(target.id, why, socket.user.id, actorName, expiresAt).catch(() => {});
+
+const sid = socketIdByUserId.get(target.id);
+if (sid) {
+  io.to(sid).emit("restriction:status", { type: "ban", reason: why, expiresAt: null, now: Date.now() });
+  io.sockets.sockets.get(sid)?.disconnect(true);
+}
+invalidateSessionsForUserId(target.id);
+
+          // Build details with captured message info
+          let details = expiresAt ? `minutes=${mins}` : `permanent reason=${String(reason || "").slice(0, 180)}`;
+          if (autoClear) {
+            details += ` cleared=${clearedCount}`;
+          }
+          if (capturedMessage) {
+            const msgPreview = String(capturedMessage.text || '')
+              .slice(0, 100)
+              .replace(/\\/g, '\\\\')
+              .replace(/"/g, '\\"');
+            const msgTime = capturedMessage.timestampUTC || new Date(capturedMessage.timestamp).toISOString();
+            details += ` captured_msg="${msgPreview}" msg_time="${msgTime}" msg_user="${capturedMessage.username}"`;
+          }
+
+          logModAction({
+            actor: socket.user,
+            action: "BAN",
+            targetUserId: target.id,
+            targetUsername: target.username,
+            room,
+            details,
+          });
+          if (caseId) {
+            addModCaseEvent(Number(caseId), {
+              actorUserId: socket.user?.id || null,
+              eventType: "ban",
+              payload: { targetUserId: target.id, minutes: mins, reason: String(reason || "").slice(0, 180), capturedMessage, clearedCount },
+            }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "ban" })).catch(() => {});
+          }
+          respond({ ok: true, username: target.username, minutes: mins, clearedCount });
+        }
+      );
+    });
+  });
+
+  socket.on("mod unmute", ({ username, reason = "", caseId = null } = {}, ack) => {
+    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
+    const room = socket.currentRoom;
+    if (!room) return respond({ ok: false, error: "No active room." });
+    const actorRole = socket.request.session.user.role;
+    if (!requireMinRole(actorRole, "Moderator")) return respond({ ok: false, error: "Not permitted." });
+
+    username = sanitizeUsername(username);
+    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+      if (!target) return respond({ ok: false, error: "User not found." });
+      if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
+
+      db.run("DELETE FROM punishments WHERE user_id=? AND type='mute'", [target.id], () => {
+        emitRoomSystem(room, `${username} was unmuted.`, { kind: "mod" });
+        logModAction({
+          actor: socket.user,
+          action: "UNMUTE",
+          targetUserId: target.id,
+          targetUsername: target.username,
+          room,
+          details: String(reason || "").slice(0, 180),
+        });
+        if (caseId) {
+          addModCaseEvent(Number(caseId), {
+            actorUserId: socket.user?.id || null,
+            eventType: "unmute",
+            payload: { targetUserId: target.id, reason: String(reason || "").slice(0, 180) },
+          }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "unmute" })).catch(() => {});
+        }
+        respond({ ok: true, username: target.username });
+      });
+    });
+  });
+
+  socket.on("mod unban", ({ username, reason = "", caseId = null } = {}, ack) => {
+    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
+    const room = socket.currentRoom;
+    if (!room) return respond({ ok: false, error: "No active room." });
+    const actorRole = socket.request.session.user.role;
+    if (!requireMinRole(actorRole, "Admin")) return respond({ ok: false, error: "Not permitted." });
+
+    username = sanitizeUsername(username);
+    db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+      if (!target) return respond({ ok: false, error: "User not found." });
+      if (!canModerate(actorRole, target.role)) return respond({ ok: false, error: "Not permitted." });
+
+      db.run("DELETE FROM punishments WHERE user_id=? AND type='ban'", [target.id], () => {
+        emitRoomSystem(room, `${username} was unbanned.`, { kind: "mod" });
+// Clear persistent restriction as well
+const actorName = socket.user?.username || socket.request?.session?.user?.username || "system";
+clearRestrictionEverywhere(username, actorName, String(reason || "").slice(0, 180) || "unban").catch(()=>{});
+const sid = socketIdByUserId.get(target.id);
+if (sid) {
+  io.to(sid).emit("restriction:status", { type: "none", reason: "", expiresAt: null, now: Date.now() });
+}
+        logModAction({
+          actor: socket.user,
+          action: "UNBAN",
+          targetUserId: target.id,
+          targetUsername: target.username,
+          room,
+          details: String(reason || "").slice(0, 180),
+        });
+        if (caseId) {
+          addModCaseEvent(Number(caseId), {
+            actorUserId: socket.user?.id || null,
+            eventType: "unban",
+            payload: { targetUserId: target.id, reason: String(reason || "").slice(0, 180) },
+          }).then(() => emitToStaff("mod:case_event", { caseId: Number(caseId), eventType: "unban" })).catch(() => {});
+        }
+        respond({ ok: true, username: target.username });
+      });
+    });
+  });
+
+
+  // ---- Linked Accounts (Moderator/Admin view)
+  socket.on("mod get linked accounts", async ({ username } = {}, ack) => {
+    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+    const actorRole = socket.request?.session?.user?.role;
+    
+    // Only Moderators, Admins, Co-owners, and Owner can view linked accounts
+    if (!actorRole || !requireMinRole(actorRole, "Moderator")) {
+      return respond({ ok: false, error: "Not permitted." });
+    }
+
+    if (!username) {
+      return respond({ ok: false, error: "Username required." });
+    }
+
+    username = sanitizeUsername(username);
+    if (!username) return respond({ ok: false, error: "Invalid username." });
+
+    db.get("SELECT id, username, role FROM users WHERE lower(username)=lower(?)", [username], async (_e, target) => {
+      if (!target) return respond({ ok: false, error: "User not found." });
+
+      try {
+        const linkedAccounts = await getLinkedAccounts(target.id);
+        
+        // Group by user for cleaner output
+        const userMap = new Map();
+        for (const link of linkedAccounts) {
+          if (!userMap.has(link.id)) {
+            userMap.set(link.id, {
+              userId: link.id,
+              username: link.username,
+              role: link.role,
+              addresses: []
+            });
+          }
+          userMap.get(link.id).addresses.push({
+            type: link.address_type,
+            value: link.address_value,
+            lastSeen: link.last_seen
+          });
+        }
+        
+        const linkedUsers = Array.from(userMap.values());
+        
+        // Log access for audit trail
+        console.log(`[audit] User ${socket.user?.username} (${socket.user?.id}) viewed linked accounts for ${target.username} (${target.id})`);
+        
+        respond({ 
+          ok: true, 
+          targetUserId: target.id,
+          targetUsername: target.username,
+          linkedUsers 
+        });
+      } catch (e) {
+        console.error("[mod get linked accounts] error:", e);
+        respond({ ok: false, error: "Failed to retrieve linked accounts." });
+      }
+    });
+  });
+
+
+// ---- Appeals (user + admin)
+socket.on("restriction:check", async (_payload, ack) => {
+  const username = socket.user?.username;
+  const r = await getRestrictionByUsername(username);
+  const payload = { type: r.type || "none", reason: r.reason || "", expiresAt: r.expiresAt || null, now: Date.now() };
+  if (typeof ack === "function") ack(payload);
+  else socket.emit("restriction:status", payload);
+});
+
+socket.on("appeal:fetchMine", async (_payload, ack) => {
+  const username = socket.user?.username;
+  const r = await getRestrictionByUsername(username);
+  const open = await findOpenAppeal(username);
+  let messages = [];
+  if (open?.id) messages = await getAppealThread(open.id);
+  const payload = { restriction: { type: r.type || "none", reason: r.reason || "", expiresAt: r.expiresAt || null, now: Date.now() }, appeal: open || null, messages };
+  if (typeof ack === "function") ack(payload);
+  else socket.emit("appeal:mine", payload);
+});
+
+socket.on("appeal:create", async ({ message } = {}, ack) => {
+  const username = socket.user?.username;
+  if (!allowSocketEvent(socket, "appeal_create", 3, 30_000)) {
+    return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
+  }
+  const r = await getRestrictionByUsername(username);
+  if (!username) return typeof ack === "function" ? ack({ ok: false, error: "Not authenticated" }) : null;
+  if (!r?.type || r.type === "none") return typeof ack === "function" ? ack({ ok: false, error: "No active kick/ban." }) : null;
+
+  let open = await findOpenAppeal(username);
+  if (!open) open = await createAppeal(username, r.type, r.reason || "");
+  if (!open?.id) return typeof ack === "function" ? ack({ ok: false, error: "Failed to create appeal." }) : null;
+
+  await addAppealMessage(open.id, { authorRole: "user", authorName: username, message: String(message || "").slice(0, 2000) });
+  const messages = await getAppealThread(open.id);
+
+  // Notify staff
+  io.emit("appeals:updated");
+
+  if (typeof ack === "function") ack({ ok: true, appeal: open, messages });
+});
+
+socket.on("appeal:send", async ({ message } = {}, ack) => {
+  const username = socket.user?.username;
+  if (!allowSocketEvent(socket, "appeal_send", 5, 30_000)) {
+    return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
+  }
+  if (!username) return typeof ack === "function" ? ack({ ok: false, error: "Not authenticated" }) : null;
+  const open = await findOpenAppeal(username);
+  if (!open?.id) return typeof ack === "function" ? ack({ ok: false, error: "No open appeal." }) : null;
+
+  await addAppealMessage(open.id, { authorRole: "user", authorName: username, message: String(message || "").slice(0, 2000) });
+  const messages = await getAppealThread(open.id);
+
+  io.emit("appeals:updated");
+
+  if (typeof ack === "function") ack({ ok: true, appeal: open, messages });
+});
+
+function isAppealsStaff(role){
+  return requireMinRole(role, "Admin") || requireMinRole(role, "Co owner") || requireMinRole(role, "Owner");
+}
+
+// Referrals: Moderators can submit ban referrals; Admin+ can review and resolve.
+function isReferralReviewer(role){
+  return requireMinRole(role, "Admin") || requireMinRole(role, "Co-owner") || requireMinRole(role, "Owner");
+}
+function canCreateReferral(role){
+  // Only Moderators submit referrals (Admins+ already have ban tools)
+  return String(role || "") === "Moderator";
+}
+
+async function createReferral({ username, referredBy, referredByRole, reason }){
+  const now = Date.now();
+  const result = await dbRunAsync(
+    `INSERT INTO referrals (username, referred_by, reason, notes, status, action_by, action_type, action_minutes, action_reason, created_at, updated_at)
+     VALUES (?, ?, ?, NULL, 'open', NULL, NULL, NULL, NULL, ?, ?)`,
+    [username, referredBy, reason, now, now]
+  );
+  try {
+    const subjectUserId = await findUserIdByUsername(username);
+    const actorUserId = await findUserIdByUsername(referredBy);
+    const caseRow = await createModCase({
+      type: "referral",
+      subjectUserId,
+      createdByUserId: actorUserId,
+      title: `Referral #${result?.lastID || ""}`.trim(),
+      summary: String(reason || "").slice(0, 800),
+    });
+    if (caseRow?.id) {
+      await addModCaseEvent(caseRow.id, {
+        actorUserId,
+        eventType: "referral_created",
+        payload: { referralId: result?.lastID || null, fromRole: referredByRole || null },
+      });
+      emitToStaff("mod:case_created", { id: caseRow.id, type: caseRow.type, status: caseRow.status });
+    }
+  } catch {}
+}
+async function listOpenReferrals(){
+  return dbAllAsync(
+    `SELECT id, username AS target_username, referred_by AS from_username, reason, status, created_at, updated_at
+     FROM referrals
+     WHERE status='open'
+     ORDER BY created_at DESC
+     LIMIT 200`
+  );
+}
+async function resolveReferral({ id, actionBy }){
+  const now = Date.now();
+  await dbRunAsync(
+    `UPDATE referrals SET status='acted', action_by=?, action_type='dismiss', updated_at=? WHERE id=?`,
+    [actionBy, now, id]
+  );
+}
+
+socket.on("appeals:list", async (_payload, ack) => {
+  const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
+  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
+  const items = await listOpenAppeals();
+  if (typeof ack === "function") ack({ ok: true, items });
+});
+
+socket.on("appeals:read", async ({ appealId } = {}, ack) => {
+  const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
+  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
+
+  const id = Number(appealId);
+  if (!Number.isFinite(id)) return typeof ack === "function" ? ack({ ok: false, error: "Invalid appeal" }) : null;
+
+  let appeal = null;
+  try {
+    if (PG_READY) {
+      const result55 = await pgSafe("SELECT * FROM appeals WHERE id=$1 LIMIT 1", [id]);
+      const rows = result55?.rows || [];
+      appeal = rows?.[0] || null;
+    }
+  } catch {}
+  if (!appeal) {
+    try { appeal = await dbGetAsync("SELECT * FROM appeals WHERE id=? LIMIT 1", [id]); } catch {}
+  }
+  if (!appeal) return typeof ack === "function" ? ack({ ok: false, error: "Not found" }) : null;
+
+  const messages = await getAppealThread(id);
+  const modlogs = await getModerationLogsForUser(appeal.username, 200);
+  const restriction = await getRestrictionByUsername(appeal.username);
+
+  if (typeof ack === "function") ack({ ok: true, appeal, messages, modlogs, restriction });
+});
+
+socket.on("appeals:reply", async ({ appealId, message } = {}, ack) => {
+  const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
+  if (!allowSocketEvent(socket, "appeal_reply", 6, 30_000)) {
+    return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
+  }
+  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
+
+  const id = Number(appealId);
+  if (!Number.isFinite(id)) return typeof ack === "function" ? ack({ ok: false, error: "Invalid appeal" }) : null;
+
+  const actorName = socket.user?.username || "staff";
+  await addAppealMessage(id, { authorRole: "admin", authorName: actorName, message: String(message || "").slice(0, 2000) });
+  io.emit("appeals:updated");
+  if (typeof ack === "function") ack({ ok: true });
+});
+
+socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, ack) => {
+  const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
+  if (!allowSocketEvent(socket, "appeal_action", 6, 30_000)) {
+    return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
+  }
+  if (!isAppealsStaff(actorRole)) return typeof ack === "function" ? ack({ ok: false, error: "Not allowed" }) : null;
+
+  const id = Number(appealId);
+  if (!Number.isFinite(id)) return typeof ack === "function" ? ack({ ok: false, error: "Invalid appeal" }) : null;
+
+  // Load appeal
+  let appeal = null;
+  try {
+    if (PG_READY) {
+      const result56 = await pgSafe("SELECT * FROM appeals WHERE id=$1 LIMIT 1", [id]);
+      const rows = result56?.rows || [];
+      appeal = rows?.[0] || null;
+    }
+  } catch {}
+  if (!appeal) {
+    try { appeal = await dbGetAsync("SELECT * FROM appeals WHERE id=? LIMIT 1", [id]); } catch {}
+  }
+  if (!appeal) return typeof ack === "function" ? ack({ ok: false, error: "Not found" }) : null;
+
+  const actorName = socket.user?.username || "staff";
+  const act = String(action || "");
+
+  if (act === "unlock" || act === "unban") {
+    await clearRestrictionEverywhere(appeal.username, actorName, "staff unlock");
+    // also clear legacy ban punishment if exists (best-effort)
+    try {
+      const urow = await dbGetAsync("SELECT id FROM users WHERE lower(username)=lower(?)", [appeal.username]);
+      if (urow?.id) dbRunAsync("DELETE FROM punishments WHERE user_id=? AND type='ban'", [urow.id]).catch(()=>{});
+    } catch {}
+  } else if (act === "ban_to_kick") {
+    const dur = Number(durationSeconds) || 3600;
+    const { expiresAt } = await setKickEverywhere(appeal.username, actorName, "ban converted to kick", dur);
+    // notify target if online
+    const tid = await dbGetAsync("SELECT id FROM users WHERE lower(username)=lower(?)", [appeal.username]).catch(()=>null);
+    const sid = tid?.id ? socketIdByUserId.get(tid.id) : null;
+    if (sid) io.to(sid).emit("restriction:status", { type: "kick", reason: "Ban converted to kick", expiresAt, now: Date.now() });
+  } else if (act === "update_kick") {
+    const dur = Number(durationSeconds) || 3600;
+    const { expiresAt } = await setKickEverywhere(appeal.username, actorName, "kick duration updated", dur);
+    const tid = await dbGetAsync("SELECT id FROM users WHERE lower(username)=lower(?)", [appeal.username]).catch(()=>null);
+    const sid = tid?.id ? socketIdByUserId.get(tid.id) : null;
+    if (sid) io.to(sid).emit("restriction:status", { type: "kick", reason: "Kick updated", expiresAt, now: Date.now() });
+  }
+
+  // Optionally resolve appeal
+  try {
+    const now = Date.now();
+    await dbRunAsync("UPDATE appeals SET status='resolved', updated_at=? WHERE id=?", [now, id]).catch(()=>{});
+    if (PG_READY) await pgSafe("UPDATE appeals SET status='resolved', updated_at=$1 WHERE id=$2", [now, id]).catch(()=>{});
+  } catch {}
+
+  io.emit("appeals:updated");
+  if (typeof ack === "function") ack({ ok: true });
+});
+
+  // ---- Referrals ----
+  socket.on("referrals:create", async ({ username, reason } = {}, ack) => {
+    if (!allowSocketEvent(socket, "referral_create", 3, 30_000)) {
+      return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
+    }
+    try{
+      const actor = socket.request?.session?.user || socket.user || {};
+      const actorRole = actor.role || "User";
+      if(!canCreateReferral(actorRole)){
+        return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+      }
+      const target = sanitizeUsername(username);
+      const why = String(reason || "").trim().slice(0, 500);
+      if(!target || !why){
+        return typeof ack === "function" ? ack({ ok:false, error:"Missing username or reason" }) : null;
+      }
+      await createReferral({ username: target, referredBy: actor.username || "unknown", referredByRole: actorRole, reason: why });
+      if(typeof ack === "function") ack({ ok:true });
+    }catch(e){
+      if(typeof ack === "function") ack({ ok:false, error:"Failed to create referral" });
+    }
+  });
+
+  socket.on("referrals:list", async (_payload, ack) => {
+    const actorRole = socket.request?.session?.user?.role || socket.user?.role || "User";
+    if(!isReferralReviewer(actorRole)) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+    const items = await listOpenReferrals();
+    if(typeof ack === "function") ack({ ok:true, items });
+  });
+
+  socket.on("referrals:resolve", async ({ id } = {}, ack) => {
+    if (!allowSocketEvent(socket, "referral_resolve", 6, 30_000)) {
+      return typeof ack === "function" ? ack({ ok: false, error: "Rate limited." }) : null;
+    }
+    try{
+      const actor = socket.request?.session?.user || socket.user || {};
+      const actorRole = actor.role || "User";
+      if(!isReferralReviewer(actorRole)) return typeof ack === "function" ? ack({ ok:false, error:"Not allowed" }) : null;
+      const rid = Number(id);
+      if(!Number.isFinite(rid)) return typeof ack === "function" ? ack({ ok:false, error:"Invalid id" }) : null;
+      await resolveReferral({ id: rid, actionBy: actor.username || "unknown" });
+      if(typeof ack === "function") ack({ ok:true });
+    }catch(e){
+      if(typeof ack === "function") ack({ ok:false, error:"Failed to resolve" });
+    }
+  });
+
+  socket.on("mod warn", ({ username, reason = "" }) => {
+    const room = socket.currentRoom;
+    if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return;
+    if (!room) return;
+    const actorRole = socket.request.session.user.role;
+    if (!requireMinRole(actorRole, "Moderator")) return;
+
+    username = sanitizeUsername(username);
+            db.get("SELECT id, username FROM users WHERE lower(username)=lower(?)", [username], (_e, target) => {
+      if (!target) return;
+      if (!canModerate(actorRole, target.role)) return;
+
+      emitRoomSystem(room, `${username} was warned: ${String(reason || "").slice(0, 120)}`, { kind: "mod" });
+      logModAction({
+        actor: socket.user,
+        action: "WARN",
+        targetUserId: target.id,
+        targetUsername: target.username,
+        room,
+        details: String(reason || "").slice(0, 180),
+      });
+    });
+  });
+
+  socket.on("mod set role", ({ username, role, reason = "" } = {}, ack) => {
+    const respond = (payload) => { if (typeof ack === "function") ack(payload); };
+    if (!allowSocketEvent(socket, "mod_action", 4, 5000)) return respond({ ok: false, error: "Rate limited." });
+    const room = socket.currentRoom;
+    if (!room) return respond({ ok: false, error: "No active room." });
+
+    const actor = socket.user;
+    const actorRole = godmodeUsers.has(actor.id)
+      ? "Owner"
+      : (socket.user?.role || socket.request?.session?.user?.role || "User");
+
+    // Admin+ can update roles via the moderation panel.
+    if (!requireMinRole(actorRole, "Admin")) return respond({ ok: false, error: "Not permitted." });
+
+    const rawName = String(username || "").trim().slice(0, 64);
+    const sanitized = sanitizeUsername(rawName);
+    role = String(role || "").trim();
+
+    const normalizedRole = ROLES.find((r) => r.toLowerCase() === role.toLowerCase());
+    if (!normalizedRole) return respond({ ok: false, error: "Invalid role." });
+    role = normalizedRole;
+
+    const lookupName = rawName || sanitized;
+    if (!lookupName) return respond({ ok: false, error: "Invalid username." });
+
+    findUserByMention(lookupName, (_e, found) => {
+      if (!found) {
+        io.to(socket.id).emit("system", buildSystemPayload(socket.currentRoom || "main", "User not found: " + lookupName));
+        return respond({ ok: false, error: "User not found." });
+      }
+
+      const target = { id: found.id, username: found.username, oldRole: found.role };
+
+      // Permission checks: you can only modify users below you.
+      if (actorRole !== "Owner" && !canModerate(actorRole, target.oldRole)) return respond({ ok: false, error: "Not permitted." });
+
+      // Prevent non-owners from assigning roles at/above themselves (or Admin+).
+      if (actorRole !== "Owner") {
+        if (roleRank(role) >= roleRank(actorRole)) return respond({ ok: false, error: "Not permitted." });
+        if (roleRank(role) >= roleRank("Admin")) return respond({ ok: false, error: "Not permitted." });
+      }
+
+      setRoleEverywhere(target.id, target.username, role).then(() => {
+        logModAction({
+          actor: socket.user,
+          action: "SET_ROLE",
+          targetUserId: target.id,
+          targetUsername: target.username,
+          room,
+          details: `role=${role} reason=${String(reason || "").slice(0, 180)}`,
+        });
+
+        // if user is online, update session-ish info
+        const sid = socketIdByUserId.get(target.id);
+        if (sid) {
+          const s = io.sockets.sockets.get(sid);
+          if (s?.request?.session?.user) {
+            s.request.session.user.role = role;
+            s.user.role = role;
+          }
+        }
+
+        emitRoomSystem(room, `${target.username} role set to ${role}.${reason ? "" : ""}`, { kind: "mod" });
+        emitUserList(room);
+        respond({ ok: true, username: target.username, role });
+      }).catch((e) => {
+        console.error("[mod set role]", e);
+        respond({ ok: false, error: "Role update failed." });
+      });
+    });
+  });
+
+  // ======== Room Management Handlers ========
+  
+  // Helper to check room role
+  async function getUserRoomRole(roomName, userId) {
+    try {
+      if (await pgUsersEnabled()) {
+        const result24 = await pgSafe(
+          `SELECT role FROM room_members WHERE room_name = $1 AND user_id = $2 LIMIT 1`,
+          [roomName, userId]
+        );
+        const rows = result24?.rows || [];
+        return rows?.[0]?.role || null;
+      } else {
+        const row = await dbGetAsync(
+          `SELECT role FROM room_members WHERE room_name = ? AND user_id = ? LIMIT 1`,
+          [roomName, userId]
+        );
+        return row?.role || null;
+      }
+    } catch (e) {
+      console.error("[getUserRoomRole] error:", e);
+      return null;
+    }
+  }
+
+  // Helper to check if user is banned from room
+  async function isUserBannedFromRoom(roomName, userId) {
+    try {
+      const now = Date.now();
+      if (await pgUsersEnabled()) {
+        const result25 = await pgSafe(
+          `SELECT expires_at FROM room_bans WHERE room_name = $1 AND user_id = $2 AND (expires_at IS NULL OR expires_at > $3) LIMIT 1`,
+          [roomName, userId, now]
+        );
+        const rows = result25?.rows || [];
+        return rows && rows.length > 0;
+      } else {
+        const row = await dbGetAsync(
+          `SELECT expires_at FROM room_bans WHERE room_name = ? AND user_id = ? AND (expires_at IS NULL OR expires_at > ?) LIMIT 1`,
+          [roomName, userId, now]
+        );
+        return !!row;
+      }
+    } catch (e) {
+      console.error("[isUserBannedFromRoom] error:", e);
+      return false;
+    }
+  }
+
+  // Rename room (owner only)
+  socket.on("room:rename", async ({ roomName, newName }, respond) => {
+    const safe = typeof respond === "function" ? respond : () => {};
+    
+    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
+    if (!roomName || !newName) return safe({ ok: false, error: "Missing room name" });
+    
+    try {
+      const sanitizedNewName = sanitizeRoomName(newName);
+      if (!sanitizedNewName) return safe({ ok: false, error: "Invalid room name" });
+      
+      const role = await getUserRoomRole(roomName, socket.user.id);
+      if (role !== "owner") return safe({ ok: false, error: "Only room owner can rename" });
+      
+      // Check if new name already exists
+      if (await pgUsersEnabled()) {
+        const result26 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [sanitizedNewName]);
+        const rows = result26?.rows || [];
+        if (rows && rows.length > 0) return safe({ ok: false, error: "Room name already exists" });
+        
+        await pgSafe(`UPDATE room_members SET room_name = $1 WHERE room_name = $2`, [sanitizedNewName, roomName]);
+        await pgSafe(`UPDATE room_bans SET room_name = $1 WHERE room_name = $2`, [sanitizedNewName, roomName]);
+        await pgSafe(`UPDATE rooms SET name = $1 WHERE name = $2`, [sanitizedNewName, roomName]);
+      } else {
+        const exists = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [sanitizedNewName]);
+        if (exists) return safe({ ok: false, error: "Room name already exists" });
+        
+        // For SQLite, we need to update child tables first since rooms.name is the PK
+        await dbRunAsync(`PRAGMA foreign_keys = OFF`);
+        await dbRunAsync(`UPDATE room_members SET room_name = ? WHERE room_name = ?`, [sanitizedNewName, roomName]);
+        await dbRunAsync(`UPDATE room_bans SET room_name = ? WHERE room_name = ?`, [sanitizedNewName, roomName]);
+        await dbRunAsync(`UPDATE messages SET room = ? WHERE room = ?`, [sanitizedNewName, roomName]);
+        await dbRunAsync(`UPDATE rooms SET name = ? WHERE name = ?`, [sanitizedNewName, roomName]);
+        await dbRunAsync(`PRAGMA foreign_keys = ON`);
+      }
+      
+      await applyRoomStructureChange({
+        action: "room.rename",
+        actorUserId: socket.user.id,
+        auditPayload: { oldName: roomName, newName: sanitizedNewName },
+      });
+      
+      safe({ ok: true, oldName: roomName, newName: sanitizedNewName });
+    } catch (e) {
+      console.error("[room:rename] error:", e);
+      safe({ ok: false, error: "Rename failed" });
+    }
+  });
+
+  // Promote user to room admin or helper (owner only)
+  socket.on("room:promote", async ({ roomName, userId, role }, respond) => {
+    const safe = typeof respond === "function" ? respond : () => {};
+    
+    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
+    if (!roomName || !userId || !role) return safe({ ok: false, error: "Missing parameters" });
+    if (!["admin", "helper"].includes(role)) return safe({ ok: false, error: "Invalid role" });
+    
+    try {
+      const actorRole = await getUserRoomRole(roomName, socket.user.id);
+      if (actorRole !== "owner") return safe({ ok: false, error: "Only room owner can promote users" });
+      
+      const now = Date.now();
+      if (await pgUsersEnabled()) {
+        await pgSafe(
+          `INSERT INTO room_members (room_name, user_id, role, assigned_by_user_id, assigned_at)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (room_name, user_id) DO UPDATE SET role = $3, assigned_by_user_id = $4, assigned_at = $5`,
+          [roomName, userId, role, socket.user.id, now]
+        );
+      } else {
+        await dbRunAsync(
+          `INSERT OR REPLACE INTO room_members (room_name, user_id, role, assigned_by_user_id, assigned_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          [roomName, userId, role, socket.user.id, now]
+        );
+      }
+      
+      safe({ ok: true, userId, role });
+    } catch (e) {
+      console.error("[room:promote] error:", e);
+      safe({ ok: false, error: "Promotion failed" });
+    }
+  });
+
+  // Demote user (owner only)
+  socket.on("room:demote", async ({ roomName, userId }, respond) => {
+    const safe = typeof respond === "function" ? respond : () => {};
+    
+    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
+    if (!roomName || !userId) return safe({ ok: false, error: "Missing parameters" });
+    
+    try {
+      const actorRole = await getUserRoomRole(roomName, socket.user.id);
+      if (actorRole !== "owner") return safe({ ok: false, error: "Only room owner can demote users" });
+      
+      if (await pgUsersEnabled()) {
+        await pgSafe(
+          `DELETE FROM room_members WHERE room_name = $1 AND user_id = $2 AND role != 'owner'`,
+          [roomName, userId]
+        );
+      } else {
+        await dbRunAsync(
+          `DELETE FROM room_members WHERE room_name = ? AND user_id = ? AND role != 'owner'`,
+          [roomName, userId]
+        );
+      }
+      
+      safe({ ok: true, userId });
+    } catch (e) {
+      console.error("[room:demote] error:", e);
+      safe({ ok: false, error: "Demotion failed" });
+    }
+  });
+
+  // Ban user from room (owner or admin)
+  socket.on("room:ban", async ({ roomName, userId, duration, reason }, respond) => {
+    const safe = typeof respond === "function" ? respond : () => {};
+    
+    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
+    if (!roomName || !userId) return safe({ ok: false, error: "Missing parameters" });
+    
+    try {
+      const actorRole = await getUserRoomRole(roomName, socket.user.id);
+      if (!["owner", "admin"].includes(actorRole)) {
+        return safe({ ok: false, error: "Only room owner or admin can ban users" });
+      }
+      
+      // Duration in milliseconds, null for permanent
+      const now = Date.now();
+      let expiresAt = null;
+      
+      if (duration && duration !== "forever") {
+        const durationMs = parseBanDuration(duration);
+        if (durationMs) {
+          expiresAt = now + durationMs;
+        }
+      }
+      
+      // Only room owner can ban for more than 7 days
+      const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+      const durationMs = parseBanDuration(duration);
+      const isLongBan = duration === "forever" || (durationMs && durationMs > sevenDaysMs);
+      
+      if (isLongBan && actorRole !== "owner") {
+        return safe({ ok: false, error: "Only room owner can ban for more than 7 days" });
+      }
+      
+      if (await pgUsersEnabled()) {
+        await pgSafe(
+          `INSERT INTO room_bans (room_name, user_id, banned_by_user_id, reason, banned_at, expires_at)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (room_name, user_id) DO UPDATE SET 
+           banned_by_user_id = $3, reason = $4, banned_at = $5, expires_at = $6`,
+          [roomName, userId, socket.user.id, reason || null, now, expiresAt]
+        );
+      } else {
+        await dbRunAsync(
+          `INSERT OR REPLACE INTO room_bans (room_name, user_id, banned_by_user_id, reason, banned_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [roomName, userId, socket.user.id, reason || null, now, expiresAt]
+        );
+      }
+      
+      // Kick user from room if they're currently in it
+      const targetSocketId = socketIdByUserId.get(userId);
+      if (targetSocketId) {
+        const targetSocket = io.sockets.sockets.get(targetSocketId);
+        if (targetSocket && targetSocket.currentRoom === roomName) {
+          targetSocket.leave(roomName);
+          targetSocket.emit("room:banned", { roomName, reason, expiresAt });
+        }
+      }
+      
+      safe({ ok: true, userId, expiresAt });
+    } catch (e) {
+      console.error("[room:ban] error:", e);
+      safe({ ok: false, error: "Ban failed" });
+    }
+  });
+
+  // Unban user from room (owner or admin)
+  socket.on("room:unban", async ({ roomName, userId }, respond) => {
+    const safe = typeof respond === "function" ? respond : () => {};
+    
+    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
+    if (!roomName || !userId) return safe({ ok: false, error: "Missing parameters" });
+    
+    try {
+      const actorRole = await getUserRoomRole(roomName, socket.user.id);
+      if (!["owner", "admin"].includes(actorRole)) {
+        return safe({ ok: false, error: "Only room owner or admin can unban users" });
+      }
+      
+      if (await pgUsersEnabled()) {
+        await pgSafe(`DELETE FROM room_bans WHERE room_name = $1 AND user_id = $2`, [roomName, userId]);
+      } else {
+        await dbRunAsync(`DELETE FROM room_bans WHERE room_name = ? AND user_id = ?`, [roomName, userId]);
+      }
+      
+      safe({ ok: true, userId });
+    } catch (e) {
+      console.error("[room:unban] error:", e);
+      safe({ ok: false, error: "Unban failed" });
+    }
+  });
+
+  // Get room members and their roles
+  socket.on("room:members", async ({ roomName }, respond) => {
+    const safe = typeof respond === "function" ? respond : () => {};
+    
+    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
+    if (!roomName) return safe({ ok: false, error: "Missing room name" });
+    
+    try {
+      let members = [];
+      
+      if (await pgUsersEnabled()) {
+        const result27 = await pgSafe(
+          `SELECT rm.user_id, rm.role, u.username, rm.assigned_at 
+           FROM room_members rm
+           JOIN users u ON u.id = rm.user_id
+           WHERE rm.room_name = $1
+           ORDER BY 
+             CASE rm.role 
+               WHEN 'owner' THEN 1 
+               WHEN 'admin' THEN 2 
+               WHEN 'helper' THEN 3 
+               ELSE 4 
+             END, 
+             rm.assigned_at ASC`,
+          [roomName]
+        );
+        const rows = result27?.rows || [];
+        members = rows || [];
+      } else {
+        members = await dbAllAsync(
+          `SELECT rm.user_id, rm.role, u.username, rm.assigned_at 
+           FROM room_members rm
+           JOIN users u ON u.id = rm.user_id
+           WHERE rm.room_name = ?
+           ORDER BY 
+             CASE rm.role 
+               WHEN 'owner' THEN 1 
+               WHEN 'admin' THEN 2 
+               WHEN 'helper' THEN 3 
+               ELSE 4 
+             END, 
+             rm.assigned_at ASC`,
+          [roomName]
+        );
+      }
+      
+      safe({ ok: true, members });
+    } catch (e) {
+      console.error("[room:members] error:", e);
+      safe({ ok: false, error: "Failed to fetch members" });
+    }
+  });
+
+  // Get room bans
+  socket.on("room:bans", async ({ roomName }, respond) => {
+    const safe = typeof respond === "function" ? respond : () => {};
+    
+    if (!socket.user?.id) return safe({ ok: false, error: "Not authenticated" });
+    if (!roomName) return safe({ ok: false, error: "Missing room name" });
+    
+    try {
+      const actorRole = await getUserRoomRole(roomName, socket.user.id);
+      if (!["owner", "admin"].includes(actorRole)) {
+        return safe({ ok: false, error: "Only room owner or admin can view bans" });
+      }
+      
+      let bans = [];
+      
+      if (await pgUsersEnabled()) {
+        const result28 = await pgSafe(
+          `SELECT rb.user_id, u.username, rb.reason, rb.banned_at, rb.expires_at, b.username as banned_by
+           FROM room_bans rb
+           JOIN users u ON u.id = rb.user_id
+           LEFT JOIN users b ON b.id = rb.banned_by_user_id
+           WHERE rb.room_name = $1
+           ORDER BY rb.banned_at DESC`,
+          [roomName]
+        );
+        const rows = result28?.rows || [];
+        bans = rows || [];
+      } else {
+        bans = await dbAllAsync(
+          `SELECT rb.user_id, u.username, rb.reason, rb.banned_at, rb.expires_at, b.username as banned_by
+           FROM room_bans rb
+           JOIN users u ON u.id = rb.user_id
+           LEFT JOIN users b ON b.id = rb.banned_by_user_id
+           WHERE rb.room_name = ?
+           ORDER BY rb.banned_at DESC`,
+          [roomName]
+        );
+      }
+      
+      safe({ ok: true, bans });
+    } catch (e) {
+      console.error("[room:bans] error:", e);
+      safe({ ok: false, error: "Failed to fetch bans" });
+    }
+  });
+
+  // Helper function to parse ban duration strings
+  function parseBanDuration(duration) {
+    const durations = {
+      "5m": 5 * 60 * 1000,
+      "10m": 10 * 60 * 1000,
+      "30m": 30 * 60 * 1000,
+      "1h": 60 * 60 * 1000,
+      "2h": 2 * 60 * 60 * 1000,
+      "4h": 4 * 60 * 60 * 1000,
+      "8h": 8 * 60 * 60 * 1000,
+      "24h": 24 * 60 * 60 * 1000,
+      "7d": 7 * 24 * 60 * 60 * 1000,
+      "30d": 30 * 24 * 60 * 60 * 1000,
+      "6mo": 6 * 30 * 24 * 60 * 60 * 1000,
+      "1y": 365 * 24 * 60 * 60 * 1000,
+      "forever": null // Permanent
+    };
+    return durations[duration] || null;
+  }
+
+  
+  socket.on("refresh user list", () => {
+    if (IS_DEV_MODE) console.log("[socket] refresh user list", { socketId: socket.id });
+    try {
+      if (socket.currentRoom) emitUserList(socket.currentRoom);
+    } catch {}
+  });
+
+socket.on("disconnect", (reason) => {
+    // Enhanced disconnect handler with comprehensive cleanup and logging
+    if (IS_DEV_MODE) console.log("[socket] disconnect", { socketId: socket.id, reason, username: socket.user?.username });
+    
+    try {
+      // Clean up session metadata
+      sessionMetaBySocketId.delete(socket.id);
+      const uid = socket.user?.id;
+      const set = sessionByUserId.get(uid);
+      if (set) {
+        set.delete(socket.id);
+        if (!set.size) sessionByUserId.delete(uid);
+      }
+    } catch (err) {
+      if (IS_DEV_MODE) console.warn("[socket] disconnect: session cleanup failed", err);
+    }
+
+    // socket.user is attached after successful auth; guard for anonymous / early disconnects
+    if (socket.user?.username) ONLINE_USERS.delete(socket.user.username);
+    emitOnlineUsers();
+
+    const room = socket.currentRoom;
+
+    // Always clear per-socket rate tracking
+    msgRate.delete(socket.id);
+    socketEventRate.delete(socket.id);
+    releaseSocketConnection(getSocketIp(socket));
+
+    // Only clear per-user mappings if THIS socket is still the active one
+    if (socket.user?.id && socketIdByUserId.get(socket.user.id) === socket.id) {
+      socketIdByUserId.delete(socket.user.id);
+      onlineState.delete(socket.user.id);
+      onlineXpTrack.delete(socket.user.id);
+    }
+
+    // last_seen + typing indicators only apply to authenticated users
+    if (socket.user?.id) {
+      db.run("UPDATE users SET last_seen=? WHERE id=?", [Date.now(), socket.user.id]);
+    }
+
+    if (room) {
+      const set = typingByRoom.get(room);
+      if (set) {
+        if (socket.user?.username) set.delete(socket.user.username);
+        broadcastTyping(room);
+      }
+      emitUserList(room);
+    }
+
+    // Clear DM typing indicators for any DM rooms this socket was in.
+    try {
+      const u = socket.user?.username;
+      if (u && socket.dmThreads && socket.dmThreads.size) {
+        for (const tid of socket.dmThreads) {
+          const set = dmTypingByThread.get(tid);
+          if (set && set.has(u)) {
+            set.delete(u);
+            if (set.size === 0) dmTypingByThread.delete(tid);
+            broadcastDmTyping(tid);
+          }
+        }
+      }
+    } catch {}
+  });
+
+  // === EMIT SERVER-READY AFTER ALL LISTENERS ARE REGISTERED ===
+  // This confirms to the client that the server is fully initialized and ready to handle events.
+  // All socket.on(...) listeners are now registered and will not miss any client events.
+  // Emitting this at the end (after all listener setup) ensures strict event registration order.
+  socket.emit("server-ready", { ok: true, socketId: socket.id });
+  if (IS_DEV_MODE) console.log("[socket] server-ready emitted", { socketId: socket.id, username: socket.user?.username });
+
+});
+
+  console.log('[startup]   ✓ Socket handlers registered');
 }
 
 /**
