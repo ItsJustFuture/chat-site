@@ -213,7 +213,7 @@ const {
   pgPool,
   POSTGRES_ENABLED,
   POSTGRES_SSL_MODE,
-  POSTGRES_SSL_VERIFY,
+  POSTGRES_SSL_REJECT_UNAUTHORIZED,
   POSTGRES_URL,
   IS_RENDER,
 } = require("./db/postgres");
@@ -377,12 +377,6 @@ if (IS_PROD) {
   }
 }
 
-if (POSTGRES_URL) {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-  const tlsReason = IS_RENDER ? "Render" : IS_PROD ? "production" : "non-prod";
-  console.warn(`[startup] NODE_TLS_REJECT_UNAUTHORIZED forced to 0 for ${tlsReason} Postgres`);
-}
-
 const AVATARS_DIR = path.join(__dirname, "avatars");
 
 // ---- Ensure folders exist
@@ -509,7 +503,7 @@ if (!POSTGRES_ENABLED && IS_DEV_MODE) {
 }
 if (POSTGRES_ENABLED) {
   console.log("[startup] Postgres SSL:", POSTGRES_SSL_MODE);
-  console.log(`[startup] Postgres pool source: db/postgresPool sslRejectUnauthorized=${POSTGRES_SSL_VERIFY}`);
+  console.log(`[startup] Postgres pool source: db/postgresPool sslRejectUnauthorized=${POSTGRES_SSL_REJECT_UNAUTHORIZED}`);
   if (pgPool) {
     pgPool
       .query("SELECT 1")

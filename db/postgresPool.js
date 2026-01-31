@@ -9,8 +9,10 @@ const IS_RENDER = Boolean(
   process.env.RENDER || process.env.RENDER_SERVICE_ID || process.env.RENDER_EXTERNAL_URL
 );
 const IS_PROD = NODE_ENV === "production";
-const POSTGRES_SSL_VERIFY = false;
-const POSTGRES_SSL = POSTGRES_ENABLED ? { rejectUnauthorized: false } : false;
+const POSTGRES_SSL_REJECT_UNAUTHORIZED = false;
+const POSTGRES_SSL = POSTGRES_ENABLED
+  ? { rejectUnauthorized: POSTGRES_SSL_REJECT_UNAUTHORIZED }
+  : false;
 const POSTGRES_SSL_MODE = POSTGRES_ENABLED ? "no-verify" : "disabled";
 const POSTGRES_CONFIG = POSTGRES_ENABLED
   ? {
@@ -37,7 +39,7 @@ module.exports = {
   POSTGRES_ENABLED,
   POSTGRES_SSL,
   POSTGRES_SSL_MODE,
-  POSTGRES_SSL_VERIFY,
+  POSTGRES_SSL_REJECT_UNAUTHORIZED,
   POSTGRES_URL,
   IS_PROD,
   IS_RENDER,
