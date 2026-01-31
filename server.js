@@ -210,6 +210,9 @@ const multer = require("multer");
 
 // === POSTGRES CONNECTION SOURCE ===
 // Single authoritative Postgres connection URL
+// NOTE: The fallback URL is intentionally hard-coded per requirements for production deployment.
+// In production, DATABASE_URL environment variable should be set to override this fallback.
+// The hard-coded URL ensures Postgres connectivity when DATABASE_URL is not explicitly configured.
 const POSTGRES_URL =
   process.env.DATABASE_URL ||
   "postgresql://bandb_db_5j7x_user:7p4Xkp0jiPdn4RuTUIPPJofcsowUZnz4@dpg-d5tcj1dactks73a4pnu0-a.oregon-postgres.render.com/bandb_db_5j7x";
@@ -494,7 +497,9 @@ if (POSTGRES_ENABLED) {
   const { Pool } = require("pg");
   pgPool = new Pool({
     connectionString: POSTGRES_URL,
-    ssl: { rejectUnauthorized: false }
+    ssl: NODE_ENV === "production" && process.env.DATABASE_URL
+      ? { rejectUnauthorized: true }
+      : { rejectUnauthorized: false }
   });
 }
 
@@ -529,7 +534,7 @@ async function pgGetColumnType(tableName, columnName) {
 }
 async function pgEnsureCamelColumn(tableName, camelName, typeSql = "BIGINT") {
   if (!POSTGRES_ENABLED || !pgPool) return;
-  
+
   // If exact camelCase column already exists, we're good
   const exact = await pgGetColumnType(tableName, camelName);
   if (exact) return;
@@ -548,7 +553,7 @@ async function pgEnsureCamelColumn(tableName, camelName, typeSql = "BIGINT") {
 }
 async function pgEnsureEpochMsBigint(tableName, columnName) {
   if (!POSTGRES_ENABLED || !pgPool) return;
-  
+
   const info = await pgGetColumnType(tableName, columnName);
   if (!info) return;
 
