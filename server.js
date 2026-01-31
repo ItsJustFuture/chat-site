@@ -15139,7 +15139,7 @@ io.use((socket, next) => {
   const secFetchSite = String(socket.handshake.headers["sec-fetch-site"] || "").toLowerCase();
   const secFetchMode = String(socket.handshake.headers["sec-fetch-mode"] || "").toLowerCase();
   const secFetchDest = String(socket.handshake.headers["sec-fetch-dest"] || "").toLowerCase();
-  const allowRefererFallback = !IS_PROD || secFetchSite === "same-origin";
+  const shouldAllowRefererFallback = !IS_PROD || secFetchSite === "same-origin";
   if (origin) {
     if (!isAllowedOrigin(origin, hostHeader)) {
       return next(new Error("Origin not allowed"));
@@ -15149,7 +15149,7 @@ io.use((socket, next) => {
   if (secFetchSite === "same-origin" && secFetchMode === "websocket" && secFetchDest === "websocket") {
     return next();
   }
-  if (referer && allowRefererFallback) {
+  if (referer && shouldAllowRefererFallback) {
     // Referrer (Referer header) can be spoofed or omitted; only use as a best-effort fallback.
     const refOrigin = safeParseUrl(referer)?.origin || "";
     if (refOrigin && isAllowedOrigin(refOrigin, hostHeader)) return next();
