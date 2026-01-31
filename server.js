@@ -15135,9 +15135,7 @@ function releaseSocketConnection(ip) {
 io.use((socket, next) => {
   const origin = String(socket.handshake.headers.origin || "");
   const hostHeader = String(socket.handshake.headers.host || "");
-  if (!origin) {
-    if (IS_PROD) return next(new Error("Origin required"));
-  } else if (!isAllowedOrigin(origin, hostHeader)) {
+  if (origin && !isAllowedOrigin(origin, hostHeader)) {
     return next(new Error("Origin not allowed"));
   }
   return next();
