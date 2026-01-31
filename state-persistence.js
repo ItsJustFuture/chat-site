@@ -12,6 +12,19 @@ let dbAllAsync = null;
 let pgPool = null;
 
 /**
+ * Safe Postgres query helper - never blocks or crashes
+ */
+async function pgSafe(query, params = []) {
+  if (!pgPool) return null;
+  try {
+    return await pgPool.query(query, params);
+  } catch (err) {
+    console.warn("[state-persistence][Postgres skipped]", err.message);
+    return null;
+  }
+}
+
+/**
  * Initialize with database references
  */
 function initStateManagement(sqliteRun, sqliteAll, postgres) {
@@ -44,7 +57,7 @@ async function createStateTables() {
   // Postgres
   if (pgPool) {
     try {
-      await pgPool.query(`
+      await pgSafe(`
         CREATE TABLE IF NOT EXISTS state_kv (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL,
@@ -54,7 +67,7 @@ async function createStateTables() {
         )
       `);
       
-      await pgPool.query(`
+      await pgSafe(`
         CREATE INDEX IF NOT EXISTS idx_state_kv_expires ON state_kv(expires_at)
       `);
     } catch (err) {
@@ -87,7 +100,7 @@ async function setState(key, value, ttlSeconds = null) {
   // Postgres
   if (pgPool) {
     try {
-      await pgPool.query(
+      await pgSafe(
         `INSERT INTO state_kv (key, value, expires_at, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (key) DO UPDATE SET value = $2, expires_at = $3, updated_at = $5`,
@@ -116,12 +129,12 @@ async function getState(key) {
     if (!rows || !rows.length) {
       // Try Postgres
       if (pgPool) {
-        const result = await pgPool.query(
+        const result = await pgSafe(
           "SELECT value, expires_at FROM state_kv WHERE key = $1",
           [key]
         );
         
-        if (result.rows && result.rows.length) {
+        if (result?.rows && result.rows.length) {
           const row = result.rows[0];
           if (row.expires_at && row.expires_at < now) {
             await deleteState(key);
@@ -161,7 +174,7 @@ async function deleteState(key) {
   
   if (pgPool) {
     try {
-      await pgPool.query("DELETE FROM state_kv WHERE key = $1", [key]);
+      await pgSafe("DELETE FROM state_kv WHERE key = $1", [key]);
     } catch (err) {
       // Silent fail
     }
@@ -214,7 +227,7 @@ async function deleteByPrefix(prefix) {
   
   if (pgPool) {
     try {
-      await pgPool.query("DELETE FROM state_kv WHERE key LIKE $1", [pattern]);
+      await pgSafe("DELETE FROM state_kv WHERE key LIKE $1", [pattern]);
     } catch (err) {
       // Silent fail
     }
@@ -240,7 +253,7 @@ async function cleanupExpiredState() {
   
   if (pgPool) {
     try {
-      await pgPool.query(
+      await pgSafe(
         "DELETE FROM state_kv WHERE expires_at IS NOT NULL AND expires_at < $1",
         [now]
       );
