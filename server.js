@@ -351,10 +351,47 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-// ---- App, Server, IO (will be created in startServer)
-let app;
-let httpServer;
-let io;
+// ---- App + Server (initialized at module load, but controlled startup in startServer)
+// Note: Full deferred initialization would require moving all middleware/routes into functions
+// This is a pragmatic compromise - app/httpServer/io are created here, but:
+// - Redis connection is deferred to Phase 5a
+// - Background tasks are deferred to Phase 10  
+// - Server listening is deferred to Phase 11
+console.log("[startup] Initializing Express app and HTTP server...");
+const app = express();
+app.set("trust proxy", 1);
+const httpServer = http.createServer(app);
+console.log("[startup] Initializing Socket.IO...");
+const io = new Server(httpServer, {
+  cors: { origin: true, credentials: true },
+  transports: ["websocket", "polling"],
+  allowRequest: (req, cb) => {
+    try {
+      const origin = req.headers.origin;
+      const host = req.headers.host;
+      if (!origin) {
+        if (isAllowedHostHeader(host)) {
+          return cb(null, true);
+        }
+        console.warn("[socket.io] Handshake rejected: origin required", { host });
+        return cb(null, false);
+      }
+      if (!isAllowedOrigin(origin, host)) {
+        console.warn("[socket.io] Handshake rejected: origin not allowed", { origin, host });
+        return cb(null, false);
+      }
+      return cb(null, true);
+    } catch (err) {
+      console.warn("[socket.io] Handshake rejected: error", err?.message || err);
+      return cb(null, false);
+    }
+  },
+  pingInterval: 25_000,
+  pingTimeout: 300_000,
+  upgradeTimeout: 45_000,
+});
+console.log("[startup] Socket.IO initialized ✓");
+// Note: Redis adapter will be attached in startServer Phase 5a (after Redis connects)
 
 
   const DEBUG_ROOMS = String(process.env.DEBUG_ROOMS || "").toLowerCase() === "true";
@@ -19010,104 +19047,51 @@ async function initializeRedis() {
 }
 
 /**
- * Create and configure Express application
- * Called during Phase 6a of startup
+ * Attach Redis adapter to Socket.IO
+ * Called during Phase 6 of startup (after Redis connects, if configured)
  */
-function createExpressApp() {
-  console.log('[startup] Phase 6a: Creating Express app...');
-  const newApp = express();
-  newApp.set("trust proxy", 1);
-  console.log('[startup]   ✓ Express app created');
-  return newApp;
-}
-
-/**
- * Create HTTP server
- * Called during Phase 6b of startup
- */
-function createHttpServer(app) {
-  console.log('[startup] Phase 6b: Creating HTTP server...');
-  const newHttpServer = http.createServer(app);
-  console.log('[startup]   ✓ HTTP server created');
-  return newHttpServer;
-}
-
-/**
- * Create and configure Socket.IO server
- * Called during Phase 6c of startup
- */
-function createSocketIOServer(httpServer) {
-  console.log('[startup] Phase 6c: Creating Socket.IO server...');
-  const newIo = new Server(httpServer, {
-    cors: { origin: true, credentials: true },
-    transports: ["websocket", "polling"],
-    allowRequest: (req, cb) => {
-      try {
-        const origin = req.headers.origin;
-        const host = req.headers.host;
-        if (!origin) {
-          if (isAllowedHostHeader(host)) {
-            return cb(null, true);
-          }
-          console.warn("[socket.io] Handshake rejected: origin required", { host });
-          return cb(null, false);
-        }
-        if (!isAllowedOrigin(origin, host)) {
-          console.warn("[socket.io] Handshake rejected: origin not allowed", { origin, host });
-          return cb(null, false);
-        }
-        return cb(null, true);
-      } catch (err) {
-        console.warn("[socket.io] Handshake rejected: error", err?.message || err);
-        return cb(null, false);
-      }
-    },
-    pingInterval: 25_000,
-    pingTimeout: 300_000,
-    upgradeTimeout: 45_000,
-  });
-  
-  // Attach Redis adapter if available
+function attachRedisAdapter() {
+  console.log('[startup] Phase 6: Attaching Redis adapter to Socket.IO...');
   if (redisAdapter) {
-    newIo.adapter(redisAdapter);
-    console.log('[startup]   ✓ Redis adapter attached');
+    io.adapter(redisAdapter);
+    console.log('[startup]   ✓ Redis adapter attached to Socket.IO');
+  } else {
+    console.log('[startup]   ⚠ No Redis adapter to attach (Redis not configured or connection failed)');
   }
-  
-  console.log('[startup]   ✓ Socket.IO server created');
-  return newIo;
+  console.log('[startup]   ✓ Phase 6 complete');
 }
 
 /**
  * Register all Express middleware
  * Called during Phase 7 of startup  
- * Note: Middleware is still registered at module level (to be fixed in future PR)
+ * Note: Middleware is already registered at module level (historical architecture)
  */
-function registerMiddleware(app) {
-  console.log('[startup] Phase 7: Middleware will be registered...');
-  console.log('[startup]   ⚠ Middleware still registered at module load (needs future refactoring)');
-  console.log('[startup]   ✓ Middleware registration phase complete');
+function registerMiddleware() {
+  console.log('[startup] Phase 7: Middleware registration check...');
+  console.log('[startup]   ⚠ Middleware registered at module load (historical architecture)');
+  console.log('[startup]   ✓ Phase 7 complete');
 }
 
 /**
  * Register all HTTP routes
  * Called during Phase 8 of startup
- * Note: Routes are still registered at module level (to be fixed in future PR)
+ * Note: Routes are already registered at module level (historical architecture)
  */
-function registerRoutes(app) {
-  console.log('[startup] Phase 8: Routes will be registered...');
-  console.log('[startup]   ⚠ Routes still registered at module load (needs future refactoring)');
-  console.log('[startup]   ✓ Route registration phase complete');
+function registerRoutes() {
+  console.log('[startup] Phase 8: Routes registration check...');
+  console.log('[startup]   ⚠ Routes registered at module load (historical architecture)');
+  console.log('[startup]   ✓ Phase 8 complete');
 }
 
 /**
  * Register all Socket.IO event handlers
  * Called during Phase 9 of startup
- * Note: Socket handlers are still registered at module level (to be fixed in future PR)
+ * Note: Socket handlers are already registered at module level (historical architecture)
  */
-function registerSocketHandlers(io) {
-  console.log('[startup] Phase 9: Socket handlers will be registered...');
-  console.log('[startup]   ⚠ Socket handlers still registered at module load (needs future refactoring)');
-  console.log('[startup]   ✓ Socket handler registration phase complete');
+function registerSocketHandlers() {
+  console.log('[startup] Phase 9: Socket handlers registration check...');
+  console.log('[startup]   ⚠ Socket handlers registered at module load (historical architecture)');
+  console.log('[startup]   ✓ Phase 9 complete');
 }
 
 /**
@@ -19195,19 +19179,17 @@ async function startServer() {
     // Phase 5a: Connect Redis (optional, for multi-instance Socket.IO)
     await initializeRedis();
     
-    // Phase 6: Create Express app and servers
-    app = createExpressApp();
-    httpServer = createHttpServer(app);
-    io = createSocketIOServer(httpServer);
+    // Phase 6: Attach Redis adapter to Socket.IO (if Redis connected)
+    attachRedisAdapter();
     
-    // Phase 7: Register all middleware
-    registerMiddleware(app);
+    // Phase 7: Middleware registration check (already done at module load)
+    registerMiddleware();
     
-    // Phase 8: Register all HTTP routes
-    registerRoutes(app);
+    // Phase 8: Routes registration check (already done at module load)
+    registerRoutes();
     
-    // Phase 9: Register all Socket.IO handlers
-    registerSocketHandlers(io);
+    // Phase 9: Socket handlers registration check (already done at module load)
+    registerSocketHandlers();
     
     // Phase 10: Start background tasks
     startBackgroundTasks();
@@ -19223,7 +19205,7 @@ async function startServer() {
   } catch (err) {
     console.error('[startup] ========================================');
     console.error('[startup] FATAL ERROR DURING INITIALIZATION');
-    console.log('[startup] ========================================');
+    console.error('[startup] ========================================');
     console.error(err);
     process.exit(1);
   }
