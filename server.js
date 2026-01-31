@@ -19011,7 +19011,8 @@ async function startHttpServer() {
 
 /**
  * Initialize Redis connection for Socket.IO adapter
- * Called during Phase 5a of startup (before creating Socket.IO)
+ * Called during Phase 5a of startup
+ * Note: Socket.IO is already created at module load; this function connects Redis and prepares the adapter
  * Returns true if Redis connected, false otherwise
  */
 async function initializeRedis() {
@@ -19068,7 +19069,7 @@ function attachRedisAdapter() {
  */
 function registerMiddleware() {
   console.log('[startup] Phase 7: Middleware registration check...');
-  console.log('[startup]   ⚠ Middleware registered at module load (historical architecture)');
+  console.log('[startup]   ℹ️ Middleware registered at module load (historical architecture)');
   console.log('[startup]   ✓ Phase 7 complete');
 }
 
@@ -19079,7 +19080,7 @@ function registerMiddleware() {
  */
 function registerRoutes() {
   console.log('[startup] Phase 8: Routes registration check...');
-  console.log('[startup]   ⚠ Routes registered at module load (historical architecture)');
+  console.log('[startup]   ℹ️ Routes registered at module load (historical architecture)');
   console.log('[startup]   ✓ Phase 8 complete');
 }
 
@@ -19090,7 +19091,7 @@ function registerRoutes() {
  */
 function registerSocketHandlers() {
   console.log('[startup] Phase 9: Socket handlers registration check...');
-  console.log('[startup]   ⚠ Socket handlers registered at module load (historical architecture)');
+  console.log('[startup]   ℹ️ Socket handlers registered at module load (historical architecture)');
   console.log('[startup]   ✓ Phase 9 complete');
 }
 
