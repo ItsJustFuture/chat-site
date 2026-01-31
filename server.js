@@ -404,6 +404,7 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
       origin: true,
       credentials: true,
     },
+    // Explicit transports to ensure Render proxies fall back to polling if WebSocket upgrade fails.
     transports: ["websocket", "polling"],
 
     // Origin allowlist for Socket.IO handshake
@@ -1908,8 +1909,8 @@ function isLocalhostOrigin(origin) {
 function isAllowedHostHeader(hostHeader) {
   if (!hostHeader) return false;
   const httpsUrl = safeParseUrl(`https://${hostHeader}`);
-  if (httpsUrl && ALLOWED_ORIGINS.has(httpsUrl.origin)) return true;
   const httpUrl = safeParseUrl(`http://${hostHeader}`);
+  if (httpsUrl && ALLOWED_ORIGINS.has(httpsUrl.origin)) return true;
   if (httpUrl && ALLOWED_ORIGINS.has(httpUrl.origin)) return true;
   if (!IS_PROD && httpsUrl && isLocalhostOrigin(httpsUrl.origin)) return true;
   if (!IS_PROD && httpUrl && isLocalhostOrigin(httpUrl.origin)) return true;
