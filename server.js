@@ -367,7 +367,7 @@ const PUBLIC_ORIGIN = String(
   "https://banter-and-brats.onrender.com"
 ).trim();
 if (PUBLIC_ORIGIN) ALLOWED_ORIGINS.add(PUBLIC_ORIGIN);
-const SOCKET_IO_DEBUG = String(process.env.SOCKET_IO_DEBUG || "").toLowerCase() === "true";
+const SOCKET_IO_DEBUG_ENABLED = String(process.env.SOCKET_IO_DEBUG || "").toLowerCase() === "true";
 
 const LOCAL_DEV = process.env.LOCAL_DEV === "1";
 // ---- Startup sanity checks (fail fast in production)
@@ -1907,10 +1907,12 @@ function isLocalhostOrigin(origin) {
 
 function isAllowedHostHeader(hostHeader) {
   if (!hostHeader) return false;
-  const url = safeParseUrl(`https://${hostHeader}`);
-  if (!url) return false;
-  if (ALLOWED_ORIGINS.has(url.origin)) return true;
-  if (!IS_PROD && isLocalhostOrigin(url.origin)) return true;
+  const httpsUrl = safeParseUrl(`https://${hostHeader}`);
+  if (httpsUrl && ALLOWED_ORIGINS.has(httpsUrl.origin)) return true;
+  const httpUrl = safeParseUrl(`http://${hostHeader}`);
+  if (httpUrl && ALLOWED_ORIGINS.has(httpUrl.origin)) return true;
+  if (!IS_PROD && httpsUrl && isLocalhostOrigin(httpsUrl.origin)) return true;
+  if (!IS_PROD && httpUrl && isLocalhostOrigin(httpUrl.origin)) return true;
   return false;
 }
 
@@ -15172,7 +15174,7 @@ io.use((socket, next) => {
   const secFetchMode = String(socket.handshake.headers["sec-fetch-mode"] || "").toLowerCase();
   const secFetchDest = String(socket.handshake.headers["sec-fetch-dest"] || "").toLowerCase();
   const allowRefererFallbackInDev = !IS_PROD;
-  if (SOCKET_IO_DEBUG) {
+  if (SOCKET_IO_DEBUG_ENABLED) {
     console.log("[socket.io] Handshake headers", {
       origin,
       host: hostHeader,
