@@ -399,7 +399,7 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
         const origin = req.headers.origin;
         const host = req.headers.host;
         if (!origin) {
-          return cb(null, !IS_PROD);
+          return cb(null, true);
         }
         return cb(null, isAllowedOrigin(origin, host));
       } catch {
