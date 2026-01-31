@@ -15135,8 +15135,21 @@ function releaseSocketConnection(ip) {
 io.use((socket, next) => {
   const origin = String(socket.handshake.headers.origin || "");
   const hostHeader = String(socket.handshake.headers.host || "");
-  if (origin && !isAllowedOrigin(origin, hostHeader)) {
-    return next(new Error("Origin not allowed"));
+  const referer = String(socket.handshake.headers.referer || "");
+  const secFetchSite = String(socket.handshake.headers["sec-fetch-site"] || "").toLowerCase();
+  if (origin) {
+    if (!isAllowedOrigin(origin, hostHeader)) {
+      return next(new Error("Origin not allowed"));
+    }
+    return next();
+  }
+  if (referer) {
+    const refOrigin = safeParseUrl(referer)?.origin || "";
+    if (refOrigin && isAllowedOrigin(refOrigin, hostHeader)) return next();
+  }
+  if (secFetchSite === "same-origin" || secFetchSite === "same-site") return next();
+  if (IS_PROD) {
+    return next(new Error("Origin required"));
   }
   return next();
 });
