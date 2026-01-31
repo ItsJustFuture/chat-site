@@ -166,16 +166,22 @@
   // ===== Utility: Wait for app:ready =====
   window.waitForAppReady = function() {
     return new Promise((resolve) => {
+      // Set up listener first to avoid race condition
+      const listener = (event) => {
+        resolve(event.detail);
+      };
+      
+      // Check if already ready
       if (isAppReady) {
+        // Already ready, resolve immediately
         resolve({
           socket: window.socket,
           currentUser: window.currentUser,
           currentRoom: window.currentRoom
         });
       } else {
-        window.addEventListener('app:ready', (event) => {
-          resolve(event.detail);
-        }, { once: true });
+        // Not ready yet, wait for event
+        window.addEventListener('app:ready', listener, { once: true });
       }
     });
   };

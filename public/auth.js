@@ -9,7 +9,7 @@
     
     // Ensure waitForAppReady is available
     if (typeof window.waitForAppReady !== 'function') {
-      console.error('[auth.js] FATAL: window.waitForAppReady not available! app.js must load before auth.js');
+      console.error('[auth.js] FATAL: window.waitForAppReady not initialized by app.js - runtime initialization error');
       return;
     }
 
@@ -131,7 +131,13 @@
         if (!data || !data.id) return showLoginView();
         
         // User is logged in, initialize socket if not already done
-        if (!window.socket && typeof window.initSocket === 'function') {
+        if (!window.socket) {
+          if (typeof window.initSocket !== 'function') {
+            console.error('[auth.js] window.initSocket not available - cannot initialize socket');
+            showChatView();
+            return;
+          }
+          
           console.log('[auth.js] Initializing socket after successful session check...');
           try {
             await window.initSocket();

@@ -20,7 +20,7 @@
     
     // Ensure waitForAppReady is available
     if (typeof window.waitForAppReady !== 'function') {
-      console.error('[chat.js] FATAL: window.waitForAppReady not available! app.js must load before chat.js');
+      console.error('[chat.js] FATAL: window.waitForAppReady not initialized by app.js - runtime initialization error');
       return;
     }
 
@@ -278,18 +278,8 @@
     // Set immediately to prevent race conditions with multiple initialization calls
     isInitialized = true;
 
-    console.log('[chat.js] Initializing chat UI...');
-
-    try {
-      // Socket is already initialized by app.js and listeners are setup
-      // Just attach UI event listeners
-      attachEventListeners();
-      console.log('[chat.js] Chat UI initialized successfully ✓');
-    } catch (err) {
-      console.error('[chat.js] Initialization failed:', err);
-      // Reset flag on error so retry is possible
-      isInitialized = false;
-    }
+    console.log('[chat.js] Chat UI initialized');
+    // Note: attachEventListeners is called from setupSocketListeners after socket is ready
   }
 
   // ===== Public API =====
