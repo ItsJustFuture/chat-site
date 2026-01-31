@@ -105,7 +105,12 @@
 
         window.socket.on('reconnect', (attemptNumber) => {
           console.log('[app.js] Socket reconnected after', attemptNumber, 'attempts');
-          serverReady = false; // Reset until new server-ready signal
+          // Reset serverReady flag - will be set again when new server-ready signal arrives
+          // Note: socket.connected is the authoritative connection state. The serverReady flag
+          // is only used for initial connection error handling (to avoid showing false errors
+          // before the server has finished initialization). All socket operations should check
+          // socket.connected, not serverReady.
+          serverReady = false;
           failedAttempts = 0;
           hideConnectionError();
         });
