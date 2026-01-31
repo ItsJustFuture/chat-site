@@ -213,7 +213,7 @@ const multer = require("multer");
 // In production, DATABASE_URL should be set; when omitted the app falls back to SQLite-only mode.
 const POSTGRES_URL = process.env.DATABASE_URL || "";
 // PGSSL_REJECT_UNAUTHORIZED accepts '1', 'true', or 'yes' to enable strict certificate verification.
-const POSTGRES_SSL_REJECT_UNAUTHORIZED = process.env.PGSSL_REJECT_UNAUTHORIZED === undefined
+const POSTGRES_SSL_VERIFY = process.env.PGSSL_REJECT_UNAUTHORIZED === undefined
   ? NODE_ENV === "production"
   : ["1", "true", "yes"].includes(String(process.env.PGSSL_REJECT_UNAUTHORIZED).toLowerCase());
 
@@ -496,7 +496,9 @@ let pgPool = null;
 if (POSTGRES_ENABLED && Pool) {
   pgPool = new Pool({
     connectionString: POSTGRES_URL,
-    ssl: { rejectUnauthorized: POSTGRES_SSL_REJECT_UNAUTHORIZED }
+    ssl: POSTGRES_URL.includes("sslmode=disable")
+      ? false
+      : { rejectUnauthorized: POSTGRES_SSL_VERIFY }
   });
 }
 

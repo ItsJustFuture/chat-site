@@ -41,7 +41,7 @@ Edit `.env` with your configuration. For local development, SQLite is used by de
 **Key Variables:**
 - `SESSION_SECRET` - Required for session encryption
 - `DATABASE_URL` - Optional; uses SQLite fallback if not set
-- `PGSSL_REJECT_UNAUTHORIZED` - Optional; set to `1`, `true`, or `yes` to enable strict cert verification (defaults to enabled in production, disabled otherwise; use `0`/omit for self-signed)
+- `PGSSL_REJECT_UNAUTHORIZED` - Optional; set to `1`, `true`, or `yes` to enable strict cert verification (defaults to enabled in production, disabled otherwise; set to `0`/`false` to explicitly disable)
 - `REDIS_URL` - Optional; enables multi-server Socket.IO scaling
 - `SENTRY_DSN` - Optional; enables error tracking
 - `ENABLE_PWA` - Optional; enables Progressive Web App features
