@@ -41,7 +41,7 @@ Edit `.env` with your configuration. For local development, SQLite is used by de
 **Key Variables:**
 - `SESSION_SECRET` - Required for session encryption
 - `DATABASE_URL` - Optional; uses SQLite fallback if not set
-- `PGSSL_REJECT_UNAUTHORIZED` - Optional; set to `1`, `true`, or `yes` to enable strict cert verification (defaults to enabled in production, disabled otherwise). Use `sslmode=disable` in `DATABASE_URL` to disable SSL entirely.
+- `PGSSL_REJECT_UNAUTHORIZED` - Deprecated; SSL verification is disabled to support Render's self-signed certificates.
 - `REDIS_URL` - Optional; enables multi-server Socket.IO scaling
 - `SENTRY_DSN` - Optional; enables error tracking
 - `ENABLE_PWA` - Optional; enables Progressive Web App features

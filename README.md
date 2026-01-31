@@ -80,7 +80,7 @@ npm run test:memory
 
 **Optional:**
 - `SQLITE_PATH` - SQLite database path (default: `./data/dev.sqlite`)
-- `PGSSL_REJECT_UNAUTHORIZED` - Set to `1`, `true`, or `yes` to enforce cert verification (defaults to enabled in production, disabled otherwise). Use `sslmode=disable` in `DATABASE_URL` to disable SSL entirely.
+- `PGSSL_REJECT_UNAUTHORIZED` - Deprecated; SSL verification is disabled to support Render's self-signed certificates.
 - `REDIS_URL` - Redis connection for Socket.IO adapter
 - `SENTRY_DSN` - Sentry error tracking
 - `ENABLE_PWA` - Enable PWA features

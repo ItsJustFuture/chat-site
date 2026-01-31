@@ -213,8 +213,9 @@ const {
   pgPool,
   POSTGRES_ENABLED,
   POSTGRES_SSL_MODE,
-  POSTGRES_SSL_VERIFY,
+  POSTGRES_SSL_REJECT_UNAUTHORIZED,
   POSTGRES_URL,
+  IS_RENDER,
 } = require("./db/postgres");
 const http = require("http");
 const {
@@ -502,6 +503,7 @@ if (!POSTGRES_ENABLED && IS_DEV_MODE) {
 }
 if (POSTGRES_ENABLED) {
   console.log("[startup] Postgres SSL:", POSTGRES_SSL_MODE);
+  console.log(`[startup] Postgres pool source: db/postgresPool sslRejectUnauthorized=${POSTGRES_SSL_REJECT_UNAUTHORIZED}`);
   if (pgPool) {
     pgPool
       .query("SELECT 1")
@@ -1960,7 +1962,7 @@ if (POSTGRES_ENABLED && pgPool) {
       // connect-pg-simple will create it on demand if missing.
       createTableIfMissing: true,
     });
-    console.log("[startup] Session store configured (Postgres)");
+    console.log("[startup] Session store configured (Postgres, explicit pool)");
   } catch (err) {
     console.warn("[startup] Session store init failed, using MemoryStore:", err?.message || err);
   }
