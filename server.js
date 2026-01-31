@@ -209,21 +209,13 @@ const rateLimit = require("express-rate-limit");
 const multer = require("multer");
 
 const NODE_ENV = process.env.NODE_ENV || "development";
-// === POSTGRES CONNECTION SOURCE ===
-// Single authoritative Postgres connection URL.
-// In production, DATABASE_URL should be set; when omitted the app falls back to SQLite-only mode.
-const POSTGRES_URL = process.env.DATABASE_URL || "";
-// PGSSL_REJECT_UNAUTHORIZED accepts '1', 'true', or 'yes' to enable strict certificate verification.
-const POSTGRES_SSL_VERIFY = process.env.PGSSL_REJECT_UNAUTHORIZED === undefined
-  ? NODE_ENV === "production"
-  : ["1", "true", "yes"].includes(String(process.env.PGSSL_REJECT_UNAUTHORIZED).toLowerCase());
-
-const POSTGRES_ENABLED = !!POSTGRES_URL;
-
-let Pool = null;
-if (POSTGRES_ENABLED) {
-  Pool = require("pg").Pool;
-}
+const {
+  pgPool,
+  POSTGRES_ENABLED,
+  POSTGRES_SSL_MODE,
+  POSTGRES_SSL_VERIFY,
+  POSTGRES_URL,
+} = require("./db/postgres");
 const http = require("http");
 const {
   DICE_VARIANTS,
@@ -490,31 +482,32 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
       console.log("[rooms] system emit", { room: "__global__", text: payload.text, meta: payload.meta || null });
     }
   }
-// === SAFE POSTGRES INITIALIZATION ===
-let pgPool = null;
-
-if (POSTGRES_ENABLED && Pool) {
-  pgPool = new Pool({
-    connectionString: POSTGRES_URL,
-    ssl: POSTGRES_URL.includes("sslmode=disable")
-      ? false
-      : { rejectUnauthorized: POSTGRES_SSL_VERIFY }
-  });
-}
-
+let pgSafeWarned = false;
 // Safe Postgres query helper - never blocks or crashes
 async function pgSafe(query, params = []) {
   if (!POSTGRES_ENABLED || !pgPool) return null;
   try {
     return await pgPool.query(query, params);
   } catch (err) {
-    console.warn("[Postgres skipped]", err.message);
+    if (!pgSafeWarned) {
+      console.warn("[Postgres skipped]", err.message);
+      pgSafeWarned = true;
+    }
     return null;
   }
 }
 
 if (!POSTGRES_ENABLED && IS_DEV_MODE) {
   console.warn("[db] Postgres unavailable, using SQLite-only mode:", DB_FILE);
+}
+if (POSTGRES_ENABLED) {
+  console.log("[startup] Postgres SSL:", POSTGRES_SSL_MODE);
+  if (pgPool) {
+    pgPool
+      .query("SELECT 1")
+      .then(() => console.log("[startup] Postgres connected"))
+      .catch((err) => console.warn("[startup] Postgres connection failed:", err?.message || err));
+  }
 }
 let DB_BACKEND = "sqlite";
 // ---- Postgres: helpers to keep legacy schemas compatible
@@ -1957,15 +1950,23 @@ app.use((req, res, next) => {
 });
 
 // ---- Sessions (Postgres-backed; survives redeploys)
-const sessionStore = pgPool
-  ? new PgSession({
+let sessionStore = new session.MemoryStore();
+if (POSTGRES_ENABLED && pgPool) {
+  try {
+    sessionStore = new PgSession({
       pool: pgPool,
       tableName: "session",
       // Prevent cold-start / deploy races where the session table isn't ready yet.
       // connect-pg-simple will create it on demand if missing.
       createTableIfMissing: true,
-    })
-  : new session.MemoryStore();
+    });
+    console.log("[startup] Session store configured (Postgres)");
+  } catch (err) {
+    console.warn("[startup] Session store init failed, using MemoryStore:", err?.message || err);
+  }
+} else {
+  console.warn("[startup] Session store using MemoryStore (no Postgres pool)");
+}
 const SESSION_SECRET =
   process.env.SESSION_SECRET || (NODE_ENV !== "production" ? "dev-secret" : undefined);
 

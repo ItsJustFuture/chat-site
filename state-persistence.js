@@ -10,6 +10,7 @@
 let dbRunAsync = null;
 let dbAllAsync = null;
 let pgPool = null;
+let pgSafeWarned = false;
 
 /**
  * Safe Postgres query helper - never blocks or crashes
@@ -19,7 +20,10 @@ async function pgSafe(query, params = []) {
   try {
     return await pgPool.query(query, params);
   } catch (err) {
-    console.warn("[state-persistence][Postgres skipped]", err.message);
+    if (!pgSafeWarned) {
+      console.warn("[state-persistence][Postgres skipped]", err.message);
+      pgSafeWarned = true;
+    }
     return null;
   }
 }

@@ -1,7 +1,7 @@
 "use strict";
 
 const bcrypt = require("bcrypt");
-const { Pool } = require("pg");
+const { pgPool, POSTGRES_ENABLED } = require("../db/postgres");
 const { seedDevUser } = require("../database");
 
 const LOCAL_DEV = process.env.LOCAL_DEV === "1";
@@ -15,25 +15,20 @@ const seed = {
 };
 
 async function seedPostgres() {
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
-  });
-  try {
-    const hash = await bcrypt.hash(seed.password, 10);
-    await pool.query(
-      `
-      INSERT INTO users (username, password_hash, role, created_at)
-      VALUES ($1, $2, $3, $4)
-      ON CONFLICT (username)
-      DO UPDATE SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role
-      `,
-      [seed.username, hash, seed.role, Date.now()]
-    );
-    console.log("[seed] Postgres: ensured dev user", seed.username);
-  } finally {
-    await pool.end();
+  if (!pgPool) {
+    throw new Error("Postgres pool unavailable");
   }
+  const hash = await bcrypt.hash(seed.password, 10);
+  await pgPool.query(
+    `
+    INSERT INTO users (username, password_hash, role, created_at)
+    VALUES ($1, $2, $3, $4)
+    ON CONFLICT (username)
+    DO UPDATE SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role
+    `,
+    [seed.username, hash, seed.role, Date.now()]
+  );
+  console.log("[seed] Postgres: ensured dev user", seed.username);
 }
 
 async function seedSqlite() {
@@ -47,7 +42,7 @@ async function main() {
     process.exit(1);
   }
 
-  if (process.env.DATABASE_URL) {
+  if (POSTGRES_ENABLED) {
     try {
       await seedPostgres();
       return;
