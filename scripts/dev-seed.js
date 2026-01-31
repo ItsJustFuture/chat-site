@@ -1,7 +1,7 @@
 "use strict";
 
 const bcrypt = require("bcrypt");
-const { Pool } = require("pg");
+const { pgPool, POSTGRES_ENABLED } = require("../db/postgres");
 const { seedDevUser } = require("../database");
 
 const LOCAL_DEV = process.env.LOCAL_DEV === "1";
@@ -15,10 +15,10 @@ const seed = {
 };
 
 async function seedPostgres() {
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
-  });
+  const pool = pgPool;
+  if (!pool) {
+    throw new Error("Postgres pool unavailable");
+  }
   try {
     const hash = await bcrypt.hash(seed.password, 10);
     await pool.query(
@@ -47,7 +47,7 @@ async function main() {
     process.exit(1);
   }
 
-  if (process.env.DATABASE_URL) {
+  if (POSTGRES_ENABLED) {
     try {
       await seedPostgres();
       return;

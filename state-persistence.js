@@ -19,7 +19,10 @@ async function pgSafe(query, params = []) {
   try {
     return await pgPool.query(query, params);
   } catch (err) {
-    console.warn("[state-persistence][Postgres skipped]", err.message);
+    if (!pgSafe.warned) {
+      console.warn("[state-persistence][Postgres skipped]", err.message);
+      pgSafe.warned = true;
+    }
     return null;
   }
 }
