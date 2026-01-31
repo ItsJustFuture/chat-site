@@ -361,6 +361,10 @@ const ALLOWED_ORIGINS = new Set(
     .map((origin) => origin.trim())
     .filter(Boolean)
 );
+const RENDER_PUBLIC_ORIGIN = "https://banter-and-brats.onrender.com";
+const RENDER_EXTERNAL_ORIGIN = String(process.env.RENDER_EXTERNAL_URL || "").trim();
+if (RENDER_PUBLIC_ORIGIN) ALLOWED_ORIGINS.add(RENDER_PUBLIC_ORIGIN);
+if (RENDER_EXTERNAL_ORIGIN) ALLOWED_ORIGINS.add(RENDER_EXTERNAL_ORIGIN);
 
 const LOCAL_DEV = process.env.LOCAL_DEV === "1";
 // ---- Startup sanity checks (fail fast in production)
@@ -387,11 +391,19 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
 // ---- App + Server
   console.log("[startup] Initializing Express app and HTTP server...");
   const app = express();
+  app.set("trust proxy", 1);
   const httpServer = http.createServer(app);
   console.log("[startup] Initializing Socket.IO...");
   const io = new Server(httpServer, {
     // Render uses HTTPS -> allow websocket upgrade
-    cors: { origin: true, credentials: true },
+    cors: {
+      origin(origin, cb) {
+        if (!origin) return cb(null, true);
+        return cb(null, isAllowedOrigin(origin, ""));
+      },
+      credentials: true,
+    },
+    transports: ["websocket", "polling"],
 
     // Origin allowlist for Socket.IO handshake
     allowRequest: (req, cb) => {
@@ -401,8 +413,13 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
         if (!origin) {
           return cb(null, true);
         }
-        return cb(null, isAllowedOrigin(origin, host));
-      } catch {
+        if (!isAllowedOrigin(origin, host)) {
+          console.warn("[socket.io] Handshake rejected: origin not allowed", { origin, host });
+          return cb(null, false);
+        }
+        return cb(null, true);
+      } catch (err) {
+        console.warn("[socket.io] Handshake rejected: error", err?.message || err);
         return cb(null, false);
       }
     },
@@ -1407,8 +1424,6 @@ try {
     return false;
   }
 })() : Promise.resolve(null);
-// IMPORTANT for Render/any reverse proxy so secure cookies work
-app.set("trust proxy", 1);
 // ---- DB
 async function pgUserExists(userId) {
   if (!pgPool || !PG_READY) return false;
@@ -1886,7 +1901,7 @@ function isLocalhostOrigin(origin) {
 }
 
 function isAllowedOrigin(origin, hostHeader) {
-  if (!origin) return false;
+  if (!origin) return true;
   const url = safeParseUrl(origin);
   if (!url) return false;
 
@@ -2098,6 +2113,7 @@ const postOriginGuard = (req, res, next) => {
 
   if (origin) {
     if (isAllowedOrigin(origin, hostHeader)) return next();
+    console.warn("[http] Origin not allowed", { origin, host: hostHeader, path: req.path });
     return res.status(403).json({ message: "Origin not allowed." });
   }
 
@@ -2107,7 +2123,11 @@ const postOriginGuard = (req, res, next) => {
   }
 
   if (secFetchSite === "same-origin" || secFetchSite === "same-site") return next();
-  return res.status(403).json({ message: "Origin required." });
+  if (IS_PROD) {
+    console.warn("[http] Origin required", { host: hostHeader, path: req.path });
+    return res.status(403).json({ message: "Origin required." });
+  }
+  return next();
 };
 
 app.use(postOriginGuard);
@@ -15140,8 +15160,17 @@ io.use((socket, next) => {
   const secFetchMode = String(socket.handshake.headers["sec-fetch-mode"] || "").toLowerCase();
   const secFetchDest = String(socket.handshake.headers["sec-fetch-dest"] || "").toLowerCase();
   const allowRefererFallbackInDev = !IS_PROD;
+  console.log("[socket.io] Handshake headers", {
+    origin,
+    host: hostHeader,
+    referer,
+    secFetchSite,
+    secFetchMode,
+    secFetchDest,
+  });
   if (origin) {
     if (!isAllowedOrigin(origin, hostHeader)) {
+      console.warn("[socket.io] Origin not allowed", { origin, host: hostHeader });
       return next(new Error("Origin not allowed"));
     }
     return next();
@@ -15153,9 +15182,6 @@ io.use((socket, next) => {
     // Referrer (Referer header) can be spoofed or omitted; only use as a best-effort fallback.
     const refOrigin = safeParseUrl(referer)?.origin || "";
     if (refOrigin && isAllowedOrigin(refOrigin, hostHeader)) return next();
-  }
-  if (IS_PROD) {
-    return next(new Error("Origin required"));
   }
   return next();
 });

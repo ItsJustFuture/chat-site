@@ -82,7 +82,11 @@
       }
 
       try {
-        window.socket = io();
+        window.socket = io({
+          path: '/socket.io',
+          transports: ['websocket', 'polling'],
+          withCredentials: true
+        });
         
         // Server-ready handler - clears false connection errors
         window.socket.on('server-ready', () => {
