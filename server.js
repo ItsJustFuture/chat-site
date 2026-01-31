@@ -398,10 +398,7 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
   const io = new Server(httpServer, {
     // Render uses HTTPS -> allow websocket upgrade
     cors: {
-      origin(origin, cb) {
-        if (!origin) return cb(null, true);
-        return cb(null, isAllowedOrigin(origin, ""));
-      },
+      origin: true,
       credentials: true,
     },
     transports: ["websocket", "polling"],
