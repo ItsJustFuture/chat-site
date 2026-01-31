@@ -8205,13 +8205,19 @@ app.post("/guest-login", async (req, res) => {
       return res.status(400).send("Username already taken.");
     }
 
-    // Create guest user in SQLite (MUST succeed)
+    // Create guest user in SQLite (MUST succeed - SQLite is required)
     const now = Date.now();
-    const sqliteResult = await dbRunAsync(
-      `INSERT INTO users (username, role, created_at, last_seen, theme)
-       VALUES (?, 'Guest', ?, ?, ?)`,
-      [username, now, now, DEFAULT_THEME]
-    );
+    let sqliteResult;
+    try {
+      sqliteResult = await dbRunAsync(
+        `INSERT INTO users (username, role, created_at, last_seen, theme)
+         VALUES (?, 'Guest', ?, ?, ?)`,
+        [username, now, now, DEFAULT_THEME]
+      );
+    } catch (sqliteErr) {
+      console.error("[guest-login] SQLite insert failed:", sqliteErr);
+      return res.status(500).send("Guest login failed - database error.");
+    }
 
     const guestUser = {
       id: sqliteResult.lastID,
@@ -8222,13 +8228,13 @@ app.post("/guest-login", async (req, res) => {
       avatar_updated: null,
     };
 
-    // Optionally mirror to Postgres (never blocking)
+    // Optionally mirror to Postgres (fire-and-forget, never blocking)
     pgSafe(
       `INSERT INTO users (id, username, role, created_at, last_seen, theme)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (id) DO NOTHING`,
       [guestUser.id, guestUser.username, guestUser.role, now, now, DEFAULT_THEME]
-    );
+    ).catch(() => {}); // Fire-and-forget
 
     // Set session and respond
     req.session.user = guestUser;
@@ -8237,7 +8243,7 @@ app.post("/guest-login", async (req, res) => {
       return res.json({ ok: true, user: guestUser });
     });
   } catch (err) {
-    console.error("[guest-login] Error:", err);
+    console.error("[guest-login] Unexpected error:", err);
     res.status(500).send("Guest login failed.");
   }
 });
@@ -15557,7 +15563,9 @@ io.on("connection", async (socket) => {
     customization: sanitizeCustomization(sessUser.customization, sessUser.textStyle, sessUser.role),
   };
 
-  // Emit server-ready signal to fix false connection errors
+  // Emit server-ready signal to prevent race condition where client shows 
+  // connection error before server completes initialization. This fixes false
+  // "failed to connect" errors on initial page load.
   socket.emit("server-ready", { ok: true });
 
   // --- Owner session map: register basic meta
@@ -18747,7 +18755,8 @@ async function startServer() {
     
     if (sqliteResult.status === "rejected") {
       console.error("[startup] SQLite migration failed", sqliteResult.reason);
-      process.exit(1); // SQLite is required
+      // SQLite is required as the primary data store; exit if it fails to initialize
+      process.exit(1);
     }
     
     if (pgResult.status === "rejected") {

@@ -40,6 +40,7 @@
   });
 
   // ===== Socket.IO Initialization with Smart Connection Error Handling =====
+  const MAX_CONNECTION_ATTEMPTS = 3; // Number of failed attempts before showing error
   let failedAttempts = 0;
   let serverReady = false;
   let connectionErrorShown = false;
@@ -104,7 +105,7 @@
           // Only show error after multiple attempts and if server hasn't signaled ready
           if (!serverReady) {
             failedAttempts++;
-            if (failedAttempts >= 3) {
+            if (failedAttempts >= MAX_CONNECTION_ATTEMPTS) {
               showConnectionError();
               reject(error);
             }
