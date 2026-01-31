@@ -3,9 +3,9 @@
 const assert = require("assert");
 const request = require("supertest");
 
-process.env.SESSION_SECRET = process.env.SESSION_SECRET || "test_secret_1234567890";
+process.env.SESSION_SECRET = process.env.SESSION_SECRET || "test_secret_12345678901234567890";
 
-const { app, startupReady } = require("../server");
+const { app, startServer } = require("../server");
 
 async function ensureLogin(agent, username, password) {
   const reg = await agent.post("/register").send({ username, password });
@@ -28,14 +28,15 @@ async function setCouplesV2Flags(agent, allowlist = []) {
 }
 
 async function run() {
-  await startupReady;
+  // Wait for server to be fully initialized
+  await startServer();
 
   const ownerAgent = request.agent(app);
   const partnerAgent = request.agent(app);
 
   const ownerName = "iri";
   const partnerName = `partner_${Date.now()}`;
-  const password = "password123";
+  const password = "password123456789"; // Must be 12+ characters
 
   await ensureLogin(ownerAgent, ownerName, password);
   await ensureLogin(partnerAgent, partnerName, password);

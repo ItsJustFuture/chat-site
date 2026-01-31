@@ -18885,8 +18885,8 @@ async function validateEnvironment() {
     process.exit(1);
   }
   
-  if (process.env.SESSION_SECRET && process.env.SESSION_SECRET.length < 16) {
-    console.error('[startup] ✗ SESSION_SECRET must be at least 16 characters');
+  if (process.env.SESSION_SECRET && process.env.SESSION_SECRET.length < 32) {
+    console.error('[startup] ✗ SESSION_SECRET must be at least 32 characters for production security');
     process.exit(1);
   }
   

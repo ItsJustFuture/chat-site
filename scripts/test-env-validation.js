@@ -14,12 +14,14 @@ console.log("[test-env-validation] Starting environment validation test...");
 console.log("[test-env-validation] Test 1: Missing SESSION_SECRET in production");
 
 const serverPath = path.join(__dirname, "..", "server.js");
+
+// Create a clean environment without SESSION_SECRET and LOCAL_DEV
+const { SESSION_SECRET, LOCAL_DEV, ...cleanEnv } = process.env;
+
 const server = spawn("node", [serverPath], {
   env: { 
-    ...process.env,
+    ...cleanEnv,
     NODE_ENV: "production",
-    LOCAL_DEV: undefined, // Remove LOCAL_DEV
-    SESSION_SECRET: undefined, // Remove SESSION_SECRET
     PORT: "4021",
   },
   cwd: path.join(__dirname, ".."),

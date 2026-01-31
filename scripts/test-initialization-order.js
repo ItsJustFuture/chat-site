@@ -13,9 +13,12 @@ const path = require("path");
 
 console.log("[test-init-order] Starting initialization order test...");
 
+// Use a random high port to avoid conflicts
+const testPort = Math.floor(Math.random() * 10000) + 40000;
+
 const serverPath = path.join(__dirname, "..", "server.js");
 const server = spawn("node", [serverPath], {
-  env: { ...process.env, LOCAL_DEV: "1", PORT: "4020" },
+  env: { ...process.env, LOCAL_DEV: "1", PORT: String(testPort) },
   cwd: path.join(__dirname, ".."),
 });
 
