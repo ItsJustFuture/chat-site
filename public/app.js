@@ -1,7 +1,190 @@
-// Enhanced public/app.js - Client-side enhancements for chat
+/**
+ * app.js - Frontend Bootstrap and Application Core
+ * 
+ * This is the main entry point for the client-side application.
+ * It initializes Socket.IO, fetches session state, and provides global APIs.
+ * 
+ * Other scripts (auth.js, chat.js) wait for the 'app:ready' event before initializing.
+ */
 
 (function() {
   'use strict';
+
+  console.log('[app.js] Loading application bootstrap...');
+
+  // ===== Global State (exposed to other modules) =====
+  window.socket = null;
+  window.currentUser = null;
+  window.currentRoom = 'main';
+  let isAppReady = false;
+
+  // ===== Global Error Trapping =====
+  window.onerror = function(message, source, lineno, colno, error) {
+    console.error('[Global Error]', {
+      message,
+      source,
+      lineno,
+      colno,
+      error,
+      context: 'window.onerror'
+    });
+    return false; // Let default handler run
+  };
+
+  window.addEventListener('unhandledrejection', function(event) {
+    console.error('[Unhandled Promise Rejection]', {
+      reason: event.reason,
+      promise: event.promise,
+      context: 'unhandledrejection'
+    });
+  });
+
+  // ===== Socket.IO Initialization =====
+  function initializeSocket() {
+    if (window.socket) {
+      console.log('[app.js] Socket already initialized');
+      return Promise.resolve(window.socket);
+    }
+
+    return new Promise((resolve, reject) => {
+      console.log('[app.js] Initializing Socket.IO...');
+      
+      // Check if io is available
+      if (typeof io === 'undefined') {
+        const error = 'Socket.IO library not loaded! Ensure /socket.io/socket.io.js is included before app.js';
+        console.error('[app.js]', error);
+        reject(new Error(error));
+        return;
+      }
+
+      try {
+        window.socket = io();
+        
+        window.socket.on('connect', () => {
+          console.log('[app.js] Socket connected:', window.socket.id);
+          resolve(window.socket);
+        });
+
+        window.socket.on('connect_error', (error) => {
+          console.error('[app.js] Socket connection error:', error);
+          reject(error);
+        });
+
+        window.socket.on('disconnect', (reason) => {
+          console.log('[app.js] Socket disconnected:', reason);
+        });
+
+        window.socket.on('error', (error) => {
+          console.error('[app.js] Socket error:', error);
+        });
+      } catch (error) {
+        console.error('[app.js] Failed to initialize Socket.IO:', error);
+        reject(error);
+      }
+    });
+  }
+
+  // ===== Expose socket initializer for auth.js to call after login =====
+  window.initSocket = initializeSocket;
+
+  // ===== Session State Fetching =====
+  async function fetchSessionState() {
+    try {
+      console.log('[app.js] Fetching session state...');
+      const response = await fetch('/me', { credentials: 'include' });
+      
+      if (!response.ok) {
+        console.log('[app.js] No active session (not logged in)');
+        return null;
+      }
+
+      const data = await response.json();
+      
+      if (data && data.id) {
+        window.currentUser = data;
+        console.log('[app.js] Session state loaded:', data.username);
+        return data;
+      }
+
+      console.log('[app.js] No user data in session');
+      return null;
+    } catch (error) {
+      console.error('[app.js] Failed to fetch session state:', error);
+      return null;
+    }
+  }
+
+  // ===== Bootstrap Application =====
+  async function bootstrap() {
+    console.log('[app.js] Starting application bootstrap...');
+
+    try {
+      // Step 1: Fetch session state (may be null if not logged in)
+      await fetchSessionState();
+      console.log('[app.js] ✓ Session state checked');
+
+      // Step 2: Initialize Socket.IO ONLY if user is logged in
+      // If not logged in, socket will be initialized after successful login by auth.js
+      if (window.currentUser) {
+        await initializeSocket();
+        console.log('[app.js] ✓ Socket.IO initialized (user logged in)');
+      } else {
+        console.log('[app.js] ℹ Socket.IO initialization deferred (user not logged in)');
+      }
+
+      // Step 3: Mark app as ready
+      isAppReady = true;
+      console.log('[app.js] ✓ Application bootstrap complete');
+
+      // Step 4: Emit custom ready event for other modules
+      const readyEvent = new CustomEvent('app:ready', {
+        detail: {
+          socket: window.socket,
+          currentUser: window.currentUser,
+          currentRoom: window.currentRoom
+        }
+      });
+      window.dispatchEvent(readyEvent);
+      console.log('[app.js] ✓ app:ready event dispatched');
+
+    } catch (error) {
+      console.error('[app.js] Bootstrap failed:', error);
+      
+      // Only show error if we expected socket to connect (i.e., user is logged in)
+      if (window.currentUser) {
+        // Display user-friendly error
+        const errorDiv = document.createElement('div');
+        errorDiv.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff6b6b;color:white;padding:15px 25px;border-radius:8px;z-index:10000;font-family:system-ui;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
+        errorDiv.textContent = '⚠️ Failed to connect to chat server. Please refresh the page.';
+        document.body.appendChild(errorDiv);
+      }
+      
+      throw error;
+    }
+  }
+
+  // ===== Utility: Wait for app:ready =====
+  window.waitForAppReady = function() {
+    return new Promise((resolve) => {
+      // Set up listener first to avoid race condition
+      const listener = (event) => {
+        resolve(event.detail);
+      };
+      
+      // Check if already ready
+      if (isAppReady) {
+        // Already ready, resolve immediately
+        resolve({
+          socket: window.socket,
+          currentUser: window.currentUser,
+          currentRoom: window.currentRoom
+        });
+      } else {
+        // Not ready yet, wait for event
+        window.addEventListener('app:ready', listener, { once: true });
+      }
+    });
+  };
 
   // ===== PWA Service Worker Registration =====
   if ('serviceWorker' in navigator && window.location.hostname !== 'localhost') {
@@ -255,6 +438,15 @@
     initLeaderboardDropdown();
   }
 
-  console.log('[app.js] Enhanced client-side features loaded');
+  // ===== Start Application Bootstrap =====
+  // Bootstrap after DOM is fully loaded to ensure all elements are available
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrap);
+  } else {
+    // DOM already loaded, start immediately
+    bootstrap();
+  }
+
+  console.log('[app.js] Application bootstrap scheduled');
 
 })();

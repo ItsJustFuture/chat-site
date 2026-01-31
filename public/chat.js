@@ -1,6 +1,6 @@
 /**
  * Chat Client - Main application logic
- * Initializes Socket.IO connection and handles all chat interactions
+ * Handles all chat interactions after app.js bootstrap completes
  */
 
 (function() {
@@ -14,28 +14,66 @@
   let currentUser = null;
   let isInitialized = false;
 
-  // ===== Socket.IO Initialization =====
-  function initializeSocket() {
-    if (socket) {
-      console.log('[chat.js] Socket already initialized');
+  // ===== Wait for app:ready before initializing =====
+  async function waitAndInit() {
+    console.log('[chat.js] Waiting for app:ready...');
+    
+    // Ensure waitForAppReady is available
+    if (typeof window.waitForAppReady !== 'function') {
+      console.error('[chat.js] FATAL: window.waitForAppReady not initialized by app.js - runtime initialization error');
       return;
     }
 
-    console.log('[chat.js] Initializing Socket.IO connection...');
-    socket = io();
+    try {
+      const appState = await window.waitForAppReady();
+      console.log('[chat.js] app:ready received');
+      
+      // Use the globally initialized socket
+      socket = appState.socket || window.socket;
+      currentUser = appState.currentUser || window.currentUser;
+      currentRoom = appState.currentRoom || window.currentRoom;
 
-    socket.on('connect', () => {
-      console.log('[chat.js] Socket connected:', socket.id);
-      // Send client hello with browser info
-      socket.emit('client:hello', {
-        tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        locale: navigator.language,
-        platform: navigator.platform
-      });
-      // Auto-join main room
-      socket.emit('join room', { room: currentRoom, status: 'Online' });
+      // Socket might not be available yet if user just logged in
+      // Listen for additional app:ready events in case socket gets initialized later
+      if (!socket) {
+        console.log('[chat.js] Socket not yet available, waiting for it...');
+        window.addEventListener('app:ready', (event) => {
+          if (event.detail.socket && !socket) {
+            console.log('[chat.js] Socket now available from re-dispatched app:ready');
+            socket = event.detail.socket;
+            currentUser = event.detail.currentUser || window.currentUser;
+            setupSocketListeners();
+          }
+        });
+      } else {
+        console.log('[chat.js] Using global socket:', socket.id);
+        setupSocketListeners();
+      }
+    } catch (error) {
+      console.error('[chat.js] Failed to wait for app:ready:', error);
+    }
+  }
+
+  // ===== Socket Event Listeners =====
+  function setupSocketListeners() {
+    if (!socket) {
+      console.error('[chat.js] Cannot setup listeners: socket is null');
+      return;
+    }
+
+    console.log('[chat.js] Setting up socket event listeners...');
+
+    // Send client hello with browser info
+    socket.emit('client:hello', {
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      locale: navigator.language,
+      platform: navigator.platform
     });
 
+    // Auto-join main room
+    socket.emit('join room', { room: currentRoom, status: 'Online' });
+
+    // Handle disconnect
     socket.on('disconnect', () => {
       console.log('[chat.js] Socket disconnected');
     });
@@ -73,6 +111,11 @@
       console.log('[chat.js] Room users:', data);
       // TODO: Update members list UI
     });
+
+    console.log('[chat.js] Socket listeners configured ✓');
+
+    // Now attach UI event listeners
+    attachEventListeners();
   }
 
   // ===== Button Event Handlers =====
@@ -235,17 +278,8 @@
     // Set immediately to prevent race conditions with multiple initialization calls
     isInitialized = true;
 
-    console.log('[chat.js] Initializing chat application...');
-
-    try {
-      initializeSocket();
-      attachEventListeners();
-      console.log('[chat.js] Chat application initialized successfully ✓');
-    } catch (err) {
-      console.error('[chat.js] Initialization failed:', err);
-      // Reset flag on error so retry is possible
-      isInitialized = false;
-    }
+    console.log('[chat.js] Chat UI initialized');
+    // Note: attachEventListeners is called from setupSocketListeners after socket is ready
   }
 
   // ===== Public API =====
@@ -254,24 +288,12 @@
     isInitialized: () => isInitialized
   };
 
-  // Auto-initialize if chatView is already visible
-  const chatView = document.getElementById('chatView');
-  if (chatView && !chatView.hidden) {
-    console.log('[chat.js] Chat view is visible, auto-initializing...');
-    initialize();
-  } else {
-    console.log('[chat.js] Chat view is hidden, waiting for initialization call...');
-  }
-
-  // Also initialize on DOM ready if not already done
+  // Start waiting for app:ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      const chatView = document.getElementById('chatView');
-      if (chatView && !chatView.hidden) {
-        initialize();
-      }
-    });
+    document.addEventListener('DOMContentLoaded', waitAndInit);
+  } else {
+    waitAndInit();
   }
 
-  console.log('[chat.js] Chat client loaded');
+  console.log('[chat.js] Chat client loaded, waiting for bootstrap...');
 })();

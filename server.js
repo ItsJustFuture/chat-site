@@ -279,6 +279,16 @@ const { VIBE_TAGS, VIBE_TAG_LIMIT } = require("./vibe-tags");
 // ---- NEW: Message utilities for receipts, reactions, edits ----
 const messageUtils = require("./lib/message-utils");
 
+// Log successful module loads
+console.log("[startup] Core modules loaded:");
+console.log("[startup]   ✓ dice-utils");
+console.log("[startup]   ✓ luck-utils");
+console.log("[startup]   ✓ survival-events");
+console.log("[startup]   ✓ validators");
+console.log("[startup]   ✓ state-persistence");
+console.log("[startup]   ✓ vibe-tags");
+console.log("[startup]   ✓ lib/message-utils");
+
 // ---- Optional integrations (graceful fallback if not configured) ----
 let Sentry = null;
 let redisAdapter = null;
@@ -367,8 +377,10 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
 }
 
 // ---- App + Server
+  console.log("[startup] Initializing Express app and HTTP server...");
   const app = express();
   const httpServer = http.createServer(app);
+  console.log("[startup] Initializing Socket.IO...");
   const io = new Server(httpServer, {
     // Render uses HTTPS -> allow websocket upgrade
     cors: { origin: true, credentials: true },
@@ -393,10 +405,12 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
     upgradeTimeout: 45_000,
   });
 
+  console.log("[startup] Socket.IO initialized ✓");
+
   // Attach Redis adapter if available
   if (redisAdapter) {
     io.adapter(redisAdapter);
-    console.log("[Socket.IO] Redis adapter attached");
+    console.log("[Socket.IO] Redis adapter attached ✓");
   }
 
 
@@ -2981,7 +2995,9 @@ function dbRunAsync(sql, params = []) {
 }
 
 // Initialize message-utils with database functions
+console.log("[startup] Initializing message-utils...");
 messageUtils.init(dbRunAsync, dbGetAsync, dbAllAsync);
+console.log("[startup] message-utils initialized ✓");
 
 // ========================================
 // Word Filter System

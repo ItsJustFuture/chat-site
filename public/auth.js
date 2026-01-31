@@ -1,6 +1,27 @@
 (function() {
   'use strict';
 
+  console.log('[auth.js] Loading auth module...');
+
+  // Wait for app:ready before initializing
+  async function waitAndInit() {
+    console.log('[auth.js] Waiting for app:ready...');
+    
+    // Ensure waitForAppReady is available
+    if (typeof window.waitForAppReady !== 'function') {
+      console.error('[auth.js] FATAL: window.waitForAppReady not initialized by app.js - runtime initialization error');
+      return;
+    }
+
+    try {
+      await window.waitForAppReady();
+      console.log('[auth.js] app:ready received, initializing auth...');
+      initAuthForm();
+    } catch (error) {
+      console.error('[auth.js] Failed to wait for app:ready:', error);
+    }
+  }
+
   function initAuthForm() {
     const authForm = document.getElementById('authForm');
     if (!authForm || authForm.dataset.authBound) return;
@@ -108,6 +129,37 @@
         if (!res.ok) return showLoginView();
         const data = await res.json();
         if (!data || !data.id) return showLoginView();
+        
+        // User is logged in, initialize socket if not already done
+        if (!window.socket) {
+          if (typeof window.initSocket !== 'function') {
+            console.error('[auth.js] window.initSocket not available - cannot initialize socket');
+            showChatView();
+            return;
+          }
+          
+          console.log('[auth.js] Initializing socket after successful session check...');
+          try {
+            await window.initSocket();
+            window.currentUser = data;
+            console.log('[auth.js] Socket initialized, updating global state');
+            
+            // Re-dispatch app:ready with socket now available
+            const readyEvent = new CustomEvent('app:ready', {
+              detail: {
+                socket: window.socket,
+                currentUser: window.currentUser,
+                currentRoom: window.currentRoom
+              }
+            });
+            window.dispatchEvent(readyEvent);
+            console.log('[auth.js] Re-dispatched app:ready with socket');
+          } catch (socketErr) {
+            console.error('[auth.js] Failed to initialize socket:', socketErr);
+            // Continue to show chat view - chat.js will handle missing socket gracefully
+          }
+        }
+        
         showChatView();
       } catch (err) {
         console.warn('[auth.js] session hydrate failed:', err?.message || err);
@@ -340,11 +392,12 @@
     applyRestrictionState();
   }
 
+  // Start initialization process
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initAuthForm);
+    document.addEventListener('DOMContentLoaded', waitAndInit);
   } else {
-    initAuthForm();
+    waitAndInit();
   }
 
-  console.log('[auth.js] Auth module initialized');
+  console.log('[auth.js] Auth module loaded, waiting for bootstrap...');
 })();
