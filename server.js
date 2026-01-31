@@ -216,7 +216,6 @@ const {
   POSTGRES_SSL_VERIFY,
   POSTGRES_URL,
   IS_RENDER,
-  IS_PROD,
 } = require("./db/postgres");
 const http = require("http");
 const {
