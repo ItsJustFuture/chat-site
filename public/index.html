@@ -2185,11 +2185,17 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
 <video controls="" id="mediaLightboxVideo" playsinline=""></video>
 </div>
 </div>
+<!-- Scripts in correct initialization order -->
+<!-- 1. Socket.IO client library (must load first) -->
 <script src="/socket.io/socket.io.js"></script>
+<!-- 2. Third-party libraries -->
 <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+<!-- 3. App bootstrap (initializes socket, session, emits app:ready) -->
+<script src="/app.js"></script>
+<!-- 4. Auth module (waits for app:ready) -->
 <script src="/auth.js"></script>
+<!-- 5. Chat module (waits for app:ready) -->
 <script src="/chat.js"></script>
-<script defer="" src="/app.js"></script>
 <div id="modalRoot">
 <!-- STAFF: Kick/Ban Appeals Panel -->
 <div class="appealsPanel" hidden="" id="appealsPanel">

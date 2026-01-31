@@ -1,6 +1,27 @@
 (function() {
   'use strict';
 
+  console.log('[auth.js] Loading auth module...');
+
+  // Wait for app:ready before initializing
+  async function waitAndInit() {
+    console.log('[auth.js] Waiting for app:ready...');
+    
+    // Ensure waitForAppReady is available
+    if (typeof window.waitForAppReady !== 'function') {
+      console.error('[auth.js] FATAL: window.waitForAppReady not available! app.js must load before auth.js');
+      return;
+    }
+
+    try {
+      await window.waitForAppReady();
+      console.log('[auth.js] app:ready received, initializing auth...');
+      initAuthForm();
+    } catch (error) {
+      console.error('[auth.js] Failed to wait for app:ready:', error);
+    }
+  }
+
   function initAuthForm() {
     const authForm = document.getElementById('authForm');
     if (!authForm || authForm.dataset.authBound) return;
@@ -340,11 +361,12 @@
     applyRestrictionState();
   }
 
+  // Start initialization process
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initAuthForm);
+    document.addEventListener('DOMContentLoaded', waitAndInit);
   } else {
-    initAuthForm();
+    waitAndInit();
   }
 
-  console.log('[auth.js] Auth module initialized');
+  console.log('[auth.js] Auth module loaded, waiting for bootstrap...');
 })();
