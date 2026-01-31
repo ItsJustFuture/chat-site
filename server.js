@@ -352,10 +352,28 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
 }
 
 // ---- App + Server (initialized at module load, but controlled startup in startServer)
-// App, Server, IO (will be created in startServer Phase 6)
-// Changed from const to let to allow assignment in startServer()
+/**
+ * Express application instance
+ * @type {Express.Application | undefined}
+ * @description Created during Phase 6a of startServer(). Remains undefined until startServer() is called.
+ * Do not access before server initialization is complete.
+ */
 let app;
+
+/**
+ * HTTP server instance
+ * @type {http.Server | undefined}
+ * @description Created during Phase 6b of startServer(). Remains undefined until startServer() is called.
+ * Do not access before server initialization is complete.
+ */
 let httpServer;
+
+/**
+ * Socket.IO server instance
+ * @type {Server | undefined}
+ * @description Created during Phase 6c of startServer(). Remains undefined until startServer() is called.
+ * Do not access before server initialization is complete.
+ */
 let io;
 
 
