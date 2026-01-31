@@ -15137,15 +15137,17 @@ io.use((socket, next) => {
   const hostHeader = String(socket.handshake.headers.host || "");
   const referer = String(socket.handshake.headers.referer || "");
   const secFetchSite = String(socket.handshake.headers["sec-fetch-site"] || "").toLowerCase();
+  const secFetchMode = String(socket.handshake.headers["sec-fetch-mode"] || "").toLowerCase();
+  const secFetchDest = String(socket.handshake.headers["sec-fetch-dest"] || "").toLowerCase();
   if (origin) {
     if (!isAllowedOrigin(origin, hostHeader)) {
       return next(new Error("Origin not allowed"));
     }
     return next();
   }
-  if (secFetchSite === "same-origin") return next();
+  if (secFetchSite === "same-origin" && (secFetchMode || secFetchDest)) return next();
   if (referer) {
-    // Referer can be spoofed or omitted; only use as a best-effort fallback.
+    // Referrer (Referer header) can be spoofed or omitted; only use as a best-effort fallback.
     const refOrigin = safeParseUrl(referer)?.origin || "";
     if (refOrigin && isAllowedOrigin(refOrigin, hostHeader)) return next();
   }
