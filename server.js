@@ -361,10 +361,12 @@ const ALLOWED_ORIGINS = new Set(
     .map((origin) => origin.trim())
     .filter(Boolean)
 );
-const RENDER_PUBLIC_ORIGIN = "https://banter-and-brats.onrender.com";
-const RENDER_EXTERNAL_ORIGIN = String(process.env.RENDER_EXTERNAL_URL || "").trim();
-ALLOWED_ORIGINS.add(RENDER_PUBLIC_ORIGIN);
-if (RENDER_EXTERNAL_ORIGIN) ALLOWED_ORIGINS.add(RENDER_EXTERNAL_ORIGIN);
+const PUBLIC_ORIGIN = String(
+  process.env.PUBLIC_ORIGIN ||
+  process.env.RENDER_EXTERNAL_URL ||
+  "https://banter-and-brats.onrender.com"
+).trim();
+if (PUBLIC_ORIGIN) ALLOWED_ORIGINS.add(PUBLIC_ORIGIN);
 const SOCKET_IO_DEBUG = String(process.env.SOCKET_IO_DEBUG || "").toLowerCase() === "true";
 
 const LOCAL_DEV = process.env.LOCAL_DEV === "1";
@@ -392,6 +394,7 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
 // ---- App + Server
   console.log("[startup] Initializing Express app and HTTP server...");
   const app = express();
+  // Trust proxy before Socket.IO initialization so secure cookies + IPs are correct behind Render.
   app.set("trust proxy", 1);
   const httpServer = http.createServer(app);
   console.log("[startup] Initializing Socket.IO...");
