@@ -169,7 +169,8 @@ function decayHeat() {
     else heatByUserId.set(uid, next);
   }
 }
-setInterval(decayHeat, 60_000).unref?.();
+// Timer will be started in startBackgroundTasks() during startup
+// setInterval(decayHeat, 60_000).unref?.();
 
 
 
@@ -296,27 +297,8 @@ if (process.env.SENTRY_DSN) {
   }
 }
 
-// Redis adapter for Socket.IO (optional, requires REDIS_URL env var)
-if (process.env.REDIS_URL) {
-  try {
-    const { createClient } = require("redis");
-    const { createAdapter } = require("@socket.io/redis-adapter");
-    
-    redisClient = createClient({ url: process.env.REDIS_URL });
-    redisClient.on("error", (err) => console.error("[Redis] Client error:", err));
-    redisClient.connect().then(() => {
-      console.log("[Redis] Connected for Socket.IO adapter");
-    }).catch((err) => {
-      console.error("[Redis] Connection failed:", err.message);
-    });
-    
-    const subClient = redisClient.duplicate();
-    redisAdapter = createAdapter(redisClient, subClient);
-    console.log("[Redis] Adapter created");
-  } catch (err) {
-    console.warn("[Redis] Failed to initialize:", err.message);
-  }
-}
+// Redis adapter for Socket.IO - will be initialized during startup
+// (Connection moved to initializeRedis() function in startServer)
 
 
 const MEMORY_SYSTEM_ENABLED = process.env.MEMORY_SYSTEM_ENABLED === "1";
@@ -369,58 +351,47 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-// ---- App + Server
-  console.log("[startup] Initializing Express app and HTTP server...");
-  const app = express();
-  // Trust proxy before Socket.IO initialization so secure cookies + IPs are correct behind Render.
-  app.set("trust proxy", 1);
-  const httpServer = http.createServer(app);
-  console.log("[startup] Initializing Socket.IO...");
-  const io = new Server(httpServer, {
-    // Render uses HTTPS -> allow websocket upgrade
-    cors: {
-      origin: true,
-      credentials: true,
-    },
-    // Explicit transports to ensure Render proxies fall back to polling if WebSocket upgrade fails.
-    transports: ["websocket", "polling"],
-
-    // Origin allowlist for Socket.IO handshake
-    allowRequest: (req, cb) => {
-      try {
-        const origin = req.headers.origin;
-        const host = req.headers.host;
-        if (!origin) {
-          if (isAllowedHostHeader(host)) {
-            return cb(null, true);
-          }
-          console.warn("[socket.io] Handshake rejected: origin required", { host });
-          return cb(null, false);
+// ---- App + Server (initialized at module load, but controlled startup in startServer)
+// Note: Full deferred initialization would require moving all middleware/routes into functions
+// This is a pragmatic compromise - app/httpServer/io are created here, but:
+// - Redis connection is deferred to Phase 5a
+// - Background tasks are deferred to Phase 10  
+// - Server listening is deferred to Phase 11
+console.log("[startup] Initializing Express app and HTTP server...");
+const app = express();
+app.set("trust proxy", 1);
+const httpServer = http.createServer(app);
+console.log("[startup] Initializing Socket.IO...");
+const io = new Server(httpServer, {
+  cors: { origin: true, credentials: true },
+  transports: ["websocket", "polling"],
+  allowRequest: (req, cb) => {
+    try {
+      const origin = req.headers.origin;
+      const host = req.headers.host;
+      if (!origin) {
+        if (isAllowedHostHeader(host)) {
+          return cb(null, true);
         }
-        if (!isAllowedOrigin(origin, host)) {
-          console.warn("[socket.io] Handshake rejected: origin not allowed", { origin, host });
-          return cb(null, false);
-        }
-        return cb(null, true);
-      } catch (err) {
-        console.warn("[socket.io] Handshake rejected: error", err?.message || err);
+        console.warn("[socket.io] Handshake rejected: origin required", { host });
         return cb(null, false);
       }
-    },
-
-    // More tolerant of mobile/background + Render sleep
-    pingInterval: 25_000,  // send pings every 25s
-    pingTimeout: 300_000,  // wait 5 minutes for pong before disconnect (mobile suspend)
-    upgradeTimeout: 45_000,
-  });
-
-  console.log("[startup] Socket.IO initialized ✓");
-
-  // Attach Redis adapter if available
-  if (redisAdapter) {
-    io.adapter(redisAdapter);
-    console.log("[Socket.IO] Redis adapter attached ✓");
-  }
+      if (!isAllowedOrigin(origin, host)) {
+        console.warn("[socket.io] Handshake rejected: origin not allowed", { origin, host });
+        return cb(null, false);
+      }
+      return cb(null, true);
+    } catch (err) {
+      console.warn("[socket.io] Handshake rejected: error", err?.message || err);
+      return cb(null, false);
+    }
+  },
+  pingInterval: 25_000,
+  pingTimeout: 300_000,
+  upgradeTimeout: 45_000,
+});
+console.log("[startup] Socket.IO initialized ✓");
+// Note: Redis adapter will be attached in startServer Phase 5a (after Redis connects)
 
 
   const DEBUG_ROOMS = String(process.env.DEBUG_ROOMS || "").toLowerCase() === "true";
@@ -14538,44 +14509,46 @@ app.delete("/dm/thread/:id/messages", dmLimiter, requireLogin, (req, res) => {
   });
 });
 
-setInterval(() => {
-  const loop = async () => {
-    const now = Date.now();
-    for (const [uid, track] of onlineXpTrack.entries()) {
-      if (!onlineState.has(uid)) {
-        onlineXpTrack.delete(uid);
-        continue;
-      }
-      const lastTs = track.lastTs || now;
-      const elapsed = Math.max(0, now - lastTs);
-      const total = (track.carryMs || 0) + elapsed;
-      const fullMinutes = Math.floor(total / 60_000);
-      const cappedMinutes = Math.min(fullMinutes, 60);
-      const carry = total - cappedMinutes * 60_000;
-      onlineXpTrack.set(uid, { lastTs: now, carryMs: carry });
-      if (cappedMinutes <= 0) continue;
+// MOVED: XP tracking timer moved to startBackgroundTasks() function (called in startServer Phase 10)
+// setInterval(() => {
+//   const loop = async () => {
+//     const now = Date.now();
+//     for (const [uid, track] of onlineXpTrack.entries()) {
+//       if (!onlineState.has(uid)) {
+//         onlineXpTrack.delete(uid);
+//         continue;
+//       }
+//       const lastTs = track.lastTs || now;
+//       const elapsed = Math.max(0, now - lastTs);
+//       const total = (track.carryMs || 0) + elapsed;
+//       const fullMinutes = Math.floor(total / 60_000);
+//       const cappedMinutes = Math.min(fullMinutes, 60);
+//       const carry = total - cappedMinutes * 60_000;
+//       onlineXpTrack.set(uid, { lastTs: now, carryMs: carry });
+//       if (cappedMinutes <= 0) continue;
+//
+//       try {
+//         const row = await getProgressionRow(uid);
+//         if (!row) continue;
+//         const role = liveRoleForUser(uid, row.role);
+//         const rate = xpRatesForRole(role).online;
+//         const delta = Math.max(0, Math.floor(cappedMinutes * rate));
+//         if (delta > 0) {
+//           await applyXpGain(uid, delta, { baseRow: row, lastOnlineXpAt: now });
+//           console.log(`[xp][online] +${delta} user=${uid} mins=${cappedMinutes} role=${role}`);
+//         }
+//       } catch (e) {
+//         console.warn("[xp][online]", e?.message || e);
+//       }
+//     }
+//
+//     for (const uid of onlineState.keys()) {
+//       awardPassiveGold(uid);
+//     }
+//   };
+//   loop().catch((e) => console.warn("[xp][online loop]", e?.message || e));
+// }, 60_000);
 
-      try {
-        const row = await getProgressionRow(uid);
-        if (!row) continue;
-        const role = liveRoleForUser(uid, row.role);
-        const rate = xpRatesForRole(role).online;
-        const delta = Math.max(0, Math.floor(cappedMinutes * rate));
-        if (delta > 0) {
-          await applyXpGain(uid, delta, { baseRow: row, lastOnlineXpAt: now });
-          console.log(`[xp][online] +${delta} user=${uid} mins=${cappedMinutes} role=${role}`);
-        }
-      } catch (e) {
-        console.warn("[xp][online]", e?.message || e);
-      }
-    }
-
-    for (const uid of onlineState.keys()) {
-      awardPassiveGold(uid);
-    }
-  };
-  loop().catch((e) => console.warn("[xp][online loop]", e?.message || e));
-}, 60_000);
 
 // ---- Helpers for punishments
 function isPunished(userId, type, cb) {
@@ -19037,6 +19010,147 @@ async function startHttpServer() {
 }
 
 /**
+ * Initialize Redis connection for Socket.IO adapter
+ * Called during Phase 5a of startup
+ * Note: Socket.IO is already created at module load; this function connects Redis and prepares the adapter
+ * Returns true if Redis connected, false otherwise
+ */
+async function initializeRedis() {
+  if (!process.env.REDIS_URL) {
+    console.log('[startup] Phase 5a: Redis not configured, skipping');
+    return false;
+  }
+  
+  console.log('[startup] Phase 5a: Connecting to Redis...');
+  
+  try {
+    const { createClient } = require("redis");
+    const { createAdapter } = require("@socket.io/redis-adapter");
+    
+    redisClient = createClient({ url: process.env.REDIS_URL });
+    redisClient.on("error", (err) => console.error("[Redis] Client error:", err));
+    
+    // AWAIT the connection!
+    await redisClient.connect();
+    console.log('[startup]   ✓ Redis connected');
+    
+    const subClient = redisClient.duplicate();
+    redisAdapter = createAdapter(redisClient, subClient);
+    console.log('[startup]   ✓ Redis adapter created');
+    
+    return true;
+  } catch (err) {
+    console.warn('[startup]   ⚠ Redis connection failed (continuing without):', err.message);
+    redisAdapter = null;
+    redisClient = null;
+    return false;
+  }
+}
+
+/**
+ * Attach Redis adapter to Socket.IO
+ * Called during Phase 6 of startup (after Redis connects, if configured)
+ */
+function attachRedisAdapter() {
+  console.log('[startup] Phase 6: Attaching Redis adapter to Socket.IO...');
+  if (redisAdapter) {
+    io.adapter(redisAdapter);
+    console.log('[startup]   ✓ Redis adapter attached to Socket.IO');
+  } else {
+    console.log('[startup]   ⚠ No Redis adapter to attach (Redis not configured or connection failed)');
+  }
+  console.log('[startup]   ✓ Phase 6 complete');
+}
+
+/**
+ * Register all Express middleware
+ * Called during Phase 7 of startup  
+ * Note: Middleware is already registered at module level (historical architecture)
+ */
+function registerMiddleware() {
+  console.log('[startup] Phase 7: Middleware registration check...');
+  console.log('[startup]   ℹ️ Middleware registered at module load (historical architecture)');
+  console.log('[startup]   ✓ Phase 7 complete');
+}
+
+/**
+ * Register all HTTP routes
+ * Called during Phase 8 of startup
+ * Note: Routes are already registered at module level (historical architecture)
+ */
+function registerRoutes() {
+  console.log('[startup] Phase 8: Routes registration check...');
+  console.log('[startup]   ℹ️ Routes registered at module load (historical architecture)');
+  console.log('[startup]   ✓ Phase 8 complete');
+}
+
+/**
+ * Register all Socket.IO event handlers
+ * Called during Phase 9 of startup
+ * Note: Socket handlers are already registered at module level (historical architecture)
+ */
+function registerSocketHandlers() {
+  console.log('[startup] Phase 9: Socket handlers registration check...');
+  console.log('[startup]   ℹ️ Socket handlers registered at module load (historical architecture)');
+  console.log('[startup]   ✓ Phase 9 complete');
+}
+
+/**
+ * Start background tasks (timers, cleanup jobs)
+ * Called during Phase 10 of startup
+ */
+function startBackgroundTasks() {
+  console.log('[startup] Phase 10: Starting background tasks...');
+  
+  // Heat decay timer
+  setInterval(decayHeat, 60_000).unref?.();
+  console.log('[startup]   ✓ Heat decay timer started');
+  
+  // XP tracking timer
+  setInterval(() => {
+    const loop = async () => {
+      const now = Date.now();
+      for (const [uid, track] of onlineXpTrack.entries()) {
+        if (!onlineState.has(uid)) {
+          onlineXpTrack.delete(uid);
+          continue;
+        }
+        const lastTs = track.lastTs || now;
+        const elapsed = Math.max(0, now - lastTs);
+        const total = (track.carryMs || 0) + elapsed;
+        const fullMinutes = Math.floor(total / 60_000);
+        const cappedMinutes = Math.min(fullMinutes, 60);
+        const carry = total - cappedMinutes * 60_000;
+        onlineXpTrack.set(uid, { lastTs: now, carryMs: carry });
+        if (cappedMinutes <= 0) continue;
+
+        try {
+          const row = await getProgressionRow(uid);
+          if (!row) continue;
+          const role = liveRoleForUser(uid, row.role);
+          const rate = xpRatesForRole(role).online;
+          const delta = Math.max(0, Math.floor(cappedMinutes * rate));
+          if (delta > 0) {
+            await applyXpGain(uid, delta, { baseRow: row, lastOnlineXpAt: now });
+            console.log(`[xp][online] +${delta} user=${uid} mins=${cappedMinutes} role=${role}`);
+          }
+        } catch (e) {
+          console.warn("[xp][online]", e?.message || e);
+        }
+      }
+
+      for (const uid of onlineState.keys()) {
+        awardPassiveGold(uid);
+      }
+    };
+    loop().catch((e) => console.warn("[xp][online loop]", e?.message || e));
+  }, 60_000);
+  console.log('[startup]   ✓ XP tracking timer started');
+  
+  console.log('[startup]   ✓ Background tasks started');
+}
+
+/**
  * Main startup function
  * Orchestrates all initialization phases
  */
@@ -19048,11 +19162,40 @@ async function startServer() {
     console.log('[startup] SERVER INITIALIZATION STARTING');
     console.log('[startup] ========================================');
     
+    // Phase 1: Validate environment variables
     await validateEnvironment();
+    
+    // Phase 2: Initialize database (SQLite + Postgres)
     await initializeDatabase();
+    
+    // Phase 3: Initialize state management tables
     await initializeStateManagement();
+    
+    // Phase 4: Initialize core data (rooms, seed users)
     await initializeCoreData();
+    
+    // Phase 5: Initialize word filters
     await initializeWordFilters();
+    
+    // Phase 5a: Connect Redis (optional, for multi-instance Socket.IO)
+    await initializeRedis();
+    
+    // Phase 6: Attach Redis adapter to Socket.IO (if Redis connected)
+    attachRedisAdapter();
+    
+    // Phase 7: Middleware registration check (already done at module load)
+    registerMiddleware();
+    
+    // Phase 8: Routes registration check (already done at module load)
+    registerRoutes();
+    
+    // Phase 9: Socket handlers registration check (already done at module load)
+    registerSocketHandlers();
+    
+    // Phase 10: Start background tasks
+    startBackgroundTasks();
+    
+    // Phase 11: Start listening for connections
     await startHttpServer();
     
     console.log('[startup] ========================================');
