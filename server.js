@@ -15143,11 +15143,12 @@ io.use((socket, next) => {
     }
     return next();
   }
+  if (secFetchSite === "same-origin" || secFetchSite === "same-site") return next();
   if (referer) {
+    // Referer can be spoofed or omitted; only use as a best-effort fallback.
     const refOrigin = safeParseUrl(referer)?.origin || "";
     if (refOrigin && isAllowedOrigin(refOrigin, hostHeader)) return next();
   }
-  if (secFetchSite === "same-origin" || secFetchSite === "same-site") return next();
   if (IS_PROD) {
     return next(new Error("Origin required"));
   }
