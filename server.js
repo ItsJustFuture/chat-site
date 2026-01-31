@@ -366,7 +366,7 @@ const PUBLIC_ORIGIN = String(
   process.env.RENDER_EXTERNAL_URL ||
   "https://banter-and-brats.onrender.com"
 ).trim();
-if (PUBLIC_ORIGIN) ALLOWED_ORIGINS.add(PUBLIC_ORIGIN);
+if (PUBLIC_ORIGIN.length) ALLOWED_ORIGINS.add(PUBLIC_ORIGIN);
 const SOCKET_IO_DEBUG_ENABLED = String(process.env.SOCKET_IO_DEBUG || "").toLowerCase() === "true";
 
 const LOCAL_DEV = process.env.LOCAL_DEV === "1";
@@ -1909,11 +1909,17 @@ function isLocalhostOrigin(origin) {
 function isAllowedHostHeader(hostHeader) {
   if (!hostHeader) return false;
   const httpsUrl = safeParseUrl(`https://${hostHeader}`);
-  const httpUrl = safeParseUrl(`http://${hostHeader}`);
-  if (httpsUrl && ALLOWED_ORIGINS.has(httpsUrl.origin)) return true;
-  if (httpUrl && ALLOWED_ORIGINS.has(httpUrl.origin)) return true;
-  if (!IS_PROD && httpsUrl && isLocalhostOrigin(httpsUrl.origin)) return true;
-  if (!IS_PROD && httpUrl && isLocalhostOrigin(httpUrl.origin)) return true;
+  if (httpsUrl) {
+    if (ALLOWED_ORIGINS.has(httpsUrl.origin)) return true;
+    if (!IS_PROD && isLocalhostOrigin(httpsUrl.origin)) return true;
+  }
+  if (!IS_PROD) {
+    const httpUrl = safeParseUrl(`http://${hostHeader}`);
+    if (httpUrl) {
+      if (ALLOWED_ORIGINS.has(httpUrl.origin)) return true;
+      if (isLocalhostOrigin(httpUrl.origin)) return true;
+    }
+  }
   return false;
 }
 
