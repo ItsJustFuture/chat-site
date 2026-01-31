@@ -352,46 +352,29 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
 }
 
 // ---- App + Server (initialized at module load, but controlled startup in startServer)
-// Note: Full deferred initialization would require moving all middleware/routes into functions
-// This is a pragmatic compromise - app/httpServer/io are created here, but:
-// - Redis connection is deferred to Phase 5a
-// - Background tasks are deferred to Phase 10  
-// - Server listening is deferred to Phase 11
-console.log("[startup] Initializing Express app and HTTP server...");
-const app = express();
-app.set("trust proxy", 1);
-const httpServer = http.createServer(app);
-console.log("[startup] Initializing Socket.IO...");
-const io = new Server(httpServer, {
-  cors: { origin: true, credentials: true },
-  transports: ["websocket", "polling"],
-  allowRequest: (req, cb) => {
-    try {
-      const origin = req.headers.origin;
-      const host = req.headers.host;
-      if (!origin) {
-        if (isAllowedHostHeader(host)) {
-          return cb(null, true);
-        }
-        console.warn("[socket.io] Handshake rejected: origin required", { host });
-        return cb(null, false);
-      }
-      if (!isAllowedOrigin(origin, host)) {
-        console.warn("[socket.io] Handshake rejected: origin not allowed", { origin, host });
-        return cb(null, false);
-      }
-      return cb(null, true);
-    } catch (err) {
-      console.warn("[socket.io] Handshake rejected: error", err?.message || err);
-      return cb(null, false);
-    }
-  },
-  pingInterval: 25_000,
-  pingTimeout: 300_000,
-  upgradeTimeout: 45_000,
-});
-console.log("[startup] Socket.IO initialized ✓");
-// Note: Redis adapter will be attached in startServer Phase 5a (after Redis connects)
+/**
+ * Express application instance
+ * @type {Express.Application | undefined}
+ * @description Created during Phase 6a of startServer(). Remains undefined until startServer() is called.
+ * Do not access before server initialization is complete.
+ */
+let app;
+
+/**
+ * HTTP server instance
+ * @type {http.Server | undefined}
+ * @description Created during Phase 6b of startServer(). Remains undefined until startServer() is called.
+ * Do not access before server initialization is complete.
+ */
+let httpServer;
+
+/**
+ * Socket.IO server instance
+ * @type {Server | undefined}
+ * @description Created during Phase 6c of startServer(). Remains undefined until startServer() is called.
+ * Do not access before server initialization is complete.
+ */
+let io;
 
 
   const DEBUG_ROOMS = String(process.env.DEBUG_ROOMS || "").toLowerCase() === "true";
@@ -1897,47 +1880,6 @@ function getClientIp(req) {
   return xfwd || req.ip || req.connection?.remoteAddress || "";
 }
 
-// ---- Security + parsing
-app.disable("x-powered-by");
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: false, limit: "1mb" }));
-
-app.use(
-  helmet({
-    contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false,
-  })
-);
-
-// IMPORTANT: CSP that blocks inline JS (good), but allows our external /public/app.js & /public/styles.css
-app.use((req, res, next) => {
-  res.setHeader(
-    "Content-Security-Policy",
-    [
-      "default-src 'self'",
-      // Inline hashes map to: admin word filters, mod message capture overlay, username history, vibe tags, and profile UI in index.html.
-      "script-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=' 'sha256-oWpLZycNOHPRAKwunf75GOBemv1jh7TmBxWivRAc6a4=' 'sha256-goKOkmKJAPdYQYWwcQHapCcKarPdgPOdvsRdXEM/cfQ=' 'sha256-7sXnZ2TVMnxHVWCkmooJgY2WLwuABY3ORO4U2HyqhCk=' 'sha256-i/aTBp59Im0Ii8AbJaj/fpbmIm5uEe2SBSUfuz0qWdo=' 'sha256-h6XKXaSUiZETwfkdn71tqPwNbWkKP7NuIVivpP1YHkQ=' 'sha256-yGn8Ao66AtYyuV/LmdeSWHLPjQvhNwVQ39CW3mlyk3U=' 'sha256-FyuENKF0oqbS8GySBjZmSheWBnbSBzWln9hSmxXIMxY=' 'sha256-RbHiP1owkaFYxhobIPZZPoETOLi+bWnIbX7EeyA0rOc='",
-      "script-src-elem 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=' 'sha256-oWpLZycNOHPRAKwunf75GOBemv1jh7TmBxWivRAc6a4=' 'sha256-goKOkmKJAPdYQYWwcQHapCcKarPdgPOdvsRdXEM/cfQ=' 'sha256-7sXnZ2TVMnxHVWCkmooJgY2WLwuABY3ORO4U2HyqhCk=' 'sha256-i/aTBp59Im0Ii8AbJaj/fpbmIm5uEe2SBSUfuz0qWdo=' 'sha256-h6XKXaSUiZETwfkdn71tqPwNbWkKP7NuIVivpP1YHkQ=' 'sha256-yGn8Ao66AtYyuV/LmdeSWHLPjQvhNwVQ39CW3mlyk3U=' 'sha256-FyuENKF0oqbS8GySBjZmSheWBnbSBzWln9hSmxXIMxY=' 'sha256-RbHiP1owkaFYxhobIPZZPoETOLi+bWnIbX7EeyA0rOc='",
-      // Inline style attributes are set by the client JS (e.g. show/hide panels),
-      // so allow them alongside our external stylesheet.
-      // Also allow Google Fonts stylesheets for optional custom fonts.
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      // Allow Google Fonts font files.
-      "font-src 'self' data: https://fonts.gstatic.com",
-      // allow avatars/uploads + blob previews on client
-      "img-src 'self' data: blob: https://i.ytimg.com",
-      "media-src 'self' blob:",
-      // socket.io
-      "connect-src 'self' ws: wss: https://noembed.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com",
-      "object-src 'none'",
-      "base-uri 'self'",
-      "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://challenges.cloudflare.com https://hcaptcha.com",
-      "frame-ancestors 'none'",
-    ].join("; ")
-  );
-  next();
-});
-
 // ---- Sessions (Postgres-backed; survives redeploys)
 let sessionStore = new session.MemoryStore();
 if (POSTGRES_ENABLED && pgPool) {
@@ -1973,12 +1915,6 @@ const sessionMiddleware = session({
   },
 });
 
-app.use(sessionMiddleware);
-
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", db: DB_BACKEND });
-});
-
 const genericRateLimitHandler = (_req, res) => {
   res.status(429).json({ message: "Too many requests, please try again later." });
 };
@@ -1991,8 +1927,6 @@ const globalLimiter = rateLimit({
   handler: genericRateLimitHandler,
   keyGenerator: (req) => getClientIp(req),
 });
-
-app.use(globalLimiter);
 
 const strictLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
@@ -2099,56 +2033,6 @@ const postOriginGuard = (req, res, next) => {
   console.warn("[http] Origin required", { host: hostHeader, path: req.path });
   return res.status(403).json({ message: "Origin required." });
 };
-
-app.use(postOriginGuard);
-
-// ---- Static
-app.use("/uploads", express.static(UPLOADS_DIR, {
-  setHeaders: (res, filePath) => {
-    const ext = path.extname(filePath).toLowerCase();
-    if (ext === ".mp3") res.setHeader("Content-Type", "audio/mpeg");
-    if (ext === ".m4a") res.setHeader("Content-Type", "audio/mp4");
-    if (ext === ".mp4") res.setHeader("Content-Type", "video/mp4");
-    if (ext === ".webm") res.setHeader("Content-Type", "video/webm");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-  },
-}));
-app.use("/avatars", express.static(AVATARS_DIR, {
-  setHeaders: (res) => {
-    res.setHeader("X-Content-Type-Options", "nosniff");
-  },
-}));
-app.use(express.static(PUBLIC_DIR));
-
-// Serve avatars stored in Postgres
-app.get("/avatar/:id", async (req, res) => {
-  const id = Number(req.params?.id);
-  if (!Number.isFinite(id) || id <= 0) return res.status(400).send("Invalid id");
-
-  try {
-    const result3 = await pgSafe(
-      `SELECT avatar_bytes, avatar_mime, avatar_updated FROM users WHERE id = $1 LIMIT 1`,
-      [id]
-    );
-    const rows = result3?.rows || [];
-    const row = rows?.[0];
-    if (!row?.avatar_bytes) return res.status(404).send("Not found");
-
-    const etag = `"av-${id}-${Number(row.avatar_updated || 0)}"`;
-    const weakEtag = `W/${etag}`;
-    const inm = String(req.headers["if-none-match"] || "");
-    if (inm === etag || inm === weakEtag) return res.status(304).end();
-
-    res.setHeader("Content-Type", row.avatar_mime || "image/png");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Cache-Control", "public, max-age=86400");
-    res.setHeader("ETag", etag);
-    return res.send(row.avatar_bytes);
-  } catch (e) {
-    console.error("[/avatar] failed:", e?.message || e);
-    return res.status(500).send("Failed to load avatar");
-  }
-});
 
 // ---- Helpers
 function normalizeUsername(u) {
@@ -8222,6292 +8106,7 @@ async function verifyCaptcha(token, ip) {
   return { ok: true };
 }
 
-app.get("/api/captcha-config", (_req, res) => {
-  if (!captchaEnabled()) return res.json({ provider: "none" });
-  return res.json({ provider: CAPTCHA_PROVIDER, siteKey: CAPTCHA_SITE_KEY });
-});
 
-// ---- Auth routes
-// ---- Auth routes
-
-// --- Guest Login Endpoint (CRITICAL: SQLite-only, Postgres optional)
-app.post("/guest-login", async (req, res) => {
-  const { username } = req.body;
-  if (!username || username.length < 2 || username.length > 20) {
-    return res.status(400).send("Invalid username (2-20 chars).");
-  }
-  
-  try {
-    // Check if user exists in SQLite (source of truth)
-    const existing = await dbAllAsync("SELECT id FROM users WHERE lower(username) = lower(?)", [username]);
-    if (existing && existing.length > 0) {
-      return res.status(400).send("Username already taken.");
-    }
-
-    // Create guest user in SQLite (MUST succeed - SQLite is required)
-    const now = Date.now();
-    let sqliteResult;
-    try {
-      sqliteResult = await dbRunAsync(
-        `INSERT INTO users (username, role, created_at, last_seen, theme)
-         VALUES (?, 'Guest', ?, ?, ?)`,
-        [username, now, now, DEFAULT_THEME]
-      );
-    } catch (sqliteErr) {
-      console.error("[guest-login] SQLite insert failed:", sqliteErr);
-      return res.status(500).send("Guest login failed - database error.");
-    }
-
-    const guestUser = {
-      id: sqliteResult.lastID,
-      username: username,
-      role: 'Guest',
-      theme: DEFAULT_THEME,
-      avatar: "",
-      avatar_updated: null,
-    };
-
-    // Optionally mirror to Postgres (fire-and-forget, never blocking)
-    pgSafe(
-      `INSERT INTO users (id, username, role, created_at, last_seen, theme)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (id) DO NOTHING`,
-      [guestUser.id, guestUser.username, guestUser.role, now, now, DEFAULT_THEME]
-    ).catch(() => {}); // Fire-and-forget
-
-    // Set session and respond
-    req.session.user = guestUser;
-    req.session.save((saveErr) => {
-      if (saveErr) return res.status(500).send("Session save failed");
-      return res.json({ ok: true, user: guestUser });
-    });
-  } catch (err) {
-    console.error("[guest-login] Unexpected error:", err);
-    res.status(500).send("Guest login failed.");
-  }
-});
-
-app.post("/register", registerLimiter, async (req, res) => {
-  try {
-    const username = sanitizeUsername(req.body?.username);
-    const password = String(req.body?.password || "");
-
-    if (!username || username.length < 2) return res.status(400).send("Invalid username");
-    if (!password || password.length < 12) return res.status(400).send("Password must be 12+ chars");
-    if (isPasswordTooWeak(password)) return res.status(400).send("Password is too common");
-
-    // Prevent duplicates (PG is canonical)
-    const existingPg = await pgGetUserByUsername(username);
-    if (existingPg) return res.status(409).send("Username already taken");
-
-    const captchaToken = String(req.body?.captchaToken || "");
-    const captcha = await verifyCaptcha(captchaToken, getClientIp(req));
-    if (!captcha.ok) return res.status(400).send(captcha.message || "Captcha failed");
-
-    const hash = await bcrypt.hash(password, 10);
-    const createdAt = Date.now();
-
-    const norm = normKey(username);
-    let role = "User";
-    if (AUTO_OWNER.has(norm)) role = "Owner";
-    else if (AUTO_COOWNERS.has(norm)) role = "Co-owner";
-
-    const theme = DEFAULT_THEME;
-
-    let user = null;
-    if (PG_READY && pgPool) {
-      const createdAtValue = PG_USERS_CREATED_AT_IS_TIMESTAMP ? new Date(createdAt) : createdAt;
-      const result22 = await pgSafe(
-        `INSERT INTO users (username, password_hash, role, created_at, theme)
-         VALUES ($1,$2,$3,$4,$5)
-         RETURNING id, username, role, theme`,
-        [username, hash, role, createdAtValue, theme]
-      );
-      const rows = result22?.rows || [];
-      user = rows[0] || null;
-    } else {
-      const existingSqlite = await dbGetAsync(
-        "SELECT id FROM users WHERE username = ? OR lower(username) = lower(?)",
-        [username, username]
-      ).catch(() => null);
-      if (existingSqlite?.id) return res.status(409).send("Username already taken");
-      const result = await dbRunAsync(
-        `INSERT INTO users (username, password_hash, role, created_at, gold, xp, theme)
-         VALUES (?,?,?,?,?,?,?)`,
-        [username, hash, role, createdAt, 0, 0, sanitizeThemeNameServer(theme)]
-      );
-      const sqliteUser = await dbGetAsync(
-        "SELECT id, username, role, theme, avatar, avatar_updated FROM users WHERE id = ?",
-        [result?.lastID]
-      );
-      user = sqliteUser || null;
-    }
-
-    if (!user) return res.status(500).send("Registration failed");
-
-    if (PG_READY && pgPool) {
-      try {
-        await dbRunAsync(
-          `INSERT INTO users (id, username, password_hash, role, created_at, gold, xp, theme)
-           VALUES (?,?,?,?,?,?,?,?)`,
-          [user.id, username, hash, role, createdAt, 0, 0, sanitizeThemeNameServer(theme)]
-        );
-      } catch (_e) {
-        await dbRunAsync(
-          `UPDATE users
-              SET username = ?, password_hash = ?, role = ?,
-                  created_at = COALESCE(created_at, ?),
-                  theme = COALESCE(theme, ?)
-            WHERE id = ?`,
-          [username, hash, role, createdAt, sanitizeThemeNameServer(theme), user.id]
-        );
-      }
-    }
-
-    req.session.regenerate((regenErr) => {
-      if (regenErr) return res.status(500).send("Session failed");
-      req.session.user = {
-        id: user.id,
-        username: user.username,
-        role: user.role,
-        theme: sanitizeThemeNameServer(user.theme),
-        avatar: user.avatar || "",
-        avatar_updated: user.avatar_updated ?? null,
-      };
-      req.session.save((saveErr) => {
-        if (saveErr) return res.status(500).send("Session save failed");
-        return res.json({ ok: true });
-      });
-    });
-  } catch (e) {
-    console.error(e);
-    res.status(500).send("Registration failed");
-  }
-});
-app.post("/login", loginIpLimiter, async (req, res) => {
-  try {
-    const raw = String(req.body?.username || "").trim().slice(0, 64);
-    const cleaned = cleanUsernameForLookup(raw);
-    const legacy = sanitizeUsername(raw);
-    const candidates = Array.from(new Set([raw, cleaned, legacy].filter(Boolean)));
-
-    const password = String(req.body?.password || "");
-    if (!candidates.length || !password) return res.status(400).send("Missing credentials");
-
-    const ip = getClientIp(req);
-    const usernameKey = normKey(raw || cleaned || legacy || "");
-    const loginKey = `${ip}:${usernameKey || "unknown"}`;
-    const ipKey = `ip:${ip}`;
-    const backoff = checkLoginBackoff(loginKey);
-    const ipBackoff = checkLoginBackoff(ipKey);
-    if (backoff.blocked || ipBackoff.blocked) {
-      return res.status(429).send("Too many attempts. Try again later.");
-    }
-
-    const captchaToken = String(req.body?.captchaToken || "");
-    const captcha = await verifyCaptcha(captchaToken, ip);
-    if (!captcha.ok) {
-      recordLoginFailure(loginKey);
-      recordLoginFailure(ipKey);
-      return res.status(400).send(captcha.message || "Captcha failed");
-    }
-
-    // 1) Prefer Postgres users (new registrations land here)
-    let pgUser = null;
-    for (const cand of candidates) {
-      pgUser = await pgGetUserByUsername(cand);
-      if (pgUser) break;
-    }
-    if (pgUser && pgUser.password_hash) {
-      const stored = String(pgUser.password_hash || "").trim();
-
-      // Backwards compatibility: some legacy accounts may have a non-bcrypt value in password_hash.
-      // If it looks like a bcrypt hash, verify normally; otherwise treat it as plaintext and upgrade on success.
-      const looksBcrypt = stored.startsWith("$2");
-      let ok = false;
-
-      if (looksBcrypt) {
-        ok = await bcrypt.compare(password, stored);
-      } else {
-        ok = password === stored;
-        if (ok) {
-          const upgraded = await bcrypt.hash(password, 10);
-          await pgSafe(`UPDATE users SET password_hash = $1 WHERE id = $2`, [upgraded, pgUser.id]).catch(() => {});
-          pgUser.password_hash = upgraded;
-        }
-      }
-
-      if (!ok) {
-        recordLoginFailure(loginKey);
-        recordLoginFailure(ipKey);
-        logSecurityEvent("login_failure", { ip, username: raw, store: "pg" });
-        return res.status(401).send("Invalid username or password");
-      }
-
-      if (password.length < 12) {
-        const nonce = crypto.randomBytes(18).toString("hex");
-        req.session.user = null;
-        req.session.passwordUpgrade = {
-          userId: pgUser.id,
-          username: pgUser.username,
-          issuedAt: Date.now(),
-          nonce,
-        };
-        clearPasswordUpgradeFailures(req);
-        clearLoginFailures(loginKey);
-        clearLoginFailures(ipKey);
-        logSecurityEvent("password_upgrade_required", { ip, username: pgUser.username, userId: pgUser.id, store: "pg" });
-        return req.session.save((saveErr) => {
-          if (saveErr) return res.status(500).send("Session save failed");
-          return res.json({ ok: false, code: "PASSWORD_UPGRADE_REQUIRED" });
-        });
-      }
-
-      const theme = sanitizeThemeNameServer(pgUser.theme || DEFAULT_THEME);
-
-      // Mirror into SQLite if missing (some UI/profile/dice logic still reads SQLite)
-      const srow = await dbGetAsync("SELECT id FROM users WHERE id = ?", [pgUser.id]).catch(() => null);
-      if (!srow) {
-        await dbRunAsync(
-          `INSERT INTO users (id, username, password_hash, role, created_at, gold, xp, theme)
-           VALUES (?,?,?,?,?,?,?,?)`,
-          [
-            pgUser.id,
-            pgUser.username,
-            pgUser.password_hash,
-            pgUser.role || "User",
-            Number(pgUser.created_at || Date.now()),
-            Number(pgUser.gold || 0),
-            Number(pgUser.xp || 0),
-            theme,
-          ]
-        );
-      }
-
-      // IMPORTANT: In Postgres we primarily store avatars in avatar_bytes/avatar_updated.
-      // If we only read the legacy "avatar" column here, the session will have an empty avatar
-      // and the UI will look like the profile "didn't save" after refresh.
-      req.session.regenerate((regenErr) => {
-        if (regenErr) return res.status(500).send("Session failed");
-        req.session.user = {
-          id: pgUser.id,
-          username: pgUser.username,
-          role: pgUser.role,
-          theme,
-          avatar: avatarUrlFromRow(pgUser) || "",
-          avatar_updated: pgUser.avatar_updated ?? pgUser.avatarUpdated ?? null,
-        };
-        dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", pgUser.id]).catch(() => {});
-        initGoldTick(pgUser.id);
-        clearLoginFailures(loginKey);
-        clearLoginFailures(ipKey);
-        req.session.save((saveErr) => {
-          if (saveErr) return res.status(500).send("Session save failed");
-          return res.json({ ok: true });
-        });
-      });
-      return;
-    }
-
-    // 2) Fallback to SQLite (legacy accounts)
-    let row = null;
-    for (const cand of candidates) {
-      row = await dbGetAsync(
-        "SELECT * FROM users WHERE username = ? OR lower(username) = lower(?)",
-        [cand, cand]
-      ).catch(() => null);
-      if (row) break;
-    }
-    if (!row) {
-      recordLoginFailure(loginKey);
-      recordLoginFailure(ipKey);
-      logSecurityEvent("login_failure", { ip, username: raw, store: "sqlite" });
-      return res.status(401).send("Invalid username or password");
-    }
-
-    // Handle legacy password column (if present)
-    let passwordHash = typeof row.password_hash === "string" ? row.password_hash : "";
-
-    if (!passwordHash) {
-      const legacyPassword = typeof row.password === "string" ? row.password : "";
-      if (!legacyPassword) return res.status(401).send("Invalid username or password");
-
-      const legacyMatches = legacyPassword.startsWith("$2")
-        ? await bcrypt.compare(password, legacyPassword)
-        : legacyPassword === password;
-
-      if (!legacyMatches) {
-        recordLoginFailure(loginKey);
-        recordLoginFailure(ipKey);
-        logSecurityEvent("login_failure", { ip, username: raw, store: "sqlite" });
-        return res.status(401).send("Invalid username or password");
-      }
-
-      passwordHash = legacyPassword.startsWith("$2") ? legacyPassword : await bcrypt.hash(password, 10);
-
-      await dbRunAsync("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [passwordHash, row.id]);
-      row.password_hash = passwordHash;
-    }
-
-    {
-      const stored = String(row.password_hash || "").trim();
-      const looksBcrypt = stored.startsWith("$2");
-      let ok = false;
-
-      if (looksBcrypt) {
-        ok = await bcrypt.compare(password, stored);
-      } else {
-        // Legacy plaintext stored in password_hash (or other non-bcrypt formats).
-        ok = password === stored;
-        if (ok) {
-          const upgraded = await bcrypt.hash(password, 10);
-          await dbRunAsync("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [upgraded, row.id]).catch(() => {});
-          row.password_hash = upgraded;
-        }
-      }
-
-      if (!ok) {
-        recordLoginFailure(loginKey);
-        recordLoginFailure(ipKey);
-        logSecurityEvent("login_failure", { ip, username: raw, store: "sqlite" });
-        return res.status(401).send("Invalid username or password");
-      }
-    }
-// Apply your auto-role rules (keep both stores aligned)
-    const norm = normKey(row.username);
-    if (AUTO_OWNER.has(norm) && row.role !== "Owner") {
-      await dbRunAsync("UPDATE users SET role = 'Owner' WHERE id = ?", [row.id]);
-      row.role = "Owner";
-    } else if (AUTO_COOWNERS.has(norm) && row.role !== "Co-owner") {
-      await dbRunAsync("UPDATE users SET role = 'Co-owner' WHERE id = ?", [row.id]);
-      row.role = "Co-owner";
-    }
-
-    const theme = sanitizeThemeNameServer(row.theme || DEFAULT_THEME);
-    if (!row.theme) await dbRunAsync("UPDATE users SET theme = ? WHERE id = ?", [theme, row.id]).catch(() => {});
-
-    if (password.length < 12) {
-      const nonce = crypto.randomBytes(18).toString("hex");
-      req.session.user = null;
-      req.session.passwordUpgrade = {
-        userId: row.id,
-        username: row.username,
-        issuedAt: Date.now(),
-        nonce,
-      };
-      clearPasswordUpgradeFailures(req);
-      clearLoginFailures(loginKey);
-      clearLoginFailures(ipKey);
-      logSecurityEvent("password_upgrade_required", { ip, username: row.username, userId: row.id, store: "sqlite" });
-      return req.session.save((saveErr) => {
-        if (saveErr) return res.status(500).send("Session save failed");
-        return res.json({ ok: false, code: "PASSWORD_UPGRADE_REQUIRED" });
-      });
-    }
-
-    if (PG_READY && pgPool) {
-      await pgSafe(
-        `INSERT INTO users (id, username, password_hash, role, created_at, theme, gold, xp)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT (username) DO UPDATE
-           SET password_hash = EXCLUDED.password_hash,
-               role = EXCLUDED.role,
-               theme = COALESCE(users.theme, EXCLUDED.theme),
-               gold = COALESCE(users.gold, EXCLUDED.gold),
-               xp = COALESCE(users.xp, EXCLUDED.xp)`,
-        [
-          row.id,
-          row.username,
-          passwordHash,
-          row.role || "User",
-          Number(row.created_at || Date.now()),
-          theme,
-          Number(row.gold || 0),
-          Number(row.xp || 0),
-        ]
-      ).catch((e) => console.error("PG mirror on login failed:", e));
-    }
-
-    req.session.regenerate((regenErr) => {
-      if (regenErr) return res.status(500).send("Session failed");
-      req.session.user = { id: row.id, username: row.username, role: row.role, theme, avatar: avatarUrlFromRow(row) || "", avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? null };
-      dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]).catch(() => {});
-      awardLoginXp(row.id, row.role);
-      awardDailyLoginGold(row);
-      initGoldTick(row.id);
-      clearLoginFailures(loginKey);
-      clearLoginFailures(ipKey);
-      req.session.save((saveErr) => {
-        if (saveErr) return res.status(500).send("Session save failed");
-        return res.json({ ok: true });
-      });
-    });
-    return;
-  } catch (e) {
-    console.error(e);
-    return res.status(500).send("Login failed");
-  }
-});
-
-app.get("/password-upgrade/status", (req, res) => {
-  const pending = req.session?.passwordUpgrade || null;
-  if (!pending?.userId) return res.json({ required: false });
-  return res.json({ required: true, nonce: pending.nonce || "" });
-});
-
-app.get("/password-upgrade", (req, res) => {
-  if (!req.session?.passwordUpgrade?.userId) return res.redirect("/");
-  return res.sendFile(path.join(PUBLIC_DIR, "index.html"));
-});
-
-app.post("/password-upgrade", passwordUpgradeLimiter, async (req, res) => {
-  const pending = req.session?.passwordUpgrade || null;
-  if (!pending?.userId) return res.status(401).json({ ok: false, message: "No password upgrade pending." });
-
-  const ip = getClientIp(req);
-  const attemptState = getPasswordUpgradeAttemptState(req);
-  if (attemptState.blocked) {
-    return res.status(429).json({ ok: false, code: "PASSWORD_UPGRADE_LOCKED", message: "Too many attempts. Try again later." });
-  }
-
-  const currentPassword = String(req.body?.currentPassword || "");
-  const newPassword = String(req.body?.newPassword || "");
-  const confirmPassword = String(req.body?.confirmPassword || "");
-  const nonce = String(req.body?.nonce || "");
-
-  if (pending.nonce && nonce !== pending.nonce) {
-    return res.status(403).json({ ok: false, message: "Invalid session." });
-  }
-
-  if (!currentPassword || !newPassword || !confirmPassword) {
-    return res.status(400).json({ ok: false, message: "Missing required fields." });
-  }
-
-  if (newPassword.length < 12) {
-    return res.status(400).json({ ok: false, message: "Password must be 12+ chars." });
-  }
-  if (newPassword !== confirmPassword) {
-    return res.status(400).json({ ok: false, message: "Passwords do not match." });
-  }
-  if (isPasswordTooWeak(newPassword)) {
-    return res.status(400).json({ ok: false, message: "Password is too common." });
-  }
-
-  try {
-    const userId = Number(pending.userId);
-    const pgUser = await pgGetUserById(userId).catch(() => null);
-    const sqliteRow = await dbGetAsync("SELECT * FROM users WHERE id = ?", [userId]).catch(() => null);
-
-    if (!pgUser && !sqliteRow) {
-      recordPasswordUpgradeFailure(req);
-      logSecurityEvent("password_upgrade_failed", { ip, userId, username: pending.username, reason: "user_not_found" });
-      return res.status(401).json({ ok: false, message: "Password upgrade failed." });
-    }
-
-    let stored = "";
-    if (pgUser?.password_hash) stored = String(pgUser.password_hash || "").trim();
-    else if (sqliteRow?.password_hash) stored = String(sqliteRow.password_hash || "").trim();
-    else if (sqliteRow?.password) stored = String(sqliteRow.password || "").trim();
-
-    const looksBcrypt = stored.startsWith("$2");
-    const matches = looksBcrypt
-      ? await bcrypt.compare(currentPassword, stored)
-      : currentPassword === stored;
-
-    if (!matches) {
-      recordPasswordUpgradeFailure(req);
-      logSecurityEvent("password_upgrade_failed", { ip, userId, username: pending.username, reason: "password_mismatch" });
-      return res.status(401).json({ ok: false, message: "Current password incorrect." });
-    }
-
-    const newHash = await bcrypt.hash(newPassword, 12);
-
-    if (pgUser?.id) {
-      await pgSafe("UPDATE users SET password_hash = $1 WHERE id = $2", [newHash, pgUser.id]).catch(() => {});
-    } else if (sqliteRow?.id) {
-      const createdAtValue = PG_USERS_CREATED_AT_IS_TIMESTAMP
-        ? new Date(Number(sqliteRow.created_at || Date.now()))
-        : Number(sqliteRow.created_at || Date.now());
-      await pgSafe(
-        `INSERT INTO users (id, username, password_hash, role, created_at, theme, gold, xp)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT (username) DO UPDATE
-           SET password_hash = EXCLUDED.password_hash,
-               role = COALESCE(users.role, EXCLUDED.role),
-               theme = COALESCE(users.theme, EXCLUDED.theme),
-               gold = COALESCE(users.gold, EXCLUDED.gold),
-               xp = COALESCE(users.xp, EXCLUDED.xp)`,
-        [
-          sqliteRow.id,
-          sqliteRow.username,
-          newHash,
-          sqliteRow.role || "User",
-          createdAtValue,
-          sanitizeThemeNameServer(sqliteRow.theme || DEFAULT_THEME),
-          Number(sqliteRow.gold || 0),
-          Number(sqliteRow.xp || 0),
-        ]
-      ).catch(() => {});
-    }
-
-    if (sqliteRow?.id) {
-      await dbRunAsync("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [newHash, sqliteRow.id]).catch(() => {});
-    } else if (pgUser?.id) {
-      await dbRunAsync(
-        `INSERT INTO users (id, username, password_hash, role, created_at, gold, xp, theme)
-         VALUES (?,?,?,?,?,?,?,?)`,
-        [
-          pgUser.id,
-          pgUser.username,
-          newHash,
-          pgUser.role || "User",
-          Number(pgUser.created_at || Date.now()),
-          Number(pgUser.gold || 0),
-          Number(pgUser.xp || 0),
-          sanitizeThemeNameServer(pgUser.theme || DEFAULT_THEME),
-        ]
-      ).catch(() => {});
-    }
-
-    const refreshedPgUser = await pgGetUserById(userId).catch(() => null);
-    const sessionRow = refreshedPgUser || sqliteRow || pgUser;
-    const role = sessionRow?.role || "User";
-    const theme = sanitizeThemeNameServer(sessionRow?.theme || DEFAULT_THEME);
-    const avatar = avatarUrlFromRow(sessionRow) || "";
-    const avatarUpdated = sessionRow?.avatar_updated ?? sessionRow?.avatarUpdated ?? null;
-
-    clearPasswordUpgradeFailures(req);
-    delete req.session.passwordUpgrade;
-
-    req.session.regenerate((regenErr) => {
-      if (regenErr) return res.status(500).json({ ok: false, message: "Session failed." });
-      req.session.user = {
-        id: userId,
-        username: sessionRow?.username || pending.username,
-        role,
-        theme,
-        avatar,
-        avatar_updated: avatarUpdated,
-      };
-      dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", userId]).catch(() => {});
-      if (!pgUser && sqliteRow) {
-        awardLoginXp(userId, role);
-        awardDailyLoginGold(sqliteRow);
-      }
-      initGoldTick(userId);
-      logSecurityEvent("password_upgrade_success", { ip, userId, username: sessionRow?.username || pending.username });
-      req.session.save((saveErr) => {
-        if (saveErr) return res.status(500).json({ ok: false, message: "Session save failed." });
-        return res.json({ ok: true });
-      });
-    });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ ok: false, message: "Password upgrade failed." });
-  }
-});
-
-app.post("/logout", (req, res) => {
-  req.session.destroy(() => res.json({ ok: true }));
-});
-
-app.get("/me", async (req, res) => {
-  try {
-    if (!req.session?.user?.id) return res.json(null);
-
-    // If we already have an avatar in-session, keep it as a fallback.
-    const prevAvatar = req.session?.user?.avatar || "";
-    const prevAvatarUpdated = req.session?.user?.avatar_updated ?? null;
-
-    // Prefer Postgres
-    // IMPORTANT: /me is used to hydrate the session and client state.
-    // We MUST select role/theme and avatar fields; otherwise we may overwrite
-    // req.session.user.role/theme with undefined, which breaks permission gating.
-    const result18 = await pgSafe(
-      `SELECT id,
-              username,
-              role,
-              theme,
-              avatar,
-              avatar_updated,
-              avatar_bytes
-         FROM users
-        WHERE id = $1
-        LIMIT 1`,
-      [req.session.user.id]
-    );
-    const rows = result18?.rows || [];
-
-    let row = rows[0];
-
-    // If not in Postgres yet, fallback to SQLite and (optionally) sync
-    if (!row) {
-      const srow = await dbGet(
-        "SELECT id, username FROM users WHERE id = ?",
-        [req.session.user.id]
-      );
-      if (!srow) return res.json(null);
-
-      const theme = sanitizeThemeNameServer(srow.theme);
-      if (!srow.theme) db.run("UPDATE users SET theme = ? WHERE id = ?", [theme, srow.id]);
-
-      // Try to mirror minimal fields into Postgres if the user exists there by id
-      // (If your login migration creates PG users with matching ids, this will work;
-      // otherwise we’ll handle it during login migration.)
-      try {
-        await pgSafe(
-          "UPDATE users SET theme = $1, role = $2 WHERE id = $3",
-          [theme, srow.role, srow.id]
-        );
-      } catch (_) {}
-
-      const computedAvatar = avatarUrlFromRow(srow) || "";
-      req.session.user = {
-        id: srow.id,
-        username: srow.username,
-        role: srow.role,
-        theme,
-        avatar: computedAvatar || prevAvatar,
-        avatar_updated: srow.avatar_updated ?? srow.avatarUpdated ?? prevAvatarUpdated,
-      };
-      return res.json(req.session.user);
-    }
-
-    const theme = sanitizeThemeNameServer(row.theme);
-    if (!row.theme) await pgSafe("UPDATE users SET theme = $1 WHERE id = $2", [theme, row.id]);
-
-    const computedAvatar = avatarUrlFromRow(row) || "";
-    req.session.user = {
-      id: row.id,
-      username: row.username,
-      role: row.role,
-      theme,
-      avatar: computedAvatar || prevAvatar,
-      avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? prevAvatarUpdated,
-    };
-    return res.json(req.session.user);
-  } catch (e) {
-    console.error(e);
-    return res.json(null);
-  }
-});
-
-// Back-compat alias used by some clients
-app.get("/api/me", (req, res) => res.redirect(307, "/me"));
-
-app.get("/api/restriction", async (req, res) => {
-  try {
-    const username = req.session?.user?.username;
-    if (!username) return res.json({ type: "none" });
-    const r = await getRestrictionByUsername(username);
-    res.json({ type: r.type || "none", reason: r.reason || "", expiresAt: r.expiresAt || null, now: Date.now() });
-  } catch (e) {
-    res.json({ type: "none" });
-  }
-});
-
-
-
-//
-// Owner-only: live feature flags
-//
-app.get("/api/owner/flags", requireOwner, async (_req, res) => {
-  try {
-    const flags = await refreshFeatureFlags();
-    res.json({ ok: true, flags });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: "failed_to_load_flags" });
-  }
-});
-
-app.post("/api/owner/flags", moderationHttpLimiter, requireOwner, express.json({ limit: "64kb" }), async (req, res) => {
-  try {
-    const incoming = req.body?.flags;
-    if (!incoming || typeof incoming !== "object") return res.status(400).json({ ok: false, error: "bad_flags" });
-    // sanitize: flat object of booleans/numbers/strings
-    const next = {};
-    for (const [k, v] of Object.entries(incoming)) {
-      if (!k || typeof k !== "string") continue;
-      if (typeof v === "boolean" || typeof v === "number" || typeof v === "string") next[k] = v;
-    }
-    await setConfigJson("feature_flags", next);
-    FEATURE_FLAGS_CACHE = { ...next };
-    try { io.emit("featureFlags:update", next); } catch {}
-    res.json({ ok: true, flags: next });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: "failed_to_save_flags" });
-  }
-});
-
-//
-// Owner-only: session map
-//
-app.get("/api/owner/sessions", requireOwner, async (_req, res) => {
-  try {
-    const out = [];
-    for (const [sid, meta] of sessionMetaBySocketId.entries()) {
-      if (!meta) continue;
-      out.push({ socketId: sid, ...meta });
-    }
-    // Sort: newest first
-    out.sort((a, b) => (b.connectedAt || 0) - (a.connectedAt || 0));
-    res.json({ ok: true, sessions: out, now: Date.now() });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: "failed_to_load_sessions" });
-  }
-});
-
-//
-// Admin/Owner: heat score snapshot (invisible to users)
-//
-app.get("/api/mod/heat", requireLogin, async (req, res) => {
-  try {
-    if (!requireMinRole(req.session.user.role, "Admin")) return res.status(403).send("Forbidden");
-    const rows = [];
-    for (const [uid, heat] of heatByUserId.entries()) {
-      rows.push({ userId: uid, heat });
-    }
-    rows.sort((a, b) => b.heat - a.heat);
-    res.json({ ok: true, rows, now: Date.now() });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: "failed_to_load_heat" });
-  }
-});
-
-// Get username history for a user (moderator only)
-app.get("/api/mod/users/:userId/username-history", requireLogin, async (req, res) => {
-  try {
-    if (!requireMinRole(req.session.user.role, "Moderator")) {
-      return res.status(403).json({ ok: false, message: "Forbidden" });
-    }
-    
-    const userId = parseInt(req.params.userId);
-    if (!userId || isNaN(userId)) {
-      return res.status(400).json({ ok: false, message: "Invalid user ID" });
-    }
-
-    const history = await dbAllAsync(
-      `SELECT old_username, new_username, changed_at, changed_by 
-       FROM username_history 
-       WHERE user_id = ? 
-       ORDER BY changed_at DESC`,
-      [userId]
-    );
-
-    res.json({ ok: true, history: history || [] });
-  } catch (e) {
-    console.error("[username history fetch]", e);
-    res.status(500).json({ ok: false, message: "Failed to load username history" });
-  }
-});
-
-//
-// Daily micro-challenges
-//
-function dayKeyNow() {
-  // UTC day key to keep consistent across timezones
-  const d = new Date();
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const da = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${da}`;
-}
-
-const DAILY_CHALLENGE_POOL = [
-  { id: "room_msgs_5", label: "Send 5 room messages", type: "room_messages", goal: 5, rewardXp: 30, rewardGold: 25 },
-  { id: "react_3", label: "React 3 times", type: "reactions", goal: 3, rewardXp: 25, rewardGold: 20 },
-  { id: "rooms_2", label: "Visit 2 different rooms", type: "unique_rooms", goal: 2, rewardXp: 25, rewardGold: 15 },
-];
-
-function pickDailyChallenges() {
-  // deterministic order for now (stable + simple)
-  return DAILY_CHALLENGE_POOL.slice(0, 3);
-}
-
-async function loadDailyProgress(userId, dayKey) {
-  const now = Date.now();
-  // prefer PG if user exists there
-  if (await pgUserExists(userId)) {
-    const result19 = await pgSafe(
-      "SELECT progress_json, claimed_json FROM daily_challenge_progress WHERE user_id=$1 AND day_key=$2",
-      [userId, dayKey]
-    );
-    const rows = result19?.rows || [];
-    if (rows?.length) return { progress: rows[0].progress_json || {}, claimed: rows[0].claimed_json || {}, updatedAt: now, pg: true };
-    return { progress: {}, claimed: {}, updatedAt: now, pg: true };
-  }
-  const row = await dbGetAsync(
-    "SELECT progress_json, claimed_json FROM daily_challenge_progress WHERE user_id=? AND day_key=?",
-    [userId, dayKey]
-  );
-  return {
-    progress: safeJsonParse(row?.progress_json || "{}", {}),
-    claimed: safeJsonParse(row?.claimed_json || "{}", {}),
-    updatedAt: now,
-    pg: false,
-  };
-}
-
-async function saveDailyProgress(userId, dayKey, progress, claimed, pg) {
-  const now = Date.now();
-  if (pg) {
-    await pgSafe(
-      `INSERT INTO daily_challenge_progress (user_id, day_key, progress_json, claimed_json, updated_at)
-       VALUES ($1,$2,$3::jsonb,$4::jsonb,$5)
-       ON CONFLICT (user_id, day_key)
-       DO UPDATE SET progress_json=EXCLUDED.progress_json, claimed_json=EXCLUDED.claimed_json, updated_at=EXCLUDED.updated_at`,
-      [userId, dayKey, JSON.stringify(progress || {}), JSON.stringify(claimed || {}), now]
-    );
-    return;
-  }
-  await dbRunAsync(
-    `INSERT INTO daily_challenge_progress (user_id, day_key, progress_json, claimed_json, updated_at)
-     VALUES (?,?,?,?,?)
-     ON CONFLICT(user_id, day_key) DO UPDATE SET progress_json=excluded.progress_json, claimed_json=excluded.claimed_json, updated_at=excluded.updated_at`,
-    [userId, dayKey, JSON.stringify(progress || {}), JSON.stringify(claimed || {}), now]
-  );
-}
-
-
-
-async function bumpDailyProgress(userId, dayKey, challengeId, delta, pgHint = null) {
-  const d = Math.max(0, Math.floor(Number(delta) || 0));
-  if (!userId || !challengeId || !d) return;
-  try {
-    const prog = await loadDailyProgress(userId, dayKey);
-    const progress = prog.progress || {};
-    const claimed = prog.claimed || {};
-    progress[challengeId] = Math.max(0, Math.floor(Number(progress[challengeId] || 0) + d));
-    await saveDailyProgress(userId, dayKey, progress, claimed, prog.pg);
-  } catch {}
-}
-
-async function bumpDailyUniqueRoom(userId, dayKey, roomName, pgHint = null) {
-  if (!userId || !roomName) return;
-  const key = "__rooms";
-  try {
-    const prog = await loadDailyProgress(userId, dayKey);
-    const progress = prog.progress || {};
-    const claimed = prog.claimed || {};
-    const arr = Array.isArray(progress[key]) ? progress[key] : [];
-    if (!arr.includes(roomName)) arr.push(roomName);
-    progress[key] = arr.slice(0, 25);
-    // mirror into rooms_2 challenge progress as count
-    progress["rooms_2"] = arr.length;
-    await saveDailyProgress(userId, dayKey, progress, claimed, prog.pg);
-  } catch {}
-}
-
-async function creditGold(userId, amount, reason = "reward") {
-  const amt = Math.max(0, Math.floor(Number(amount) || 0));
-  if (!amt) return null;
-
-  if (await pgUserExists(userId)) {
-    const client = await pgPool.connect();
-    try {
-      await client.query("BEGIN");
-      const { rows } = await client.query("SELECT gold FROM users WHERE id=$1 FOR UPDATE", [userId]);
-      const current = Number(rows?.[0]?.gold || 0);
-      const next = current + amt;
-      await client.query("UPDATE users SET gold=$1 WHERE id=$2", [next, userId]);
-      await client.query(
-        "INSERT INTO gold_transactions (user_id, amount, reason, created_at) VALUES ($1,$2,$3,$4)",
-        [userId, amt, String(reason || "reward"), Date.now()]
-      );
-      await client.query("COMMIT");
-      try { emitProgressionUpdate(userId); } catch {}
-      return { ok: true, gold: next };
-    } catch (e) {
-      try { await client.query("ROLLBACK"); } catch {}
-      return null;
-    } finally {
-      client.release();
-    }
-  }
-
-  await dbRunAsync("UPDATE users SET gold = gold + ? WHERE id = ?", [amt, userId]);
-  try { emitProgressionUpdate(userId); } catch {}
-  return { ok: true };
-}
-
-app.get("/api/challenges/today", requireLogin, async (req, res) => {
-  try {
-    const userId = req.session.user.id;
-    const dk = dayKeyNow();
-    const picked = pickDailyChallenges();
-    const prog = await loadDailyProgress(userId, dk);
-    const progress = prog.progress || {};
-    const claimed = prog.claimed || {};
-    const challenges = picked.map((c) => {
-      const p = Number(progress[c.id] || 0);
-      const done = p >= c.goal;
-      return {
-        ...c,
-        progress: p,
-        done,
-        claimed: !!claimed[c.id],
-      };
-    });
-    res.json({ ok: true, dayKey: dk, challenges });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: "failed_to_load_challenges" });
-  }
-});
-
-app.post("/api/challenges/claim", strictLimiter, requireLogin, express.json({ limit: "32kb" }), async (req, res) => {
-  try {
-    const userId = req.session.user.id;
-    const dk = dayKeyNow();
-    const id = String(req.body?.id || "");
-    const picked = pickDailyChallenges();
-    const challenge = picked.find((c) => c.id === id);
-    if (!challenge) return res.status(400).json({ ok: false, error: "unknown_challenge" });
-
-    const prog = await loadDailyProgress(userId, dk);
-    const progress = prog.progress || {};
-    const claimed = prog.claimed || {};
-    if (claimed[id]) return res.json({ ok: true, already: true });
-
-    const p = Number(progress[id] || 0);
-    if (p < challenge.goal) return res.status(400).json({ ok: false, error: "not_complete" });
-
-    claimed[id] = true;
-    await saveDailyProgress(userId, dk, progress, claimed, prog.pg);
-
-    // reward
-    try { await applyXpGain(userId, challenge.rewardXp || 0, { reason: "daily_challenge" }); } catch {}
-    try { await creditGold(userId, challenge.rewardGold || 0, `daily_challenge:${id}`); } catch {}
-
-    res.json({ ok: true, claimed: true });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: "failed_to_claim" });
-  }
-});
-
-app.get("/api/vibes", (_req, res) => {
-  res.json({ limit: VIBE_TAG_LIMIT, vibes: VIBE_TAGS });
-});
-
-app.get("/api/me/progression", requireLogin, async (req, res) => {
-  const uid = req.session.user.id;
-
-  const finish = async () => {
-    try {
-      // Keep current tick logic (SQLite) but mirror results into Postgres
-      await syncGoldXpThemeToPg(uid);
-
-      const result23 = await pgSafe(
-        "SELECT gold, xp FROM users WHERE id = $1 LIMIT 1",
-        [uid]
-      );
-      const rows = result23?.rows || [];
-      const row = rows[0];
-      if (!row) return res.status(404).send("Not found");
-
-      return res.json(progressionFromRow(row, true));
-    } catch (e) {
-      console.error(e);
-      return res.status(500).send("Failed");
-    }
-  };
-
-  if (onlineState.has(uid)) {
-    awardPassiveGold(uid, () => {
-      finish();
-    });
-  } else {
-    finish();
-  }
-});
-
-app.get("/api/me/gold", requireLogin, async (req, res) => {
-  const uid = req.session.user.id;
-
-  const finish = async () => {
-    try {
-      await syncGoldXpThemeToPg(uid);
-
-      const result24 = await pgSafe(
-        "SELECT gold FROM users WHERE id = $1 LIMIT 1",
-        [uid]
-      );
-      const rows = result24?.rows || [];
-      const row = rows[0];
-      if (!row) return res.status(404).send("Not found");
-
-      return res.json({ gold: Number(row.gold || 0) });
-    } catch (e) {
-      console.error(e);
-      return res.status(500).send("Failed");
-    }
-  };
-
-  if (onlineState.has(uid)) {
-    awardPassiveGold(uid, () => { finish(); });
-  } else {
-    finish();
-  }
-});
-
-app.post("/api/me/username", strictLimiter, requireLogin, async (req, res) => {
-  const userId = req.session.user.id;
-  const oldUsername = req.session.user.username;
-  const raw = String(req.body?.username || "").trim();
-  const newName = sanitizeUsername(raw);
-
-  if (!newName || newName.length < 2) {
-    return res.status(400).json({ ok: false, message: "Invalid username." });
-  }
-  if (normKey(newName) === normKey(req.session.user.username)) {
-    return res.status(400).json({ ok: false, message: "That is already your username." });
-  }
-  if (!(await pgUsersEnabled())) {
-    return res.status(503).json({ ok: false, message: "Username changes are unavailable right now." });
-  }
-
-  let nextGold = null;
-  const client = await pgPool.connect();
-  try {
-    await client.query("BEGIN");
-
-    const existing = await client.query(
-      "SELECT id FROM users WHERE lower(username) = lower($1) AND id <> $2 LIMIT 1",
-      [newName, userId]
-    );
-    if (existing.rows?.length) {
-      await client.query("ROLLBACK");
-      return res.status(409).json({ ok: false, message: "Username already taken." });
-    }
-
-    const spend = await spendGoldInTransaction(client, userId, USERNAME_CHANGE_COST, "username_change");
-    if (!spend.ok) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ ok: false, message: spend.message || "Not enough gold.", gold: spend.gold ?? null });
-    }
-
-    await client.query("UPDATE users SET username = $1 WHERE id = $2", [newName, userId]);
-    await client.query("COMMIT");
-    nextGold = spend.gold;
-  } catch (e) {
-    try { await client.query("ROLLBACK"); } catch {}
-    if (e?.code === "23505") {
-      return res.status(409).json({ ok: false, message: "Username already taken." });
-    }
-    console.error("[username change]", e);
-    return res.status(500).json({ ok: false, message: "Failed to update username." });
-  } finally {
-    client.release();
-  }
-
-  // Log username history to SQLite
-  try {
-    await dbRunAsync(
-      "INSERT INTO username_history (user_id, old_username, new_username, changed_at, changed_by) VALUES (?, ?, ?, ?, ?)",
-      [userId, oldUsername, newName, Date.now(), 'self']
-    );
-  } catch (e) {
-    console.warn("[username history]", e?.message || e);
-  }
-
-  // Best-effort mirror to SQLite so legacy lookups remain consistent.
-  try {
-    await dbRunAsync("UPDATE users SET username = ? WHERE id = ?", [newName, userId]);
-  } catch (e) {
-    console.warn("[username change][sqlite]", e?.message || e);
-  }
-
-  req.session.user.username = newName;
-  return req.session.save((saveErr) => {
-    if (saveErr) return res.status(500).json({ ok: false, message: "Session save failed." });
-    updateLiveUsername(userId, newName);
-    return res.json({ ok: true, username: newName, gold: nextGold, cost: USERNAME_CHANGE_COST });
-  });
-});
-
-app.get("/api/me/theme", requireLogin, async (req, res) => {
-  try {
-    // Prefer Postgres
-    const result20 = await pgSafe(
-      "SELECT theme FROM users WHERE id = $1 LIMIT 1",
-      [req.session.user.id]
-    );
-    const rows = result20?.rows || [];
-    const row = rows[0];
-    if (!row) return res.status(404).send("Not found");
-
-    const theme = sanitizeThemeNameServer(row.theme);
-    if (!row.theme) await pgSafe("UPDATE users SET theme = $1 WHERE id = $2", [theme, req.session.user.id]);
-
-    req.session.user.theme = theme;
-        // Enforce private-theme rules server-side
-    const effective = canUseTheme(req.session.user, theme) ? theme : DEFAULT_THEME;
-    req.session.user.theme = effective;
-    return res.json({ theme: effective });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).send("Failed");
-  }
-});
-
-
-app.post("/api/me/theme", strictLimiter, requireLogin, async (req, res) => {
-  try {
-    const theme = sanitizeThemeNameServer(req.body?.theme);
-
-    // Enforce private-theme rules server-side
-    if (!canUseTheme(req.session.user, theme)) {
-      return res.status(403).json({ error: "Theme not allowed" });
-    }
-
-
-    // Update Postgres (new source of truth for theme)
-    await pgSafe("UPDATE users SET theme = $1 WHERE id = $2", [theme, req.session.user.id]);
-
-    // Keep SQLite in sync until login/user migration is fully done
-    db.run("UPDATE users SET theme = ? WHERE id = ?", [theme, req.session.user.id]);
-
-    req.session.user.theme = theme;
-    return res.json({ theme });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.post("/api/themes/purchase", strictLimiter, requireLogin, express.json({ limit: "8kb" }), async (req, res) => {
-  const userId = req.session.user.id;
-  const themeId = String(req.body?.themeId || "").trim();
-  const theme = THEME_BY_ID.get(themeId);
-  if (!theme) return res.status(404).json({ ok: false, error: "theme_not_found" });
-  if (!theme.isPurchasable || !theme.goldPrice) {
-    return res.status(400).json({ ok: false, error: "theme_not_purchasable" });
-  }
-
-  try {
-    if (await pgUserExists(userId)) {
-      const client = await pgPool.connect();
-      try {
-        await client.query("BEGIN");
-        const { rows } = await client.query(
-          "SELECT gold, prefs_json FROM users WHERE id = $1 LIMIT 1 FOR UPDATE",
-          [userId]
-        );
-        const row = rows?.[0];
-        if (!row) {
-          await client.query("ROLLBACK");
-          return res.status(404).json({ ok: false, error: "user_not_found" });
-        }
-        const gold = Number(row.gold || 0);
-        const prefs = normalizePrefs(safeJsonParse(row.prefs_json, {}), req.session.user.role);
-        const owned = new Set(normalizeThemeIdList(prefs.ownedThemeIds));
-        if (owned.has(themeId)) {
-          await client.query("COMMIT");
-          return res.json({ ok: true, gold, ownedThemeIds: Array.from(owned) });
-        }
-        if (gold < theme.goldPrice) {
-          await client.query("ROLLBACK");
-          return res.status(400).json({ ok: false, error: "insufficient_gold", gold });
-        }
-        const nextGold = gold - theme.goldPrice;
-        owned.add(themeId);
-        const nextPrefs = normalizePrefs({ ...prefs, ownedThemeIds: Array.from(owned) }, req.session.user.role);
-        await client.query("UPDATE users SET gold = $1, prefs_json = $2::jsonb WHERE id = $3", [
-          nextGold,
-          JSON.stringify(nextPrefs),
-          userId,
-        ]);
-        await client.query("COMMIT");
-        db.run("UPDATE users SET gold = ?, prefs_json = ? WHERE id = ?", [
-          nextGold,
-          JSON.stringify(nextPrefs),
-          userId,
-        ]);
-        return res.json({ ok: true, gold: nextGold, ownedThemeIds: nextPrefs.ownedThemeIds });
-      } catch (e) {
-        await client.query("ROLLBACK");
-        throw e;
-      } finally {
-        client.release();
-      }
-    }
-  } catch (e) {
-    console.warn("[themes][purchase][pg] failed, falling back to sqlite:", e?.message || e);
-  }
-
-  db.get("SELECT gold, prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
-    if (!row) return res.status(404).json({ ok: false, error: "user_not_found" });
-    const gold = Number(row.gold || 0);
-    const prefs = normalizePrefs(safeJsonParse(row.prefs_json, {}), req.session.user.role);
-    const owned = new Set(normalizeThemeIdList(prefs.ownedThemeIds));
-    if (owned.has(themeId)) {
-      return res.json({ ok: true, gold, ownedThemeIds: Array.from(owned) });
-    }
-    if (gold < theme.goldPrice) {
-      return res.status(400).json({ ok: false, error: "insufficient_gold", gold });
-    }
-    const nextGold = gold - theme.goldPrice;
-    owned.add(themeId);
-    const nextPrefs = normalizePrefs({ ...prefs, ownedThemeIds: Array.from(owned) }, req.session.user.role);
-    db.run(
-      "UPDATE users SET gold = ?, prefs_json = ? WHERE id = ?",
-      [nextGold, JSON.stringify(nextPrefs), userId],
-      (err2) => {
-        if (err2) return res.status(500).json({ ok: false, error: "purchase_failed" });
-        return res.json({ ok: true, gold: nextGold, ownedThemeIds: nextPrefs.ownedThemeIds });
-      }
-    );
-  });
-});
-
-// ---- User prefs (badge colors, DM theme, etc)
-function safeJsonParse(raw, fallback) {
-  try {
-    if (raw == null || raw === "") return fallback;
-    if (typeof raw === "object") return raw; // pg may already return json
-    return JSON.parse(raw);
-  } catch {
-    return fallback;
-  }
-}
-function safeString(value, fallback = "") {
-  if (typeof value === "string") return value;
-  if (value === null || value === undefined) return fallback;
-  return String(value);
-}
-function safeNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-const PREFS_DEFAULTS = Object.freeze({
-  dmBadgePrefs: { direct: "#ed4245", group: "#5865f2" },
-  dmNeonColor: "#5865f2",
-  dmThemePrefs: { background: "#1e1f22" },
-  pinnedThemeIds: [],
-  favoriteThemeIds: [],
-  ownedThemeIds: [],
-  sound: {
-    enabled: false,
-    room: true,
-    dm: true,
-    mention: true,
-    sent: false,
-    receive: false,
-    reaction: false,
-  },
-});
-function normalizeSoundPrefs(raw) {
-  const base = { ...PREFS_DEFAULTS.sound };
-  if (!raw || typeof raw !== "object") return base;
-  for (const key of Object.keys(base)) {
-    if (typeof raw[key] === "boolean") base[key] = raw[key];
-  }
-  return base;
-}
-function normalizeThemeIdList(raw) {
-  if (!Array.isArray(raw)) return [];
-  const unique = [];
-  const seen = new Set();
-  for (const id of raw) {
-    const key = String(id || "");
-    if (!THEME_ID_SET.has(key) || seen.has(key)) continue;
-    seen.add(key);
-    unique.push(key);
-  }
-  return unique;
-}
-function enforcePinnedLimit(prefs, role) {
-  const maxPins = roleRank(role || "User") >= roleRank("VIP") ? 5 : 2;
-  prefs.pinnedThemeIds = normalizeThemeIdList(prefs.pinnedThemeIds).slice(0, maxPins);
-  return prefs;
-}
-function normalizePrefs(raw, role = "User") {
-  const prefs = raw && typeof raw === "object" ? raw : {};
-  const dmBadgePrefs = { ...PREFS_DEFAULTS.dmBadgePrefs };
-  if (prefs.dmBadgePrefs && typeof prefs.dmBadgePrefs === "object") {
-    if (typeof prefs.dmBadgePrefs.direct === "string") dmBadgePrefs.direct = prefs.dmBadgePrefs.direct;
-    if (typeof prefs.dmBadgePrefs.group === "string") dmBadgePrefs.group = prefs.dmBadgePrefs.group;
-  }
-  const dmNeonColor = typeof prefs.dmNeonColor === "string"
-    ? prefs.dmNeonColor
-    : (typeof prefs.dmThemePrefs?.background === "string" ? prefs.dmThemePrefs.background : PREFS_DEFAULTS.dmNeonColor);
-  const dmThemePrefs = { ...PREFS_DEFAULTS.dmThemePrefs };
-  if (prefs.dmThemePrefs && typeof prefs.dmThemePrefs === "object") {
-    if (typeof prefs.dmThemePrefs.background === "string") dmThemePrefs.background = prefs.dmThemePrefs.background;
-  }
-  return {
-    ...prefs,
-    pinnedThemeIds: normalizeThemeIdList(prefs.pinnedThemeIds),
-    favoriteThemeIds: normalizeThemeIdList(prefs.favoriteThemeIds),
-    ownedThemeIds: normalizeThemeIdList(prefs.ownedThemeIds),
-    dmBadgePrefs,
-    dmNeonColor,
-    dmThemePrefs,
-    sound: normalizeSoundPrefs(prefs.sound),
-    chatFx: sanitizeChatFx(prefs.chatFx),
-    textStyle: sanitizeTextStyle(prefs.textStyle, role),
-    customization: sanitizeCustomization(prefs.customization, prefs.textStyle, role)
-  };
-}
-function sanitizePrefsInput(p, role = "User") {
-  const out = {};
-  if (p && typeof p === "object") {
-    if (p.dmBadgePrefs && typeof p.dmBadgePrefs === "object") out.dmBadgePrefs = p.dmBadgePrefs;
-    if (typeof p.dmNeonColor === "string") out.dmNeonColor = p.dmNeonColor;
-    if (p.dmThemePrefs && typeof p.dmThemePrefs === "object") out.dmThemePrefs = p.dmThemePrefs;
-    if (Array.isArray(p.pinnedThemeIds)) out.pinnedThemeIds = normalizeThemeIdList(p.pinnedThemeIds);
-    if (Array.isArray(p.favoriteThemeIds)) out.favoriteThemeIds = normalizeThemeIdList(p.favoriteThemeIds);
-    if (p.chatFx && typeof p.chatFx === "object") out.chatFx = sanitizeChatFx(p.chatFx);
-    if (p.textStyle && typeof p.textStyle === "object") out.textStyle = sanitizeTextStyle(p.textStyle, role);
-    if (p.customization && typeof p.customization === "object") {
-      out.customization = sanitizeCustomization(p.customization, p.textStyle, role);
-    }
-    if (p.userNameStyle && typeof p.userNameStyle === "object") {
-      out.customization = sanitizeCustomization({ userNameStyle: p.userNameStyle }, p.textStyle, role);
-    }
-    if (p.messageTextStyle && typeof p.messageTextStyle === "object") {
-      const existing = out.customization || sanitizeCustomization(p.customization, p.textStyle, role) || {};
-      out.customization = sanitizeCustomization({ ...existing, messageTextStyle: p.messageTextStyle }, p.textStyle, role);
-    }
-    if (p.sound && typeof p.sound === "object") {
-      const sound = {};
-      for (const key of ["enabled", "room", "dm", "mention", "sent", "receive", "reaction"]) {
-        if (typeof p.sound[key] === "boolean") sound[key] = p.sound[key];
-      }
-      out.sound = sound;
-    }
-  }
-  return out;
-}
-
-function buildAuthorsFxMap(usernames, cb) {
-  const unique = Array.from(new Set((usernames || []).filter((name) => typeof name === "string" && name.trim())));
-  if (!unique.length) return cb({});
-
-  // Prefer Postgres during the SQLite -> PG migration.
-  (async () => {
-    const base = {};
-    for (const name of unique) base[name] = mergeChatFxWithCustomization(null, null, null);
-
-    try {
-      if (pgPool) {
-          const result4 = await pgSafe(
-            "SELECT username, prefs_json FROM users WHERE username = ANY($1::text[])",
-            [unique]
-          );
-          const rows = result4?.rows || [];
-          for (const row of rows || []) {
-            const prefs = safeJsonParse(row?.prefs_json, {});
-            base[row.username] = mergeChatFxWithCustomization(prefs?.chatFx, prefs?.customization, prefs?.textStyle);
-          }
-          return cb(base);
-        }
-    } catch (e) {
-      console.warn("[chatFx][authorsFx][pg] failed, falling back to sqlite:", e?.message || e);
-    }
-
-    const placeholders = unique.map(() => "?").join(",");
-    db.all(
-      `SELECT username, prefs_json FROM users WHERE username IN (${placeholders})`,
-      unique,
-      (_e, rows) => {
-        for (const row of rows || []) {
-          const prefs = safeJsonParse(row?.prefs_json, {});
-          base[row.username] = mergeChatFxWithCustomization(prefs?.chatFx, prefs?.customization, prefs?.textStyle);
-        }
-        cb(base);
-      }
-    );
-  })();
-}
-
-function emitUserFxUpdate(socket) {
-  if (!socket?.user) return;
-  io.emit("user fx updated", {
-    userId: socket.user.id,
-    username: socket.user.username,
-    chatFx: mergeChatFxWithCustomization(socket.user.chatFx, socket.user.customization, socket.user.textStyle, socket.user.role),
-    customization: sanitizeCustomization(socket.user.customization, socket.user.textStyle, socket.user.role)
-  });
-}
-
-function updateLiveChatFx(userId, chatFx) {
-  const sid = socketIdByUserId.get(userId);
-  const s = sid ? io.sockets.sockets.get(sid) : null;
-  if (!s?.user) return;
-  s.user.chatFx = sanitizeChatFx(chatFx);
-  if (s.currentRoom) emitUserList(s.currentRoom);
-  emitUserFxUpdate(s);
-}
-
-function updateLiveCustomization(userId, customization, textStyle) {
-  const sid = socketIdByUserId.get(userId);
-  const s = sid ? io.sockets.sockets.get(sid) : null;
-  if (!s?.user) return;
-  s.user.customization = sanitizeCustomization(customization, textStyle, s.user.role);
-  s.user.textStyle = sanitizeTextStyle(textStyle, s.user.role);
-  if (s.currentRoom) emitUserList(s.currentRoom);
-  emitUserFxUpdate(s);
-}
-
-// API endpoint to get text style presets (gradient and neon)
-app.get("/api/text-style-presets", requireLogin, (req, res) => {
-  const userRole = req.session.user?.role || "User";
-  const isVip = requireMinRole(userRole, "VIP");
-  
-  // Only VIP+ users can access gradient and neon presets
-  if (!isVip) {
-    return res.json({
-      gradients: {},
-      neons: {},
-      vipRequired: true
-    });
-  }
-  
-  return res.json({
-    gradients: GRADIENT_PRESETS,
-    neons: NEON_PRESETS,
-    vipRequired: false
-  });
-});
-
-app.get("/api/me/prefs", requireLogin, async (req, res) => {
-  const userId = req.session.user.id;
-  const userRole = req.session.user.role || "User";
-  try {
-    // Prefer Postgres if the user exists there
-    if (await pgUserExists(userId)) {
-      const result25 = await pgSafe("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
-      const rows = result25?.rows || [];
-      const prefs = normalizePrefs(safeJsonParse(rows?.[0]?.prefs_json, {}), userRole);
-      return res.json({ prefs });
-    }
-  } catch (e) {
-    console.warn("[prefs][pg] read failed, falling back to sqlite:", e?.message || e);
-  }
-
-  db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (err, row) => {
-    if (err) return res.status(500).send("Failed");
-    const prefs = normalizePrefs(safeJsonParse(row?.prefs_json, {}), userRole);
-    return res.json({ prefs });
-  });
-});
-
-app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
-  const userId = req.session.user.id;
-  const userRole = req.session.user.role || "User";
-  const incoming = sanitizePrefsInput(req.body?.prefs ?? req.body, userRole);
-  const shouldUpdateChatFx = Object.prototype.hasOwnProperty.call(incoming || {}, "chatFx");
-  const shouldUpdateTextStyle = Object.prototype.hasOwnProperty.call(incoming || {}, "textStyle");
-  const shouldUpdateCustomization = Object.prototype.hasOwnProperty.call(incoming || {}, "customization")
-    || Object.prototype.hasOwnProperty.call(incoming || {}, "userNameStyle")
-    || Object.prototype.hasOwnProperty.call(incoming || {}, "messageTextStyle");
-
-  try {
-    if (await pgUserExists(userId)) {
-      const result26 = await pgSafe("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
-      const rows = result26?.rows || [];
-      const current = safeJsonParse(rows?.[0]?.prefs_json, {});
-      const currentPrefs = normalizePrefs(current || {}, userRole);
-      const mergedCustomization = sanitizeCustomization(
-        { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
-        currentPrefs.textStyle || incoming.textStyle,
-        userRole
-      );
-      const merged = enforcePinnedLimit(
-        normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }, userRole),
-        userRole
-      );
-      // IMPORTANT: node-postgres does not reliably serialize plain JS objects to JSON/JSONB.
-      // Always stringify and cast to jsonb to ensure prefs are actually persisted.
-      await pgSafe("UPDATE users SET prefs_json = $1::jsonb WHERE id = $2", [JSON.stringify(merged), userId]);
-
-      // Keep SQLite in sync
-      db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId]);
-      if (shouldUpdateChatFx) {
-        req.session.user.chatFx = sanitizeChatFx(merged.chatFx);
-        updateLiveChatFx(userId, merged.chatFx);
-      }
-      if (shouldUpdateTextStyle) {
-        req.session.user.textStyle = sanitizeTextStyle(merged.textStyle, userRole);
-      }
-      if (shouldUpdateCustomization) {
-        req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle, userRole);
-        updateLiveCustomization(userId, merged.customization, merged.textStyle);
-      }
-      return res.json({ ok: true, prefs: merged });
-    }
-  } catch (e) {
-    console.warn("[prefs][pg] update failed, falling back to sqlite:", e?.message || e);
-  }
-
-  // SQLite fallback
-  db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
-    const current = safeJsonParse(row?.prefs_json, {});
-    const currentPrefs = normalizePrefs(current || {}, userRole);
-    const mergedCustomization = sanitizeCustomization(
-      { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
-      currentPrefs.textStyle || incoming.textStyle,
-      userRole
-    );
-    const merged = enforcePinnedLimit(
-      normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }, userRole),
-      userRole
-    );
-    db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId], (err2) => {
-      if (err2) return res.status(500).send("Failed");
-      if (shouldUpdateChatFx) {
-        req.session.user.chatFx = sanitizeChatFx(merged.chatFx);
-        updateLiveChatFx(userId, merged.chatFx);
-      }
-      if (shouldUpdateTextStyle) {
-        req.session.user.textStyle = sanitizeTextStyle(merged.textStyle, userRole);
-      }
-      if (shouldUpdateCustomization) {
-        req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle, userRole);
-        updateLiveCustomization(userId, merged.customization, merged.textStyle);
-      }
-      return res.json({ ok: true, prefs: merged });
-    });
-  });
-});
-
-app.post("/api/profile/customization", strictLimiter, requireLogin, async (req, res) => {
-  const userId = req.session.user.id;
-  const userRole = req.session.user.role || "User";
-  const rawCustomization = req.body?.customization ?? {
-    userNameStyle: req.body?.userNameStyle,
-    messageTextStyle: req.body?.messageTextStyle
-  };
-  const incoming = sanitizePrefsInput({ customization: rawCustomization, textStyle: req.body?.textStyle }, userRole);
-  const shouldUpdateCustomization = Object.prototype.hasOwnProperty.call(incoming || {}, "customization");
-  if (!shouldUpdateCustomization) return res.status(400).send("Invalid customization");
-
-  try {
-    if (await pgUserExists(userId)) {
-      const result27 = await pgSafe("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
-      const rows = result27?.rows || [];
-      const current = safeJsonParse(rows?.[0]?.prefs_json, {});
-      const currentPrefs = normalizePrefs(current || {}, userRole);
-      const mergedCustomization = sanitizeCustomization(
-        { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
-        currentPrefs.textStyle || incoming.textStyle,
-        userRole
-      );
-      const merged = enforcePinnedLimit(
-        normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }, userRole),
-        userRole
-      );
-      await pgSafe("UPDATE users SET prefs_json = $1::jsonb WHERE id = $2", [JSON.stringify(merged), userId]);
-      db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId]);
-      req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle, userRole);
-      updateLiveCustomization(userId, merged.customization, merged.textStyle);
-      return res.json({ ok: true, customization: merged.customization, prefs: merged });
-    }
-  } catch (e) {
-    console.warn("[prefs][pg] customization update failed, falling back to sqlite:", e?.message || e);
-  }
-
-  db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
-    const current = safeJsonParse(row?.prefs_json, {});
-    const currentPrefs = normalizePrefs(current || {}, userRole);
-    const mergedCustomization = sanitizeCustomization(
-      { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
-      currentPrefs.textStyle || incoming.textStyle,
-      userRole
-    );
-    const merged = enforcePinnedLimit(
-      normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }, userRole),
-      userRole
-    );
-    db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId], (err2) => {
-      if (err2) return res.status(500).send("Failed");
-      req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle, userRole);
-      updateLiveCustomization(userId, merged.customization, merged.textStyle);
-      return res.json({ ok: true, customization: merged.customization, prefs: merged });
-    });
-  });
-});
-
-function sortLeaderboardRows(rows, valueKey) {
-  return rows
-    .map((r) => ({ ...r, username: r.username || "" }))
-    .sort((a, b) => {
-      const diff = Number(b[valueKey] || 0) - Number(a[valueKey] || 0);
-      if (diff !== 0) return diff;
-      const base = String(a.username).localeCompare(String(b.username), undefined, { sensitivity: "base" });
-      if (base !== 0) return base;
-      return String(a.username).localeCompare(String(b.username));
-    });
-}
-
-let leaderboardCache = { payload: null, updatedAt: 0, inFlight: null };
-
-async function buildLeaderboardPayload() {
-  const merged = new Map();
-
-  if (await pgUsersEnabled()) {
-    try {
-      const result28 = await pgSafe(
-        `SELECT u.id,
-                u.username,
-                COALESCE(u.xp, 0) AS xp,
-                COALESCE(u.gold, 0) AS gold,
-                COALESCE(u.dice_sixes, 0) AS dice_sixes,
-                COALESCE(COUNT(pl.user_id), 0) AS likes
-           FROM users u
-           LEFT JOIN profile_likes pl ON pl.target_user_id = u.id
-          GROUP BY u.id`
-      );
-      const rows = result28?.rows || [];
-      for (const row of rows || []) {
-        const id = Number(row.id);
-        if (!Number.isInteger(id)) continue;
-        merged.set(id, row);
-      }
-    } catch (e) {
-      console.warn("[leaderboard][pg] failed, falling back to sqlite:", e?.message || e);
-    }
-  }
-
-  // Backfill any users that only exist in SQLite so the leaderboard includes everyone.
-  const sqliteRows = await dbAllAsync(
-    `SELECT u.id,
-            u.username,
-            COALESCE(u.xp, 0) AS xp,
-            COALESCE(u.gold, 0) AS gold,
-            COALESCE(u.dice_sixes, 0) AS dice_sixes,
-            COALESCE(COUNT(pl.user_id), 0) AS likes
-       FROM users u
-       LEFT JOIN profile_likes pl ON pl.target_user_id = u.id
-      GROUP BY u.id`
-  );
-  for (const row of sqliteRows || []) {
-    const id = Number(row.id);
-    if (!Number.isInteger(id) || merged.has(id)) continue;
-    merged.set(id, row);
-  }
-
-  const rows = Array.from(merged.values());
-  const xpRowsRaw = rows.map((r) => ({ username: r.username, xp: r.xp }));
-  const goldRowsRaw = rows.map((r) => ({ username: r.username, gold: r.gold }));
-  const diceRowsRaw = rows.map((r) => ({ username: r.username, dice_sixes: r.dice_sixes }));
-  const likeRowsRaw = rows.map((r) => ({ username: r.username, likes: r.likes }));
-
-  const xpRows = sortLeaderboardRows(xpRowsRaw, "xp");
-  const goldRows = sortLeaderboardRows(goldRowsRaw, "gold");
-  const diceRows = sortLeaderboardRows(diceRowsRaw, "dice_sixes");
-  const likeRows = sortLeaderboardRows(likeRowsRaw, "likes");
-
-  return {
-    xp: xpRows.map((r) => ({ username: r.username, level: levelInfo(r.xp || 0).level, xp: Number(r.xp || 0) })),
-    gold: goldRows.map((r) => ({ username: r.username, gold: Number(r.gold || 0) })),
-    dice: diceRows.map((r) => ({ username: r.username, sixes: Number(r.dice_sixes || 0) })),
-    likes: likeRows.map((r) => ({ username: r.username, likes: Number(r.likes || 0) })),
-  };
-}
-
-async function rebuildLeaderboards({ force = false } = {}) {
-  if (leaderboardCache.inFlight && !force) return leaderboardCache.inFlight;
-  leaderboardCache.inFlight = (async () => {
-    const payload = await buildLeaderboardPayload();
-    leaderboardCache.payload = payload;
-    leaderboardCache.updatedAt = Date.now();
-    return payload;
-  })();
-  try {
-    return await leaderboardCache.inFlight;
-  } finally {
-    leaderboardCache.inFlight = null;
-  }
-}
-
-async function sendLeaderboard(res) {
-  try {
-    const now = Date.now();
-    const shouldRefresh = !leaderboardCache.payload || (now - leaderboardCache.updatedAt > 10_000);
-    const payload = shouldRefresh ? await rebuildLeaderboards({ force: true }) : leaderboardCache.payload;
-    return res.json(payload);
-  } catch (err) {
-    return res.status(500).json({ ok: false });
-  }
-}
-
-async function fetchChessLeaderboard(limit = 50, offset = 0) {
-  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
-  const safeOffset = Math.max(Number(offset) || 0, 0);
-  if (await chessPgEnabled()) {
-    const result21 = await pgSafe(
-      `SELECT s.user_id,
-              u.username,
-              s.chess_elo,
-              s.chess_games_played,
-              s.chess_wins,
-              s.chess_losses,
-              s.chess_draws,
-              s.chess_peak_elo
-         FROM chess_user_stats s
-         JOIN users u ON u.id = s.user_id
-        ORDER BY s.chess_elo DESC, s.chess_games_played DESC, u.username ASC
-        LIMIT $1 OFFSET $2`,
-      [safeLimit, safeOffset]
-    );
-    const rows = result21?.rows || [];
-    return rows || [];
-  }
-
-  const rows = await dbAllAsync(
-    `SELECT s.user_id,
-            u.username,
-            s.chess_elo,
-            s.chess_games_played,
-            s.chess_wins,
-            s.chess_losses,
-            s.chess_draws,
-            s.chess_peak_elo
-       FROM chess_user_stats s
-       JOIN users u ON u.id = s.user_id
-      ORDER BY s.chess_elo DESC, s.chess_games_played DESC, u.username ASC
-      LIMIT ? OFFSET ?`,
-    [safeLimit, safeOffset]
-  );
-  return rows || [];
-}
-
-app.get("/api/leaderboard", requireLogin, async (_req, res) => sendLeaderboard(res));
-app.get("/api/leaderboards", requireLogin, async (_req, res) => sendLeaderboard(res));
-
-app.get("/api/chess/leaderboard", requireLogin, async (req, res) => {
-  try {
-    const rows = await fetchChessLeaderboard(req.query?.limit, req.query?.offset);
-    const payload = rows.map((row) => {
-      const games = Number(row.chess_games_played || 0);
-      const wins = Number(row.chess_wins || 0);
-      const losses = Number(row.chess_losses || 0);
-      const draws = Number(row.chess_draws || 0);
-      const winrate = games > 0 ? Math.round((wins / games) * 1000) / 10 : 0;
-      return {
-        userId: Number(row.user_id),
-        username: row.username,
-        elo: Number(row.chess_elo || CHESS_DEFAULT_ELO),
-        gamesPlayed: games,
-        wins,
-        losses,
-        draws,
-        winrate,
-        peakElo: Number(row.chess_peak_elo || row.chess_elo || CHESS_DEFAULT_ELO),
-      };
-    });
-    return res.json({ rows: payload, limit: Number(req.query?.limit || 50), offset: Number(req.query?.offset || 0) });
-  } catch (err) {
-    console.warn("[chess] leaderboard failed:", err?.message || err);
-    return res.status(500).json({ ok: false });
-  }
-});
-
-app.post("/api/me/award-gold", strictLimiter, requireLogin, (req, res) => {
-  if (process.env.ALLOW_DEV_AWARD_GOLD !== "1") return res.status(404).send("Not found");
-  const amount = clamp(req.body?.amount ?? req.body?.gold ?? 0, 1, 100000);
-  if (!amount) return res.status(400).send("Invalid amount");
-
-  db.run("UPDATE users SET gold = gold + ? WHERE id = ?", [amount, req.session.user.id], (err) => {
-    if (err) return res.status(500).send("Failed");
-    emitProgressionUpdate(req.session.user.id);
-    db.get("SELECT gold FROM users WHERE id = ?", [req.session.user.id], (_e, row) => {
-      return res.json({ ok: true, gold: row?.gold || 0 });
-    });
-  });
-});
-// ---- Rooms API
-app.get("/rooms", requireLogin, async (req, res) => {
-  try {
-    const payload = await buildRoomStructurePayload(req.session?.user?.id);
-    return res.json(payload);
-  } catch (e) {
-    console.warn("[rooms] failed to load room structure", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.get("/api/rooms/structure", requireLogin, async (req, res) => {
-  try {
-    const payload = await buildRoomStructurePayload(req.session?.user?.id);
-    return res.json(payload);
-  } catch (e) {
-    console.warn("[rooms] failed to load room structure", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-async function buildSurvivalHistoryPayload() {
-  const seasons = await fetchSurvivalHistory(10);
-  const result = [];
-  for (const season of seasons || []) {
-    const winner = season.status === "finished" ? await fetchSurvivalWinner(season.id) : null;
-    result.push({
-      id: season.id,
-      title: season.title,
-      status: season.status,
-      created_at: season.created_at,
-      winner,
-    });
-  }
-  return result;
-}
-
-function formatSurvivalSeason(season) {
-  if (!season) return null;
-  const { seed, options } = parseSurvivalSeedPayload(season.rng_seed);
-  return {
-    id: season.id,
-    room_id: season.room_id,
-    created_by_user_id: season.created_by_user_id,
-    title: season.title,
-    status: season.status,
-    day_index: season.day_index,
-    phase: season.phase,
-    rng_seed: seed || null,
-    options: options || {},
-    created_at: season.created_at,
-    updated_at: season.updated_at,
-  };
-}
-
-
-function buildSurvivalArenaPayload(season, participants = []) {
-  if (!season) return null;
-  const { seed } = parseSurvivalSeedPayload(season.rng_seed);
-  const rng = createSeededRng(`${seed || "survival"}:arena:${season.day_index}:${season.phase}`);
-  const dangerLevels = {};
-  for (const z of SURVIVAL_ZONES) {
-    // 0–5, lightly influenced by population + RNG (purely cosmetic for now).
-    const pop = participants.filter((p) => p.alive && normalizeSurvivalZoneName(p.location) === z).length;
-    const base = clamp(Math.round(rng() * 3) + (pop ? 1 : 0), 0, 5);
-    dangerLevels[z] = base;
-  }
-  const lobbySet = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
-  return {
-    zones: [...SURVIVAL_ZONES],
-    dangerLevels,
-    lobbyUserIds: Array.from(lobbySet.values()),
-  };
-}
-
-async function buildSurvivalPayload(season, { beforeId = null, limit = 200 } = {}) {
-  if (!season) {
-    return { season: null, participants: [], alliances: [], events: [], history: await buildSurvivalHistoryPayload() };
-  }
-  const [participants, alliances, events, history, winner] = await Promise.all([
-    fetchSurvivalParticipants(season.id),
-    fetchSurvivalAlliances(season.id),
-    fetchSurvivalEvents(season.id, { limit, beforeId }),
-    buildSurvivalHistoryPayload(),
-    season.status === "finished" ? fetchSurvivalWinner(season.id) : Promise.resolve(null),
-  ]);
-  return {
-    season: formatSurvivalSeason(season),
-    participants,
-    alliances,
-    events,
-    winner,
-    history,
-    arena: buildSurvivalArenaPayload(season, participants),
-  };
-}
-
-// Admin+ can create rooms
-app.post("/rooms", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
-  const actor = req.session.user;
-  if (!requireMinRole(actor.role, "Admin")) return res.status(403).send("Forbidden");
-
-  const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-  if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-
-  const name = sanitizeRoomName(req.body?.name || req.body?.room || "");
-  if (!name) return res.status(400).send("Invalid room name");
-
-  try {
-    const row = await (await pgUsersEnabled())
-      ? (async () => {
-        const result2 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [name]);
-        const rows = result2?.rows || [];
-        return rows?.[0] || null;
-      })()
-      : await dbGetAsync(`SELECT name FROM rooms WHERE name=?`, [name]);
-    if (row) return res.status(409).send("Room already exists");
-
-    const requestedCategoryId = Number(req.body?.category_id) || null;
-    const requestedMasterId = Number(req.body?.master_id) || null;
-    const requestedUserRoom = req.body?.is_user_room ? true : false;
-    const resolved = await resolveRoomCategoryId({
-      categoryId: requestedCategoryId,
-      masterId: requestedMasterId,
-      isUserRoom: requestedUserRoom,
-    });
-    const categoryId = resolved?.categoryId ?? null;
-    let categoryRow = null;
-    if (categoryId) {
-      if (await pgUsersEnabled()) {
-        const result3 = await pgSafe(
-          `SELECT c.id, c.master_id, m.name as master_name
-             FROM room_categories c
-             JOIN room_master_categories m ON m.id = c.master_id
-            WHERE c.id = $1 LIMIT 1`,
-          [categoryId]
-        );
-        const rows = result3?.rows || [];
-        categoryRow = rows?.[0] || null;
-      } else {
-        categoryRow = await dbGetAsync(
-          `SELECT c.id, c.master_id, m.name as master_name
-             FROM room_categories c
-             JOIN room_master_categories m ON m.id = c.master_id
-            WHERE c.id = ? LIMIT 1`,
-          [categoryId]
-        );
-      }
-    }
-    const isUserRoom = categoryRow?.master_name === "User Rooms" ? 1 : 0;
-    let nextSort = { maxSort: 0, maxsort: 0 };
-    if (categoryId) {
-      if (await pgUsersEnabled()) {
-        const result4 = await pgSafe(
-          `SELECT COALESCE(MAX(room_sort_order), 0) as maxsort FROM rooms WHERE category_id = $1`,
-          [categoryId]
-        );
-        const rows = result4?.rows || [];
-        nextSort = rows?.[0] || nextSort;
-      } else {
-        nextSort = await dbGetAsync(
-          `SELECT COALESCE(MAX(room_sort_order), 0) as maxSort FROM rooms WHERE category_id = ?`,
-          [categoryId]
-        );
-      }
-    }
-    const sortOrder = Number(nextSort?.maxsort || nextSort?.maxSort || 0) + 1;
-
-    if (await pgUsersEnabled()) {
-      await pgSafe(
-        `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived, is_system)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
-        [name, actor.id, Date.now(), categoryId, sortOrder, actor.id, isUserRoom,
-         Number(req.body?.vip_only)||0,
-         Number(req.body?.staff_only)||0,
-         Math.max(0, Math.min(999, Number(req.body?.min_level)||0)),
-         Number(req.body?.is_locked)||0,
-         Number(req.body?.maintenance_mode)||0,
-         (req.body?.events_enabled === 0 || req.body?.events_enabled === "0") ? 0 : 1,
-         Math.max(0, Math.min(3600, Number(req.body?.slowmode_seconds)||0)),
-         0,
-         0]
-      );
-    } else {
-      await dbRunAsync(
-        `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived, is_system)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [name, actor.id, Date.now(), categoryId, sortOrder, actor.id, isUserRoom,
-         Number(req.body?.vip_only)||0,
-         Number(req.body?.staff_only)||0,
-         Math.max(0, Math.min(999, Number(req.body?.min_level)||0)),
-         Number(req.body?.is_locked)||0,
-         Number(req.body?.maintenance_mode)||0,
-         (req.body?.events_enabled === 0 || req.body?.events_enabled === "0") ? 0 : 1,
-         Math.max(0, Math.min(3600, Number(req.body?.slowmode_seconds)||0)),
-         0,
-         0]
-      );
-    }
-
-    logModAction({ actor, action: "room.create", room: name, details: null });
-    await applyRoomStructureChange({
-      action: "room.create",
-      actorUserId: actor.id,
-      auditPayload: { name, category_id: categoryId, is_user_room: isUserRoom },
-    });
-
-    return res.json({ ok: true, name });
-  } catch (e) {
-    console.warn("[rooms] create failed", e?.message || e);
-    return res.status(500).send("Failed to create room");
-  }
-});
-
-// ---- Survival Simulator API
-
-// Lobby endpoints (opt-in list for quick season fills)
-app.get("/api/survival/lobby", requireLogin, async (_req, res) => {
-  try {
-    const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
-    return res.json({ user_ids: Array.from(set.values()) });
-  } catch {
-    return res.json({ user_ids: [] });
-  }
-});
-
-app.post("/api/survival/lobby/join", requireLogin, async (req, res) => {
-  try {
-    const uid = Number(req.session?.user?.id);
-    if (!uid) return res.status(401).send("Unauthorized");
-    const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
-    set.add(uid);
-    io.to(SURVIVAL_ROOM_ID).emit("survival:lobby", { user_ids: Array.from(set.values()) });
-    return res.json({ ok: true, user_ids: Array.from(set.values()) });
-  } catch (e) {
-    return res.status(500).send("Failed");
-  }
-});
-
-app.post("/api/survival/lobby/leave", requireLogin, async (req, res) => {
-  try {
-    const uid = Number(req.session?.user?.id);
-    if (!uid) return res.status(401).send("Unauthorized");
-    const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
-    set.delete(uid);
-    io.to(SURVIVAL_ROOM_ID).emit("survival:lobby", { user_ids: Array.from(set.values()) });
-    return res.json({ ok: true, user_ids: Array.from(set.values()) });
-  } catch (e) {
-    return res.status(500).send("Failed");
-  }
-});
-
-app.get("/api/survival/current", requireLogin, async (_req, res) => {
-  try {
-    const season = await fetchSurvivalCurrentSeason();
-    const payload = await buildSurvivalPayload(season);
-    return res.json(payload);
-  } catch (e) {
-    console.warn("[survival] current failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.get("/api/survival/seasons/:id", requireLogin, async (req, res) => {
-  try {
-    const beforeId = req.query?.before ? Number(req.query.before) : null;
-    const season = await fetchSurvivalSeasonById(req.params.id);
-    if (!season) return res.status(404).send("Not found");
-    const payload = await buildSurvivalPayload(season, { beforeId });
-    return res.json(payload);
-  } catch (e) {
-    console.warn("[survival] fetch season failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json({ limit: "32kb" }), async (req, res) => {
-  const now = Date.now();
-  const lastStart = survivalSeasonCooldownByRoom.get(SURVIVAL_ROOM_DB_ID) || 0;
-  if (now - lastStart < SURVIVAL_SEASON_COOLDOWN_MS) {
-    return res.status(429).json({ message: "Please wait before starting another season." });
-  }
-
-  const running = await fetchSurvivalCurrentSeason();
-  if (running && running.status === "running") {
-    return res.status(409).json({ message: "A season is already running." });
-  }
-
-  const titleRaw = String(req.body?.title || "").trim();
-  const title = titleRaw || `Season — ${new Date(now).toLocaleString()}`;
-  const participantIds = Array.isArray(req.body?.participant_user_ids)
-    ? req.body.participant_user_ids
-    : [];
-  const npcRaw = String(req.body?.npc_names || "").trim();
-  const fillSlots = Number(req.body?.fill_slots || 0) || 0;
-  // include_lobby is accepted for client compatibility; if you later persist lobby signups,
-  // this flag can add them here.
-  const includeLobby = !!req.body?.include_lobby;
-  const options = {
-    includeCouples: !!req.body?.options?.includeCouples,
-    chaoticMode: !!req.body?.options?.chaoticMode,
-  };
-
-  // If requested, merge in current lobby signups as participants (deduped).
-  if (includeLobby) {
-    const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
-    const lobbyIds = Array.from(set.values()).map((x) => Number(x)).filter((x) => x > 0);
-    if (lobbyIds.length) {
-      const merged = new Set([...(participantIds || []).map((x) => Number(x)).filter((x) => x > 0), ...lobbyIds]);
-      participantIds.length = 0;
-      for (const id of merged.values()) participantIds.push(id);
-    }
-  }
-  // User snapshots (real site users)
-  const userSnapshots = await fetchSurvivalUserSnapshots(participantIds);
-
-  // NPC names typed by owner (comma/newline separated)
-  const npcTyped = npcRaw
-    ? npcRaw
-        .split(/[\n,]/g)
-        .map((s) => String(s || "").trim())
-        .filter(Boolean)
-    : [];
-  const npcNames = [];
-  {
-    const seen = new Set();
-    for (const n of npcTyped) {
-      const key = n.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      npcNames.push(n.slice(0, 40));
-      if (npcNames.length >= 80) break;
-    }
-  }
-
-  // Total participants can be users + NPCs. We only require at least two TOTAL.
-  const baseCount = userSnapshots.length + npcNames.length;
-  const desiredCount = fillSlots > 0 ? Math.max(fillSlots, baseCount) : baseCount;
-  if (desiredCount < 2) {
-    return res.status(400).json({ message: "Add at least two total participants (users or NPC names)." });
-  }
-
-  const seed = crypto.randomBytes(8).toString("hex");
-  const rng = createSeededRng(seed);
-
-  // Auto-fill NPC slots to desiredCount using a fixed pool (25 male / 25 female)
-  if (desiredCount > baseCount) {
-    const used = new Set([
-      ...userSnapshots.map((u) => String(u.display_name || "").toLowerCase()),
-      ...npcNames.map((n) => String(n).toLowerCase()),
-    ]);
-    const pool = [...SURVIVAL_AUTOFILL_POOL.female, ...SURVIVAL_AUTOFILL_POOL.male];
-    // Shuffle with seeded RNG
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      const tmp = pool[i];
-      pool[i] = pool[j];
-      pool[j] = tmp;
-    }
-    let need = desiredCount - baseCount;
-    for (const name of pool) {
-      if (need <= 0) break;
-      const key = String(name).toLowerCase();
-      if (used.has(key)) continue;
-      used.add(key);
-      npcNames.push(String(name));
-      need--;
-    }
-    // Hard fallback if pool exhausted
-    let t = 1;
-    while (need > 0) {
-      const name = `Tribute ${t++}`;
-      const key = name.toLowerCase();
-      if (!used.has(key)) {
-        used.add(key);
-        npcNames.push(name);
-        need--;
-      }
-    }
-  }
-  const seasonPayload = {
-    room_id: SURVIVAL_ROOM_DB_ID,
-    created_by_user_id: req.session.user.id,
-    title: title.slice(0, 120),
-    status: "running",
-    day_index: 1,
-    phase: "day",
-    rng_seed: buildSurvivalSeedPayload(seed, options),
-    created_at: now,
-    updated_at: now,
-  };
-
-  let seasonId = null;
-  try {
-    if (await pgUsersEnabled()) {
-      await pgSafe("BEGIN");
-      const result29 = await pgSafe(
-        `INSERT INTO survival_seasons (room_id, created_by_user_id, title, status, day_index, phase, rng_seed, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-         RETURNING id`,
-        [
-          seasonPayload.room_id,
-          seasonPayload.created_by_user_id,
-          seasonPayload.title,
-          seasonPayload.status,
-          seasonPayload.day_index,
-          seasonPayload.phase,
-          seasonPayload.rng_seed,
-          seasonPayload.created_at,
-          seasonPayload.updated_at,
-        ]
-      );
-      const rows = result29?.rows || [];
-      seasonId = rows[0]?.id;
-      if (!seasonId) throw new Error("missing season id");
-      for (const user of userSnapshots) {
-        const traits = buildSurvivalTraits(rng, options.chaoticMode);
-        const location = pickSurvivalSpawnLocation(rng);
-        await pgSafe(
-          `INSERT INTO survival_participants
-           (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
-           VALUES ($1,$2,$3,$4,1,100,0,NULL,$5,$6,$7,NULL,$8)`,
-          [
-            seasonId,
-            user.id,
-            user.username,
-            user.avatar || null,
-            JSON.stringify([]),
-            JSON.stringify(traits),
-            location,
-            now,
-          ]
-        );
-      }
-
-      // NPC participants (custom + autofill)
-      for (const name of npcNames) {
-        const traits = buildSurvivalTraits(rng, options.chaoticMode);
-        const location = pickSurvivalSpawnLocation(rng);
-        await pgSafe(
-          `INSERT INTO survival_participants
-           (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
-           VALUES ($1, NULL, $2, NULL, 1, 100, 0, NULL, $3, $4, $5, NULL, $6)`,
-          [
-            seasonId,
-            String(name).slice(0, 40),
-            JSON.stringify([]),
-            JSON.stringify(traits),
-            location,
-            now,
-          ]
-        );
-      }
-      await pgSafe("COMMIT");
-    } else {
-      await dbRunAsync("BEGIN");
-      const result = await dbRunAsync(
-        `INSERT INTO survival_seasons
-         (room_id, created_by_user_id, title, status, day_index, phase, rng_seed, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          seasonPayload.room_id,
-          seasonPayload.created_by_user_id,
-          seasonPayload.title,
-          seasonPayload.status,
-          seasonPayload.day_index,
-          seasonPayload.phase,
-          seasonPayload.rng_seed,
-          seasonPayload.created_at,
-          seasonPayload.updated_at,
-        ]
-      );
-      seasonId = result.lastID;
-      for (const user of userSnapshots) {
-        const traits = buildSurvivalTraits(rng, options.chaoticMode);
-        const location = pickSurvivalSpawnLocation(rng);
-        await dbRunAsync(
-          `INSERT INTO survival_participants
-           (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
-           VALUES (?, ?, ?, ?, 1, 100, 0, NULL, ?, ?, ?, NULL, ?)`,
-          [
-            seasonId,
-            user.id,
-            user.username,
-            user.avatar || null,
-            JSON.stringify([]),
-            JSON.stringify(traits),
-            location,
-            now,
-          ]
-        );
-      }
-
-      // NPC participants (custom + autofill). SQLite has no FK on user_id here, so we use 0.
-      for (const name of npcNames) {
-        const traits = buildSurvivalTraits(rng, options.chaoticMode);
-        const location = pickSurvivalSpawnLocation(rng);
-        await dbRunAsync(
-          `INSERT INTO survival_participants
-           (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
-           VALUES (?, 0, ?, NULL, 1, 100, 0, NULL, ?, ?, ?, NULL, ?)`,
-          [
-            seasonId,
-            String(name).slice(0, 40),
-            JSON.stringify([]),
-            JSON.stringify(traits),
-            location,
-            now,
-          ]
-        );
-      }
-      await dbRunAsync("COMMIT");
-    }
-  } catch (e) {
-    try { await dbRunAsync("ROLLBACK"); } catch {}
-    try { if (await pgUsersEnabled()) await pgSafe("ROLLBACK"); } catch {}
-    console.warn("[survival] create season failed", e?.message || e);
-    return res.status(500).json({ message: "Failed to start season." });
-  }
-
-  survivalSeasonCooldownByRoom.set(SURVIVAL_ROOM_DB_ID, now);
-
-  // Clear lobby signups when a season starts (so the next season starts fresh).
-  try {
-    const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
-    if (set.size) {
-      set.clear();
-      io.to(SURVIVAL_ROOM_ID).emit("survival:lobby", { user_ids: [] });
-    }
-  } catch {}
-  const season = await fetchSurvivalSeasonById(seasonId);
-  const payload = await buildSurvivalPayload(season);
-  io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
-  // Mirror the narrative into the room as system messages.
-  try {
-    emitRoomSystem(SURVIVAL_ROOM_ID, `🏟️ Survival season started: ${payload?.season?.title || title}`, { kind: "survival" });
-    emitRoomSystem(SURVIVAL_ROOM_ID, `Day ${payload?.season?.day_index || 1} — ${String(payload?.season?.phase || "day").toUpperCase()}`, { kind: "survival" });
-  } catch {}
-  return res.json(payload);
-});
-
-app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, express.json({ limit: "16kb" }), async (req, res) => {
-  const seasonId = Number(req.params.id);
-  if (!seasonId) return res.status(400).json({ message: "Invalid season." });
-  const now = Date.now();
-  const lastAdvance = survivalAdvanceCooldownBySeason.get(seasonId) || 0;
-  if (now - lastAdvance < SURVIVAL_ADVANCE_COOLDOWN_MS) {
-    return res.status(429).json({ message: "Slow down." });
-  }
-  survivalAdvanceCooldownBySeason.set(seasonId, now);
-
-  const season = await fetchSurvivalSeasonById(seasonId);
-  if (!season) return res.status(404).json({ message: "Season not found." });
-  if (season.status !== "running") return res.status(400).json({ message: "Season is not running." });
-
-  const participants = await fetchSurvivalParticipants(seasonId);
-  const alliances = await fetchSurvivalAlliances(seasonId);
-  participants.forEach((p) => {
-    p.location = normalizeSurvivalZoneName(p.location) || SURVIVAL_ZONES[0];
-  });
-  const alive = participants.filter((p) => p.alive);
-  if (alive.length <= 1) {
-    season.status = "finished";
-  }
-
-  const { seed, options } = parseSurvivalSeedPayload(season.rng_seed);
-  const rng = createSeededRng(`${seed || "survival"}:${season.day_index}:${season.phase}:${now}`);
-  const couples = options?.includeCouples
-    ? await (async () => {
-      try {
-        if (await pgUsersEnabled()) {
-          const ids = alive.map((p) => p.user_id);
-          const result5 = await pgSafe(
-            `SELECT user1_id, user2_id FROM couple_links WHERE user1_id = ANY($1::int[]) OR user2_id = ANY($1::int[])`,
-            [ids]
-          );
-          const rows = result5?.rows || [];
-          return (rows || []).map((row) => [Number(row.user1_id), Number(row.user2_id)]);
-        }
-      } catch (e) {
-        console.warn("[survival] couple lookup failed:", e?.message || e);
-      }
-      const rows = await dbAllAsync(
-        `SELECT user1_id, user2_id FROM couple_links`
-      );
-      return (rows || []).map((row) => [Number(row.user1_id), Number(row.user2_id)]);
-    })()
-    : [];
-
-  
-  // Chaos baseline (extra events after the guaranteed participation pass)
-  // NOTE: We enforce EXACTLY one participant-scoped event per alive participant per phase
-  // (day + night), so we disable extra participant-scoped "chaos" events here.
-  // Arena / zone-wide events still provide chaos without starving or spamming individuals.
-  const chaosEventCount = 0;
-
-  const events = [];
-  const pendingAlliances = [];
-  const appearanceCount = new Map();
-  const existingAllianceNames = alliances.map((a) => a.name);
-  const templatePool = selectSurvivalTemplate({
-    aliveCount: alive.length,
-    phase: season.phase,
-    dayIndex: season.day_index,
-    options,
-  });
-
-  let orderIndex = 0;
-
-  // GUARANTEE: Every alive participant appears in EXACTLY ONE participant-scoped event per phase.
-  // IMPORTANT: If someone is included in a multi-person event, they do NOT get an additional solo event in the same phase.
-  // We track by participant.id (NOT user_id) so NPCs are treated as unique individuals.
-  const remainingForGuarantee = new Set(alive.map((p) => p.id));
-
-  let guard = 0;
-  while (remainingForGuarantee.size > 0 && guard < 5000) {
-    guard += 1;
-
-    // Only pick from participants that haven't yet appeared this phase (and are still alive).
-    const eligibleAlive = participants.filter((p) => p.alive && remainingForGuarantee.has(p.id));
-    if (eligibleAlive.length < 1) break;
-
-    // Constrain templates so we never request more participants than we have eligible.
-    const constrainedPool = templatePool.filter((t) => Number(t?.participants || 1) <= eligibleAlive.length);
-
-    let selectedTemplate = null;
-    let selectedParticipants = null;
-
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      const template = pickWeighted(constrainedPool, rng);
-      if (!template) break;
-
-      const picked = pickParticipantsForTemplate({
-        template,
-        alive: eligibleAlive,
-        rng,
-        appearanceCount,
-        couples,
-      });
-
-      if (!picked || picked.length < template.participants) continue;
-
-      selectedTemplate = template;
-      selectedParticipants = picked;
-      break;
-    }
-
-    if (!selectedTemplate || !selectedParticipants) {
-      // Guaranteed fallback: at least a solo neutral event for one remaining participant.
-      const fallback = SURVIVAL_EVENT_TEMPLATES.find((t) => t.id.startsWith("solo_neutral_"));
-      selectedTemplate = fallback || SURVIVAL_EVENT_TEMPLATES.find((t) => Number(t?.participants || 1) === 1) || null;
-      if (!selectedTemplate) break;
-      selectedParticipants = [eligibleAlive[0]];
-    }
-
-    selectedParticipants.forEach((p) => {
-      const k = p.user_id ? `u:${p.user_id}` : `p:${p.id}`;
-      appearanceCount.set(k, (appearanceCount.get(k) || 0) + 1);
-      p.last_event_at = now;
-      remainingForGuarantee.delete(p.id);
-    });
-
-    const text = renderSurvivalEventText(selectedTemplate, selectedParticipants, rng);
-    const outcome = applySurvivalOutcome({
-      template: selectedTemplate,
-      participants: selectedParticipants,
-      rng,
-      pendingAlliances,
-      existingAllianceNames,
-    });
-
-    // Attach a best-guess zone for this event so the arena map can filter/animate.
-    try {
-      const zones = (selectedParticipants || [])
-        .map((p) => normalizeSurvivalZoneName(p.location))
-        .filter(Boolean);
-      const zone = zones.length
-        ? zones
-            .sort(
-              (a, b) =>
-                zones.filter((z) => z === a).length - zones.filter((z) => z === b).length
-            )
-            .pop()
-        : null;
-      if (zone) outcome.zone = normalizeSurvivalZoneName(zone) || zone;
-    } catch {}
-
-    orderIndex += 1;
-    events.push({
-      id: null,
-      season_id: seasonId,
-      day_index: season.day_index,
-      phase: season.phase,
-      order_index: orderIndex,
-      text,
-      // Only store real user IDs (NPCs have user_id NULL/0 and should not collide in logs).
-      involved_user_ids: selectedParticipants.map((p) => p.user_id).filter((id) => Number(id) > 0),
-      outcome,
-      created_at: now,
-    });
-  }
-
-  // NOTE: participant-scoped chaos events intentionally disabled (see chaosEventCount above).
-
-
-
-  // Occasional zone-wide / arena-wide events (adds variety + makes the map feel alive).
-  try {
-    const arenaEv = maybeGenerateArenaEvent({ season, participants, rng, now });
-    if (arenaEv && arenaEv.text) {
-      orderIndex += 1;
-      events.push({
-        id: null,
-        season_id: seasonId,
-        day_index: season.day_index,
-        phase: season.phase,
-        order_index: orderIndex,
-        text: arenaEv.text,
-        involved_user_ids: Array.isArray(arenaEv.outcome?.affected_user_ids)
-          ? arenaEv.outcome.affected_user_ids.filter((id) => Number(id) > 0)
-          : [],
-        outcome: arenaEv.outcome || { type: "arena", scope: "global" },
-        created_at: now,
-      });
-    }
-  } catch (e) {
-    console.warn("[survival] arena event failed:", e?.message || e);
-  }
-
-  const aliveAfter = participants.filter((p) => p.alive);
-  if (aliveAfter.length <= 1 && season.status !== "finished") {
-    season.status = "finished";
-    const winner = aliveAfter[0];
-    if (winner) {
-      const winnerName = sanitizeDisplayName(winner.display_name);
-      const winnerTag = winner.user_id ? `@${winnerName}` : winnerName;
-      events.push({
-        id: null,
-        season_id: seasonId,
-        day_index: season.day_index,
-        phase: season.phase,
-        order_index: orderIndex + 1,
-        text: `🏆 ${winnerTag} wins the season!`,
-        involved_user_ids: winner.user_id ? [winner.user_id] : [],
-        outcome: { type: "winner" },
-        created_at: now,
-      });
-    } else {
-      events.push({
-        id: null,
-        season_id: seasonId,
-        day_index: season.day_index,
-        phase: season.phase,
-        order_index: orderIndex + 1,
-        text: "No one survived the season. Wild.",
-        involved_user_ids: [],
-        outcome: { type: "draw" },
-        created_at: now,
-      });
-    }
-  }
-
-  if (season.status !== "finished") {
-    if (season.phase === "day") {
-      season.phase = "night";
-    } else {
-      season.phase = "day";
-      season.day_index = Number(season.day_index || 1) + 1;
-    }
-  }
-  season.updated_at = now;
-
-  const pendingMap = new Map();
-  try {
-    if (await pgUsersEnabled()) {
-      await pgSafe("BEGIN");
-      for (const pending of pendingAlliances) {
-        const result5 = await pgSafe(
-          `INSERT INTO survival_alliances (season_id, name, created_at) VALUES ($1,$2,$3) RETURNING id`,
-          [seasonId, pending.name, now]
-        );
-        const rows = result5?.rows || [];
-        const actualId = rows[0]?.id;
-        pendingMap.set(pending.tempId, actualId);
-      }
-
-      for (const participant of participants) {
-        const allianceId = pendingMap.get(participant.alliance_id) || participant.alliance_id;
-        participant.alliance_id = allianceId && allianceId < 0 ? null : allianceId;
-        await pgSafe(
-          `UPDATE survival_participants
-           SET alive=$1, hp=$2, kills=$3, alliance_id=$4, inventory_json=$5, traits_json=$6, location=$7, last_event_at=$8
-           WHERE id=$9`,
-          [
-            participant.alive ? 1 : 0,
-            participant.hp,
-            participant.kills,
-            participant.alliance_id,
-            JSON.stringify(participant.inventory || []),
-            JSON.stringify(participant.traits || {}),
-            participant.location || null,
-            participant.last_event_at,
-            participant.id,
-          ]
-        );
-      }
-
-      for (const event of events) {
-        if (event.outcome?.alliance?.id && pendingMap.has(event.outcome.alliance.id)) {
-          event.outcome.alliance.id = pendingMap.get(event.outcome.alliance.id);
-        }
-        const result6 = await pgSafe(
-          `INSERT INTO survival_events
-           (season_id, day_index, phase, order_index, text, involved_user_ids_json, outcome_json, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-           RETURNING id`,
-          [
-            seasonId,
-            event.day_index,
-            event.phase,
-            event.order_index,
-            event.text,
-            JSON.stringify(event.involved_user_ids || []),
-            JSON.stringify(event.outcome || {}),
-            event.created_at,
-          ]
-        );
-        const rows = result6?.rows || [];
-        event.id = rows[0]?.id;
-      }
-
-      await pgSafe(
-        `UPDATE survival_seasons SET status=$1, day_index=$2, phase=$3, updated_at=$4 WHERE id=$5`,
-        [season.status, season.day_index, season.phase, season.updated_at, seasonId]
-      );
-      await pgSafe("COMMIT");
-    } else {
-      await dbRunAsync("BEGIN");
-      for (const pending of pendingAlliances) {
-        const result = await dbRunAsync(
-          `INSERT INTO survival_alliances (season_id, name, created_at) VALUES (?, ?, ?)`,
-          [seasonId, pending.name, now]
-        );
-        pendingMap.set(pending.tempId, result.lastID);
-      }
-
-      for (const participant of participants) {
-        const allianceId = pendingMap.get(participant.alliance_id) || participant.alliance_id;
-        participant.alliance_id = allianceId && allianceId < 0 ? null : allianceId;
-        await dbRunAsync(
-          `UPDATE survival_participants
-           SET alive=?, hp=?, kills=?, alliance_id=?, inventory_json=?, traits_json=?, location=?, last_event_at=?
-           WHERE id=?`,
-          [
-            participant.alive ? 1 : 0,
-            participant.hp,
-            participant.kills,
-            participant.alliance_id,
-            JSON.stringify(participant.inventory || []),
-            JSON.stringify(participant.traits || {}),
-            participant.location || null,
-            participant.last_event_at,
-            participant.id,
-          ]
-        );
-      }
-
-      for (const event of events) {
-        if (event.outcome?.alliance?.id && pendingMap.has(event.outcome.alliance.id)) {
-          event.outcome.alliance.id = pendingMap.get(event.outcome.alliance.id);
-        }
-        const result = await dbRunAsync(
-          `INSERT INTO survival_events
-           (season_id, day_index, phase, order_index, text, involved_user_ids_json, outcome_json, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            seasonId,
-            event.day_index,
-            event.phase,
-            event.order_index,
-            event.text,
-            JSON.stringify(event.involved_user_ids || []),
-            JSON.stringify(event.outcome || {}),
-            event.created_at,
-          ]
-        );
-        event.id = result.lastID;
-      }
-
-      await dbRunAsync(
-        `UPDATE survival_seasons SET status=?, day_index=?, phase=?, updated_at=? WHERE id=?`,
-        [season.status, season.day_index, season.phase, season.updated_at, seasonId]
-      );
-      await dbRunAsync("COMMIT");
-    }
-  } catch (e) {
-    try { await dbRunAsync("ROLLBACK"); } catch {}
-    try { if (await pgUsersEnabled()) await pgSafe("ROLLBACK"); } catch {}
-    console.warn("[survival] advance failed", e?.message || e);
-    return res.status(500).json({ message: "Failed to advance." });
-  }
-
-  const payload = await buildSurvivalPayload(await fetchSurvivalSeasonById(seasonId));
-  io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
-  io.to(SURVIVAL_ROOM_ID).emit("survival:events", { seasonId, events });
-
-  // Mirror every simulator event into room system messages so spectators see the full story.
-  try {
-    for (const ev of events || []) {
-      if (!ev || !ev.text) continue;
-      emitRoomSystem(SURVIVAL_ROOM_ID, `⚔️ ${ev.text}`, { kind: "survival" });
-    }
-  } catch {}
-
-  return res.json(payload);
-});
-
-app.post("/api/survival/seasons/:id/end", survivalLimiter, requireCoOwner, express.json({ limit: "8kb" }), async (req, res) => {
-  const seasonId = Number(req.params.id);
-  if (!seasonId) return res.status(400).json({ message: "Invalid season." });
-  const season = await fetchSurvivalSeasonById(seasonId);
-  if (!season) return res.status(404).json({ message: "Season not found." });
-  if (season.status === "finished") {
-    const payload = await buildSurvivalPayload(season);
-    return res.json(payload);
-  }
-  const now = Date.now();
-  try {
-    if (await pgUsersEnabled()) {
-      await pgSafe(`UPDATE survival_seasons SET status='finished', updated_at=$1 WHERE id=$2`, [now, seasonId]);
-    } else {
-      await dbRunAsync(`UPDATE survival_seasons SET status='finished', updated_at=? WHERE id=?`, [now, seasonId]);
-    }
-  } catch (e) {
-    console.warn("[survival] end failed", e?.message || e);
-    return res.status(500).json({ message: "Failed to end season." });
-  }
-  const payload = await buildSurvivalPayload(await fetchSurvivalSeasonById(seasonId));
-  io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
-  return res.json(payload);
-});
-
-// ---- Room structure management (Owner-only)
-app.post("/api/room-masters", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
-  const name = sanitizeRoomGroupName(req.body?.name || "");
-  if (!name) return res.status(400).send("Invalid name");
-  try {
-    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-    let sortOrder = 0;
-    let insertedId = null;
-    const now = Date.now();
-    if (await pgUsersEnabled()) {
-      const result30 = await pgSafe(
-        `SELECT id FROM room_master_categories WHERE lower(name) = lower($1)`,
-        [name]
-      );
-      const exists = result30?.rows || [];
-      if (exists?.[0]) return res.status(409).send("Master exists");
-      const result31 = await pgSafe(`SELECT COALESCE(MAX(sort_order), 0) as maxsort FROM room_master_categories`);
-      const maxRows = result31?.rows || [];
-      sortOrder = Number(maxRows?.[0]?.maxsort || 0) + 1;
-      const result32 = await pgSafe(
-        `INSERT INTO room_master_categories (name, sort_order, created_at) VALUES ($1, $2, $3) RETURNING id`,
-        [name, sortOrder, now]
-      );
-      const rows = result32?.rows || [];
-      insertedId = rows?.[0]?.id ?? null;
-    } else {
-      const existing = await dbGetAsync(`SELECT id FROM room_master_categories WHERE lower(name) = lower(?)`, [name]);
-      if (existing) return res.status(409).send("Master exists");
-      const maxRow = await dbGetAsync(`SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_master_categories`);
-      sortOrder = Number(maxRow?.maxSort || 0) + 1;
-      const ins = await dbRunAsync(
-        `INSERT INTO room_master_categories (name, sort_order, created_at) VALUES (?, ?, ?)`,
-        [name, sortOrder, now]
-      );
-      insertedId = ins?.lastID || null;
-    }
-    await applyRoomStructureChange({
-      action: "room_master.create",
-      actorUserId: req.session?.user?.id,
-      auditPayload: { id: insertedId, name, sort_order: sortOrder },
-    });
-    return res.json({ ok: true, id: insertedId, name, sort_order: sortOrder });
-  } catch (e) {
-    console.warn("[room-masters] create failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.patch("/api/room-masters/reorder", strictLimiter, requireAdminPlus, express.json({ limit: "32kb" }), async (req, res) => {
-  const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
-  if (!orderedIds?.length) return res.status(400).send("Missing order");
-  try {
-    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-    if (await pgUsersEnabled()) {
-      for (let i = 0; i < orderedIds.length; i += 1) {
-        const id = Number(orderedIds[i]);
-        if (!id) continue;
-        await pgSafe(`UPDATE room_master_categories SET sort_order = $1 WHERE id = $2`, [i, id]);
-      }
-    } else {
-      for (let i = 0; i < orderedIds.length; i += 1) {
-        const id = Number(orderedIds[i]);
-        if (!id) continue;
-        await dbRunAsync(`UPDATE room_master_categories SET sort_order = ? WHERE id = ?`, [i, id]);
-      }
-    }
-    await applyRoomStructureChange({
-      action: "room_master.reorder",
-      actorUserId: req.session?.user?.id,
-      auditPayload: { orderedIds },
-    });
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn("[room-masters] reorder failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.patch("/api/room-masters/:id", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
-  const id = Number(req.params.id);
-  if (!id) return res.status(400).send("Invalid master");
-  try {
-    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-    const row = await (await pgUsersEnabled())
-      ? (async () => {
-        const result7 = await pgSafe(`SELECT id, name FROM room_master_categories WHERE id = $1`, [id]);
-        const rows = result7?.rows || [];
-        return rows?.[0] || null;
-      })()
-      : await dbGetAsync(`SELECT id, name FROM room_master_categories WHERE id = ?`, [id]);
-    if (!row) return res.status(404).send("Not found");
-    const updates = [];
-    const params = [];
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "name")) {
-      const name = sanitizeRoomGroupName(req.body?.name || "");
-      if (!name) return res.status(400).send("Invalid name");
-      if (DEFAULT_ROOM_MASTERS.includes(row.name) && name !== row.name) {
-        return res.status(400).send("Cannot rename default master");
-      }
-      const existing = await (await pgUsersEnabled())
-        ? (async () => {
-          const result6 = await pgSafe(
-            `SELECT id FROM room_master_categories WHERE lower(name) = lower($1) AND id != $2`,
-            [name, id]
-          );
-          const rows = result6?.rows || [];
-          return rows?.[0] || null;
-        })()
-        : await dbGetAsync(
-          `SELECT id FROM room_master_categories WHERE lower(name) = lower(?) AND id != ?`,
-          [name, id]
-        );
-      if (existing) return res.status(409).send("Name exists");
-      updates.push("name = ?");
-      params.push(name);
-    }
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "sort_order")) {
-      const sortOrder = Number(req.body?.sort_order);
-      if (Number.isFinite(sortOrder)) {
-        updates.push("sort_order = ?");
-        params.push(sortOrder);
-      }
-    }
-    if (!updates.length) return res.json({ ok: true });
-    if (await pgUsersEnabled()) {
-      const pgUpdates = updates.map((item, idx) => item.replace("?", `$${idx + 1}`));
-      const pgParams = [...params, id];
-      await pgSafe(`UPDATE room_master_categories SET ${pgUpdates.join(", ")} WHERE id = $${pgParams.length}`, pgParams);
-    } else {
-      params.push(id);
-      await dbRunAsync(`UPDATE room_master_categories SET ${updates.join(", ")} WHERE id = ?`, params);
-    }
-    await applyRoomStructureChange({
-      action: "room_master.update",
-      actorUserId: req.session?.user?.id,
-      auditPayload: { id, updates: req.body || {} },
-    });
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn("[room-masters] patch failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.delete("/api/room-masters/:id", strictLimiter, requireOwner, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!id) return res.status(400).send("Invalid master");
-  try {
-    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-    const row = await (await pgUsersEnabled())
-      ? (async () => {
-        const result8 = await pgSafe(`SELECT id, name FROM room_master_categories WHERE id = $1`, [id]);
-        const rows = result8?.rows || [];
-        return rows?.[0] || null;
-      })()
-      : await dbGetAsync(`SELECT id, name FROM room_master_categories WHERE id = ?`, [id]);
-    if (!row) return res.status(404).send("Not found");
-    if (DEFAULT_ROOM_MASTERS.includes(row.name)) {
-      return res.status(400).send("Cannot delete default master");
-    }
-    const defaults = await getDefaultMasterIds();
-    const fallbackCategoryId = await getUncategorizedCategoryId(defaults.site);
-    if (await pgUsersEnabled()) {
-      const result33 = await pgSafe(`SELECT id FROM room_categories WHERE master_id = $1`, [id]);
-      const categories = result33?.rows || [];
-      const categoryIds = (categories || []).map((c) => c.id).filter(Boolean);
-      if (categoryIds.length && fallbackCategoryId) {
-        await pgSafe(
-          `UPDATE rooms SET category_id = $1 WHERE category_id = ANY($2::int[])`,
-          [fallbackCategoryId, categoryIds]
-        );
-      }
-      await pgSafe(`DELETE FROM room_categories WHERE master_id = $1`, [id]);
-      await pgSafe(`DELETE FROM room_master_categories WHERE id = $1`, [id]);
-    } else {
-      const categories = await dbAllAsync(`SELECT id FROM room_categories WHERE master_id = ?`, [id]);
-      const categoryIds = categories.map((c) => c.id).filter(Boolean);
-      if (categoryIds.length && fallbackCategoryId) {
-        const placeholders = categoryIds.map(() => "?").join(",");
-        await dbRunAsync(
-          `UPDATE rooms SET category_id = ? WHERE category_id IN (${placeholders})`,
-          [fallbackCategoryId, ...categoryIds]
-        );
-      }
-      await dbRunAsync(`DELETE FROM room_categories WHERE master_id = ?`, [id]);
-      await dbRunAsync(`DELETE FROM room_master_categories WHERE id = ?`, [id]);
-    }
-    await applyRoomStructureChange({
-      action: "room_master.delete",
-      actorUserId: req.session?.user?.id,
-      auditPayload: { id, name: row.name },
-    });
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn("[room-masters] delete failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.post("/api/room-categories", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
-  const masterId = Number(req.body?.master_id);
-  const name = sanitizeRoomGroupName(req.body?.name || "");
-  if (!masterId) return res.status(400).send("Invalid master");
-  if (!name) return res.status(400).send("Invalid name");
-  try {
-    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-    let sortOrder = 0;
-    let insertedId = null;
-    const now = Date.now();
-    if (await pgUsersEnabled()) {
-      const result34 = await pgSafe(
-        `SELECT id FROM room_master_categories WHERE id = $1`,
-        [masterId]
-      );
-      const masterRows = result34?.rows || [];
-      if (!masterRows?.[0]) return res.status(404).send("Master not found");
-      const result35 = await pgSafe(
-        `SELECT id FROM room_categories WHERE master_id = $1 AND lower(name) = lower($2)`,
-        [masterId, name]
-      );
-      const existingRows = result35?.rows || [];
-      if (existingRows?.[0]) return res.status(409).send("Category exists");
-      const result36 = await pgSafe(
-        `SELECT COALESCE(MAX(sort_order), 0) as maxsort FROM room_categories WHERE master_id = $1`,
-        [masterId]
-      );
-      const maxRows = result36?.rows || [];
-      sortOrder = Number(maxRows?.[0]?.maxsort || 0) + 1;
-      const result37 = await pgSafe(
-        `INSERT INTO room_categories (master_id, name, sort_order, created_at) VALUES ($1, $2, $3, $4) RETURNING id`,
-        [masterId, name, sortOrder, now]
-      );
-      const rows = result37?.rows || [];
-      insertedId = rows?.[0]?.id ?? null;
-    } else {
-      const master = await dbGetAsync(`SELECT id FROM room_master_categories WHERE id = ?`, [masterId]);
-      if (!master) return res.status(404).send("Master not found");
-      const existing = await dbGetAsync(
-        `SELECT id FROM room_categories WHERE master_id = ? AND lower(name) = lower(?)`,
-        [masterId, name]
-      );
-      if (existing) return res.status(409).send("Category exists");
-      const maxRow = await dbGetAsync(
-        `SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_categories WHERE master_id = ?`,
-        [masterId]
-      );
-      sortOrder = Number(maxRow?.maxSort || 0) + 1;
-      const ins = await dbRunAsync(
-        `INSERT INTO room_categories (master_id, name, sort_order, created_at) VALUES (?, ?, ?, ?)`,
-        [masterId, name, sortOrder, now]
-      );
-      insertedId = ins?.lastID || null;
-    }
-    await applyRoomStructureChange({
-      action: "room_category.create",
-      actorUserId: req.session?.user?.id,
-      auditPayload: { id: insertedId, master_id: masterId, name, sort_order: sortOrder },
-    });
-    return res.json({ ok: true, id: insertedId, master_id: masterId, name });
-  } catch (e) {
-    console.warn("[room-categories] create failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.patch("/api/room-categories/reorder", strictLimiter, requireAdminPlus, express.json({ limit: "32kb" }), async (req, res) => {
-  const masterId = Number(req.body?.master_id);
-  const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
-  if (!masterId || !orderedIds?.length) return res.status(400).send("Invalid order");
-  try {
-    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-    if (await pgUsersEnabled()) {
-      for (let i = 0; i < orderedIds.length; i += 1) {
-        const id = Number(orderedIds[i]);
-        if (!id) continue;
-        await pgSafe(
-          `UPDATE room_categories SET sort_order = $1 WHERE id = $2 AND master_id = $3`,
-          [i, id, masterId]
-        );
-      }
-    } else {
-      for (let i = 0; i < orderedIds.length; i += 1) {
-        const id = Number(orderedIds[i]);
-        if (!id) continue;
-        await dbRunAsync(
-          `UPDATE room_categories SET sort_order = ? WHERE id = ? AND master_id = ?`,
-          [i, id, masterId]
-        );
-      }
-    }
-    await applyRoomStructureChange({
-      action: "room_category.reorder",
-      actorUserId: req.session?.user?.id,
-      auditPayload: { master_id: masterId, orderedIds },
-    });
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn("[room-categories] reorder failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.patch("/api/room-categories/:id", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
-  const id = Number(req.params.id);
-  if (!id) return res.status(400).send("Invalid category");
-  try {
-    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-    const row = await (await pgUsersEnabled())
-      ? (async () => {
-        const result9 = await pgSafe(`SELECT id, name, master_id FROM room_categories WHERE id = $1`, [id]);
-        const rows = result9?.rows || [];
-        return rows?.[0] || null;
-      })()
-      : await dbGetAsync(`SELECT id, name, master_id FROM room_categories WHERE id = ?`, [id]);
-    if (!row) return res.status(404).send("Not found");
-    const updates = [];
-    const params = [];
-
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "name")) {
-      const name = sanitizeRoomGroupName(req.body?.name || "");
-      if (!name) return res.status(400).send("Invalid name");
-      if (normalizeRoomGroupName(row.name) === normalizeRoomGroupName(DEFAULT_ROOM_CATEGORY) && name !== row.name) {
-        return res.status(400).send("Cannot rename Uncategorized");
-      }
-      const targetMaster = Number(req.body?.master_id) || row.master_id;
-      const existing = await (await pgUsersEnabled())
-        ? (async () => {
-          const result7 = await pgSafe(
-            `SELECT id FROM room_categories WHERE master_id = $1 AND lower(name) = lower($2) AND id != $3`,
-            [targetMaster, name, id]
-          );
-          const rows = result7?.rows || [];
-          return rows?.[0] || null;
-        })()
-        : await dbGetAsync(
-          `SELECT id FROM room_categories WHERE master_id = ? AND lower(name) = lower(?) AND id != ?`,
-          [targetMaster, name, id]
-        );
-      if (existing) return res.status(409).send("Name exists");
-      updates.push("name = ?");
-      params.push(name);
-    }
-
-    let nextMasterId = row.master_id;
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "master_id")) {
-      const masterId = Number(req.body?.master_id);
-      if (!masterId) return res.status(400).send("Invalid master");
-      if (normalizeRoomGroupName(row.name) === normalizeRoomGroupName(DEFAULT_ROOM_CATEGORY) && masterId !== row.master_id) {
-        return res.status(400).send("Cannot move Uncategorized");
-      }
-      const masterRow = await (await pgUsersEnabled())
-        ? (async () => {
-          const result8 = await pgSafe(`SELECT id FROM room_master_categories WHERE id = $1`, [masterId]);
-          const rows = result8?.rows || [];
-          return rows?.[0] || null;
-        })()
-        : await dbGetAsync(`SELECT id FROM room_master_categories WHERE id = ?`, [masterId]);
-      if (!masterRow) return res.status(404).send("Master not found");
-      nextMasterId = masterId;
-      updates.push("master_id = ?");
-      params.push(masterId);
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "sort_order")) {
-      const sortOrder = Number(req.body?.sort_order);
-      if (Number.isFinite(sortOrder)) {
-        updates.push("sort_order = ?");
-        params.push(sortOrder);
-      }
-    }
-
-    if (!updates.length) return res.json({ ok: true });
-
-    if (nextMasterId !== row.master_id && !Object.prototype.hasOwnProperty.call(req.body || {}, "sort_order")) {
-      const maxRow = await (await pgUsersEnabled())
-        ? (async () => {
-          const result9 = await pgSafe(
-            `SELECT COALESCE(MAX(sort_order), 0) as maxsort FROM room_categories WHERE master_id = $1`,
-            [nextMasterId]
-          );
-          const rows = result9?.rows || [];
-          return rows?.[0] || null;
-        })()
-        : await dbGetAsync(
-          `SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_categories WHERE master_id = ?`,
-          [nextMasterId]
-        );
-      const sortOrder = Number(maxRow?.maxsort || maxRow?.maxSort || 0) + 1;
-      updates.push("sort_order = ?");
-      params.push(sortOrder);
-    }
-
-    if (await pgUsersEnabled()) {
-      const pgUpdates = updates.map((item, idx) => item.replace("?", `$${idx + 1}`));
-      const pgParams = [...params, id];
-      await pgSafe(`UPDATE room_categories SET ${pgUpdates.join(", ")} WHERE id = $${pgParams.length}`, pgParams);
-    } else {
-      params.push(id);
-      await dbRunAsync(`UPDATE room_categories SET ${updates.join(", ")} WHERE id = ?`, params);
-    }
-    await applyRoomStructureChange({
-      action: "room_category.update",
-      actorUserId: req.session?.user?.id,
-      auditPayload: { id, updates: req.body || {} },
-    });
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn("[room-categories] patch failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.delete("/api/room-categories/:id", strictLimiter, requireAdminPlus, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!id) return res.status(400).send("Invalid category");
-  try {
-    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-    const row = await (await pgUsersEnabled())
-      ? (async () => {
-        const result10 = await pgSafe(`SELECT id, name, master_id FROM room_categories WHERE id = $1`, [id]);
-        const rows = result10?.rows || [];
-        return rows?.[0] || null;
-      })()
-      : await dbGetAsync(`SELECT id, name, master_id FROM room_categories WHERE id = ?`, [id]);
-    if (!row) return res.status(404).send("Not found");
-    if (normalizeRoomGroupName(row.name) === normalizeRoomGroupName(DEFAULT_ROOM_CATEGORY)) {
-      return res.status(400).send("Cannot delete Uncategorized");
-    }
-    const rooms = await (await pgUsersEnabled())
-      ? (async () => {
-        const result11 = await pgSafe(`SELECT name FROM rooms WHERE category_id = $1`, [id]);
-        const rows = result11?.rows || [];
-        return rows || [];
-      })()
-      : await dbAllAsync(`SELECT name FROM rooms WHERE category_id = ?`, [id]);
-    if (rooms?.length) return res.status(409).send("Category must be empty to delete");
-    if (await pgUsersEnabled()) {
-      await pgSafe(`DELETE FROM room_categories WHERE id = $1`, [id]);
-    } else {
-      await dbRunAsync(`DELETE FROM room_categories WHERE id = ?`, [id]);
-    }
-    await applyRoomStructureChange({
-      action: "room_category.delete",
-      actorUserId: req.session?.user?.id,
-      auditPayload: { id, name: row.name },
-    });
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn("[room-categories] delete failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.patch("/api/rooms/:id/move", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
-  const roomName = sanitizeRoomName(req.params.id || "");
-  if (!roomName) return res.status(400).send("Invalid room");
-  try {
-    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-    const roomRow = await (await pgUsersEnabled())
-      ? (async () => {
-        const result12 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
-        const rows = result12?.rows || [];
-        return rows?.[0] || null;
-      })()
-      : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
-    if (!roomRow) return res.status(404).send("Not found");
-    const requestedCategoryId = Number(req.body?.category_id) || null;
-    const resolved = await resolveRoomCategoryId({ categoryId: requestedCategoryId, isUserRoom: false });
-    const categoryId = resolved?.categoryId ?? null;
-    let categoryRow = null;
-    if (categoryId) {
-      if (await pgUsersEnabled()) {
-        const result13 = await pgSafe(
-          `SELECT c.id, m.name as master_name
-             FROM room_categories c
-             JOIN room_master_categories m ON m.id = c.master_id
-            WHERE c.id = $1 LIMIT 1`,
-          [categoryId]
-        );
-        const rows = result13?.rows || [];
-        categoryRow = rows?.[0] || null;
-      } else {
-        categoryRow = await dbGetAsync(
-          `SELECT c.id, m.name as master_name
-             FROM room_categories c
-             JOIN room_master_categories m ON m.id = c.master_id
-            WHERE c.id = ? LIMIT 1`,
-          [categoryId]
-        );
-      }
-    }
-    const isUserRoom = categoryRow?.master_name === "User Rooms" ? 1 : 0;
-    let sortOrder = Number(req.body?.room_sort_order);
-    if (!Number.isFinite(sortOrder)) {
-      let maxRow = { maxSort: 0, maxsort: 0 };
-      if (categoryId) {
-        if (await pgUsersEnabled()) {
-          const result10 = await pgSafe(
-            `SELECT COALESCE(MAX(room_sort_order), 0) as maxsort FROM rooms WHERE category_id = $1`,
-            [categoryId]
-          );
-          const rows = result10?.rows || [];
-          maxRow = rows?.[0] || maxRow;
-        } else {
-          maxRow = await dbGetAsync(
-            `SELECT COALESCE(MAX(room_sort_order), 0) as maxSort FROM rooms WHERE category_id = ?`,
-            [categoryId]
-          );
-        }
-      }
-      sortOrder = Number(maxRow?.maxsort || maxRow?.maxSort || 0) + 1;
-    }
-    if (await pgUsersEnabled()) {
-      await pgSafe(
-        `UPDATE rooms SET category_id = $1, room_sort_order = $2, is_user_room = $3 WHERE name = $4`,
-        [categoryId, sortOrder, isUserRoom, roomName]
-      );
-    } else {
-      await dbRunAsync(
-        `UPDATE rooms SET category_id = ?, room_sort_order = ?, is_user_room = ? WHERE name = ?`,
-        [categoryId, sortOrder, isUserRoom, roomName]
-      );
-    }
-    await applyRoomStructureChange({
-      action: "room.move",
-      actorUserId: req.session?.user?.id,
-      auditPayload: { name: roomName, category_id: categoryId, room_sort_order: sortOrder },
-    });
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn("[rooms] move failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.patch("/api/rooms/:id/settings", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
-  const roomName = sanitizeRoomName(req.params.id || "");
-  if (!roomName) return res.status(400).send("Invalid room");
-  const slowmode = Number(req.body?.slowmode_seconds ?? req.body?.slowmode ?? 0);
-  const isLocked = Number(req.body?.is_locked ?? 0) ? 1 : 0;
-  const maintenance = Number(req.body?.maintenance_mode ?? 0) ? 1 : 0;
-  const vipOnly = Number(req.body?.vip_only ?? 0) ? 1 : 0;
-  const staffOnly = Number(req.body?.staff_only ?? 0) ? 1 : 0;
-  const minLevel = Math.max(0, Math.min(999, Number(req.body?.min_level ?? 0) || 0));
-  const eventsEnabled = Number(req.body?.events_enabled ?? 1) ? 1 : 0;
-
-  if (!Number.isFinite(slowmode) || slowmode < 0 || slowmode > 3600) {
-    return res.status(400).send("Invalid slowmode");
-  }
-  try {
-    const roomRow = await (await pgUsersEnabled())
-      ? (async () => {
-        const result14 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
-        const rows = result14?.rows || [];
-        return rows?.[0] || null;
-      })()
-      : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
-    if (!roomRow) return res.status(404).send("Not found");
-    if (await pgUsersEnabled()) {
-      await pgSafe(
-        `UPDATE rooms
-            SET slowmode_seconds = $1,
-                is_locked = $2,
-                maintenance_mode = $3,
-                vip_only = $4,
-                staff_only = $5,
-                min_level = $6,
-                events_enabled = $7
-          WHERE name = $8`,
-        [slowmode, isLocked, maintenance, vipOnly, staffOnly, minLevel, eventsEnabled, roomName]
-      );
-    } else {
-      await dbRunAsync(
-        `UPDATE rooms
-            SET slowmode_seconds = ?,
-                is_locked = ?,
-                maintenance_mode = ?,
-                vip_only = ?,
-                staff_only = ?,
-                min_level = ?,
-                events_enabled = ?
-          WHERE name = ?`,
-        [slowmode, isLocked, maintenance, vipOnly, staffOnly, minLevel, eventsEnabled, roomName]
-      );
-    }
-    await emitRoomStructureUpdate();
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn("[rooms][settings]", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.patch("/api/rooms/:id/archive", strictLimiter, requireAdminPlus, async (req, res) => {
-  const roomName = sanitizeRoomName(req.params.id || "");
-  if (!roomName) return res.status(400).send("Invalid room");
-  const actor = req.session?.user;
-  if (isCoreRoomName(roomName) && !requireMinRole(actor?.role, "Owner")) {
-    return res.status(403).send("Core rooms can only be archived by the Owner");
-  }
-  try {
-    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-    const row = await (await pgUsersEnabled())
-      ? (async () => {
-        const result15 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
-        const rows = result15?.rows || [];
-        return rows?.[0] || null;
-      })()
-      : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
-    if (!row) return res.status(404).send("Not found");
-    if (await pgUsersEnabled()) {
-      await pgSafe(`UPDATE rooms SET archived = 1 WHERE name = $1`, [roomName]);
-    } else {
-      await dbRunAsync(`UPDATE rooms SET archived = 1 WHERE name = ?`, [roomName]);
-    }
-    await applyRoomStructureChange({
-      action: "room.archive",
-      actorUserId: req.session?.user?.id,
-      auditPayload: { name: roomName },
-    });
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn("[rooms] archive failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.patch("/api/rooms/:id/restore", strictLimiter, requireAdminPlus, async (req, res) => {
-  const roomName = sanitizeRoomName(req.params.id || "");
-  if (!roomName) return res.status(400).send("Invalid room");
-  try {
-    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-    const row = await (await pgUsersEnabled())
-      ? (async () => {
-        const result16 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
-        const rows = result16?.rows || [];
-        return rows?.[0] || null;
-      })()
-      : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
-    if (!row) return res.status(404).send("Not found");
-    if (await pgUsersEnabled()) {
-      await pgSafe(`UPDATE rooms SET archived = 0 WHERE name = $1`, [roomName]);
-    } else {
-      await dbRunAsync(`UPDATE rooms SET archived = 0 WHERE name = ?`, [roomName]);
-    }
-    await applyRoomStructureChange({
-      action: "room.restore",
-      actorUserId: req.session?.user?.id,
-      auditPayload: { name: roomName },
-    });
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn("[rooms] restore failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.get("/api/rooms/:id/events", strictLimiter, requireAdminPlus, async (req, res) => {
-  const roomName = sanitizeRoomName(req.params.id || "");
-  if (!roomName) return res.status(400).send("Invalid room");
-  return res.json({ ok: true, events: getActiveEventsForRoom(roomName) });
-});
-
-app.post("/api/rooms/:id/events", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
-  const roomName = sanitizeRoomName(req.params.id || "");
-  if (!roomName) return res.status(400).send("Invalid room");
-  const type = String(req.body?.type || "").trim();
-  const allowedTypes = new Set(["announcement", "prompt", "flair"]);
-  if (!allowedTypes.has(type)) return res.status(400).send("Invalid event type");
-  const roomRow = await dbGetAsync(`SELECT events_enabled, archived FROM rooms WHERE name = ?`, [roomName]);
-  if (!roomRow) return res.status(404).send("Not found");
-  if (Number(roomRow.archived || 0) === 1) return res.status(400).send("Room is archived");
-  if (Number(roomRow.events_enabled ?? 1) === 0) return res.status(400).send("Events are disabled for this room");
-  const durationSec = Math.max(0, Math.min(24 * 60 * 60, Number(req.body?.duration_seconds ?? 0) || 0));
-  const payload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
-  const id = ROOM_EVENT_SEQ++;
-  const startedAt = Date.now();
-  const endsAt = durationSec ? startedAt + durationSec * 1000 : null;
-  const rawText = String(payload?.text || "").trim();
-  if (type === "announcement" && !rawText) return res.status(400).send("Text required");
-  const resolvedText = type === "prompt" ? (rawText || selectPromptText()) : rawText;
-  const title = resolvedText ? resolvedText.slice(0, 80) : type === "flair" ? "Visual Flair" : "Room Event";
-  const ev = { id, type, title, payload: { ...payload, text: resolvedText }, startedAt, endsAt, createdBy: req.session?.user?.username || null };
-  await addRoomEvent(roomName, ev);
-  io.to(roomName).emit("room:event", { room: roomName, active: ev, at: Date.now() });
-
-  if (type === "announcement" || type === "prompt") {
-    const text = resolvedText ? String(resolvedText).slice(0, 500) : "💬 Prompt event started.";
-    emitRoomSystem(roomName, text);
-  }
-
-  return res.json({ ok: true, event: ev });
-});
-
-app.post("/api/room-events/:id/stop", strictLimiter, requireAdminPlus, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id) || id < 1) return res.status(400).send("Invalid event");
-  const stopped = await stopRoomEventById(id);
-  if (!stopped) return res.status(404).send("Not found");
-  emitRoomSystem(stopped.room, "⛔ Room event ended.");
-  io.to(stopped.room).emit("room:event", { room: stopped.room, active: null, at: Date.now() });
-  return res.json({ ok: true });
-});
-
-
-app.patch("/api/rooms/:id", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
-  const oldName = sanitizeRoomName(req.params.id || "");
-  const nextName = sanitizeRoomName(req.body?.name || "");
-  if (!oldName || !nextName) return res.status(400).send("Invalid room");
-  if (oldName === nextName) return res.json({ ok: true, name: nextName });
-  const actor = req.session?.user;
-  if (isCoreRoomName(oldName) && !requireMinRole(actor?.role, "Owner")) {
-    return res.status(403).send("Core rooms can only be renamed by the Owner");
-  }
-  try {
-    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-    const roomRow = await (await pgUsersEnabled())
-      ? (async () => {
-        const result17 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [oldName]);
-        const rows = result17?.rows || [];
-        return rows?.[0] || null;
-      })()
-      : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [oldName]);
-    if (!roomRow) return res.status(404).send("Not found");
-    const exists = await (await pgUsersEnabled())
-      ? (async () => {
-        const result18 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [nextName]);
-        const rows = result18?.rows || [];
-        return rows?.[0] || null;
-      })()
-      : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [nextName]);
-    if (exists) return res.status(409).send("Room already exists");
-
-    // Update rooms primary key name + all references that store room name
-    if (await pgUsersEnabled()) {
-      await pgSafe(`UPDATE rooms SET name = $1 WHERE name = $2`, [nextName, oldName]);
-    } else {
-      await dbRunAsync(`UPDATE rooms SET name = ? WHERE name = ?`, [nextName, oldName]);
-    }
-
-    // Best-effort updates for related tables (some installs may not have all tables)
-    const safeUpdate = async (sql, params) => {
-      try { await dbRunAsync(sql, params); } catch (_) {}
-    };
-    await safeUpdate(`UPDATE messages SET room = ? WHERE room = ?`, [nextName, oldName]);
-    await safeUpdate(`UPDATE mod_logs SET room = ? WHERE room = ?`, [nextName, oldName]);
-    await safeUpdate(`UPDATE command_audit SET room = ? WHERE room = ?`, [nextName, oldName]);
-
-    if (await pgUsersEnabled()) {
-      const safeUpdatePg = async (sql, params) => {
-        try { await pgSafe(sql, params); } catch (_) {}
-      };
-      await safeUpdatePg(`UPDATE messages SET room = $1 WHERE room = $2`, [nextName, oldName]);
-      await safeUpdatePg(`UPDATE mod_logs SET room = $1 WHERE room = $2`, [nextName, oldName]);
-      await safeUpdatePg(`UPDATE command_audit SET room = $1 WHERE room = $2`, [nextName, oldName]);
-    }
-
-    // Move live sockets currently in the old room to the new room to prevent "ghost" rooms.
-    try {
-      const sockets = await io.in(oldName).fetchSockets();
-      for (const sock of sockets) {
-        try { sock.leave(oldName); } catch (_) {}
-        try { sock.join(nextName); } catch (_) {}
-        if (sock.currentRoom === oldName) sock.currentRoom = nextName;
-        if (sock.data?.currentRoom === oldName) sock.data.currentRoom = nextName;
-      }
-    } catch (_) {}
-
-    await applyRoomStructureChange({
-      action: "room.rename",
-      actorUserId: actor?.id,
-      auditPayload: { from: oldName, to: nextName },
-    });
-    return res.json({ ok: true, name: nextName });
-  } catch (e) {
-    console.warn("[rooms] rename failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.patch("/api/rooms/reorder", strictLimiter, requireAdminPlus, express.json({ limit: "32kb" }), async (req, res) => {
-  const categoryId = Number(req.body?.category_id);
-  const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
-  if (!categoryId || !orderedIds?.length) return res.status(400).send("Invalid order");
-  try {
-    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-    if (await pgUsersEnabled()) {
-      for (let i = 0; i < orderedIds.length; i += 1) {
-        const roomName = sanitizeRoomName(orderedIds[i] || "");
-        if (!roomName) continue;
-        await pgSafe(
-          `UPDATE rooms SET room_sort_order = $1 WHERE name = $2 AND category_id = $3`,
-          [i, roomName, categoryId]
-        );
-      }
-    } else {
-      for (let i = 0; i < orderedIds.length; i += 1) {
-        const roomName = sanitizeRoomName(orderedIds[i] || "");
-        if (!roomName) continue;
-        await dbRunAsync(
-          `UPDATE rooms SET room_sort_order = ? WHERE name = ? AND category_id = ?`,
-          [i, roomName, categoryId]
-        );
-      }
-    }
-    await applyRoomStructureChange({
-      action: "room.reorder",
-      actorUserId: req.session?.user?.id,
-      auditPayload: { category_id: categoryId, orderedIds },
-    });
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn("[rooms] reorder failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-app.post("/api/rooms/reset_defaults", strictLimiter, requireAdminPlus, async (req, res) => {
-  try {
-    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
-    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
-    await ensureCoreRoomsExist();
-    await applyRoomStructureChange({
-      action: "room.reset_defaults",
-      actorUserId: req.session?.user?.id,
-      auditPayload: { restored: "missing_system_rooms" },
-    });
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn("[rooms] reset defaults failed", e?.message || e);
-    return res.status(500).send("Failed");
-  }
-});
-
-// ---- Moderation Cases API
-app.get("/api/mod/cases", strictLimiter, requireLogin, async (req, res) => {
-  const actor = req.session?.user;
-  if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
-
-  const status = String(req.query?.status || "").trim();
-  const type = String(req.query?.type || "").trim();
-  const assigned = String(req.query?.assigned || "").trim();
-  const isAdmin = canViewAllCases(actor.role);
-  const limit = Math.min(200, Math.max(1, Number(req.query?.limit || 200)));
-
-  try {
-    if (await pgUsersEnabled()) {
-      const where = [];
-      const params = [];
-      if (!isAdmin) {
-        where.push("(status = 'open' OR assigned_to_user_id = $1 OR created_by_user_id = $2)");
-        params.push(actor.id, actor.id);
-      }
-      if (status) { params.push(status); where.push(`status = $${params.length}`); }
-      if (type) { params.push(type); where.push(`type = $${params.length}`); }
-      if (assigned === "me") { params.push(actor.id); where.push(`assigned_to_user_id = $${params.length}`); }
-      if (assigned === "unassigned") { where.push("assigned_to_user_id IS NULL"); }
-      if (assigned && assigned !== "me" && assigned !== "unassigned") {
-        const assignedId = Number(assigned);
-        if (Number.isFinite(assignedId) && assignedId > 0) {
-          params.push(assignedId);
-          where.push(`assigned_to_user_id = $${params.length}`);
-        }
-      }
-      const sql = `SELECT * FROM mod_cases ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY updated_at DESC LIMIT ${limit}`;
-      const result38 = await pgSafe(sql, params);
-      const rows = result38?.rows || [];
-      return res.json({ ok: true, items: rows || [] });
-    }
-
-    const where = [];
-    const params = [];
-    if (!isAdmin) {
-      where.push("(status = 'open' OR assigned_to_user_id = ? OR created_by_user_id = ?)");
-      params.push(actor.id, actor.id);
-    }
-    if (status) { where.push("status = ?"); params.push(status); }
-    if (type) { where.push("type = ?"); params.push(type); }
-    if (assigned === "me") { where.push("assigned_to_user_id = ?"); params.push(actor.id); }
-    if (assigned === "unassigned") { where.push("assigned_to_user_id IS NULL"); }
-    if (assigned && assigned !== "me" && assigned !== "unassigned") {
-      const assignedId = Number(assigned);
-      if (Number.isFinite(assignedId) && assignedId > 0) {
-        where.push("assigned_to_user_id = ?");
-        params.push(assignedId);
-      }
-    }
-    const sql = `SELECT * FROM mod_cases ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY updated_at DESC LIMIT ${limit}`;
-    const items = await dbAllAsync(sql, params);
-    return res.json({ ok: true, items });
-  } catch (e) {
-    console.warn("[mod-cases] list failed", e?.message || e);
-    return res.status(500).json({ ok: false, error: "failed_to_list" });
-  }
-});
-
-app.get("/api/mod/cases/:id", strictLimiter, requireLogin, async (req, res) => {
-  const actor = req.session?.user;
-  if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id)) return res.status(400).send("Invalid case");
-
-  try {
-    const caseRow = await fetchModCaseById(id);
-    if (!caseRow) return res.status(404).send("Not found");
-    const isAdmin = canViewAllCases(actor.role);
-    if (!isAdmin) {
-      const allowed =
-        caseRow.status === "open" ||
-        Number(caseRow.assigned_to_user_id || 0) === Number(actor.id) ||
-        Number(caseRow.created_by_user_id || 0) === Number(actor.id);
-      if (!allowed) return res.status(403).send("Forbidden");
-    }
-
-    const events = await (await pgUsersEnabled())
-      ? (async () => {
-        const result19 = await pgSafe(
-          `SELECT * FROM mod_case_events WHERE case_id = $1 ORDER BY created_at ASC`,
-          [id]
-        );
-        const rows = result19?.rows || [];
-        return rows || [];
-      })()
-      : await dbAllAsync(`SELECT * FROM mod_case_events WHERE case_id = ? ORDER BY created_at ASC`, [id]);
-    const notes = await (await pgUsersEnabled())
-      ? (async () => {
-        const result20 = await pgSafe(
-          `SELECT * FROM mod_case_notes WHERE case_id = $1 ORDER BY created_at ASC`,
-          [id]
-        );
-        const rows = result20?.rows || [];
-        return rows || [];
-      })()
-      : await dbAllAsync(`SELECT * FROM mod_case_notes WHERE case_id = ? ORDER BY created_at ASC`, [id]);
-    const evidence = await (await pgUsersEnabled())
-      ? (async () => {
-        const result21 = await pgSafe(
-          `SELECT * FROM mod_case_evidence WHERE case_id = $1 ORDER BY created_at ASC`,
-          [id]
-        );
-        const rows = result21?.rows || [];
-        return rows || [];
-      })()
-      : await dbAllAsync(`SELECT * FROM mod_case_evidence WHERE case_id = ? ORDER BY created_at ASC`, [id]);
-
-    const parsedEvents = (events || []).map((ev) => ({
-      ...ev,
-      event_payload: typeof ev.event_payload === "string" ? safeJsonParse(ev.event_payload, {}) : ev.event_payload,
-    }));
-
-    return res.json({ ok: true, case: caseRow, events: parsedEvents, notes, evidence });
-  } catch (e) {
-    console.warn("[mod-cases] fetch failed", e?.message || e);
-    return res.status(500).json({ ok: false, error: "failed_to_fetch" });
-  }
-});
-
-app.post("/api/mod/cases", strictLimiter, requireLogin, express.json({ limit: "32kb" }), async (req, res) => {
-  const actor = req.session?.user;
-  if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
-  const type = String(req.body?.type || "").trim();
-  const allowedTypes = new Set(["flag", "appeal", "referral", "investigation"]);
-  if (!allowedTypes.has(type)) return res.status(400).send("Invalid type");
-
-  try {
-    const caseRow = await createModCase({
-      type,
-      status: "open",
-      priority: String(req.body?.priority || "normal"),
-      subjectUserId: Number(req.body?.subject_user_id) || null,
-      createdByUserId: actor.id,
-      assignedToUserId: Number(req.body?.assigned_to_user_id) || null,
-      roomId: req.body?.room_id ? String(req.body.room_id) : null,
-      title: req.body?.title ? String(req.body.title).slice(0, 160) : null,
-      summary: req.body?.summary ? String(req.body.summary).slice(0, 2000) : null,
-    });
-    if (!caseRow?.id) return res.status(500).json({ ok: false, error: "create_failed" });
-    await addModCaseEvent(caseRow.id, { actorUserId: actor.id, eventType: "created", payload: { type } });
-    emitToStaff("mod:case_created", { id: caseRow.id, type: caseRow.type, status: caseRow.status });
-    return res.json({ ok: true, case: caseRow });
-  } catch (e) {
-    console.warn("[mod-cases] create failed", e?.message || e);
-    return res.status(500).json({ ok: false, error: "create_failed" });
-  }
-});
-
-app.patch("/api/mod/cases/:id", strictLimiter, requireLogin, express.json({ limit: "32kb" }), async (req, res) => {
-  const actor = req.session?.user;
-  if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id)) return res.status(400).send("Invalid case");
-
-  try {
-    const caseRow = await fetchModCaseById(id);
-    if (!caseRow) return res.status(404).send("Not found");
-    const isAdmin = canViewAllCases(actor.role);
-    const isOwnerOrAssignee =
-      Number(caseRow.assigned_to_user_id || 0) === Number(actor.id) ||
-      Number(caseRow.created_by_user_id || 0) === Number(actor.id);
-    if (!isAdmin && !isOwnerOrAssignee) return res.status(403).send("Forbidden");
-
-    const updates = [];
-    const params = [];
-    const fields = [
-      ["assigned_to_user_id", "assigned_to_user_id"],
-      ["priority", "priority"],
-      ["title", "title"],
-      ["summary", "summary"],
-      ["room_id", "room_id"],
-      ["subject_user_id", "subject_user_id"],
-    ];
-    for (const [key, col] of fields) {
-      if (!Object.prototype.hasOwnProperty.call(req.body || {}, key)) continue;
-      updates.push(col);
-      params.push(req.body[key] == null ? null : req.body[key]);
-    }
-    if (!updates.length) return res.json({ ok: true, case: caseRow });
-
-    const now = Date.now();
-    if (await pgUsersEnabled()) {
-      const setParts = updates.map((col, idx) => `${col} = $${idx + 1}`);
-      const pgParams = [...params, now, id];
-      await pgSafe(
-        `UPDATE mod_cases SET ${setParts.join(", ")}, updated_at = $${pgParams.length - 1} WHERE id = $${pgParams.length}`,
-        pgParams
-      );
-    } else {
-      const setParts = updates.map(() => "?");
-      await dbRunAsync(
-        `UPDATE mod_cases SET ${updates.map((col, idx) => `${col} = ${setParts[idx]}`).join(", ")}, updated_at = ? WHERE id = ?`,
-        [...params, now, id]
-      );
-    }
-    await addModCaseEvent(id, { actorUserId: actor.id, eventType: "updated", payload: { updates: req.body || {} } });
-    emitToStaff("mod:case_updated", { id, updates: req.body || {} });
-    const updated = await fetchModCaseById(id);
-    return res.json({ ok: true, case: updated });
-  } catch (e) {
-    console.warn("[mod-cases] update failed", e?.message || e);
-    return res.status(500).json({ ok: false, error: "update_failed" });
-  }
-});
-
-app.post("/api/mod/cases/:id/status", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
-  const actor = req.session?.user;
-  if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
-  const id = Number(req.params.id);
-  const status = String(req.body?.status || "").trim();
-  if (!Number.isFinite(id) || !status) return res.status(400).send("Invalid status");
-  const allowedStatuses = new Set(["open", "closed", "resolved", "pending"]);
-  if (!allowedStatuses.has(status)) return res.status(400).send("Invalid status");
-
-  try {
-    const caseRow = await fetchModCaseById(id);
-    if (!caseRow) return res.status(404).send("Not found");
-    const isAdmin = canViewAllCases(actor.role);
-    const isOwnerOrAssignee =
-      Number(caseRow.assigned_to_user_id || 0) === Number(actor.id) ||
-      Number(caseRow.created_by_user_id || 0) === Number(actor.id);
-    if (!isAdmin && !isOwnerOrAssignee) return res.status(403).send("Forbidden");
-
-    const now = Date.now();
-    const closedAt = status === "closed" ? now : null;
-    const closedReason = req.body?.closed_reason ? String(req.body.closed_reason).slice(0, 400) : null;
-    if (await pgUsersEnabled()) {
-      await pgSafe(
-        `UPDATE mod_cases SET status = $1, updated_at = $2, closed_at = $3, closed_reason = $4 WHERE id = $5`,
-        [status, now, closedAt, closedReason, id]
-      );
-    } else {
-      await dbRunAsync(
-        `UPDATE mod_cases SET status = ?, updated_at = ?, closed_at = ?, closed_reason = ? WHERE id = ?`,
-        [status, now, closedAt, closedReason, id]
-      );
-    }
-    await addModCaseEvent(id, { actorUserId: actor.id, eventType: "status_changed", payload: { status, closed_reason: closedReason } });
-    emitToStaff("mod:case_updated", { id, status });
-    const updated = await fetchModCaseById(id);
-    return res.json({ ok: true, case: updated });
-  } catch (e) {
-    console.warn("[mod-cases] status update failed", e?.message || e);
-    return res.status(500).json({ ok: false, error: "status_failed" });
-  }
-});
-
-app.post("/api/mod/cases/:id/notes", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
-  const actor = req.session?.user;
-  if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
-  const id = Number(req.params.id);
-  const body = String(req.body?.body || "").trim();
-  if (!Number.isFinite(id) || !body) return res.status(400).send("Invalid note");
-  try {
-    const caseRow = await fetchModCaseById(id);
-    if (!caseRow) return res.status(404).send("Not found");
-    const note = await addModCaseNote(id, { authorUserId: actor.id, body: body.slice(0, 2000) });
-    await addModCaseEvent(id, { actorUserId: actor.id, eventType: "note_added" });
-    emitToStaff("mod:case_event", { caseId: id, eventType: "note_added" });
-    return res.json({ ok: true, note });
-  } catch (e) {
-    console.warn("[mod-cases] note failed", e?.message || e);
-    return res.status(500).json({ ok: false, error: "note_failed" });
-  }
-});
-
-app.post("/api/mod/cases/:id/evidence", strictLimiter, requireLogin, express.json({ limit: "32kb" }), async (req, res) => {
-  const actor = req.session?.user;
-  if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id)) return res.status(400).send("Invalid case");
-  const evidenceType = String(req.body?.evidence_type || "").trim();
-  const allowedTypes = new Set(["message", "text", "link"]);
-  if (!allowedTypes.has(evidenceType)) return res.status(400).send("Invalid evidence type");
-
-  try {
-    const caseRow = await fetchModCaseById(id);
-    if (!caseRow) return res.status(404).send("Not found");
-    const evidence = await addModCaseEvidence(id, {
-      createdByUserId: actor.id,
-      evidenceType,
-      roomId: req.body?.room_id ? String(req.body.room_id) : null,
-      messageId: Number(req.body?.message_id) || null,
-      messageExcerpt: req.body?.message_excerpt ? String(req.body.message_excerpt).slice(0, 500) : null,
-      url: req.body?.url ? String(req.body.url).slice(0, 600) : null,
-      text: req.body?.text ? String(req.body.text).slice(0, 2000) : null,
-    });
-    await addModCaseEvent(id, { actorUserId: actor.id, eventType: "evidence_added", payload: { evidence_type: evidenceType } });
-    emitToStaff("mod:case_event", { caseId: id, eventType: "evidence_added" });
-    return res.json({ ok: true, evidence });
-  } catch (e) {
-    console.warn("[mod-cases] evidence failed", e?.message || e);
-    return res.status(500).json({ ok: false, error: "evidence_failed" });
-  }
-});
-
-// ========================================
-// Word Filter Management API (Admin/Co-owner/Owner only)
-// ========================================
-
-// Get all word filters
-app.get("/api/word-filters", requireLogin, async (req, res) => {
-  const actor = req.session?.user;
-  if (!actor || !requireMinRole(actor.role, "Admin")) {
-    return res.status(403).json({ ok: false, error: "Forbidden" });
-  }
-
-  try {
-    const filters = await dbAllAsync(
-      "SELECT id, filter_text, is_phrase, is_hardcoded, added_by_username, created_at, notes FROM word_filters ORDER BY created_at DESC"
-    );
-    return res.json({ ok: true, filters });
-  } catch (e) {
-    console.error("[word-filters] get failed", e);
-    return res.status(500).json({ ok: false, error: "Failed to fetch filters" });
-  }
-});
-
-// Add a new word filter
-app.post("/api/word-filters", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
-  const actor = req.session?.user;
-  if (!actor || !requireMinRole(actor.role, "Admin")) {
-    return res.status(403).json({ ok: false, error: "Forbidden" });
-  }
-
-  const filterText = String(req.body?.filter_text || "").trim();
-  const isPhrase = !!req.body?.is_phrase;
-  const notes = String(req.body?.notes || "").trim().slice(0, 500);
-
-  if (!filterText || filterText.length < 2 || filterText.length > 100) {
-    return res.status(400).json({ ok: false, error: "Filter text must be between 2 and 100 characters" });
-  }
-
-  try {
-    // Check for duplicates
-    const existing = await dbGetAsync("SELECT id FROM word_filters WHERE filter_text = ?", [filterText]);
-    if (existing) {
-      return res.status(400).json({ ok: false, error: "Filter already exists" });
-    }
-
-    const result = await dbRunAsync(
-      `INSERT INTO word_filters (filter_text, is_phrase, is_hardcoded, added_by_user_id, added_by_username, created_at, notes)
-       VALUES (?, ?, 0, ?, ?, ?, ?)`,
-      [filterText, isPhrase ? 1 : 0, actor.id, actor.username, Date.now(), notes || null]
-    );
-
-    // Reload cache
-    await loadWordFilters();
-
-    return res.json({ ok: true, filterId: result.lastID });
-  } catch (e) {
-    console.error("[word-filters] add failed", e);
-    return res.status(500).json({ ok: false, error: "Failed to add filter" });
-  }
-});
-
-// Delete a word filter (cannot delete hardcoded filters)
-app.delete("/api/word-filters/:id", strictLimiter, requireLogin, async (req, res) => {
-  const actor = req.session?.user;
-  if (!actor || !requireMinRole(actor.role, "Admin")) {
-    return res.status(403).json({ ok: false, error: "Forbidden" });
-  }
-
-  const filterId = Number(req.params.id);
-  if (!Number.isFinite(filterId)) {
-    return res.status(400).json({ ok: false, error: "Invalid filter ID" });
-  }
-
-  try {
-    // Check if hardcoded
-    const filter = await dbGetAsync("SELECT is_hardcoded FROM word_filters WHERE id = ?", [filterId]);
-    if (!filter) {
-      return res.status(404).json({ ok: false, error: "Filter not found" });
-    }
-    if (filter.is_hardcoded === 1) {
-      return res.status(400).json({ ok: false, error: "Cannot delete hardcoded filter" });
-    }
-
-    await dbRunAsync("DELETE FROM word_filters WHERE id = ?", [filterId]);
-
-    // Reload cache
-    await loadWordFilters();
-
-    return res.json({ ok: true });
-  } catch (e) {
-    console.error("[word-filters] delete failed", e);
-    return res.status(500).json({ ok: false, error: "Failed to delete filter" });
-  }
-});
-
-// ---- Room collapse persistence
-app.patch(
-  "/api/users/me/room-master-collapsed",
-  strictLimiter,
-  requireLogin,
-  express.json({ limit: "8kb" }),
-  async (req, res) => {
-    const userId = req.session?.user?.id;
-    const masterId = String(req.body?.master_id || "").trim();
-    const collapsed = !!req.body?.collapsed;
-    if (!masterId) return res.status(400).send("Invalid master");
-    try {
-      const current = await getUserRoomCollapseState(userId);
-      const next = { ...(current.master || {}) };
-      next[masterId] = collapsed;
-      const serialized = JSON.stringify(next);
-      await dbRunAsync(`UPDATE users SET room_master_collapsed = ? WHERE id = ?`, [serialized, userId]);
-      try {
-        await pgSafe(`UPDATE users SET room_master_collapsed = $1 WHERE id = $2`, [serialized, userId]);
-      } catch {}
-      return res.json({ ok: true });
-    } catch (e) {
-      console.warn("[rooms] master collapse failed", e?.message || e);
-      return res.status(500).send("Failed");
-    }
-  }
-);
-
-app.patch(
-  "/api/users/me/room-category-collapsed",
-  strictLimiter,
-  requireLogin,
-  express.json({ limit: "8kb" }),
-  async (req, res) => {
-    const userId = req.session?.user?.id;
-    const categoryId = String(req.body?.category_id || "").trim();
-    const collapsed = !!req.body?.collapsed;
-    if (!categoryId) return res.status(400).send("Invalid category");
-    try {
-      const current = await getUserRoomCollapseState(userId);
-      const next = { ...(current.category || {}) };
-      next[categoryId] = collapsed;
-      const serialized = JSON.stringify(next);
-      await dbRunAsync(`UPDATE users SET room_category_collapsed = ? WHERE id = ?`, [serialized, userId]);
-      try {
-        await pgSafe(`UPDATE users SET room_category_collapsed = $1 WHERE id = $2`, [serialized, userId]);
-      } catch {}
-      return res.json({ ok: true });
-    } catch (e) {
-      console.warn("[rooms] category collapse failed", e?.message || e);
-      return res.status(500).send("Failed");
-    }
-  }
-);
-
-// ---- Changelog API
-app.get("/api/changelog", requireLogin, async (req, res) => {
-  const limit = clamp(req.query?.limit || 0, 0, 200);
-  try {
-    const rows = await fetchChangelogEntriesWithReactions({ limit, userId: req.session?.user?.id });
-    return res.json(rows || []);
-  } catch (e) {
-    console.error("[changelog] load failed:", e?.message || e);
-    return res.status(500).send("Failed to load changelog");
-  }
-});
-
-app.post("/api/changelog", strictLimiter, requireOwner, async (req, res) => {
-  const cleaned = cleanChangelogInput(req.body?.title, req.body?.body);
-  if (cleaned.error) return res.status(400).send(cleaned.error);
-
-  try {
-    let entry = null;
-
-    if (await pgChangelogEnabled()) {
-      try {
-        entry = await pgCreateChangelogEntry({
-          title: cleaned.title,
-          body: cleaned.body,
-          authorId: req.session.user.id,
-        });
-      } catch (e) {
-        console.warn("[changelog] PG POST failed, falling back to sqlite:", e?.message || e);
-      }
-    }
-
-    if (!entry) {
-      entry = await createChangelogEntrySqlite({
-        title: cleaned.title,
-        body: cleaned.body,
-        authorId: req.session.user.id,
-      });
-    }
-
-    const payload = toChangelogPayload(entry);
-    io.emit("changelog updated");
-    return res.json(payload);
-  } catch (err) {
-    console.error("[changelog] create failed:", err?.message || err);
-    return res.status(500).send("Failed to create changelog entry");
-  }
-});
-
-app.put("/api/changelog/:id", requireOwner, async (req, res) => {
-  const id = Number(req.params?.id);
-  if (!Number.isFinite(id) || id <= 0) return res.status(400).send("Invalid entry id");
-
-  const cleaned = cleanChangelogInput(req.body?.title, req.body?.body);
-  if (cleaned.error) return res.status(400).send(cleaned.error);
-
-  try {
-    if (await pgChangelogEnabled()) {
-      try {
-        const row = await pgUpdateChangelogEntry({ id, title: cleaned.title, body: cleaned.body });
-        if (row) {
-          io.emit("changelog updated");
-          return res.json(toChangelogPayload(row));
-        }
-      } catch (e) {
-        console.warn("[changelog] PG PUT failed, falling back to sqlite:", e?.message || e);
-      }
-    }
-
-    // sqlite fallback
-    const now = Date.now();
-    const result = await dbRunAsync(
-      `UPDATE changelog_entries SET title=?, body=?, updated_at=? WHERE id=?`,
-      [cleaned.title, cleaned.body, now, id]
-    );
-    if (!result?.changes) return res.status(404).send("Entry not found");
-
-    const row = await dbGetAsync(
-      `SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries WHERE id=?`,
-      [id]
-    );
-    io.emit("changelog updated");
-    return res.json(toChangelogPayload(row));
-  } catch (err) {
-    console.error("[changelog] update failed:", err?.message || err);
-    return res.status(500).send("Failed to update changelog entry");
-  }
-});
-
-app.delete("/api/changelog/:id", strictLimiter, requireOwner, async (req, res) => {
-  const id = Number(req.params?.id);
-  if (!Number.isFinite(id) || id <= 0) return res.status(400).send("Invalid entry id");
-
-  const confirmed = req.body?.confirm === true || req.body?.confirm === "true";
-  if (!confirmed) return res.status(400).send("Confirmation required");
-
-  try {
-    if (await pgChangelogEnabled()) {
-      try {
-        const ok = await pgDeleteChangelogEntry(id);
-        if (ok) {
-          io.emit("changelog updated");
-          return res.json({ ok: true });
-        }
-      } catch (e) {
-        console.warn("[changelog] PG DELETE failed, falling back to sqlite:", e?.message || e);
-      }
-    }
-
-    // sqlite fallback
-    await dbRunAsync(`DELETE FROM changelog_reactions WHERE entry_id=?`, [id]);
-    const result = await dbRunAsync(`DELETE FROM changelog_entries WHERE id=?`, [id]);
-    if (!result?.changes) return res.status(404).send("Entry not found");
-    io.emit("changelog updated");
-    return res.json({ ok: true });
-  } catch (err) {
-    console.error("[changelog] delete failed:", err?.message || err);
-    return res.status(500).send("Failed to delete changelog entry");
-  }
-});
-
-app.post("/api/changelog/:id/reaction", strictLimiter, requireLogin, async (req, res) => {
-  const entryId = Number(req.params?.id);
-  const reaction = normalizeReactionKey(req.body?.reaction);
-  if (!Number.isFinite(entryId) || entryId <= 0) return res.status(400).send("Invalid entry id");
-  if (!reaction) return res.status(400).send("Invalid reaction");
-
-  const userId = req.session.user.id;
-  let payload = null;
-  let usedPg = false;
-
-  if (await pgChangelogEnabled()) {
-    try {
-      const exists = await pgChangelogEntryExists(entryId);
-      if (!exists) return res.status(404).send("Entry not found");
-      await pgToggleChangelogReaction(entryId, userId, reaction);
-      usedPg = true;
-      payload = await pgChangelogReactionPayload(entryId, userId);
-    } catch (e) {
-      console.warn("[changelog] PG reaction toggle fallback:", e?.message || e);
-      if (usedPg) return res.status(500).send("Failed to update reaction");
-    }
-  }
-
-  if (!payload && !usedPg) {
-    const exists = await sqliteChangelogEntryExists(entryId);
-    if (!exists) return res.status(404).send("Entry not found");
-    await sqliteToggleChangelogReaction(entryId, userId, reaction);
-    payload = await sqliteChangelogReactionPayload(entryId, userId);
-  } else if (!payload && usedPg) {
-    return res.status(500).send("Failed to update reaction");
-  }
-
-  if (!payload) return res.status(500).send("Failed to update reaction");
-
-  io.emit("changelog reactions updated");
-  return res.json(payload);
-});
-
-app.get("/api/faq", requireLogin, async (req, res) => {
-  try {
-    const rows = await fetchFaqQuestionsWithReactions(req.session?.user?.username);
-    return res.json(rows || []);
-  } catch (e) {
-    console.error("[faq] load failed:", e?.message || e);
-    return res.status(500).send("Failed to load FAQ");
-  }
-});
-
-app.post("/api/faq", strictLimiter, requireLogin, async (req, res) => {
-  const cleaned = cleanFaqInput(req.body?.title, req.body?.details);
-  if(cleaned.error) return res.status(400).send(cleaned.error);
-
-  const userId = req.session.user.id;
-  const now = Date.now();
-  const last = faqAskCooldown.get(userId) || 0;
-  if(now - last < FAQ_RATE_LIMIT_MS) return res.status(429).send("Please wait before asking another question.");
-  faqAskCooldown.set(userId, now);
-
-  try{
-    let row = null;
-    if(await pgChangelogEnabled()){
-      try{ row = await pgCreateFaqQuestion(cleaned); }catch(e){ console.warn("[faq] PG create fallback:", e?.message || e); }
-    }
-    if(!row){
-      row = await sqliteCreateFaqQuestion(cleaned);
-    }
-    const payload = toFaqPayload(row);
-    io.emit("faq:update");
-    return res.json(payload);
-  }catch(err){
-    console.error("[faq] create failed:", err?.message || err);
-    return res.status(500).send("Failed to submit question");
-  }
-});
-
-app.patch("/api/faq/:id/answer", requireLogin, async (req, res) => {
-  const questionId = Number(req.params?.id);
-  if(!Number.isFinite(questionId) || questionId <= 0) return res.status(400).send("Invalid question id");
-  if(!requireMinRole(req.session.user.role, "Admin")) return res.status(403).send("Forbidden");
-
-  const answerBody = String(req.body?.answer || "").trimEnd();
-  // Allow effectively unlimited answers (TEXT field), but keep a high ceiling
-  // to protect the service from accidental paste-bombs.
-  if(answerBody.length > 50000) return res.status(400).send("Answer is too long");
-
-  try{
-    let row = null;
-    if(await pgChangelogEnabled()){
-      try{ row = await pgUpdateFaqAnswer({ id: questionId, answerBody, answeredBy: req.session.user.id }); }catch(e){ console.warn("[faq] PG answer fallback:", e?.message || e); }
-    }
-    if(!row){
-      row = await sqliteUpdateFaqAnswer({ id: questionId, answerBody, answeredBy: req.session.user.id });
-    }
-    if(!row) return res.status(404).send("Question not found");
-    const payload = toFaqPayload(row);
-    io.emit("faq:update");
-    return res.json(payload);
-  }catch(err){
-    console.error("[faq] answer failed:", err?.message || err);
-    return res.status(500).send("Failed to save answer");
-  }
-});
-
-app.delete("/api/faq/:id", strictLimiter, requireLogin, async (req, res) => {
-  const questionId = Number(req.params?.id);
-  if(!Number.isFinite(questionId) || questionId <= 0) return res.status(400).send("Invalid question id");
-  // Admin, Co-owner, Owner
-  if(!requireMinRole(req.session.user.role, "Admin")) return res.status(403).send("Forbidden");
-
-  try{
-    let ok = false;
-    if(await pgChangelogEnabled()){
-      try{ ok = await pgDeleteFaqQuestion(questionId); }catch(e){ console.warn("[faq] PG delete fallback:", e?.message || e); }
-    }
-    if(!ok){
-      ok = await sqliteDeleteFaqQuestion(questionId);
-    }
-    if(!ok) return res.status(404).send("Question not found");
-    io.emit("faq:update");
-    return res.json({ ok:true });
-  }catch(err){
-    console.error("[faq] delete failed:", err?.message || err);
-    return res.status(500).send("Failed to delete question");
-  }
-});
-
-app.post("/api/faq/:id/react", strictLimiter, requireLogin, async (req, res) => {
-  const questionId = Number(req.params?.id);
-  const reaction = normalizeFaqReactionKey(req.body?.reaction);
-  if(!Number.isFinite(questionId) || questionId <= 0) return res.status(400).send("Invalid question id");
-  if(!reaction) return res.status(400).send("Invalid reaction");
-
-  const username = req.session.user.username;
-  let usedPg = false;
-  try{
-    if(await pgChangelogEnabled()){
-      const exists = await pgFaqQuestionExists(questionId);
-      if(!exists) return res.status(404).send("Question not found");
-      await pgToggleFaqReaction(questionId, username, reaction);
-      usedPg = true;
-      const payload = await faqReactionPayload(questionId, username);
-      io.emit("faq:update");
-      return res.json(payload);
-    }
-  }catch(e){
-    console.warn("[faq] PG reaction toggle fallback:", e?.message || e);
-    if(usedPg) return res.status(500).send("Failed to update reaction");
-  }
-
-  try{
-    const exists = await sqliteFaqQuestionExists(questionId);
-    if(!exists) return res.status(404).send("Question not found");
-    await sqliteToggleFaqReaction(questionId, username, reaction);
-    const payload = await faqReactionPayload(questionId, username);
-    io.emit("faq:update");
-    return res.json(payload);
-  }catch(err){
-    console.error("[faq] reaction failed:", err?.message || err);
-    return res.status(500).send("Failed to update reaction");
-  }
-});
-// ---- Profile routes
-app.get("/api/profile", requireLogin, (req, res) => res.redirect(307, "/profile"));
-
-async function fetchProfileLikeStats(targetUserId, viewerId) {
-  if (await pgUsersEnabled()) {
-    try {
-      const result39 = await pgSafe(
-        `SELECT COUNT(*)::int AS likes,
-                EXISTS(SELECT 1 FROM profile_likes WHERE user_id = $2 AND target_user_id = $1) AS liked`,
-        [targetUserId, viewerId]
-      );
-      const rows = result39?.rows || [];
-      return { likes: Number(rows?.[0]?.likes || 0), liked: !!rows?.[0]?.liked };
-    } catch (e) {
-      console.warn("[profile likes][pg] failed, falling back to sqlite:", e?.message || e);
-    }
-  }
-
-  return await new Promise((resolve) => {
-    db.get(
-      `SELECT
-        (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
-        EXISTS(SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?) AS liked`,
-      [targetUserId, viewerId, targetUserId],
-      (_likeErr, likesRow) => {
-        resolve({
-          likes: Number(likesRow?.likes || 0),
-          liked: !!Number(likesRow?.liked || 0),
-        });
-      }
-    );
-  });
-}
-
-async function toggleProfileLike(userId, targetUserId) {
-  if (await pgUsersEnabled()) {
-    try {
-      const now = Date.now();
-      await pgSafe(
-        `WITH deleted AS (
-            DELETE FROM profile_likes
-             WHERE user_id = $1 AND target_user_id = $2
-             RETURNING 1
-         ),
-         inserted AS (
-           INSERT INTO profile_likes (user_id, target_user_id, created_at)
-           SELECT $1, $2, $3
-            WHERE NOT EXISTS (SELECT 1 FROM deleted)
-           ON CONFLICT (user_id, target_user_id) DO NOTHING
-           RETURNING 1
-         )
-         SELECT 1`,
-        [userId, targetUserId, now]
-      );
-      const stats = await fetchProfileLikeStats(targetUserId, userId);
-      // Best-effort mirror to SQLite so legacy reads stay consistent.
-      try {
-        if (stats.liked) {
-          await dbRunAsync(
-            `INSERT OR IGNORE INTO profile_likes (user_id, target_user_id, created_at) VALUES (?, ?, ?)`,
-            [userId, targetUserId, now]
-          );
-        } else {
-          await dbRunAsync(`DELETE FROM profile_likes WHERE user_id = ? AND target_user_id = ?`, [userId, targetUserId]);
-        }
-      } catch (e) {
-        console.warn("[profile likes][sqlite mirror]", e?.message || e);
-      }
-      return stats;
-    } catch (e) {
-      console.warn("[profile likes][pg toggle] failed, falling back to sqlite:", e?.message || e);
-    }
-  }
-
-  const existing = await dbGetAsync(
-    `SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?`,
-    [userId, targetUserId]
-  ).catch(() => null);
-  if (existing) {
-    await dbRunAsync(`DELETE FROM profile_likes WHERE user_id = ? AND target_user_id = ?`, [userId, targetUserId]);
-  } else {
-    await dbRunAsync(
-      `INSERT OR IGNORE INTO profile_likes (user_id, target_user_id, created_at) VALUES (?, ?, ?)`,
-      [userId, targetUserId, Date.now()]
-    );
-  }
-  return await fetchProfileLikeStats(targetUserId, userId);
-}
-
-app.get("/profile", requireLogin, async (req, res) => {
-  const userId = req.session.user.id;
-
-  try {
-    // Prefer Postgres if this user exists there (Render prod path)
-    if (await pgUserExists(userId)) {
-      const row = await pgGetUserRowById(userId, [
-        "id",
-        "username",
-        "role",
-        "avatar",
-        "avatar_updated",
-        "bio",
-        "mood",
-        "age",
-        "gender",
-        "header_grad_a",
-        "header_grad_b",
-        "created_at",
-        "last_seen",
-        "last_room",
-        "last_status",
-        "gold",
-        "xp",
-        "vibe_tags",
-      ]);
-      if (!row) return res.status(404).send("Not found");
-
-      const live = onlineState.get(row.id);
-      const lastStatus = normalizeStatus(live?.status || row.last_status, "");
-      const lastSeen = resolveLastSeen(row, live, lastStatus);
-
-      const likeStats = await fetchProfileLikeStats(row.id, userId);
-      const payload = {
-        id: row.id,
-        username: row.username,
-        role: row.role,
-        avatar: avatarUrlFromRow(row),
-        bio: row.bio,
-        mood: row.mood,
-        age: row.age,
-        gender: row.gender,
-        created_at: row.created_at,
-        last_seen: lastSeen,
-        last_room: row.last_room,
-        last_status: lastStatus || null,
-        current_room: live?.room || null,
-        header_grad_a: sanitizeHexColor(row.header_grad_a),
-        header_grad_b: sanitizeHexColor(row.header_grad_b),
-        likes: likeStats.likes,
-        likedByMe: likeStats.liked,
-        vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
-        ...progressionFromRow(row, true),
-      };
-      return res.json(payload);
-    }
-  } catch (e) {
-    console.warn("[/profile][pg] failed, falling back to sqlite:", e?.message || e);
-  }
-
-  // SQLite fallback (original behavior)
-  const row = await dbGet(
-    `SELECT id, username FROM users WHERE id = ?`,
-    [userId]
-  );
-  if (!row) return res.status(404).send("Not found");
-  const live = onlineState.get(row.id);
-  const lastStatus = normalizeStatus(live?.status || row.last_status, "");
-  const lastSeen = resolveLastSeen(row, live, lastStatus);
-  const likeStats = await fetchProfileLikeStats(row.id, userId);
-  const payload = {
-    id: row.id,
-    username: row.username,
-    role: row.role,
-    avatar: avatarUrlFromRow(row),
-    bio: row.bio,
-    mood: row.mood,
-    age: row.age,
-    gender: row.gender,
-    created_at: row.created_at,
-    last_seen: lastSeen,
-    last_room: row.last_room,
-    last_status: lastStatus || null,
-    current_room: live?.room || null,
-    header_grad_a: sanitizeHexColor(row.header_grad_a),
-    header_grad_b: sanitizeHexColor(row.header_grad_b),
-    likes: likeStats.likes,
-    likedByMe: likeStats.liked,
-    vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
-    ...progressionFromRow(row, true),
-  };
-  return res.json(payload);
-});
-
-app.get("/profile/:username", requireLogin, async (req, res) => {
-  const rawParam = String(req.params.username || "");
-  let decoded = rawParam;
-  try { decoded = decodeURIComponent(rawParam); } catch {}
-  const rawName = String(decoded || "").trim().slice(0, 64);
-  const cleaned = cleanUsernameForLookup(rawName);
-  const legacy = sanitizeUsername(rawName);
-
-  const candidates = Array.from(new Set([rawName, cleaned, legacy].filter(Boolean)));
-  if (!candidates.length) return res.status(400).send("Bad username");
-
-  try {
-    // Prefer Postgres first (Render/prod path). Some users may not exist in SQLite yet.
-    let row = null;
-    let fromPg = false;
-    try {
-      for (const cand of candidates) {
-        try {
-          const r = await pgSafe(
-            `SELECT id, username FROM users WHERE username = $1 OR lower(username) = lower($1)
-             LIMIT 1`,
-            [cand]
-          );
-          row = r.rows?.[0] || null;
-          if (row) break;
-        } catch {}
-      }
-      if (row) fromPg = true;
-    } catch {}
-
-    // Fallback to SQLite
-    if (!row) {
-      for (const cand of candidates) {
-        row = await dbGet(
-          `SELECT id, username FROM users WHERE username = ? OR lower(username) = lower(?)`,
-          [cand, cand]
-        );
-        if (row) break;
-      }
-    }
-
-    if (!row) return res.status(404).send("Not found");
-
-    // IMPORTANT: The quick lookup above only selects id/username.
-    // We must fetch the full profile row, otherwise the UI will show blanks
-    // and appear to "not pull" changes after edits.
-    const PROFILE_COLS = [
-      "id",
-      "username",
-      "role",
-      "created_at",
-      "avatar",
-      "avatar_bytes",
-      "avatar_mime",
-      "avatar_updated",
-      "bio",
-      "mood",
-      "age",
-      "gender",
-      "last_seen",
-      "last_room",
-      "last_status",
-      "gold",
-      "xp",
-      "vibe_tags",
-      "header_grad_a",
-      "header_grad_b",
-    ];
-
-    if (fromPg) {
-      try {
-        const full = await pgGetUserRowById(Number(row.id) || 0, PROFILE_COLS);
-        if (full) row = full;
-      } catch {}
-    } else {
-      // SQLite full fetch
-      try {
-        const full = await dbGet(
-          `SELECT ${PROFILE_COLS.filter((c) => c !== "avatar_bytes" && c !== "avatar_mime" && c !== "avatar_updated").join(", ")}
-           FROM users WHERE id = ? LIMIT 1`,
-          [Number(row.id) || 0]
-        );
-        if (full) row = full;
-      } catch {}
-    }
-
-    const live = onlineState.get(row.id);
-    const lastStatus = normalizeStatus(live?.status || row.last_status, "");
-    const lastSeen = resolveLastSeen(row, live, lastStatus);
-    const includePrivate = req.session.user.id === row.id;
-
-    const likeStats = await fetchProfileLikeStats(row.id, req.session.user.id);
-    const payload = {
-      id: row.id,
-      username: row.username,
-      role: row.role,
-      avatar: avatarUrlFromRow(row),
-      bio: row.bio,
-      mood: live?.mood ?? row.mood,
-      age: row.age,
-      gender: row.gender,
-      created_at: row.created_at,
-      last_seen: lastSeen,
-      last_room: row.last_room,
-      last_status: lastStatus || null,
-      current_room: live?.room || null,
-      header_grad_a: sanitizeHexColor(row.header_grad_a),
-      header_grad_b: sanitizeHexColor(row.header_grad_b),
-      likes: likeStats.likes,
-      likedByMe: likeStats.liked,
-      vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
-      ...progressionFromRow(row, includePrivate),
-    };
-
-    // Couple info (opt-in, privacy-friendly)
-    try {
-      if (PG_READY && row?.id) {
-        const targetId = Number(row.id) || 0;
-        const result22 = await pgSafe(
-          `
-          SELECT cl.*,
-                 u1.username AS user1_name,
-                 u2.username AS user2_name,
-                 u1.avatar AS user1_avatar,
-                 u2.avatar AS user2_avatar,
-                 u1.role AS user1_role,
-                 u2.role AS user2_role,
-                 p1.enabled AS p1_enabled, p1.show_profile AS p1_show_profile, p1.show_members AS p1_show_members,
-                 p1.group_members AS p1_group_members, p1.aura AS p1_aura, p1.badge AS p1_badge,
-                 p2.enabled AS p2_enabled, p2.show_profile AS p2_show_profile, p2.show_members AS p2_show_members,
-                 p2.group_members AS p2_group_members, p2.aura AS p2_aura, p2.badge AS p2_badge
-            FROM couple_links cl
-            JOIN users u1 ON u1.id = cl.user1_id
-            JOIN users u2 ON u2.id = cl.user2_id
-            LEFT JOIN couple_prefs p1 ON p1.link_id = cl.id AND p1.user_id = cl.user1_id
-            LEFT JOIN couple_prefs p2 ON p2.link_id = cl.id AND p2.user_id = cl.user2_id
-           WHERE cl.status='active'
-             AND (cl.user1_id=$1 OR cl.user2_id=$1)
-           ORDER BY cl.updated_at DESC
-           LIMIT 1
-          `,
-          [targetId]
-        );
-        const clRows = result22?.rows || [];
-
-        const cl = clRows[0];
-        if (cl) {
-          const isU1 = Number(cl.user1_id) === targetId;
-          const partnerName = isU1 ? cl.user2_name : cl.user1_name;
-          const partnerId = getCouplePartnerId(targetId, cl);
-          const viewerId = Number(req.session.user?.id) || 0;
-          const isMember = isCoupleMember(viewerId, cl);
-          const privacy = cl.privacy || "private";
-
-          const mePrefs = isU1 ? {
-            enabled: !!cl.p1_enabled,
-            showProfile: !!cl.p1_show_profile,
-            showMembers: !!cl.p1_show_members,
-            groupMembers: !!cl.p1_group_members,
-            aura: !!cl.p1_aura,
-            badge: !!cl.p1_badge
-          } : {
-            enabled: !!cl.p2_enabled,
-            showProfile: !!cl.p2_show_profile,
-            showMembers: !!cl.p2_show_members,
-            groupMembers: !!cl.p2_group_members,
-            aura: !!cl.p2_aura,
-            badge: !!cl.p2_badge
-          };
-
-          const partnerPrefs = isU1 ? {
-            enabled: !!cl.p2_enabled,
-            showProfile: !!cl.p2_show_profile,
-            showMembers: !!cl.p2_show_members,
-            groupMembers: !!cl.p2_group_members,
-            aura: !!cl.p2_aura,
-            badge: !!cl.p2_badge
-          } : {
-            enabled: !!cl.p1_enabled,
-            showProfile: !!cl.p1_show_profile,
-            showMembers: !!cl.p1_show_members,
-            groupMembers: !!cl.p1_group_members,
-            aura: !!cl.p1_aura,
-            badge: !!cl.p1_badge
-          };
-
-          let privacyAllows = privacy === "public";
-          if (privacy === "private") privacyAllows = isMember;
-          if (privacy === "friends" && !privacyAllows) {
-            if (isMember) privacyAllows = true;
-            else if (viewerId && viewerId !== targetId && partnerId) {
-              try {
-                if (PG_READY && FRIENDS_READY) {
-                  privacyAllows = (await pgAreFriends(viewerId, targetId)) || (await pgAreFriends(viewerId, partnerId));
-                } else {
-                  privacyAllows = (await dbAreFriends(viewerId, targetId)) || (await dbAreFriends(viewerId, partnerId));
-                }
-              } catch {}
-            }
-          }
-
-          if (privacyAllows && canShowCoupleFeature(mePrefs, partnerPrefs, "profile")) {
-            payload.couple = {
-              partner: partnerName,
-              since: Number(cl.activated_at || cl.created_at) || null,
-              statusEmoji: cl.status_emoji || "💜",
-              statusLabel: cl.status_label || "Linked",
-              badge: canShowCoupleBadge(mePrefs, partnerPrefs, cl),
-              aura: canShowCoupleFeature(mePrefs, partnerPrefs, "aura"),
-              showMembers: canShowCoupleFeature(mePrefs, partnerPrefs, "members"),
-              groupMembers: canShowCoupleFeature(mePrefs, partnerPrefs, "group")
-            };
-          }
-
-          if (privacyAllows && isCouplesV2EnabledFor(req.session.user)) {
-            const members = [
-              {
-                id: Number(cl.user1_id) || 0,
-                username: cl.user1_name,
-                avatar: avatarUrlFromRow({ avatar: cl.user1_avatar }),
-                role: cl.user1_role || "User"
-              },
-              {
-                id: Number(cl.user2_id) || 0,
-                username: cl.user2_name,
-                avatar: avatarUrlFromRow({ avatar: cl.user2_avatar }),
-                role: cl.user2_role || "User"
-              }
-            ];
-            payload.coupleCard = {
-              coupleName: cl.couple_name || "",
-              coupleBio: cl.couple_bio || "",
-              privacy,
-              showBadge: cl.show_badge !== false,
-              statusEmoji: cl.status_emoji || "💜",
-              statusLabel: cl.status_label || "Linked",
-              since: Number(cl.activated_at || cl.created_at) || null,
-              members
-            };
-          }
-        }
-      }
-    } catch {}
-
-    // Friend relationship info (for showing accept/decline/add friend UI)
-    try {
-      const viewerId = Number(req.session.user?.id) || 0;
-      const targetId = Number(payload.id) || 0;
-      if (viewerId && targetId && viewerId !== targetId) {
-        let status = null;
-        let requestId = null;
-        if (PG_READY && FRIENDS_READY) {
-          const friends = await pgAreFriends(viewerId, targetId);
-          if (friends) {
-            status = 'friends';
-          } else {
-            const incoming = await pgGetPendingFriendRequest(targetId, viewerId);
-            const outgoing = await pgGetPendingFriendRequest(viewerId, targetId);
-            if (incoming?.id) { status = 'incoming'; requestId = Number(incoming.id) || null; }
-            else if (outgoing?.id) { status = 'outgoing'; requestId = Number(outgoing.id) || null; }
-            else status = 'none';
-          }
-        } else {
-          const friends = await dbAreFriends(viewerId, targetId);
-          if (friends) {
-            status = 'friends';
-          } else {
-            const incoming = await dbGetPendingFriendRequest(targetId, viewerId);
-            const outgoing = await dbGetPendingFriendRequest(viewerId, targetId);
-            if (incoming?.id) { status = 'incoming'; requestId = Number(incoming.id) || null; }
-            else if (outgoing?.id) { status = 'outgoing'; requestId = Number(outgoing.id) || null; }
-            else status = 'none';
-          }
-        }
-        payload.friend = { status, requestId };
-      }
-    } catch {}
-
-
-    return res.json(payload);
-  } catch (e) {
-    return res.status(500).send("Server error");
-  }
-});
-
-app.get("/api/memory-settings", requireLogin, async (req, res) => {
-  try {
-    const settings = await getMemorySettingsForUser(req.session.user);
-    return res.json({ ok: true, ...settings });
-  } catch (e) {
-    console.warn("[memory] settings fetch failed:", e?.message || e);
-    return res.status(500).json({ ok: false, error: "failed_to_load_settings" });
-  }
-});
-
-app.post("/api/memory-settings", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
-  try {
-    const user = req.session.user;
-    const settings = await getMemorySettingsForUser(user);
-    if (!settings.available) return res.status(403).json({ ok: false, error: "feature_disabled" });
-    const enabled = !!req.body?.enabled;
-    await setMemorySettingsRow(user.id, enabled);
-    return res.json({ ok: true, available: true, enabled });
-  } catch (e) {
-    console.warn("[memory] settings update failed:", e?.message || e);
-    return res.status(500).json({ ok: false, error: "failed_to_save_settings" });
-  }
-});
-
-app.get("/api/memories", requireLogin, async (req, res) => {
-  const user = req.session.user;
-  try {
-    const settings = await getMemorySettingsForUser(user);
-    if (!settings.available || !settings.enabled) return res.status(403).json({ ok: false, error: "disabled" });
-
-    const types = resolveMemoryTypes(req.query?.filter);
-    if (await pgUserExists(user.id)) {
-      const params = [user.id];
-      let whereSql = "user_id = $1";
-      if (types?.length) {
-        params.push(types);
-        whereSql += ` AND type = ANY($${params.length}::text[])`;
-      }
-      const result40 = await pgSafe(
-        `SELECT * FROM memories WHERE ${whereSql} ORDER BY created_at DESC`,
-        params
-      );
-      const rows = result40?.rows || [];
-      const memories = rows.map(normalizeMemoryRow);
-      return res.json({ ok: true, memories });
-    }
-  } catch (e) {
-    console.warn("[memory] pg list failed, falling back to sqlite:", e?.message || e);
-  }
-
-  try {
-    const params = [user.id];
-    let whereSql = "user_id = ?";
-    if (types?.length) {
-      whereSql += ` AND type IN (${types.map(() => "?").join(", ")})`;
-      params.push(...types);
-    }
-    const rows = await dbAllAsync(
-      `SELECT * FROM memories WHERE ${whereSql} ORDER BY created_at DESC`,
-      params
-    );
-    const memories = rows.map(normalizeMemoryRow);
-    return res.json({ ok: true, memories });
-  } catch (e) {
-    console.warn("[memory] sqlite list failed:", e?.message || e);
-    return res.status(500).json({ ok: false, error: "failed_to_load_memories" });
-  }
-});
-
-app.post("/api/memories/:id/pin", strictLimiter, requireLogin, async (req, res) => {
-  const user = req.session.user;
-  const memoryId = Number(req.params.id) || 0;
-  if (!memoryId) return res.status(400).json({ ok: false, error: "bad_request" });
-
-  try {
-    const settings = await getMemorySettingsForUser(user);
-    if (!settings.available || !settings.enabled) return res.status(403).json({ ok: false, error: "disabled" });
-
-    if (await pgUserExists(user.id)) {
-      const result41 = await pgSafe(
-        `UPDATE memories SET pinned = NOT pinned WHERE id = $1 AND user_id = $2 RETURNING pinned`,
-        [memoryId, user.id]
-      );
-      const rows = result41?.rows || [];
-      const row = rows[0];
-      if (!row) return res.status(404).json({ ok: false, error: "not_found" });
-      return res.json({ ok: true, pinned: normalizeMemoryBool(row.pinned) });
-    }
-  } catch (e) {
-    console.warn("[memory] pg pin failed, falling back to sqlite:", e?.message || e);
-  }
-
-  try {
-    await dbRunAsync(
-      `UPDATE memories SET pinned = CASE WHEN pinned = 1 THEN 0 ELSE 1 END WHERE id = ? AND user_id = ?`,
-      [memoryId, user.id]
-    );
-    const row = await dbGetAsync(`SELECT pinned FROM memories WHERE id = ? AND user_id = ?`, [memoryId, user.id]);
-    if (!row) return res.status(404).json({ ok: false, error: "not_found" });
-    return res.json({ ok: true, pinned: normalizeMemoryBool(row.pinned) });
-  } catch (e) {
-    console.warn("[memory] sqlite pin failed:", e?.message || e);
-    return res.status(500).json({ ok: false, error: "failed_to_pin" });
-  }
-});
-
-
-// ---- Couples API (opt-in). Postgres only.
-app.get("/api/couples/me", requireLogin, async (req, res) => {
-  try {
-    if (!PG_READY) return res.status(503).send("DB not ready");
-    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
-    const summary = await pgGetCoupleSummaryFor(req.session.user);
-    if (summary?.v2Enabled && summary?.couple) {
-      ensureCoupleMilestoneMemories(summary.couple).catch((e) => {
-        console.warn("[couples] milestone memory failed:", e?.message || e);
-      });
-    }
-    return res.json(summary);
-  } catch (e) {
-    console.warn("[couples] /me failed:", e?.message || e);
-    return res.status(500).send("Could not load couples");
-  }
-});
-
-app.post("/api/couples/request", strictLimiter, requireLogin, async (req, res) => {
-  try {
-    if (!PG_READY) return res.status(503).send("DB not ready");
-    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
-
-    const targetRaw = String(req.body?.targetUsername || "").trim().slice(0, 64);
-    const targetName = sanitizeUsername(targetRaw);
-    if (!targetName) return res.status(400).send("Bad username");
-    if (targetName.toLowerCase() === String(req.session.user?.username || "").toLowerCase()) {
-      return res.status(400).send("You cannot link with yourself");
-    }
-
-    const result22 = await pgSafe(`SELECT id, username FROM users WHERE lower(username)=lower($1) LIMIT 1`, [targetName]);
-    const trg = result22?.rows || [];
-    const target = trg[0];
-    if (!target) return res.status(404).send("User not found");
-
-    const meId = Number(req.session.user?.id) || 0;
-    if (!meId) return res.status(401).send("Not logged in");
-    const otherId = Number(target.id) || 0;
-    const [u1, u2] = orderPair(meId, otherId);
-    const now = Date.now();
-
-    const result23 = await pgSafe(
-      `SELECT id, status FROM couple_links WHERE user1_id=$1 AND user2_id=$2 LIMIT 1`,
-      [u1, u2]
-    );
-    const existing = result23?.rows || [];
-    if (existing[0]) {
-      if (existing[0].status === "active") return res.status(409).send("Already linked");
-      return res.status(409).send("A link request already exists");
-    }
-
-    const result24 = await pgSafe(
-      `
-      INSERT INTO couple_links(user1_id, user2_id, requested_by_id, status, status_emoji, status_label, created_at, updated_at)
-      VALUES($1,$2,$3,'pending','💜','Linked',$4,$4)
-      RETURNING id
-      `,
-      [u1, u2, meId, now]
-    );
-    const created = result24?.rows || [];
-    const linkId = created?.[0]?.id;
-
-    await pgSafe(
-      `
-      INSERT INTO couple_prefs(link_id, user_id, enabled, show_profile, show_members, group_members, aura, badge, allow_ping, updated_at)
-      VALUES
-        ($1,$2,true,true,true,false,true,true,true,$4),
-        ($1,$3,true,true,true,false,true,true,true,$4)
-      ON CONFLICT (link_id, user_id) DO NOTHING
-      `,
-      [linkId, u1, u2, now]
-    );
-
-    const summary = await pgGetCoupleSummaryFor(req.session.user);
-    return res.json(summary);
-  } catch (e) {
-    console.warn("[couples] request failed:", e?.message || e);
-    return res.status(500).send("Could not create request");
-  }
-});
-
-app.post("/api/couples/respond", strictLimiter, requireLogin, async (req, res) => {
-  try {
-    if (!PG_READY) return res.status(503).send("DB not ready");
-    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
-    const linkId = Number(req.body?.linkId) || 0;
-    const accept = !!req.body?.accept;
-    if (!linkId) return res.status(400).send("Bad request");
-
-    const meId = Number(req.session.user?.id) || 0;
-    const result25 = await pgSafe(`SELECT * FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
-    const rows = result25?.rows || [];
-    const link = rows[0];
-    if (!link) return res.status(404).send("Not found");
-    if (link.status !== "pending") return res.status(409).send("Not pending");
-    if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
-
-    if (!accept) {
-      await pgSafe(`DELETE FROM couple_links WHERE id=$1`, [linkId]);
-      emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
-      const summary = await pgGetCoupleSummaryFor(req.session.user);
-      return res.json(summary);
-    }
-
-    const now = Date.now();
-    await pgSafe(
-      `UPDATE couple_links SET status='active', activated_at=$2, updated_at=$2 WHERE id=$1`,
-      [linkId, now]
-    );
-    emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
-
-    // Ensure both sides have default prefs rows (so both requestor + acceptor see options)
-    try {
-      await pgUpsertCouplePrefs(linkId, Number(link.user1_id) || 0, {});
-      await pgUpsertCouplePrefs(linkId, Number(link.user2_id) || 0, {});
-    } catch (e) {
-      console.warn("[couples] ensure prefs rows failed:", e?.message || e);
-    }
-
-    try {
-      await ensureCoupleLinkedMemories(link);
-    } catch (e) {
-      console.warn("[couples] memory create failed:", e?.message || e);
-    }
-
-    const summary = await pgGetCoupleSummaryFor(req.session.user);
-    return res.json(summary);
-  } catch (e) {
-    console.warn("[couples] respond failed:", e?.message || e);
-    return res.status(500).send("Could not respond");
-  }
-});
-
-app.post("/api/couples/unlink", strictLimiter, requireLogin, async (req, res) => {
-  try {
-    if (!PG_READY) return res.status(503).send("DB not ready");
-    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
-    const linkId = Number(req.body?.linkId) || 0;
-    if (!linkId) return res.status(400).send("Bad request");
-
-    const meId = Number(req.session.user?.id) || 0;
-    const result26 = await pgSafe(`SELECT user1_id,user2_id FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
-    const rows = result26?.rows || [];
-    const link = rows[0];
-    if (!link) return res.status(404).send("Not found");
-    if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
-
-    await pgSafe(`DELETE FROM couple_links WHERE id=$1`, [linkId]);
-    emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
-    const summary = await pgGetCoupleSummaryFor(req.session.user);
-    return res.json(summary);
-  } catch (e) {
-    console.warn("[couples] unlink failed:", e?.message || e);
-    return res.status(500).send("Could not unlink");
-  }
-});
-
-app.post("/api/couples/prefs", strictLimiter, requireLogin, async (req, res) => {
-  try {
-    if (!PG_READY) return res.status(503).send("DB not ready");
-    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
-    const linkId = Number(req.body?.linkId) || 0;
-    if (!linkId) return res.status(400).send("Bad request");
-    const meId = Number(req.session.user?.id) || 0;
-
-    const result27 = await pgSafe(`SELECT user1_id,user2_id FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
-    const rows = result27?.rows || [];
-    const link = rows[0];
-    if (!link) return res.status(404).send("Not found");
-    if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
-
-    await pgUpsertCouplePrefs(linkId, meId, req.body?.prefs || {});
-    emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
-    const summary = await pgGetCoupleSummaryFor(req.session.user);
-    return res.json(summary);
-  } catch (e) {
-    console.warn("[couples] prefs failed:", e?.message || e);
-    return res.status(500).send("Could not update prefs");
-  }
-});
-
-app.post("/api/couples/status", strictLimiter, requireLogin, async (req, res) => {
-  try {
-    if (!PG_READY) return res.status(503).send("DB not ready");
-    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
-    const linkId = Number(req.body?.linkId) || 0;
-    if (!linkId) return res.status(400).send("Bad request");
-
-    const meId = Number(req.session.user?.id) || 0;
-    const result28 = await pgSafe(`SELECT user1_id,user2_id,status FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
-    const rows = result28?.rows || [];
-    const link = rows[0];
-    if (!link) return res.status(404).send("Not found");
-    if (link.status !== "active") return res.status(409).send("Not active");
-    if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
-
-    const emoji = String(req.body?.statusEmoji || "💜").trim().slice(0, 8) || "💜";
-    const label = String(req.body?.statusLabel || "Linked").trim().slice(0, 20) || "Linked";
-    const now = Date.now();
-
-    await pgSafe(
-      `UPDATE couple_links SET status_emoji=$2, status_label=$3, updated_at=$4 WHERE id=$1`,
-      [linkId, emoji, label, now]
-    );
-    emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
-
-    const summary = await pgGetCoupleSummaryFor(req.session.user);
-    return res.json(summary);
-  } catch (e) {
-    console.warn("[couples] status failed:", e?.message || e);
-    return res.status(500).send("Could not update status");
-  }
-});
-
-app.post("/api/couples/settings", strictLimiter, requireLogin, async (req, res) => {
-  try {
-    if (!PG_READY) return res.status(503).send("DB not ready");
-    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
-    if (!isCouplesV2EnabledFor(req.session.user)) return res.status(403).send("Forbidden");
-
-    const link = await pgGetActiveCoupleLinkForUser(req.session.user.id);
-    if (!link) return res.status(404).send("Not linked");
-    if (!isCoupleMember(req.session.user.id, link)) return res.status(403).send("Forbidden");
-
-    const privacyRaw = String(req.body?.privacy || "").trim().toLowerCase();
-    const privacy = ["private", "friends", "public"].includes(privacyRaw) ? privacyRaw : undefined;
-    const coupleName = typeof req.body?.couple_name === "string" ? String(req.body.couple_name).trim().slice(0, 48) : undefined;
-    const coupleBio = typeof req.body?.couple_bio === "string" ? String(req.body.couple_bio).trim().slice(0, 220) : undefined;
-    const showBadge = typeof req.body?.show_badge === "boolean" ? req.body.show_badge : undefined;
-    const bonusesEnabled = typeof req.body?.bonuses_enabled === "boolean" ? req.body.bonuses_enabled : undefined;
-    const now = Date.now();
-
-    const sets = [];
-    const vals = [];
-    if (privacy) { sets.push(`privacy=$${vals.length + 1}`); vals.push(privacy); }
-    if (coupleName !== undefined) { sets.push(`couple_name=$${vals.length + 1}`); vals.push(coupleName || null); }
-    if (coupleBio !== undefined) { sets.push(`couple_bio=$${vals.length + 1}`); vals.push(coupleBio || null); }
-    if (showBadge !== undefined) { sets.push(`show_badge=$${vals.length + 1}`); vals.push(showBadge); }
-    if (bonusesEnabled !== undefined) { sets.push(`bonuses_enabled=$${vals.length + 1}`); vals.push(bonusesEnabled); }
-    sets.push(`updated_at=$${vals.length + 1}`); vals.push(now);
-
-    if (sets.length) {
-      vals.push(link.id);
-      await pgSafe(`UPDATE couple_links SET ${sets.join(", ")} WHERE id=$${vals.length}`, vals);
-    }
-
-    emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId: link.id });
-    const summary = await pgGetCoupleSummaryFor(req.session.user);
-    return res.json(summary);
-  } catch (e) {
-    console.warn("[couples] settings failed:", e?.message || e);
-    return res.status(500).send("Could not update settings");
-  }
-});
-
-const coupleNudgeCooldownMs = 60_000;
-const coupleNudgeLastByUser = new Map(); // key: `${linkId}:${userId}` -> ts
-
-app.post("/api/couples/nudge", strictLimiter, requireLogin, async (req, res) => {
-  try {
-    if (!PG_READY) return res.status(503).send("DB not ready");
-    if (!COUPLES_READY) return res.status(503).send("Couples not ready");
-    if (!isCouplesV2EnabledFor(req.session.user)) return res.status(403).send("Forbidden");
-
-    const link = await pgGetActiveCoupleLinkForUser(req.session.user.id);
-    if (!link) return res.status(404).send("Not linked");
-    if (!isCoupleMember(req.session.user.id, link)) return res.status(403).send("Forbidden");
-
-    const partnerId = getCouplePartnerId(req.session.user.id, link);
-    if (!partnerId) return res.status(404).send("Partner not found");
-    const prefsPartner = await pgGetCouplePrefs(link.id, partnerId);
-    if (prefsPartner && prefsPartner.allow_ping === false) return res.status(403).send("Partner muted nudges");
-
-    const key = `${link.id}:${req.session.user.id}`;
-    const last = coupleNudgeLastByUser.get(key) || 0;
-    if (Date.now() - last < coupleNudgeCooldownMs) return res.status(429).send("Slow down");
-    coupleNudgeLastByUser.set(key, Date.now());
-
-    emitToUserIds([partnerId], "couples:nudge", {
-      fromId: req.session.user.id,
-      fromName: req.session.user.username,
-      linkId: link.id
-    });
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn("[couples] nudge failed:", e?.message || e);
-    return res.status(500).send("Could not send nudge");
-  }
-});
-
-
-// --- Friends API
-app.get("/api/friends/requests", requireLogin, async (req, res) => {
-  try {
-    const meId = Number(req.session.user?.id) || 0;
-    if (!meId) return res.status(401).send("Not logged in");
-    const rows = (PG_READY && FRIENDS_READY)
-      ? await pgListIncomingFriendRequests(meId)
-      : await dbListIncomingFriendRequests(meId);
-
-    const payload = rows.map((r) => ({
-      id: Number(r.id) || 0,
-      createdAt: Number(r.created_at) || Date.now(),
-      from: {
-        id: Number(r.from_id) || null,
-        username: r.from_username || r.username || null,
-        avatar: (PG_READY && FRIENDS_READY) ? avatarUrlFromRow(r) : (r.avatar || null)
-      }
-    })).filter((x) => x.id && x.from?.username);
-
-    return res.json({ incoming: payload });
-  } catch (e) {
-    console.warn('[friends] requests list failed:', e?.message || e);
-    return res.status(500).send('Could not load requests');
-  }
-});
-
-app.get("/api/friends/list", requireLogin, async (req, res) => {
-  try {
-    const meId = Number(req.session.user?.id) || 0;
-    if (!meId) return res.status(401).send("Not logged in");
-    const rows = (PG_READY && FRIENDS_READY)
-      ? await pgListFriendsForUser(meId)
-      : await dbListFriendsForUser(meId);
-
-    const friends = rows.map((r) => {
-      const uid = Number(r.id) || Number(r.friend_user_id) || 0;
-      const live = onlineState.get(uid);
-      const online = !!socketIdByUserId.get(uid);
-      return {
-        id: uid,
-        username: r.username,
-        role: r.role,
-        avatar: (PG_READY && FRIENDS_READY) ? avatarUrlFromRow(r) : (r.avatar || null),
-        isFavorite: !!r.is_favorite,
-        online,
-        currentRoom: live?.room || null,
-        lastSeen: r.last_seen || null,
-        lastRoom: r.last_room || null,
-        lastStatus: live?.status || r.last_status || null,
-      };
-    }).filter((f) => f.id && f.username);
-
-    return res.json({ friends });
-  } catch (e) {
-    console.warn('[friends] list failed:', e?.message || e);
-    return res.status(500).send('Could not load friends');
-  }
-});
-
-app.post("/api/friends/request", strictLimiter, requireLogin, async (req, res) => {
-  try {
-    const meId = Number(req.session.user?.id) || 0;
-    const toName = String(req.body?.to || '').trim().slice(0, 64);
-    const toUser = await findUserByUsername(toName);
-    if (!toUser) return res.status(404).send('User not found');
-    if (Number(toUser.id) === meId) return res.status(400).send('You cannot friend yourself');
-
-    // Already friends?
-    const already = (PG_READY && FRIENDS_READY)
-      ? await pgAreFriends(meId, toUser.id)
-      : await dbAreFriends(meId, toUser.id);
-    if (already) return res.json({ ok: true, status: 'friends', autoAccepted: true });
-
-    // If they already requested you, auto-accept
-    const incoming = (PG_READY && FRIENDS_READY)
-      ? await pgGetPendingFriendRequest(toUser.id, meId)
-      : await dbGetPendingFriendRequest(toUser.id, meId);
-
-    const now = Date.now();
-
-    if (incoming?.id) {
-      if (PG_READY && FRIENDS_READY) {
-        await pgSafe(`UPDATE friend_requests SET status='accepted', updated_at=$2 WHERE id=$1`, [incoming.id, now]);
-        await pgCreateFriendsPair(meId, toUser.id);
-      } else {
-        await dbRunAsync(`UPDATE friend_requests SET status='accepted', updated_at=? WHERE id=?`, [now, incoming.id]);
-        await dbCreateFriendsPair(meId, toUser.id);
-      }
-
-      // notify both
-      const sOther = socketIdByUserId.get(Number(toUser.id));
-      if (sOther) io.to(sOther).emit('friend:accepted', { username: req.session.user.username, by: req.session.user.username });
-      const sMe = socketIdByUserId.get(meId);
-      if (sMe) io.to(sMe).emit('friend:accepted', { username: toUser.username, by: req.session.user.username });
-
-      return res.json({ ok: true, status: 'friends', autoAccepted: true });
-    }
-
-    // Existing outgoing pending?
-    const outgoing = (PG_READY && FRIENDS_READY)
-      ? await pgGetPendingFriendRequest(meId, toUser.id)
-      : await dbGetPendingFriendRequest(meId, toUser.id);
-    if (outgoing?.id) return res.json({ ok: true, status: 'pending', requestId: Number(outgoing.id) });
-
-    let requestId = 0;
-    if (PG_READY && FRIENDS_READY) {
-      const result42 = await pgSafe(
-        `INSERT INTO friend_requests(from_user_id, to_user_id, status, created_at, updated_at)
-         VALUES ($1,$2,'pending',$3,$3)
-         RETURNING id`,
-        [meId, toUser.id, now]
-      );
-      const rows = result42?.rows || [];
-      requestId = Number(rows?.[0]?.id) || 0;
-    } else {
-      const r = await dbRunAsync(
-        `INSERT INTO friend_requests(from_user_id, to_user_id, status, created_at, updated_at)
-         VALUES (?,?, 'pending', ?, ?)`,
-        [meId, toUser.id, now, now]
-      );
-      requestId = Number(r?.lastID) || 0;
-    }
-
-    // notify receiver (personalized flair via client notification)
-    const sOther = socketIdByUserId.get(Number(toUser.id));
-    if (sOther) {
-      io.to(sOther).emit('friend:request', {
-        requestId,
-        from: {
-          id: meId,
-          username: req.session.user.username,
-          avatar: await getAvatarUrlForUserId(meId),
-        },
-        createdAt: now,
-      });
-    }
-
-    return res.json({ ok: true, status: 'pending', requestId });
-  } catch (e) {
-    console.warn('[friends] request failed:', e?.message || e);
-    return res.status(500).send('Could not send request');
-  }
-});
-
-app.post("/api/friends/respond", strictLimiter, requireLogin, async (req, res) => {
-  try {
-    const meId = Number(req.session.user?.id) || 0;
-    const requestId = Number(req.body?.requestId) || 0;
-    const action = String(req.body?.action || '').toLowerCase();
-    if (!requestId || !['accept','decline'].includes(action)) return res.status(400).send('Bad request');
-
-    const now = Date.now();
-
-    if (PG_READY && FRIENDS_READY) {
-      const result43 = await pgSafe(`SELECT * FROM friend_requests WHERE id=$1 LIMIT 1`, [requestId]);
-      const rows = result43?.rows || [];
-      const fr = rows[0];
-      if (!fr) return res.status(404).send('Not found');
-      if (String(fr.status) !== 'pending') return res.json({ ok: true, status: fr.status });
-      if (Number(fr.to_user_id) !== meId) return res.status(403).send('Forbidden');
-
-      if (action === 'accept') {
-        await pgSafe(`UPDATE friend_requests SET status='accepted', updated_at=$2 WHERE id=$1`, [requestId, now]);
-        await pgCreateFriendsPair(fr.from_user_id, fr.to_user_id);
-      } else {
-        await pgSafe(`UPDATE friend_requests SET status='declined', updated_at=$2 WHERE id=$1`, [requestId, now]);
-      }
-
-      const fromId = Number(fr.from_user_id) || 0;
-      const fromUser = await pgGetUserById(fromId).catch(()=>null);
-      const sFrom = socketIdByUserId.get(fromId);
-      const sMe = socketIdByUserId.get(meId);
-      if (action === 'accept') {
-        if (sFrom) io.to(sFrom).emit('friend:accepted', { username: req.session.user.username, by: req.session.user.username });
-        if (sMe && fromUser?.username) io.to(sMe).emit('friend:accepted', { username: fromUser.username, by: req.session.user.username });
-      } else {
-        if (sFrom) io.to(sFrom).emit('friend:declined', { username: req.session.user.username });
-      }
-
-      return res.json({ ok: true, status: action === 'accept' ? 'accepted' : 'declined' });
-    }
-
-    // SQLite fallback
-    const fr = await dbGetAsync(`SELECT * FROM friend_requests WHERE id=? LIMIT 1`, [requestId]).catch(()=>null);
-    if (!fr) return res.status(404).send('Not found');
-    if (String(fr.status) !== 'pending') return res.json({ ok: true, status: fr.status });
-    if (Number(fr.to_user_id) !== meId) return res.status(403).send('Forbidden');
-
-    if (action === 'accept') {
-      await dbRunAsync(`UPDATE friend_requests SET status='accepted', updated_at=? WHERE id=?`, [now, requestId]);
-      await dbCreateFriendsPair(fr.from_user_id, fr.to_user_id);
-    } else {
-      await dbRunAsync(`UPDATE friend_requests SET status='declined', updated_at=? WHERE id=?`, [now, requestId]);
-    }
-
-    const sFrom = socketIdByUserId.get(Number(fr.from_user_id));
-    if (action === 'accept') {
-      if (sFrom) io.to(sFrom).emit('friend:accepted', { username: req.session.user.username, by: req.session.user.username });
-    } else {
-      if (sFrom) io.to(sFrom).emit('friend:declined', { username: req.session.user.username });
-    }
-
-    return res.json({ ok: true, status: action === 'accept' ? 'accepted' : 'declined' });
-  } catch (e) {
-    console.warn('[friends] respond failed:', e?.message || e);
-    return res.status(500).send('Could not respond');
-  }
-});
-
-app.post("/api/friends/favorite", strictLimiter, requireLogin, async (req, res) => {
-  try {
-    const meId = Number(req.session.user?.id) || 0;
-    const uname = String(req.body?.username || '').trim().slice(0,64);
-    const other = await findUserByUsername(uname);
-    if (!other) return res.status(404).send('User not found');
-    const isFavorite = !!req.body?.isFavorite;
-
-    if (PG_READY && FRIENDS_READY) {
-      await pgSafe(
-        `UPDATE friends SET is_favorite=$3 WHERE user_id=$1 AND friend_user_id=$2`,
-        [meId, other.id, isFavorite]
-      );
-    } else {
-      await dbRunAsync(`UPDATE friends SET is_favorite=? WHERE user_id=? AND friend_user_id=?`, [isFavorite ? 1 : 0, meId, other.id]);
-    }
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn('[friends] favorite failed:', e?.message || e);
-    return res.status(500).send('Could not update favorite');
-  }
-});
-
-app.post("/api/friends/remove", strictLimiter, requireLogin, async (req, res) => {
-  try {
-    const meId = Number(req.session.user?.id) || 0;
-    const uname = String(req.body?.username || '').trim().slice(0,64);
-    const other = await findUserByUsername(uname);
-    if (!other) return res.status(404).send('User not found');
-
-    if (PG_READY && FRIENDS_READY) {
-      await pgSafe(`DELETE FROM friends WHERE (user_id=$1 AND friend_user_id=$2) OR (user_id=$2 AND friend_user_id=$1)`, [meId, other.id]);
-    } else {
-      await dbRunAsync(`DELETE FROM friends WHERE (user_id=? AND friend_user_id=?) OR (user_id=? AND friend_user_id=?)`, [meId, other.id, other.id, meId]);
-    }
-    // notify other (optional)
-    const sOther = socketIdByUserId.get(Number(other.id));
-    if (sOther) io.to(sOther).emit('friend:removed', { username: req.session.user.username });
-    return res.json({ ok: true });
-  } catch (e) {
-    console.warn('[friends] remove failed:', e?.message || e);
-    return res.status(500).send('Could not remove friend');
-  }
-});
-
-
-
-app.post("/profile/:username/like", strictLimiter, requireLogin, async (req, res) => {
-  const u = sanitizeUsername(req.params.username);
-  if (!u) return res.status(400).send("Bad username");
-
-  const target = await findUserByUsername(u);
-  if (!target) return res.status(404).send("Not found");
-  if (target.id === req.session.user.id) {
-    return res.status(400).json({ ok: false, message: "You cannot like yourself." });
-  }
-
-  try {
-    const stats = await toggleProfileLike(req.session.user.id, target.id);
-    return res.json({
-      ok: true,
-      likes: stats.likes,
-      liked: stats.liked,
-    });
-  } catch (e) {
-    return res.status(500).json({ ok: false, message: "Could not update like" });
-  }
-});
-
-// Avatar upload for profile edits (2MB max, in-memory only)
-const AVATAR_ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-const avatarUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 2 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const ok = AVATAR_ALLOWED_MIME.has(String(file.mimetype || "").toLowerCase());
-    cb(ok ? null : new Error("Invalid avatar type"), ok);
-  },
-});
-
-// IMPORTANT: Most of your app now reads profiles from Postgres (when the user exists there).
-// The old version of this route only updated SQLite, so uploads "worked" but never showed up.
-app.post("/profile", strictLimiter, requireLogin, (req, res) => {
-  avatarUpload.single("avatar")(req, res, async (err) => {
-    if (err) {
-      const msg =
-        err.code === "LIMIT_FILE_SIZE"
-          ? "Avatar too large (max 2MB)."
-          : (err.message || "Avatar upload failed.");
-      return res.status(400).json({ ok: false, message: msg });
-    }
-
-    const userId = req.session.user.id;
-    const mood = String(req.body?.mood || "").slice(0, 40);
-    const bio = String(req.body?.bio || "").slice(0, 2000);
-    const age = req.body?.age === "" || req.body?.age == null ? null : clamp(req.body.age, 18, 120);
-    const gender = String(req.body?.gender || "").slice(0, 40);
-    const vibeTags = sanitizeVibeTags(req.body?.vibeTags);
-    const headerGradA = sanitizeHexColor(req.body?.headerColorA);
-    const headerGradB = sanitizeHexColor(req.body?.headerColorB);
-    // Postgres stores vibe_tags as JSONB. node-postgres will otherwise serialize arrays
-    // as Postgres array literals, which causes the UPDATE to fail and makes changes
-    // appear to "revert" on refresh (because /profile reads from Postgres first).
-    const vibeTagsJson = JSON.stringify(vibeTags);
-    const file = req.file || null;
-    if (file) {
-      const sniffed = sniffImageMime(file.buffer);
-      if (!sniffed || !AVATAR_ALLOWED_MIME.has(sniffed)) {
-        return res.status(400).json({ ok: false, message: "Invalid avatar content." });
-      }
-    }
-    const avatarUpdated = file ? Date.now() : null;
-    const avatarUrl = file ? `/avatar/${userId}?v=${avatarUpdated}` : null;
-
-    // Best-effort: push updated profile bits into the currently-connected socket (so members list/chat updates immediately)
-    const refreshLivePresence = () => {
-      const sid = socketIdByUserId.get(userId);
-      const s = sid ? io.sockets.sockets.get(sid) : null;
-      if (!s?.user) return;
-      if (avatarUrl) s.user.avatar = avatarUrl;
-      s.user.mood = mood;
-      s.user.vibe_tags = vibeTags;
-      if (s.currentRoom) emitUserList(s.currentRoom);
-    };
-
-    try {
-      // Prefer Postgres if this user exists there (Render prod path)
-      if (await pgUserExists(userId)) {
-        if (file) {
-          await pgSafe(
-            `UPDATE users
-               SET mood = $1,
-                   bio = $2,
-                   age = $3,
-                   gender = $4,
-                   avatar_bytes = $5,
-                   avatar_mime = $6,
-                   avatar_updated = $7,
-                   avatar = NULL,
-                   vibe_tags = $8::jsonb,
-                   header_grad_a = COALESCE($9, header_grad_a),
-                   header_grad_b = COALESCE($10, header_grad_b)
-             WHERE id = $11`,
-            [mood, bio, age, gender, file.buffer, file.mimetype, avatarUpdated, vibeTagsJson, headerGradA, headerGradB, userId]
-          );
-        } else {
-          await pgSafe(
-            `UPDATE users
-               SET mood = $1,
-                   bio = $2,
-                   age = $3,
-                   gender = $4,
-                   vibe_tags = $5::jsonb,
-                   header_grad_a = COALESCE($6, header_grad_a),
-                   header_grad_b = COALESCE($7, header_grad_b)
-             WHERE id = $8`,
-            [mood, bio, age, gender, vibeTagsJson, headerGradA, headerGradB, userId]
-          );
-        }
-        if (avatarUrl) req.session.user.avatar = avatarUrl;
-        // Reinforcement: persist the updated session before responding so refresh
-        // cannot revert to a stale/empty avatar due to an unsaved session write.
-        return req.session.save((saveErr) => {
-          if (saveErr) return res.status(500).json({ ok: false, message: "Session save failed" });
-          refreshLivePresence();
-          return res.json({ ok: true, avatar: avatarUrl });
-        });
-      }
-    } catch (e) {
-      console.warn("[/profile][pg] update failed, falling back to sqlite:", e?.message || e);
-    }
-
-    if (file) {
-      return res.status(500).json({ ok: false, message: "Avatar storage unavailable right now." });
-    }
-
-    // SQLite fallback (original behavior)
-    db.get("SELECT avatar, vibe_tags, header_grad_a, header_grad_b FROM users WHERE id = ?", [userId], (_e, old) => {
-      const newAvatar = old?.avatar || null;
-      const oldVibes = sanitizeVibeTags(old?.vibe_tags || []);
-      const vibeJson = JSON.stringify(vibeTags.length ? vibeTags : oldVibes);
-      const newHeaderGradA = headerGradA ?? sanitizeHexColor(old?.header_grad_a);
-      const newHeaderGradB = headerGradB ?? sanitizeHexColor(old?.header_grad_b);
-
-      db.run(
-        `UPDATE users SET mood=?, bio=?, age=?, gender=?, avatar=?, vibe_tags=?, header_grad_a=?, header_grad_b=? WHERE id=?`,
-        [mood, bio, age, gender, newAvatar, vibeJson, newHeaderGradA, newHeaderGradB, userId],
-        (err2) => {
-          if (err2) return res.status(500).send("Save failed");
-          if (avatarUrl) req.session.user.avatar = avatarUrl;
-          refreshLivePresence();
-          return res.json({ ok: true, avatar: avatarUrl });
-        }
-      );
-    });
-  });
-});
-
-
-
-// Remove avatar (clears avatar field; best-effort deletes local file if present)
-app.delete("/profile/avatar", strictLimiter, requireLogin, async (req, res) => {
-  const userId = req.session.user.id;
-
-  const clearAvatarInLivePresence = () => {
-    const sid = socketIdByUserId.get(userId);
-    const s = sid ? io.sockets.sockets.get(sid) : null;
-    if (!s?.user) return;
-    s.user.avatar = null;
-    if (s.currentRoom) emitUserList(s.currentRoom);
-  };
-
-  const tryDeleteLocalAvatarFile = (avatarUrl) => {
-    try {
-      const rel = String(avatarUrl || "");
-      if (!rel.startsWith("/avatars/")) return;
-      const fp = path.join(AVATARS_DIR, path.basename(rel));
-      fs.unlink(fp, () => {});
-    } catch {}
-  };
-
-  try {
-    // Prefer Postgres if present
-    if (await pgUserExists(userId)) {
-      const result44 = await pgSafe(`SELECT avatar FROM users WHERE id = $1`, [userId]);
-      const rows = result44?.rows || [];
-      const oldAvatar = rows?.[0]?.avatar || null;
-
-      await pgSafe(
-        `UPDATE users
-            SET avatar = NULL,
-                avatar_bytes = NULL,
-                avatar_mime = NULL,
-                avatar_updated = NULL
-          WHERE id = $1`,
-        [userId]
-      );
-      req.session.user.avatar = null;
-      clearAvatarInLivePresence();
-      tryDeleteLocalAvatarFile(oldAvatar);
-      return res.json({ ok: true });
-    }
-  } catch (e) {
-    console.warn("[/profile/avatar][pg] delete failed, falling back to sqlite:", e?.message || e);
-  }
-
-  // SQLite fallback
-  db.get("SELECT avatar FROM users WHERE id = ?", [userId], (_e, row) => {
-    const oldAvatar = row?.avatar || null;
-    db.run(`UPDATE users SET avatar = NULL WHERE id = ?`, [userId], (err2) => {
-      if (err2) return res.status(500).send("Could not remove avatar");
-      req.session.user.avatar = null;
-      clearAvatarInLivePresence();
-      tryDeleteLocalAvatarFile(oldAvatar);
-      return res.json({ ok: true });
-    });
-  });
-});
-
-// ---- Uploads (25MB images/gifs, 100MB videos). VIP can upload videos, everyone can upload images.
-const MAX_IMAGE_GIF_BYTES = 25 * 1024 * 1024;
-const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
-const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
-const IMAGE_UPLOAD_ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-const AUDIO_UPLOAD_ALLOWED_MIME = new Set(["audio/mpeg", "audio/mp4", "audio/aac"]);
-const VIDEO_UPLOAD_ALLOWED_MIME = new Set(["video/mp4", "video/webm"]);
-const AUDIO_UPLOAD_ALLOWED_EXT = new Set([".mp3", ".m4a", ".aac"]);
-const IMAGE_UPLOAD_ALLOWED_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
-const VIDEO_UPLOAD_ALLOWED_EXT = new Set([".mp4", ".webm"]);
-const SAFE_UPLOAD_EXT_BY_MIME = {
-  "image/png": ".png",
-  "image/jpeg": ".jpg",
-  "image/webp": ".webp",
-  "image/gif": ".gif",
-  "audio/mpeg": ".mp3",
-  "audio/mp4": ".m4a",
-  "audio/aac": ".aac",
-  "video/mp4": ".mp4",
-  "video/webm": ".webm",
-};
-
-function inferUploadMimeFromName(originalname){
-  const name = String(originalname || "").toLowerCase();
-  const ext = (name.includes(".") ? name.split(".").pop() : "").slice(0, 10);
-  switch(ext){
-    case "mp3": return "audio/mpeg";
-    case "m4a": return "audio/mp4";
-    case "aac": return "audio/aac";
-    case "wav": return "audio/wav";
-    case "ogg":
-    case "oga": return "audio/ogg";
-    case "opus": return "audio/opus";
-    case "webm": return "audio/webm";
-    default: return "";
-  }
-}
-
-function safeUploadExt(mime, originalname) {
-  const ext = path.extname(originalname || "").toLowerCase();
-  if (IMAGE_UPLOAD_ALLOWED_EXT.has(ext) || AUDIO_UPLOAD_ALLOWED_EXT.has(ext) || VIDEO_UPLOAD_ALLOWED_EXT.has(ext)) {
-    return ext;
-  }
-  return SAFE_UPLOAD_EXT_BY_MIME[mime] || "";
-}
-
-function readFileHeader(filePath, length = 32) {
-  try {
-    const fd = fs.openSync(filePath, "r");
-    const buffer = Buffer.alloc(length);
-    fs.readSync(fd, buffer, 0, length, 0);
-    fs.closeSync(fd);
-    return buffer;
-  } catch {
-    return null;
-  }
-}
-
-function sniffImageMime(buffer) {
-  if (!buffer) return "";
-  if (buffer.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))) {
-    return "image/png";
-  }
-  if (buffer.slice(0, 3).equals(Buffer.from([0xFF, 0xD8, 0xFF]))) return "image/jpeg";
-  if (buffer.slice(0, 6).toString("ascii") === "GIF87a" || buffer.slice(0, 6).toString("ascii") === "GIF89a") {
-    return "image/gif";
-  }
-  if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WEBP") {
-    return "image/webp";
-  }
-  return "";
-}
-
-function sniffMp3(buffer) {
-  if (!buffer) return false;
-  if (buffer.slice(0, 3).toString("ascii") === "ID3") return true;
-  return buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0;
-}
-
-function sniffAac(buffer) {
-  if (!buffer) return false;
-  return buffer[0] === 0xff && (buffer[1] & 0xf6) === 0xf0;
-}
-
-function sniffMp4Container(buffer) {
-  if (!buffer) return false;
-  return buffer.slice(4, 8).toString("ascii") === "ftyp";
-}
-
-function sniffWebm(buffer) {
-  if (!buffer) return false;
-  return buffer.slice(0, 4).equals(Buffer.from([0x1A, 0x45, 0xDF, 0xA3]));
-}
-const chatUpload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
-    filename: (_req, file, cb) => {
-      const ext = safeUploadExt(file.mimetype, file.originalname) || "";
-      cb(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`);
-    },
-  }),
-  limits: { fileSize: MAX_VIDEO_BYTES },
-});
-
-app.post("/upload", uploadLimiter, uploadUserLimiter, requireLogin, (req, res) => {
-  chatUpload.single("file")(req, res, (err) => {
-    if (err) {
-      if (err.code === "LIMIT_FILE_SIZE") {
-        return res.status(413).json({ message: "File too large (max 100MB)." });
-      }
-      return res.status(400).json({ message: err.message || "Upload failed." });
-    }
-    if (!req.file) return res.status(400).send("No file");
-
-    const uploadKind = String(req.body?.uploadKind || "").trim();
-    let mime = String(req.file.mimetype || "");
-    if(!mime || mime === "application/octet-stream"){
-      const inferred = inferUploadMimeFromName(req.file.originalname);
-      if(inferred) mime = inferred;
-    }
-    const role = req.session.user.role;
-
-    const isSvg = mime === "image/svg+xml";
-    const isImage = IMAGE_UPLOAD_ALLOWED_MIME.has(mime);
-    const isAudio = AUDIO_UPLOAD_ALLOWED_MIME.has(mime);
-    const isVideo = VIDEO_UPLOAD_ALLOWED_MIME.has(mime);
-
-    const cleanupUpload = () => {
-      try { fs.unlinkSync(path.join(UPLOADS_DIR, req.file.filename)); } catch {}
-    };
-
-    if (isSvg || (!isImage && !isAudio && !isVideo)) {
-      cleanupUpload();
-      return res.status(400).json({ message: "File type not allowed" });
-    }
-
-    if (isAudio && uploadKind === "audio-upload") {
-      const ext = path.extname(req.file.originalname || "").toLowerCase();
-      const mimeAllowed = AUDIO_UPLOAD_ALLOWED_MIME.has(mime);
-      const extAllowed = AUDIO_UPLOAD_ALLOWED_EXT.has(ext);
-      if (!mimeAllowed || !extAllowed) {
-        cleanupUpload();
-        return res.status(400).json({ message: "Audio upload supports MP3, M4A, or AAC only." });
-      }
-    }
-
-    if (isImage && !IMAGE_UPLOAD_ALLOWED_EXT.has(path.extname(req.file.originalname || "").toLowerCase())) {
-      cleanupUpload();
-      return res.status(400).json({ message: "Image type not allowed." });
-    }
-
-    const header = readFileHeader(path.join(UPLOADS_DIR, req.file.filename), 32);
-    if (isImage) {
-      const sniffed = sniffImageMime(header);
-      if (!sniffed || !IMAGE_UPLOAD_ALLOWED_MIME.has(sniffed)) {
-        cleanupUpload();
-        return res.status(400).json({ message: "Image content invalid." });
-      }
-      mime = sniffed;
-    }
-
-    if (isAudio) {
-      const isMp3 = sniffMp3(header);
-      const isAac = sniffAac(header);
-      const isMp4 = sniffMp4Container(header);
-      if (!(isMp3 || isAac || isMp4)) {
-        cleanupUpload();
-        return res.status(400).json({ message: "Audio content invalid." });
-      }
-    }
-
-    if (isVideo) {
-      const isMp4 = sniffMp4Container(header);
-      const isW = sniffWebm(header);
-      if (!(isMp4 || isW)) {
-        cleanupUpload();
-        return res.status(400).json({ message: "Video content invalid." });
-      }
-    }
-
-    if (isImage && req.file.size > MAX_IMAGE_GIF_BYTES) {
-      cleanupUpload();
-      return res.status(413).json({ message: "Image/GIF too large (max 25MB)." });
-    }
-
-    if (isAudio && req.file.size > MAX_AUDIO_BYTES) {
-      cleanupUpload();
-      return res.status(413).json({ message: "Audio too large (max 15MB)." });
-    }
-
-    if (isVideo && req.file.size > MAX_VIDEO_BYTES) {
-      cleanupUpload();
-      return res.status(413).json({ message: "Video too large (max 100MB)." });
-    }
-
-    if (isVideo && !requireMinRole(role, "VIP")) {
-      cleanupUpload();
-      return res.status(403).json({ message: "VIP required for video uploads" });
-    }
-
-    const url = `/uploads/${req.file.filename}`;
-    const type = isImage ? "image" : (isAudio ? "audio" : "video");
-
-    if (req.session?.user?.id) {
-      const userHint = req.session.user;
-      if (isAudio && uploadKind === "audio-upload") {
-        void ensureMemory(req.session.user.id, "first_voice_note", {
-          type: "media",
-          title: "First voice note",
-          description: "Sent your first voice note.",
-          icon: "🎙️",
-          metadata: { kind: "voice_note" },
-        }, userHint);
-      }
-      if (isImage) {
-        void ensureMemory(req.session.user.id, "first_image_upload", {
-          type: "media",
-          title: "First image upload",
-          description: "Shared your first image.",
-          icon: "🖼️",
-          metadata: { kind: "image" },
-        }, userHint);
-      }
-    }
-
-    logSecurityEvent("upload", {
-      ip: getClientIp(req),
-      userId: req.session?.user?.id || null,
-      username: req.session?.user?.username || null,
-      type,
-      mime,
-      size: req.file.size,
-    });
-
-    return res.json({
-      url,
-      mime,
-      size: req.file.size,
-      type,
-    });
-  });
-});
-
-
-// ---- Mod logs API (Moderator+)
-app.get("/mod/logs", requireLogin, (req, res) => {
-  const role = req.session.user.role;
-  if (!requireMinRole(role, "Moderator")) return res.status(403).send("Forbidden");
-
-  const limit = clamp(req.query.limit || 50, 1, 200);
-  const user = String(req.query.user || "").trim().slice(0, 40);
-  const action = String(req.query.action || "").trim().slice(0, 40);
-
-  const wh = [];
-  const args = [];
-
-  if (user) {
-    wh.push("(lower(actor_username) = lower(?) OR lower(target_username) = lower(?))");
-    args.push(user, user);
-  }
-  if (action) {
-    wh.push("action = ?");
-    args.push(action);
-  }
-
-  const whereSql = wh.length ? `WHERE ${wh.join(" AND ")}` : "";
-  db.all(
-    `SELECT ts, actor_username, actor_role, action, target_username, room, details
-     FROM mod_logs ${whereSql}
-     ORDER BY ts DESC LIMIT ?`,
-    [...args, limit],
-    (err, rows) => {
-      if (err) return res.status(500).send("Failed");
-      return res.json(rows || []);
-    }
-  );
-});
-
-// ---- Direct messages API
-// NOTE: This handler is used for BOTH /dm/threads and /api/dm/threads.
-// Older builds mounted everything under /api; newer builds use /dm.
-// Keeping both paths avoids breaking clients and prevents 404s.
-function handleListDmThreads(req, res) {
-  const userId = req.session.user.id;
-
-  db.all(
-    `SELECT t.id, t.title, t.is_group, t.created_at,
-            COALESCE(
-              (SELECT id FROM dm_messages WHERE id=t.last_message_id AND deleted=0),
-              (SELECT id FROM dm_messages WHERE thread_id=t.id AND deleted=0 ORDER BY ts DESC LIMIT 1)
-            ) AS last_message_id,
-            (SELECT text FROM dm_messages WHERE thread_id=t.id AND deleted=0 ORDER BY ts DESC LIMIT 1) AS last_text,
-            COALESCE(
-              (SELECT ts FROM dm_messages WHERE id=t.last_message_id AND deleted=0),
-              t.last_message_at,
-              (SELECT ts FROM dm_messages WHERE thread_id=t.id AND deleted=0 ORDER BY ts DESC LIMIT 1)
-            ) AS last_ts,
-            (SELECT COUNT(*) FROM dm_messages m
-              WHERE m.thread_id = t.id
-                AND m.deleted = 0
-                AND m.user_id != ?
-                AND m.ts > COALESCE(pself.last_read_at, 0)
-            ) AS unreadCount
-     FROM dm_threads t
-     INNER JOIN dm_participants pself ON pself.thread_id = t.id AND pself.user_id = ?
-     ORDER BY COALESCE(t.last_message_at, last_ts, t.created_at) DESC`,
-    [userId, userId],
-    (err, threads) => {
-      if (err) {
-        console.error("[dm/threads]", err);
-        return res.status(500).send("Failed to load threads");
-      }
-      if (!threads?.length) return res.json([]);
-
-      const ids = threads.map((t) => t.id);
-      const placeholders = ids.map(() => "?").join(",");
-
-      db.all(
-        `SELECT dp.thread_id, u.id as user_id, u.username, u.avatar
-         FROM dm_participants dp
-         JOIN users u ON u.id = dp.user_id
-         WHERE dp.thread_id IN (${placeholders})`,
-        ids,
-        (_e, parts) => {
-          const grouped = new Map();
-          for (const p of parts || []) {
-            if (!grouped.has(p.thread_id)) grouped.set(p.thread_id, []);
-            grouped.get(p.thread_id).push(p);
-          }
-
-          const result = threads.map((t) => {
-            const members = grouped.get(t.id) || [];
-            const other = members.find((m) => Number(m.user_id) !== Number(userId)) || members[0] || null;
-            return {
-              ...t,
-              participants: members.map((p) => p.username),
-              participantIds: members.map((p) => p.user_id),
-              participantsDetail: members.map((p) => ({ id: p.user_id, username: p.username, avatar: avatarUrlFromRow(p) })),
-              otherUser: other
-                ? { id: other.user_id, username: other.username, avatar: avatarUrlFromRow(other) }
-                : null,
-              unreadCount: Number(t.unreadCount || 0),
-            };
-          });
-          res.json(result);
-        }
-      );
-    }
-  );
-}
-
-app.get("/dm/threads", requireLogin, handleListDmThreads);
-app.get("/api/dm/threads", requireLogin, handleListDmThreads);
-
-app.get("/dm/thread/:id", requireLogin, (req, res) => {
-  const tid = Number(req.params.id);
-  if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
-  loadThreadForUser(tid, req.session.user.id, (err, thread) => {
-    if (err) return res.status(403).send("Not allowed");
-    return res.json(thread);
-  });
-});
-
-app.get("/api/dm/thread/:id", requireLogin, (req, res) => {
-  const tid = Number(req.params.id);
-  if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
-  loadThreadForUser(tid, req.session.user.id, (err, thread) => {
-    if (err) return res.status(403).send("Not allowed");
-    return res.json(thread);
-  });
-});
-
-  // --- DM thread creation (shared by /dm and /api prefixes)
-  async function handleCreateDmThread(req, res) {
-    // Accept multiple payload shapes for compatibility:
-    // { participants:["a"], kind:"direct" }
-    // { participant:"a" } / { user:"a" } / { to:"a" } / { username:"a" }
-    let participantNames = req.body?.participants;
-    let participantIds = req.body?.participantIds || req.body?.participantsIds;
-    if (!Array.isArray(participantIds)) {
-      const singleId =
-        req.body?.participantId ??
-        req.body?.toId ??
-        req.body?.userId ??
-        req.body?.targetId ??
-        null;
-      participantIds = singleId != null ? [singleId] : [];
-    }
-
-    // Normalize participants list (strings) and allow mixed arrays (ids or usernames)
-    if (Array.isArray(participantNames)) {
-      const nextNames = [];
-      for (const v of participantNames) {
-        const n = Number(v);
-        if (Number.isInteger(n) && n > 0) participantIds.push(n);
-        else nextNames.push(v);
-      }
-      participantNames = nextNames;
-    } else {
-      const raw = String(
-        participantNames ||
-        req.body?.participant ||
-        req.body?.user ||
-        req.body?.to ||
-        req.body?.username ||
-        ""
-      );
-      participantNames = raw.split(",");
-    }
-
-    // De-dupe ids
-    participantIds = Array.from(
-      new Set(
-        participantIds
-          .map((v) => Number(v))
-          .filter((n) => Number.isInteger(n) && n > 0)
-      )
-    );
-
-    const kindRaw = String(req.body?.kind || "").trim().toLowerCase();
-    let title = String(req.body?.title || "").trim().slice(0, 80);
-    const cleanedNames = [];
-    const seen = new Set();
-    for (const name of participantNames || []) {
-      const s = cleanUsernameForLookup(name);
-      const key = normKey(s);
-      if (!s || seen.has(key)) continue;
-      if (key === normKey(req.session.user.username)) continue;
-      seen.add(key);
-      cleanedNames.push(s);
-    }
-
-    // If client passed ids, allow creating threads without relying on username matching.
-    if (!cleanedNames.length && !participantIds.length) {
-      return res.status(400).send("Pick someone to message");
-    }
-
-    // NOTE:
-    // The client may pass BOTH `participants` (names) and `participantIds` for the SAME user.
-    // If we derive group/direct from the raw request counts, a normal direct DM can be
-    // misclassified as a group chat (e.g. 1 name + 1 id = 2 requestedCount).
-    // Instead, determine group/direct based on the *resolved unique recipients*.
-    //
-    // Also: if the client explicitly requests a direct DM, honor that.
-    const requestedKind = kindRaw === "group" ? "group" : (kindRaw === "direct" ? "direct" : "auto");
-
-    try {
-      const usersByName = await fetchUsersByNames(cleanedNames);
-      if (usersByName.length !== cleanedNames.length) {
-        const found = new Set((usersByName || []).map((u) => normKey(u.username)));
-        const missing = cleanedNames.filter((n) => !found.has(normKey(n))).slice(0, 3);
-        return res.status(404).send(missing.length ? `User not found: ${missing.join(", ")}` : "User not found");
-      }
-
-      const myId = req.session.user.id;
-      const myName = req.session.user.username;
-
-      const usersById = await fetchUsersByIds(participantIds);
-      if (usersById.length !== participantIds.length) {
-        const foundIds = new Set((usersById || []).map((u) => Number(u.id)));
-        const missingIds = participantIds.filter((id) => !foundIds.has(Number(id))).slice(0, 3);
-        return res.status(404).send(missingIds.length ? `User not found (id): ${missingIds.join(", ")}` : "User not found");
-      }
-
-      const merged = new Map();
-      for (const u of usersByName || []) merged.set(Number(u.id), u);
-      for (const u of usersById || []) merged.set(Number(u.id), u);
-      merged.delete(Number(myId));
-
-      const recipients = Array.from(merged.values());
-
-      // Determine group/direct from resolved recipients.
-      const isGroup = (requestedKind === "group") || (requestedKind === "auto" && (recipients.length > 1 || !!title));
-
-      if (requestedKind === "group" && recipients.length < 2) {
-        return res.status(400).send("Group chats need 2+ participants (or a title)");
-      }
-
-      if (!isGroup && recipients.length !== 1) {
-        return res.status(400).send("Pick exactly one person for a direct DM");
-      }
-
-      const recipientIds = recipients.map((u) => Number(u.id));
-      const recipientNames = recipients.map((u) => u.username);
-      const allParticipantIds = Array.from(new Set([...recipientIds, myId]));
-      const allParticipantNames = Array.from(new Set([...recipientNames, myName]));
-
-      const notifyParticipants = (threadId, reused, isGroupThread, threadTitle = title || null) => {
-        for (const uid of allParticipantIds) {
-          const sid = socketIdByUserId.get(uid);
-          if (sid) {
-            const sock = io.sockets.sockets.get(sid);
-            if (sock) sock.join(`dm:${threadId}`);
-            io.to(sid).emit("dm thread invited", {
-              threadId,
-              title: threadTitle,
-              isGroup: isGroupThread,
-              participants: allParticipantNames,
-            });
-          }
-        }
-
-        return res.json({ ok: true, threadId, reused, isGroup: isGroupThread, participants: allParticipantNames });
-      };
-
-      const threadParticipants = allParticipantIds;
-      return resolveOrCreateThread(
-        {
-          participantIds: threadParticipants,
-          isGroup,
-          title,
-          createdBy: myId,
-        },
-        (err3, info) => {
-          if (err3) {
-            console.error("[dm:create] resolve failed", err3);
-            return res.status(500).send("Failed to create thread");
-          }
-          notifyParticipants(info.id, !info.created, isGroup, title || null);
-        }
-      );
-    } catch (err) {
-      console.error("[dm:create] failed", err);
-      return res.status(500).send("Failed to create thread");
-    }
-  }
-
-app.post("/dm/thread", dmLimiter, requireLogin, handleCreateDmThread);
-app.post("/api/dm/thread", dmLimiter, requireLogin, handleCreateDmThread);
-
-app.post("/dm/thread/:id/participants", dmLimiter, requireLogin, (req, res) => {
-  const tid = Number(req.params.id);
-  if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
-
-  loadThreadForUser(tid, req.session.user.id, (err, thread) => {
-    if (err) return res.status(403).send("Not allowed");
-    if (!thread.is_group) return res.status(400).send("Only group DMs can add members");
-
-    let participants = req.body?.participants;
-    if (!Array.isArray(participants)) participants = [];
-
-    const cleaned = [];
-    const seen = new Set();
-    for (const name of participants || []) {
-      const s = cleanUsernameForLookup(name);
-      const key = normKey(s);
-      if (!s || seen.has(key)) continue;
-      if (key === normKey(req.session.user.username)) continue;
-      seen.add(key);
-      cleaned.push(s);
-    }
-
-    if (!cleaned.length) return res.status(400).send("Pick at least one new member");
-
-    (async () => {
-      try {
-        const users = await fetchUsersByNames(cleaned);
-        if (users.length !== cleaned.length) {
-          const found = new Set((users || []).map((u) => normKey(u.username)));
-          const missing = cleaned.filter((n) => !found.has(normKey(n))).slice(0, 3);
-          return res.status(404).send(missing.length ? `User not found: ${missing.join(", ")}` : "User not found");
-        }
-
-        db.all(
-          `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
-          [tid],
-          (listErr, rows) => {
-            if (listErr) return res.status(500).send("Failed to add members");
-            const existingIds = new Set((rows || []).map((r) => r.user_id));
-            const newUsers = users.filter((u) => !existingIds.has(u.id));
-            if (!newUsers.length) return res.status(400).send("Everyone is already in the group");
-
-            const now = Date.now();
-            for (const u of newUsers) {
-              db.run(
-                `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
-                [tid, u.id, req.session.user.id, now]
-              );
-              const sid = socketIdByUserId.get(u.id);
-              if (sid) {
-                const sock = io.sockets.sockets.get(sid);
-                if (sock) sock.join(`dm:${tid}`);
-                io.to(sid).emit("dm thread invited", {
-                  threadId: tid,
-                  title: thread.title || null,
-                  isGroup: true,
-                  participants: thread.participants,
-                });
-              }
-            }
-
-            loadThreadForUser(tid, req.session.user.id, (infoErr, fresh) => {
-              if (infoErr) return res.status(500).send("Added but could not refresh");
-              return res.json({ ok: true, participants: fresh.participants });
-            });
-          }
-        );
-      } catch (fetchErr) {
-        console.error("[dm:add] failed", fetchErr);
-        return res.status(500).send("Failed to add members");
-      }
-    })();
-  });
-});
-
-app.post("/dm/thread/:id/leave", dmLimiter, requireLogin, (req, res) => {
-  const tid = Number(req.params.id);
-  if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
-  loadThreadForUser(tid, req.session.user.id, (err, thread) => {
-    if (err) return res.status(403).send("Not allowed");
-    if (!thread.is_group) return res.status(400).send("Leaving only available in group chats");
-
-    db.run(
-      `DELETE FROM dm_participants WHERE thread_id = ? AND user_id = ?`,
-      [tid, req.session.user.id],
-      (delErr) => {
-        if (delErr) return res.status(500).send("Could not leave group");
-        return res.json({ ok: true });
-      }
-    );
-  });
-});
-
-app.delete("/dm/thread/:id/messages", dmLimiter, requireLogin, (req, res) => {
-  const tid = Number(req.params.id);
-  if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
-
-  loadThreadForUser(tid, req.session.user.id, (err) => {
-    if (err) return res.status(403).send("Not allowed");
-
-    db.run("DELETE FROM dm_messages WHERE thread_id = ?", [tid], (delErr) => {
-      if (delErr) return res.status(500).send("Failed to delete history");
-
-      io.to(`dm:${tid}`).emit("dm history cleared", { threadId: tid });
-      res.json({ ok: true });
-    });
-  });
-});
 
 // MOVED: XP tracking timer moved to startBackgroundTasks() function (called in startServer Phase 10)
 // setInterval(() => {
@@ -15149,64 +8748,6 @@ function releaseSocketConnection(ip) {
   if (!state.count) socketConnByIp.delete(ip);
 }
 
-// ---- Socket auth middleware (session)
-io.use((socket, next) => {
-  const origin = String(socket.handshake.headers.origin || "");
-  const hostHeader = String(socket.handshake.headers.host || "");
-  const referer = String(socket.handshake.headers.referer || "");
-  const secFetchSite = String(socket.handshake.headers["sec-fetch-site"] || "").toLowerCase();
-  const secFetchMode = String(socket.handshake.headers["sec-fetch-mode"] || "").toLowerCase();
-  const secFetchDest = String(socket.handshake.headers["sec-fetch-dest"] || "").toLowerCase();
-  const allowRefererFallbackInDev = !IS_PROD;
-  if (SOCKET_IO_DEBUG_ENABLED) {
-    console.log("[socket.io] Handshake headers", {
-      origin,
-      host: hostHeader,
-      referer,
-      secFetchSite,
-      secFetchMode,
-      secFetchDest,
-    });
-  }
-  if (origin) {
-    if (!isAllowedOrigin(origin, hostHeader)) {
-      console.warn("[socket.io] Origin not allowed", { origin, host: hostHeader });
-      return next(new Error("Origin not allowed"));
-    }
-    return next();
-  }
-  if (secFetchSite === "same-origin" && secFetchMode === "websocket" && secFetchDest === "websocket") {
-    return next();
-  }
-  if (hostHeader && isAllowedHostHeader(hostHeader)) {
-    return next();
-  }
-  if (referer && allowRefererFallbackInDev) {
-    // Referrer (Referer header) can be spoofed or omitted; only use as a best-effort fallback.
-    const refOrigin = safeParseUrl(referer)?.origin || "";
-    if (refOrigin && isAllowedOrigin(refOrigin, hostHeader)) return next();
-  }
-  if (IS_PROD) {
-    console.warn("[socket.io] Origin required", { host: hostHeader });
-    return next(new Error("Origin required"));
-  }
-  return next();
-});
-
-io.use((socket, next) => {
-  const fakeRes = socket.request.res || {
-    getHeader: () => undefined,
-    setHeader: () => {},
-    writeHead: () => {},
-  };
-  sessionMiddleware(socket.request, fakeRes, () => {
-    if (!socket.request.session?.user?.id) {
-      return next(new Error("Not authenticated"));
-    }
-    next();
-  });
-});
-
 function broadcastTyping(room) {
   const set = typingByRoom.get(room);
   const names = set ? Array.from(set) : [];
@@ -15574,7 +9115,6784 @@ function applyLuckForRoll({ luck, rollStreak, lastQualMsgAt, userId, now }) {
   return { nextLuck, nextStreak };
 }
 
-// ---- Socket handlers
+
+// ===================================================================
+// STRUCTURED STARTUP SEQUENCE
+// ===================================================================
+
+let SERVER_STARTED = false;
+
+/**
+ * Phase 1: Validate Environment
+ * Ensures all required environment variables are set
+ */
+async function validateEnvironment() {
+  console.log('[startup] Phase 1: Environment validation');
+  
+  const required = ['SESSION_SECRET'];
+  const missing = required.filter(key => !process.env[key]);
+  
+  if (missing.length && !IS_DEV_MODE) {
+    console.error('[startup] ✗ Missing required environment variables:', missing);
+    process.exit(1);
+  }
+  
+  if (process.env.SESSION_SECRET && process.env.SESSION_SECRET.length < 32) {
+    console.error('[startup] ✗ SESSION_SECRET must be at least 32 characters for production security');
+    process.exit(1);
+  }
+  
+  console.log('[startup] ✓ Environment validation complete');
+}
+
+/**
+ * Phase 2: Initialize Database
+ * Runs migrations and validates database is ready
+ */
+async function initializeDatabase() {
+  console.log('[startup] Phase 2: Database initialization');
+  
+  // Run SQLite migrations
+  console.log('[startup]   Running SQLite migrations...');
+  try {
+    await runAllMigrations();
+    console.log('[startup]   ✓ SQLite migrations complete');
+  } catch (err) {
+    console.error('[startup]   ✗ SQLite migration failed:', err.message);
+    process.exit(1);
+  }
+  
+  // Validate core tables exist
+  const tables = ['users', 'messages', 'rooms'];
+  for (const table of tables) {
+    try {
+      const result = await dbAllAsync(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name=?`,
+        [table]
+      );
+      if (!result || result.length === 0) {
+        console.error(`[startup]   ✗ Critical table missing: ${table}`);
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error(`[startup]   ✗ Failed to validate table ${table}:`, err.message);
+      process.exit(1);
+    }
+  }
+  
+  console.log('[startup]   ✓ SQLite ready with all core tables');
+  
+  // Initialize Postgres if available
+  if (POSTGRES_ENABLED && pgPool) {
+    console.log('[startup]   Initializing Postgres...');
+    
+    try {
+      await pgInitPromise; // Wait for Postgres schema creation
+      await pgPool.query('SELECT 1'); // Validate connection
+      console.log('[startup]   ✓ Postgres ready');
+    } catch (err) {
+      console.warn('[startup]   ⚠ Postgres failed (continuing with SQLite only):', err.message);
+    }
+  }
+  
+  console.log('[startup] ✓ Database initialization complete');
+}
+
+/**
+ * Phase 3: Initialize State Management
+ * Sets up state persistence tables
+ */
+async function initializeStateManagement() {
+  console.log('[startup] Phase 3: State management initialization');
+  
+  try {
+    initStateManagement(dbRunAsync, dbAllAsync, pgPool);
+    await createStateTables();
+    
+    // Validate state tables exist
+    const result = await dbAllAsync(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='state_kv'`
+    );
+    if (!result || result.length === 0) {
+      console.error('[startup]   ✗ State persistence tables failed to create');
+      process.exit(1);
+    }
+    
+    console.log('[startup] ✓ State management ready');
+  } catch (err) {
+    console.error('[startup]   ✗ State persistence init failed:', err.message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Phase 4: Initialize Core Data
+ * Ensures core rooms and seed data exist
+ */
+async function initializeCoreData() {
+  console.log('[startup] Phase 4: Core data initialization');
+  
+  try {
+    await ensureCoreRoomsExist();
+    console.log('[startup]   ✓ Core rooms ready');
+  } catch (err) {
+    console.warn('[startup]   ⚠ Core rooms setup failed:', err.message);
+  }
+  
+  try {
+    await ensureDevSeedUser();
+    console.log('[startup]   ✓ Dev seed user ready');
+  } catch (err) {
+    console.warn('[startup]   ⚠ Dev seed user failed:', err.message);
+  }
+  
+  console.log('[startup] ✓ Core data initialization complete');
+}
+
+/**
+ * Phase 5: Initialize Word Filters
+ * Sets up content filtering system
+ */
+async function initializeWordFilters() {
+  console.log('[startup] Phase 5: Word filters initialization');
+  
+  try {
+    await initializeHardcodedFilters();
+    await loadWordFilters();
+    console.log('[startup] ✓ Word filters ready');
+  } catch (err) {
+    console.warn('[startup]   ⚠ Word filter init failed:', err.message);
+  }
+}
+
+/**
+ * Phase 6: Start HTTP Server
+ * Begins listening for connections
+ */
+async function startHttpServer() {
+  console.log('[startup] Phase 6: Starting HTTP server');
+  
+  return new Promise((resolve, reject) => {
+    httpServer.listen(PORT, (err) => {
+      if (err) {
+        console.error('[startup] ✗ Failed to start server:', err);
+        reject(err);
+        return;
+      }
+      
+      SERVER_STARTED = true;
+      console.log(`[startup] ✓ HTTP server listening on port ${PORT}`);
+      console.log(`[startup]   Database mode: ${POSTGRES_ENABLED && PG_READY ? 'Postgres + SQLite' : 'SQLite-only'}`);
+      resolve();
+    });
+  });
+}
+
+/**
+ * Initialize Redis connection for Socket.IO adapter
+ * Called during Phase 5a of startup
+ * Note: Socket.IO is already created at module load; this function connects Redis and prepares the adapter
+ * Returns true if Redis connected, false otherwise
+ */
+async function initializeRedis() {
+  if (!process.env.REDIS_URL) {
+    console.log('[startup] Phase 5a: Redis not configured, skipping');
+    return false;
+  }
+  
+  console.log('[startup] Phase 5a: Connecting to Redis...');
+  
+  try {
+    const { createClient } = require("redis");
+    const { createAdapter } = require("@socket.io/redis-adapter");
+    
+    redisClient = createClient({ url: process.env.REDIS_URL });
+    redisClient.on("error", (err) => console.error("[Redis] Client error:", err));
+    
+    // AWAIT the connection!
+    await redisClient.connect();
+    console.log('[startup]   ✓ Redis connected');
+    
+    const subClient = redisClient.duplicate();
+    redisAdapter = createAdapter(redisClient, subClient);
+    console.log('[startup]   ✓ Redis adapter created');
+    
+    return true;
+  } catch (err) {
+    console.warn('[startup]   ⚠ Redis connection failed (continuing without):', err.message);
+    redisAdapter = null;
+    redisClient = null;
+    return false;
+  }
+}
+
+/**
+ * Create and configure Express application
+ * Called during Phase 6a of startup
+ * @returns {Express.Application} Configured Express app
+ */
+function createExpressApp() {
+  console.log('[startup] Phase 6a: Creating Express app...');
+  
+  const app = express();
+  app.set("trust proxy", 1);
+  app.disable("x-powered-by"); // Security best practice
+  
+  console.log('[startup]   ✓ Express app created');
+  return app;
+}
+
+/**
+ * Create HTTP server
+ * Called during Phase 6b of startup
+ * @param {Express.Application} app - Express application
+ * @returns {http.Server} HTTP server instance
+ */
+function createHttpServer(app) {
+  console.log('[startup] Phase 6b: Creating HTTP server...');
+  
+  const httpServer = http.createServer(app);
+  
+  console.log('[startup]   ✓ HTTP server created');
+  return httpServer;
+}
+
+/**
+ * Create and configure Socket.IO server
+ * Called during Phase 6c of startup
+ * @param {http.Server} httpServer - HTTP server instance
+ * @returns {Server} Socket.IO server instance
+ */
+function createSocketIOServer(httpServer) {
+  console.log('[startup] Phase 6c: Creating Socket.IO server...');
+  
+  const io = new Server(httpServer, {
+    cors: {
+      origin: true,
+      credentials: true,
+    },
+    transports: ["websocket", "polling"],
+    
+    // Origin allowlist for Socket.IO handshake
+    allowRequest: (req, cb) => {
+      try {
+        const origin = req.headers.origin;
+        const host = req.headers.host;
+        if (!origin) {
+          if (isAllowedHostHeader(host)) {
+            return cb(null, true);
+          }
+          console.warn("[socket.io] Handshake rejected: origin required", { host });
+          return cb(null, false);
+        }
+        if (!isAllowedOrigin(origin, host)) {
+          console.warn("[socket.io] Handshake rejected: origin not allowed", { origin, host });
+          return cb(null, false);
+        }
+        return cb(null, true);
+      } catch (err) {
+        console.warn("[socket.io] Handshake rejected: error", err?.message || err);
+        return cb(null, false);
+      }
+    },
+    
+    // Tolerant of mobile/background + Render sleep
+    pingInterval: 25_000,
+    pingTimeout: 300_000,
+    upgradeTimeout: 45_000,
+  });
+  
+  console.log('[startup]   ✓ Socket.IO server created');
+  return io;
+}
+
+/**
+ * Attach Redis adapter to Socket.IO
+ * Called during Phase 6d of startup (after Redis connects, if configured)
+ */
+function attachRedisAdapter() {
+  console.log('[startup] Phase 6d: Attaching Redis adapter to Socket.IO...');
+  if (redisAdapter) {
+    io.adapter(redisAdapter);
+    console.log('[startup]   ✓ Redis adapter attached to Socket.IO');
+  } else {
+    console.log('[startup]   ⚠ No Redis adapter to attach (Redis not configured or connection failed)');
+  }
+  console.log('[startup]   ✓ Phase 6d complete');
+}
+
+/**
+ * Register all Express middleware
+ * Called during Phase 7 of startup
+ * @param {Express.Application} app - Express application
+ */
+function registerMiddleware(app) {
+  console.log('[startup] Phase 7: Registering middleware...');
+  
+  // Body parsers
+  app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ extended: false, limit: "1mb" }));
+  
+  // Security headers (helmet)
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    })
+  );
+  
+  // Custom CSP header
+  app.use((req, res, next) => {
+    res.setHeader(
+      "Content-Security-Policy",
+      [
+        "default-src 'self'",
+        "script-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=' 'sha256-oWpLZycNOHPRAKwunf75GOBemv1jh7TmBxWivRAc6a4=' 'sha256-goKOkmKJAPdYQYWwcQHapCcKarPdgPOdvsRdXEM/cfQ=' 'sha256-7sXnZ2TVMnxHVWCkmooJgY2WLwuABY3ORO4U2HyqhCk=' 'sha256-i/aTBp59Im0Ii8AbJaj/fpbmIm5uEe2SBSUfuz0qWdo=' 'sha256-h6XKXaSUiZETwfkdn71tqPwNbWkKP7NuIVivpP1YHkQ=' 'sha256-yGn8Ao66AtYyuV/LmdeSWHLPjQvhNwVQ39CW3mlyk3U=' 'sha256-FyuENKF0oqbS8GySBjZmSheWBnbSBzWln9hSmxXIMxY=' 'sha256-RbHiP1owkaFYxhobIPZZPoETOLi+bWnIbX7EeyA0rOc='",
+        "script-src-elem 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=' 'sha256-oWpLZycNOHPRAKwunf75GOBemv1jh7TmBxWivRAc6a4=' 'sha256-goKOkmKJAPdYQYWwcQHapCcKarPdgPOdvsRdXEM/cfQ=' 'sha256-7sXnZ2TVMnxHVWCkmooJgY2WLwuABY3ORO4U2HyqhCk=' 'sha256-i/aTBp59Im0Ii8AbJaj/fpbmIm5uEe2SBSUfuz0qWdo=' 'sha256-h6XKXaSUiZETwfkdn71tqPwNbWkKP7NuIVivpP1YHkQ=' 'sha256-yGn8Ao66AtYyuV/LmdeSWHLPjQvhNwVQ39CW3mlyk3U=' 'sha256-FyuENKF0oqbS8GySBjZmSheWBnbSBzWln9hSmxXIMxY=' 'sha256-RbHiP1owkaFYxhobIPZZPoETOLi+bWnIbX7EeyA0rOc='",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' data: https://fonts.gstatic.com",
+        "img-src 'self' data: blob: https://i.ytimg.com",
+        "media-src 'self' blob:",
+        "connect-src 'self' ws: wss: https://noembed.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://challenges.cloudflare.com https://hcaptcha.com",
+        "frame-ancestors 'none'",
+      ].join("; ")
+    );
+    next();
+  });
+  
+  // Session middleware
+  app.use(sessionMiddleware);
+  
+  // Health check (before rate limiting)
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", db: DB_BACKEND });
+  });
+  
+  // Rate limiting
+  app.use(globalLimiter);
+  
+  // Origin guard for POST/PUT/DELETE/PATCH
+  app.use(postOriginGuard);
+  
+  // Static files
+  app.use("/uploads", express.static(UPLOADS_DIR, {
+    setHeaders: (res, filePath) => {
+      const ext = path.extname(filePath).toLowerCase();
+      if (ext === ".mp3") res.setHeader("Content-Type", "audio/mpeg");
+      if (ext === ".m4a") res.setHeader("Content-Type", "audio/mp4");
+      if (ext === ".mp4") res.setHeader("Content-Type", "video/mp4");
+      if (ext === ".webm") res.setHeader("Content-Type", "video/webm");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+    },
+  }));
+  
+  app.use("/avatars", express.static(AVATARS_DIR, {
+    setHeaders: (res) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+    },
+  }));
+  
+  app.use(express.static(PUBLIC_DIR));
+  
+  // Avatar serving route
+  app.get("/avatar/:id", async (req, res) => {
+    const id = Number(req.params?.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).send("Invalid id");
+  
+    try {
+      const result3 = await pgSafe(
+        `SELECT avatar_bytes, avatar_mime, avatar_updated FROM users WHERE id = $1 LIMIT 1`,
+        [id]
+      );
+      const rows = result3?.rows || [];
+      const row = rows?.[0];
+      if (!row?.avatar_bytes) return res.status(404).send("Not found");
+  
+      const etag = `"av-${id}-${Number(row.avatar_updated || 0)}"`;
+      const weakEtag = `W/${etag}`;
+      const inm = String(req.headers["if-none-match"] || "");
+      if (inm === etag || inm === weakEtag) return res.status(304).end();
+  
+      res.setHeader("Content-Type", row.avatar_mime || "image/png");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("ETag", etag);
+      return res.send(row.avatar_bytes);
+    } catch (e) {
+      console.error("[/avatar] failed:", e?.message || e);
+      return res.status(500).send("Failed to load avatar");
+    }
+  });
+  
+  console.log('[startup]   ✓ Middleware registered');
+}
+
+/**
+ * Register all HTTP routes
+ * Called during Phase 8 of startup
+ */
+function registerRoutes(app) {
+  console.log('[startup] Phase 8: Registering routes...');
+
+  app.get("/api/captcha-config", (_req, res) => {
+    if (!captchaEnabled()) return res.json({ provider: "none" });
+    return res.json({ provider: CAPTCHA_PROVIDER, siteKey: CAPTCHA_SITE_KEY });
+  });
+
+  // ---- Auth routes
+  // ---- Auth routes
+
+  // --- Guest Login Endpoint (CRITICAL: SQLite-only, Postgres optional)
+  app.post("/guest-login", async (req, res) => {
+    const { username } = req.body;
+    if (!username || username.length < 2 || username.length > 20) {
+      return res.status(400).send("Invalid username (2-20 chars).");
+    }
+  
+    try {
+      // Check if user exists in SQLite (source of truth)
+      const existing = await dbAllAsync("SELECT id FROM users WHERE lower(username) = lower(?)", [username]);
+      if (existing && existing.length > 0) {
+        return res.status(400).send("Username already taken.");
+      }
+
+      // Create guest user in SQLite (MUST succeed - SQLite is required)
+      const now = Date.now();
+      let sqliteResult;
+      try {
+        sqliteResult = await dbRunAsync(
+          `INSERT INTO users (username, role, created_at, last_seen, theme)
+           VALUES (?, 'Guest', ?, ?, ?)`,
+          [username, now, now, DEFAULT_THEME]
+        );
+      } catch (sqliteErr) {
+        console.error("[guest-login] SQLite insert failed:", sqliteErr);
+        return res.status(500).send("Guest login failed - database error.");
+      }
+
+      const guestUser = {
+        id: sqliteResult.lastID,
+        username: username,
+        role: 'Guest',
+        theme: DEFAULT_THEME,
+        avatar: "",
+        avatar_updated: null,
+      };
+
+      // Optionally mirror to Postgres (fire-and-forget, never blocking)
+      pgSafe(
+        `INSERT INTO users (id, username, role, created_at, last_seen, theme)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (id) DO NOTHING`,
+        [guestUser.id, guestUser.username, guestUser.role, now, now, DEFAULT_THEME]
+      ).catch(() => {}); // Fire-and-forget
+
+      // Set session and respond
+      req.session.user = guestUser;
+      req.session.save((saveErr) => {
+        if (saveErr) return res.status(500).send("Session save failed");
+        return res.json({ ok: true, user: guestUser });
+      });
+    } catch (err) {
+      console.error("[guest-login] Unexpected error:", err);
+      res.status(500).send("Guest login failed.");
+    }
+  });
+
+  app.post("/register", registerLimiter, async (req, res) => {
+    try {
+      const username = sanitizeUsername(req.body?.username);
+      const password = String(req.body?.password || "");
+
+      if (!username || username.length < 2) return res.status(400).send("Invalid username");
+      if (!password || password.length < 12) return res.status(400).send("Password must be 12+ chars");
+      if (isPasswordTooWeak(password)) return res.status(400).send("Password is too common");
+
+      // Prevent duplicates (PG is canonical)
+      const existingPg = await pgGetUserByUsername(username);
+      if (existingPg) return res.status(409).send("Username already taken");
+
+      const captchaToken = String(req.body?.captchaToken || "");
+      const captcha = await verifyCaptcha(captchaToken, getClientIp(req));
+      if (!captcha.ok) return res.status(400).send(captcha.message || "Captcha failed");
+
+      const hash = await bcrypt.hash(password, 10);
+      const createdAt = Date.now();
+
+      const norm = normKey(username);
+      let role = "User";
+      if (AUTO_OWNER.has(norm)) role = "Owner";
+      else if (AUTO_COOWNERS.has(norm)) role = "Co-owner";
+
+      const theme = DEFAULT_THEME;
+
+      let user = null;
+      if (PG_READY && pgPool) {
+        const createdAtValue = PG_USERS_CREATED_AT_IS_TIMESTAMP ? new Date(createdAt) : createdAt;
+        const result22 = await pgSafe(
+          `INSERT INTO users (username, password_hash, role, created_at, theme)
+           VALUES ($1,$2,$3,$4,$5)
+           RETURNING id, username, role, theme`,
+          [username, hash, role, createdAtValue, theme]
+        );
+        const rows = result22?.rows || [];
+        user = rows[0] || null;
+      } else {
+        const existingSqlite = await dbGetAsync(
+          "SELECT id FROM users WHERE username = ? OR lower(username) = lower(?)",
+          [username, username]
+        ).catch(() => null);
+        if (existingSqlite?.id) return res.status(409).send("Username already taken");
+        const result = await dbRunAsync(
+          `INSERT INTO users (username, password_hash, role, created_at, gold, xp, theme)
+           VALUES (?,?,?,?,?,?,?)`,
+          [username, hash, role, createdAt, 0, 0, sanitizeThemeNameServer(theme)]
+        );
+        const sqliteUser = await dbGetAsync(
+          "SELECT id, username, role, theme, avatar, avatar_updated FROM users WHERE id = ?",
+          [result?.lastID]
+        );
+        user = sqliteUser || null;
+      }
+
+      if (!user) return res.status(500).send("Registration failed");
+
+      if (PG_READY && pgPool) {
+        try {
+          await dbRunAsync(
+            `INSERT INTO users (id, username, password_hash, role, created_at, gold, xp, theme)
+             VALUES (?,?,?,?,?,?,?,?)`,
+            [user.id, username, hash, role, createdAt, 0, 0, sanitizeThemeNameServer(theme)]
+          );
+        } catch (_e) {
+          await dbRunAsync(
+            `UPDATE users
+                SET username = ?, password_hash = ?, role = ?,
+                    created_at = COALESCE(created_at, ?),
+                    theme = COALESCE(theme, ?)
+              WHERE id = ?`,
+            [username, hash, role, createdAt, sanitizeThemeNameServer(theme), user.id]
+          );
+        }
+      }
+
+      req.session.regenerate((regenErr) => {
+        if (regenErr) return res.status(500).send("Session failed");
+        req.session.user = {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          theme: sanitizeThemeNameServer(user.theme),
+          avatar: user.avatar || "",
+          avatar_updated: user.avatar_updated ?? null,
+        };
+        req.session.save((saveErr) => {
+          if (saveErr) return res.status(500).send("Session save failed");
+          return res.json({ ok: true });
+        });
+      });
+    } catch (e) {
+      console.error(e);
+      res.status(500).send("Registration failed");
+    }
+  });
+  app.post("/login", loginIpLimiter, async (req, res) => {
+    try {
+      const raw = String(req.body?.username || "").trim().slice(0, 64);
+      const cleaned = cleanUsernameForLookup(raw);
+      const legacy = sanitizeUsername(raw);
+      const candidates = Array.from(new Set([raw, cleaned, legacy].filter(Boolean)));
+
+      const password = String(req.body?.password || "");
+      if (!candidates.length || !password) return res.status(400).send("Missing credentials");
+
+      const ip = getClientIp(req);
+      const usernameKey = normKey(raw || cleaned || legacy || "");
+      const loginKey = `${ip}:${usernameKey || "unknown"}`;
+      const ipKey = `ip:${ip}`;
+      const backoff = checkLoginBackoff(loginKey);
+      const ipBackoff = checkLoginBackoff(ipKey);
+      if (backoff.blocked || ipBackoff.blocked) {
+        return res.status(429).send("Too many attempts. Try again later.");
+      }
+
+      const captchaToken = String(req.body?.captchaToken || "");
+      const captcha = await verifyCaptcha(captchaToken, ip);
+      if (!captcha.ok) {
+        recordLoginFailure(loginKey);
+        recordLoginFailure(ipKey);
+        return res.status(400).send(captcha.message || "Captcha failed");
+      }
+
+      // 1) Prefer Postgres users (new registrations land here)
+      let pgUser = null;
+      for (const cand of candidates) {
+        pgUser = await pgGetUserByUsername(cand);
+        if (pgUser) break;
+      }
+      if (pgUser && pgUser.password_hash) {
+        const stored = String(pgUser.password_hash || "").trim();
+
+        // Backwards compatibility: some legacy accounts may have a non-bcrypt value in password_hash.
+        // If it looks like a bcrypt hash, verify normally; otherwise treat it as plaintext and upgrade on success.
+        const looksBcrypt = stored.startsWith("$2");
+        let ok = false;
+
+        if (looksBcrypt) {
+          ok = await bcrypt.compare(password, stored);
+        } else {
+          ok = password === stored;
+          if (ok) {
+            const upgraded = await bcrypt.hash(password, 10);
+            await pgSafe(`UPDATE users SET password_hash = $1 WHERE id = $2`, [upgraded, pgUser.id]).catch(() => {});
+            pgUser.password_hash = upgraded;
+          }
+        }
+
+        if (!ok) {
+          recordLoginFailure(loginKey);
+          recordLoginFailure(ipKey);
+          logSecurityEvent("login_failure", { ip, username: raw, store: "pg" });
+          return res.status(401).send("Invalid username or password");
+        }
+
+        if (password.length < 12) {
+          const nonce = crypto.randomBytes(18).toString("hex");
+          req.session.user = null;
+          req.session.passwordUpgrade = {
+            userId: pgUser.id,
+            username: pgUser.username,
+            issuedAt: Date.now(),
+            nonce,
+          };
+          clearPasswordUpgradeFailures(req);
+          clearLoginFailures(loginKey);
+          clearLoginFailures(ipKey);
+          logSecurityEvent("password_upgrade_required", { ip, username: pgUser.username, userId: pgUser.id, store: "pg" });
+          return req.session.save((saveErr) => {
+            if (saveErr) return res.status(500).send("Session save failed");
+            return res.json({ ok: false, code: "PASSWORD_UPGRADE_REQUIRED" });
+          });
+        }
+
+        const theme = sanitizeThemeNameServer(pgUser.theme || DEFAULT_THEME);
+
+        // Mirror into SQLite if missing (some UI/profile/dice logic still reads SQLite)
+        const srow = await dbGetAsync("SELECT id FROM users WHERE id = ?", [pgUser.id]).catch(() => null);
+        if (!srow) {
+          await dbRunAsync(
+            `INSERT INTO users (id, username, password_hash, role, created_at, gold, xp, theme)
+             VALUES (?,?,?,?,?,?,?,?)`,
+            [
+              pgUser.id,
+              pgUser.username,
+              pgUser.password_hash,
+              pgUser.role || "User",
+              Number(pgUser.created_at || Date.now()),
+              Number(pgUser.gold || 0),
+              Number(pgUser.xp || 0),
+              theme,
+            ]
+          );
+        }
+
+        // IMPORTANT: In Postgres we primarily store avatars in avatar_bytes/avatar_updated.
+        // If we only read the legacy "avatar" column here, the session will have an empty avatar
+        // and the UI will look like the profile "didn't save" after refresh.
+        req.session.regenerate((regenErr) => {
+          if (regenErr) return res.status(500).send("Session failed");
+          req.session.user = {
+            id: pgUser.id,
+            username: pgUser.username,
+            role: pgUser.role,
+            theme,
+            avatar: avatarUrlFromRow(pgUser) || "",
+            avatar_updated: pgUser.avatar_updated ?? pgUser.avatarUpdated ?? null,
+          };
+          dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", pgUser.id]).catch(() => {});
+          initGoldTick(pgUser.id);
+          clearLoginFailures(loginKey);
+          clearLoginFailures(ipKey);
+          req.session.save((saveErr) => {
+            if (saveErr) return res.status(500).send("Session save failed");
+            return res.json({ ok: true });
+          });
+        });
+        return;
+      }
+
+      // 2) Fallback to SQLite (legacy accounts)
+      let row = null;
+      for (const cand of candidates) {
+        row = await dbGetAsync(
+          "SELECT * FROM users WHERE username = ? OR lower(username) = lower(?)",
+          [cand, cand]
+        ).catch(() => null);
+        if (row) break;
+      }
+      if (!row) {
+        recordLoginFailure(loginKey);
+        recordLoginFailure(ipKey);
+        logSecurityEvent("login_failure", { ip, username: raw, store: "sqlite" });
+        return res.status(401).send("Invalid username or password");
+      }
+
+      // Handle legacy password column (if present)
+      let passwordHash = typeof row.password_hash === "string" ? row.password_hash : "";
+
+      if (!passwordHash) {
+        const legacyPassword = typeof row.password === "string" ? row.password : "";
+        if (!legacyPassword) return res.status(401).send("Invalid username or password");
+
+        const legacyMatches = legacyPassword.startsWith("$2")
+          ? await bcrypt.compare(password, legacyPassword)
+          : legacyPassword === password;
+
+        if (!legacyMatches) {
+          recordLoginFailure(loginKey);
+          recordLoginFailure(ipKey);
+          logSecurityEvent("login_failure", { ip, username: raw, store: "sqlite" });
+          return res.status(401).send("Invalid username or password");
+        }
+
+        passwordHash = legacyPassword.startsWith("$2") ? legacyPassword : await bcrypt.hash(password, 10);
+
+        await dbRunAsync("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [passwordHash, row.id]);
+        row.password_hash = passwordHash;
+      }
+
+      {
+        const stored = String(row.password_hash || "").trim();
+        const looksBcrypt = stored.startsWith("$2");
+        let ok = false;
+
+        if (looksBcrypt) {
+          ok = await bcrypt.compare(password, stored);
+        } else {
+          // Legacy plaintext stored in password_hash (or other non-bcrypt formats).
+          ok = password === stored;
+          if (ok) {
+            const upgraded = await bcrypt.hash(password, 10);
+            await dbRunAsync("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [upgraded, row.id]).catch(() => {});
+            row.password_hash = upgraded;
+          }
+        }
+
+        if (!ok) {
+          recordLoginFailure(loginKey);
+          recordLoginFailure(ipKey);
+          logSecurityEvent("login_failure", { ip, username: raw, store: "sqlite" });
+          return res.status(401).send("Invalid username or password");
+        }
+      }
+  // Apply your auto-role rules (keep both stores aligned)
+      const norm = normKey(row.username);
+      if (AUTO_OWNER.has(norm) && row.role !== "Owner") {
+        await dbRunAsync("UPDATE users SET role = 'Owner' WHERE id = ?", [row.id]);
+        row.role = "Owner";
+      } else if (AUTO_COOWNERS.has(norm) && row.role !== "Co-owner") {
+        await dbRunAsync("UPDATE users SET role = 'Co-owner' WHERE id = ?", [row.id]);
+        row.role = "Co-owner";
+      }
+
+      const theme = sanitizeThemeNameServer(row.theme || DEFAULT_THEME);
+      if (!row.theme) await dbRunAsync("UPDATE users SET theme = ? WHERE id = ?", [theme, row.id]).catch(() => {});
+
+      if (password.length < 12) {
+        const nonce = crypto.randomBytes(18).toString("hex");
+        req.session.user = null;
+        req.session.passwordUpgrade = {
+          userId: row.id,
+          username: row.username,
+          issuedAt: Date.now(),
+          nonce,
+        };
+        clearPasswordUpgradeFailures(req);
+        clearLoginFailures(loginKey);
+        clearLoginFailures(ipKey);
+        logSecurityEvent("password_upgrade_required", { ip, username: row.username, userId: row.id, store: "sqlite" });
+        return req.session.save((saveErr) => {
+          if (saveErr) return res.status(500).send("Session save failed");
+          return res.json({ ok: false, code: "PASSWORD_UPGRADE_REQUIRED" });
+        });
+      }
+
+      if (PG_READY && pgPool) {
+        await pgSafe(
+          `INSERT INTO users (id, username, password_hash, role, created_at, theme, gold, xp)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT (username) DO UPDATE
+             SET password_hash = EXCLUDED.password_hash,
+                 role = EXCLUDED.role,
+                 theme = COALESCE(users.theme, EXCLUDED.theme),
+                 gold = COALESCE(users.gold, EXCLUDED.gold),
+                 xp = COALESCE(users.xp, EXCLUDED.xp)`,
+          [
+            row.id,
+            row.username,
+            passwordHash,
+            row.role || "User",
+            Number(row.created_at || Date.now()),
+            theme,
+            Number(row.gold || 0),
+            Number(row.xp || 0),
+          ]
+        ).catch((e) => console.error("PG mirror on login failed:", e));
+      }
+
+      req.session.regenerate((regenErr) => {
+        if (regenErr) return res.status(500).send("Session failed");
+        req.session.user = { id: row.id, username: row.username, role: row.role, theme, avatar: avatarUrlFromRow(row) || "", avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? null };
+        dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", row.id]).catch(() => {});
+        awardLoginXp(row.id, row.role);
+        awardDailyLoginGold(row);
+        initGoldTick(row.id);
+        clearLoginFailures(loginKey);
+        clearLoginFailures(ipKey);
+        req.session.save((saveErr) => {
+          if (saveErr) return res.status(500).send("Session save failed");
+          return res.json({ ok: true });
+        });
+      });
+      return;
+    } catch (e) {
+      console.error(e);
+      return res.status(500).send("Login failed");
+    }
+  });
+
+  app.get("/password-upgrade/status", (req, res) => {
+    const pending = req.session?.passwordUpgrade || null;
+    if (!pending?.userId) return res.json({ required: false });
+    return res.json({ required: true, nonce: pending.nonce || "" });
+  });
+
+  app.get("/password-upgrade", (req, res) => {
+    if (!req.session?.passwordUpgrade?.userId) return res.redirect("/");
+    return res.sendFile(path.join(PUBLIC_DIR, "index.html"));
+  });
+
+  app.post("/password-upgrade", passwordUpgradeLimiter, async (req, res) => {
+    const pending = req.session?.passwordUpgrade || null;
+    if (!pending?.userId) return res.status(401).json({ ok: false, message: "No password upgrade pending." });
+
+    const ip = getClientIp(req);
+    const attemptState = getPasswordUpgradeAttemptState(req);
+    if (attemptState.blocked) {
+      return res.status(429).json({ ok: false, code: "PASSWORD_UPGRADE_LOCKED", message: "Too many attempts. Try again later." });
+    }
+
+    const currentPassword = String(req.body?.currentPassword || "");
+    const newPassword = String(req.body?.newPassword || "");
+    const confirmPassword = String(req.body?.confirmPassword || "");
+    const nonce = String(req.body?.nonce || "");
+
+    if (pending.nonce && nonce !== pending.nonce) {
+      return res.status(403).json({ ok: false, message: "Invalid session." });
+    }
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({ ok: false, message: "Missing required fields." });
+    }
+
+    if (newPassword.length < 12) {
+      return res.status(400).json({ ok: false, message: "Password must be 12+ chars." });
+    }
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ ok: false, message: "Passwords do not match." });
+    }
+    if (isPasswordTooWeak(newPassword)) {
+      return res.status(400).json({ ok: false, message: "Password is too common." });
+    }
+
+    try {
+      const userId = Number(pending.userId);
+      const pgUser = await pgGetUserById(userId).catch(() => null);
+      const sqliteRow = await dbGetAsync("SELECT * FROM users WHERE id = ?", [userId]).catch(() => null);
+
+      if (!pgUser && !sqliteRow) {
+        recordPasswordUpgradeFailure(req);
+        logSecurityEvent("password_upgrade_failed", { ip, userId, username: pending.username, reason: "user_not_found" });
+        return res.status(401).json({ ok: false, message: "Password upgrade failed." });
+      }
+
+      let stored = "";
+      if (pgUser?.password_hash) stored = String(pgUser.password_hash || "").trim();
+      else if (sqliteRow?.password_hash) stored = String(sqliteRow.password_hash || "").trim();
+      else if (sqliteRow?.password) stored = String(sqliteRow.password || "").trim();
+
+      const looksBcrypt = stored.startsWith("$2");
+      const matches = looksBcrypt
+        ? await bcrypt.compare(currentPassword, stored)
+        : currentPassword === stored;
+
+      if (!matches) {
+        recordPasswordUpgradeFailure(req);
+        logSecurityEvent("password_upgrade_failed", { ip, userId, username: pending.username, reason: "password_mismatch" });
+        return res.status(401).json({ ok: false, message: "Current password incorrect." });
+      }
+
+      const newHash = await bcrypt.hash(newPassword, 12);
+
+      if (pgUser?.id) {
+        await pgSafe("UPDATE users SET password_hash = $1 WHERE id = $2", [newHash, pgUser.id]).catch(() => {});
+      } else if (sqliteRow?.id) {
+        const createdAtValue = PG_USERS_CREATED_AT_IS_TIMESTAMP
+          ? new Date(Number(sqliteRow.created_at || Date.now()))
+          : Number(sqliteRow.created_at || Date.now());
+        await pgSafe(
+          `INSERT INTO users (id, username, password_hash, role, created_at, theme, gold, xp)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT (username) DO UPDATE
+             SET password_hash = EXCLUDED.password_hash,
+                 role = COALESCE(users.role, EXCLUDED.role),
+                 theme = COALESCE(users.theme, EXCLUDED.theme),
+                 gold = COALESCE(users.gold, EXCLUDED.gold),
+                 xp = COALESCE(users.xp, EXCLUDED.xp)`,
+          [
+            sqliteRow.id,
+            sqliteRow.username,
+            newHash,
+            sqliteRow.role || "User",
+            createdAtValue,
+            sanitizeThemeNameServer(sqliteRow.theme || DEFAULT_THEME),
+            Number(sqliteRow.gold || 0),
+            Number(sqliteRow.xp || 0),
+          ]
+        ).catch(() => {});
+      }
+
+      if (sqliteRow?.id) {
+        await dbRunAsync("UPDATE users SET password_hash = ?, password = NULL WHERE id = ?", [newHash, sqliteRow.id]).catch(() => {});
+      } else if (pgUser?.id) {
+        await dbRunAsync(
+          `INSERT INTO users (id, username, password_hash, role, created_at, gold, xp, theme)
+           VALUES (?,?,?,?,?,?,?,?)`,
+          [
+            pgUser.id,
+            pgUser.username,
+            newHash,
+            pgUser.role || "User",
+            Number(pgUser.created_at || Date.now()),
+            Number(pgUser.gold || 0),
+            Number(pgUser.xp || 0),
+            sanitizeThemeNameServer(pgUser.theme || DEFAULT_THEME),
+          ]
+        ).catch(() => {});
+      }
+
+      const refreshedPgUser = await pgGetUserById(userId).catch(() => null);
+      const sessionRow = refreshedPgUser || sqliteRow || pgUser;
+      const role = sessionRow?.role || "User";
+      const theme = sanitizeThemeNameServer(sessionRow?.theme || DEFAULT_THEME);
+      const avatar = avatarUrlFromRow(sessionRow) || "";
+      const avatarUpdated = sessionRow?.avatar_updated ?? sessionRow?.avatarUpdated ?? null;
+
+      clearPasswordUpgradeFailures(req);
+      delete req.session.passwordUpgrade;
+
+      req.session.regenerate((regenErr) => {
+        if (regenErr) return res.status(500).json({ ok: false, message: "Session failed." });
+        req.session.user = {
+          id: userId,
+          username: sessionRow?.username || pending.username,
+          role,
+          theme,
+          avatar,
+          avatar_updated: avatarUpdated,
+        };
+        dbRunAsync("UPDATE users SET last_seen = ?, last_status = ? WHERE id = ?", [Date.now(), "Online", userId]).catch(() => {});
+        if (!pgUser && sqliteRow) {
+          awardLoginXp(userId, role);
+          awardDailyLoginGold(sqliteRow);
+        }
+        initGoldTick(userId);
+        logSecurityEvent("password_upgrade_success", { ip, userId, username: sessionRow?.username || pending.username });
+        req.session.save((saveErr) => {
+          if (saveErr) return res.status(500).json({ ok: false, message: "Session save failed." });
+          return res.json({ ok: true });
+        });
+      });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, message: "Password upgrade failed." });
+    }
+  });
+
+  app.post("/logout", (req, res) => {
+    req.session.destroy(() => res.json({ ok: true }));
+  });
+
+  app.get("/me", async (req, res) => {
+    try {
+      if (!req.session?.user?.id) return res.json(null);
+
+      // If we already have an avatar in-session, keep it as a fallback.
+      const prevAvatar = req.session?.user?.avatar || "";
+      const prevAvatarUpdated = req.session?.user?.avatar_updated ?? null;
+
+      // Prefer Postgres
+      // IMPORTANT: /me is used to hydrate the session and client state.
+      // We MUST select role/theme and avatar fields; otherwise we may overwrite
+      // req.session.user.role/theme with undefined, which breaks permission gating.
+      const result18 = await pgSafe(
+        `SELECT id,
+                username,
+                role,
+                theme,
+                avatar,
+                avatar_updated,
+                avatar_bytes
+           FROM users
+          WHERE id = $1
+          LIMIT 1`,
+        [req.session.user.id]
+      );
+      const rows = result18?.rows || [];
+
+      let row = rows[0];
+
+      // If not in Postgres yet, fallback to SQLite and (optionally) sync
+      if (!row) {
+        const srow = await dbGet(
+          "SELECT id, username FROM users WHERE id = ?",
+          [req.session.user.id]
+        );
+        if (!srow) return res.json(null);
+
+        const theme = sanitizeThemeNameServer(srow.theme);
+        if (!srow.theme) db.run("UPDATE users SET theme = ? WHERE id = ?", [theme, srow.id]);
+
+        // Try to mirror minimal fields into Postgres if the user exists there by id
+        // (If your login migration creates PG users with matching ids, this will work;
+        // otherwise we’ll handle it during login migration.)
+        try {
+          await pgSafe(
+            "UPDATE users SET theme = $1, role = $2 WHERE id = $3",
+            [theme, srow.role, srow.id]
+          );
+        } catch (_) {}
+
+        const computedAvatar = avatarUrlFromRow(srow) || "";
+        req.session.user = {
+          id: srow.id,
+          username: srow.username,
+          role: srow.role,
+          theme,
+          avatar: computedAvatar || prevAvatar,
+          avatar_updated: srow.avatar_updated ?? srow.avatarUpdated ?? prevAvatarUpdated,
+        };
+        return res.json(req.session.user);
+      }
+
+      const theme = sanitizeThemeNameServer(row.theme);
+      if (!row.theme) await pgSafe("UPDATE users SET theme = $1 WHERE id = $2", [theme, row.id]);
+
+      const computedAvatar = avatarUrlFromRow(row) || "";
+      req.session.user = {
+        id: row.id,
+        username: row.username,
+        role: row.role,
+        theme,
+        avatar: computedAvatar || prevAvatar,
+        avatar_updated: row.avatar_updated ?? row.avatarUpdated ?? prevAvatarUpdated,
+      };
+      return res.json(req.session.user);
+    } catch (e) {
+      console.error(e);
+      return res.json(null);
+    }
+  });
+
+  // Back-compat alias used by some clients
+  app.get("/api/me", (req, res) => res.redirect(307, "/me"));
+
+  app.get("/api/restriction", async (req, res) => {
+    try {
+      const username = req.session?.user?.username;
+      if (!username) return res.json({ type: "none" });
+      const r = await getRestrictionByUsername(username);
+      res.json({ type: r.type || "none", reason: r.reason || "", expiresAt: r.expiresAt || null, now: Date.now() });
+    } catch (e) {
+      res.json({ type: "none" });
+    }
+  });
+
+
+
+  //
+  // Owner-only: live feature flags
+  //
+  app.get("/api/owner/flags", requireOwner, async (_req, res) => {
+    try {
+      const flags = await refreshFeatureFlags();
+      res.json({ ok: true, flags });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: "failed_to_load_flags" });
+    }
+  });
+
+  app.post("/api/owner/flags", moderationHttpLimiter, requireOwner, express.json({ limit: "64kb" }), async (req, res) => {
+    try {
+      const incoming = req.body?.flags;
+      if (!incoming || typeof incoming !== "object") return res.status(400).json({ ok: false, error: "bad_flags" });
+      // sanitize: flat object of booleans/numbers/strings
+      const next = {};
+      for (const [k, v] of Object.entries(incoming)) {
+        if (!k || typeof k !== "string") continue;
+        if (typeof v === "boolean" || typeof v === "number" || typeof v === "string") next[k] = v;
+      }
+      await setConfigJson("feature_flags", next);
+      FEATURE_FLAGS_CACHE = { ...next };
+      try { io.emit("featureFlags:update", next); } catch {}
+      res.json({ ok: true, flags: next });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: "failed_to_save_flags" });
+    }
+  });
+
+  //
+  // Owner-only: session map
+  //
+  app.get("/api/owner/sessions", requireOwner, async (_req, res) => {
+    try {
+      const out = [];
+      for (const [sid, meta] of sessionMetaBySocketId.entries()) {
+        if (!meta) continue;
+        out.push({ socketId: sid, ...meta });
+      }
+      // Sort: newest first
+      out.sort((a, b) => (b.connectedAt || 0) - (a.connectedAt || 0));
+      res.json({ ok: true, sessions: out, now: Date.now() });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: "failed_to_load_sessions" });
+    }
+  });
+
+  //
+  // Admin/Owner: heat score snapshot (invisible to users)
+  //
+  app.get("/api/mod/heat", requireLogin, async (req, res) => {
+    try {
+      if (!requireMinRole(req.session.user.role, "Admin")) return res.status(403).send("Forbidden");
+      const rows = [];
+      for (const [uid, heat] of heatByUserId.entries()) {
+        rows.push({ userId: uid, heat });
+      }
+      rows.sort((a, b) => b.heat - a.heat);
+      res.json({ ok: true, rows, now: Date.now() });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: "failed_to_load_heat" });
+    }
+  });
+
+  // Get username history for a user (moderator only)
+  app.get("/api/mod/users/:userId/username-history", requireLogin, async (req, res) => {
+    try {
+      if (!requireMinRole(req.session.user.role, "Moderator")) {
+        return res.status(403).json({ ok: false, message: "Forbidden" });
+      }
+    
+      const userId = parseInt(req.params.userId);
+      if (!userId || isNaN(userId)) {
+        return res.status(400).json({ ok: false, message: "Invalid user ID" });
+      }
+
+      const history = await dbAllAsync(
+        `SELECT old_username, new_username, changed_at, changed_by 
+         FROM username_history 
+         WHERE user_id = ? 
+         ORDER BY changed_at DESC`,
+        [userId]
+      );
+
+      res.json({ ok: true, history: history || [] });
+    } catch (e) {
+      console.error("[username history fetch]", e);
+      res.status(500).json({ ok: false, message: "Failed to load username history" });
+    }
+  });
+
+  //
+  // Daily micro-challenges
+  //
+  function dayKeyNow() {
+    // UTC day key to keep consistent across timezones
+    const d = new Date();
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const da = String(d.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${da}`;
+  }
+
+  const DAILY_CHALLENGE_POOL = [
+    { id: "room_msgs_5", label: "Send 5 room messages", type: "room_messages", goal: 5, rewardXp: 30, rewardGold: 25 },
+    { id: "react_3", label: "React 3 times", type: "reactions", goal: 3, rewardXp: 25, rewardGold: 20 },
+    { id: "rooms_2", label: "Visit 2 different rooms", type: "unique_rooms", goal: 2, rewardXp: 25, rewardGold: 15 },
+  ];
+
+  function pickDailyChallenges() {
+    // deterministic order for now (stable + simple)
+    return DAILY_CHALLENGE_POOL.slice(0, 3);
+  }
+
+  async function loadDailyProgress(userId, dayKey) {
+    const now = Date.now();
+    // prefer PG if user exists there
+    if (await pgUserExists(userId)) {
+      const result19 = await pgSafe(
+        "SELECT progress_json, claimed_json FROM daily_challenge_progress WHERE user_id=$1 AND day_key=$2",
+        [userId, dayKey]
+      );
+      const rows = result19?.rows || [];
+      if (rows?.length) return { progress: rows[0].progress_json || {}, claimed: rows[0].claimed_json || {}, updatedAt: now, pg: true };
+      return { progress: {}, claimed: {}, updatedAt: now, pg: true };
+    }
+    const row = await dbGetAsync(
+      "SELECT progress_json, claimed_json FROM daily_challenge_progress WHERE user_id=? AND day_key=?",
+      [userId, dayKey]
+    );
+    return {
+      progress: safeJsonParse(row?.progress_json || "{}", {}),
+      claimed: safeJsonParse(row?.claimed_json || "{}", {}),
+      updatedAt: now,
+      pg: false,
+    };
+  }
+
+  async function saveDailyProgress(userId, dayKey, progress, claimed, pg) {
+    const now = Date.now();
+    if (pg) {
+      await pgSafe(
+        `INSERT INTO daily_challenge_progress (user_id, day_key, progress_json, claimed_json, updated_at)
+         VALUES ($1,$2,$3::jsonb,$4::jsonb,$5)
+         ON CONFLICT (user_id, day_key)
+         DO UPDATE SET progress_json=EXCLUDED.progress_json, claimed_json=EXCLUDED.claimed_json, updated_at=EXCLUDED.updated_at`,
+        [userId, dayKey, JSON.stringify(progress || {}), JSON.stringify(claimed || {}), now]
+      );
+      return;
+    }
+    await dbRunAsync(
+      `INSERT INTO daily_challenge_progress (user_id, day_key, progress_json, claimed_json, updated_at)
+       VALUES (?,?,?,?,?)
+       ON CONFLICT(user_id, day_key) DO UPDATE SET progress_json=excluded.progress_json, claimed_json=excluded.claimed_json, updated_at=excluded.updated_at`,
+      [userId, dayKey, JSON.stringify(progress || {}), JSON.stringify(claimed || {}), now]
+    );
+  }
+
+
+
+  async function bumpDailyProgress(userId, dayKey, challengeId, delta, pgHint = null) {
+    const d = Math.max(0, Math.floor(Number(delta) || 0));
+    if (!userId || !challengeId || !d) return;
+    try {
+      const prog = await loadDailyProgress(userId, dayKey);
+      const progress = prog.progress || {};
+      const claimed = prog.claimed || {};
+      progress[challengeId] = Math.max(0, Math.floor(Number(progress[challengeId] || 0) + d));
+      await saveDailyProgress(userId, dayKey, progress, claimed, prog.pg);
+    } catch {}
+  }
+
+  async function bumpDailyUniqueRoom(userId, dayKey, roomName, pgHint = null) {
+    if (!userId || !roomName) return;
+    const key = "__rooms";
+    try {
+      const prog = await loadDailyProgress(userId, dayKey);
+      const progress = prog.progress || {};
+      const claimed = prog.claimed || {};
+      const arr = Array.isArray(progress[key]) ? progress[key] : [];
+      if (!arr.includes(roomName)) arr.push(roomName);
+      progress[key] = arr.slice(0, 25);
+      // mirror into rooms_2 challenge progress as count
+      progress["rooms_2"] = arr.length;
+      await saveDailyProgress(userId, dayKey, progress, claimed, prog.pg);
+    } catch {}
+  }
+
+  async function creditGold(userId, amount, reason = "reward") {
+    const amt = Math.max(0, Math.floor(Number(amount) || 0));
+    if (!amt) return null;
+
+    if (await pgUserExists(userId)) {
+      const client = await pgPool.connect();
+      try {
+        await client.query("BEGIN");
+        const { rows } = await client.query("SELECT gold FROM users WHERE id=$1 FOR UPDATE", [userId]);
+        const current = Number(rows?.[0]?.gold || 0);
+        const next = current + amt;
+        await client.query("UPDATE users SET gold=$1 WHERE id=$2", [next, userId]);
+        await client.query(
+          "INSERT INTO gold_transactions (user_id, amount, reason, created_at) VALUES ($1,$2,$3,$4)",
+          [userId, amt, String(reason || "reward"), Date.now()]
+        );
+        await client.query("COMMIT");
+        try { emitProgressionUpdate(userId); } catch {}
+        return { ok: true, gold: next };
+      } catch (e) {
+        try { await client.query("ROLLBACK"); } catch {}
+        return null;
+      } finally {
+        client.release();
+      }
+    }
+
+    await dbRunAsync("UPDATE users SET gold = gold + ? WHERE id = ?", [amt, userId]);
+    try { emitProgressionUpdate(userId); } catch {}
+    return { ok: true };
+  }
+
+  app.get("/api/challenges/today", requireLogin, async (req, res) => {
+    try {
+      const userId = req.session.user.id;
+      const dk = dayKeyNow();
+      const picked = pickDailyChallenges();
+      const prog = await loadDailyProgress(userId, dk);
+      const progress = prog.progress || {};
+      const claimed = prog.claimed || {};
+      const challenges = picked.map((c) => {
+        const p = Number(progress[c.id] || 0);
+        const done = p >= c.goal;
+        return {
+          ...c,
+          progress: p,
+          done,
+          claimed: !!claimed[c.id],
+        };
+      });
+      res.json({ ok: true, dayKey: dk, challenges });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: "failed_to_load_challenges" });
+    }
+  });
+
+  app.post("/api/challenges/claim", strictLimiter, requireLogin, express.json({ limit: "32kb" }), async (req, res) => {
+    try {
+      const userId = req.session.user.id;
+      const dk = dayKeyNow();
+      const id = String(req.body?.id || "");
+      const picked = pickDailyChallenges();
+      const challenge = picked.find((c) => c.id === id);
+      if (!challenge) return res.status(400).json({ ok: false, error: "unknown_challenge" });
+
+      const prog = await loadDailyProgress(userId, dk);
+      const progress = prog.progress || {};
+      const claimed = prog.claimed || {};
+      if (claimed[id]) return res.json({ ok: true, already: true });
+
+      const p = Number(progress[id] || 0);
+      if (p < challenge.goal) return res.status(400).json({ ok: false, error: "not_complete" });
+
+      claimed[id] = true;
+      await saveDailyProgress(userId, dk, progress, claimed, prog.pg);
+
+      // reward
+      try { await applyXpGain(userId, challenge.rewardXp || 0, { reason: "daily_challenge" }); } catch {}
+      try { await creditGold(userId, challenge.rewardGold || 0, `daily_challenge:${id}`); } catch {}
+
+      res.json({ ok: true, claimed: true });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: "failed_to_claim" });
+    }
+  });
+
+  app.get("/api/vibes", (_req, res) => {
+    res.json({ limit: VIBE_TAG_LIMIT, vibes: VIBE_TAGS });
+  });
+
+  app.get("/api/me/progression", requireLogin, async (req, res) => {
+    const uid = req.session.user.id;
+
+    const finish = async () => {
+      try {
+        // Keep current tick logic (SQLite) but mirror results into Postgres
+        await syncGoldXpThemeToPg(uid);
+
+        const result23 = await pgSafe(
+          "SELECT gold, xp FROM users WHERE id = $1 LIMIT 1",
+          [uid]
+        );
+        const rows = result23?.rows || [];
+        const row = rows[0];
+        if (!row) return res.status(404).send("Not found");
+
+        return res.json(progressionFromRow(row, true));
+      } catch (e) {
+        console.error(e);
+        return res.status(500).send("Failed");
+      }
+    };
+
+    if (onlineState.has(uid)) {
+      awardPassiveGold(uid, () => {
+        finish();
+      });
+    } else {
+      finish();
+    }
+  });
+
+  app.get("/api/me/gold", requireLogin, async (req, res) => {
+    const uid = req.session.user.id;
+
+    const finish = async () => {
+      try {
+        await syncGoldXpThemeToPg(uid);
+
+        const result24 = await pgSafe(
+          "SELECT gold FROM users WHERE id = $1 LIMIT 1",
+          [uid]
+        );
+        const rows = result24?.rows || [];
+        const row = rows[0];
+        if (!row) return res.status(404).send("Not found");
+
+        return res.json({ gold: Number(row.gold || 0) });
+      } catch (e) {
+        console.error(e);
+        return res.status(500).send("Failed");
+      }
+    };
+
+    if (onlineState.has(uid)) {
+      awardPassiveGold(uid, () => { finish(); });
+    } else {
+      finish();
+    }
+  });
+
+  app.post("/api/me/username", strictLimiter, requireLogin, async (req, res) => {
+    const userId = req.session.user.id;
+    const oldUsername = req.session.user.username;
+    const raw = String(req.body?.username || "").trim();
+    const newName = sanitizeUsername(raw);
+
+    if (!newName || newName.length < 2) {
+      return res.status(400).json({ ok: false, message: "Invalid username." });
+    }
+    if (normKey(newName) === normKey(req.session.user.username)) {
+      return res.status(400).json({ ok: false, message: "That is already your username." });
+    }
+    if (!(await pgUsersEnabled())) {
+      return res.status(503).json({ ok: false, message: "Username changes are unavailable right now." });
+    }
+
+    let nextGold = null;
+    const client = await pgPool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const existing = await client.query(
+        "SELECT id FROM users WHERE lower(username) = lower($1) AND id <> $2 LIMIT 1",
+        [newName, userId]
+      );
+      if (existing.rows?.length) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ ok: false, message: "Username already taken." });
+      }
+
+      const spend = await spendGoldInTransaction(client, userId, USERNAME_CHANGE_COST, "username_change");
+      if (!spend.ok) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ ok: false, message: spend.message || "Not enough gold.", gold: spend.gold ?? null });
+      }
+
+      await client.query("UPDATE users SET username = $1 WHERE id = $2", [newName, userId]);
+      await client.query("COMMIT");
+      nextGold = spend.gold;
+    } catch (e) {
+      try { await client.query("ROLLBACK"); } catch {}
+      if (e?.code === "23505") {
+        return res.status(409).json({ ok: false, message: "Username already taken." });
+      }
+      console.error("[username change]", e);
+      return res.status(500).json({ ok: false, message: "Failed to update username." });
+    } finally {
+      client.release();
+    }
+
+    // Log username history to SQLite
+    try {
+      await dbRunAsync(
+        "INSERT INTO username_history (user_id, old_username, new_username, changed_at, changed_by) VALUES (?, ?, ?, ?, ?)",
+        [userId, oldUsername, newName, Date.now(), 'self']
+      );
+    } catch (e) {
+      console.warn("[username history]", e?.message || e);
+    }
+
+    // Best-effort mirror to SQLite so legacy lookups remain consistent.
+    try {
+      await dbRunAsync("UPDATE users SET username = ? WHERE id = ?", [newName, userId]);
+    } catch (e) {
+      console.warn("[username change][sqlite]", e?.message || e);
+    }
+
+    req.session.user.username = newName;
+    return req.session.save((saveErr) => {
+      if (saveErr) return res.status(500).json({ ok: false, message: "Session save failed." });
+      updateLiveUsername(userId, newName);
+      return res.json({ ok: true, username: newName, gold: nextGold, cost: USERNAME_CHANGE_COST });
+    });
+  });
+
+  app.get("/api/me/theme", requireLogin, async (req, res) => {
+    try {
+      // Prefer Postgres
+      const result20 = await pgSafe(
+        "SELECT theme FROM users WHERE id = $1 LIMIT 1",
+        [req.session.user.id]
+      );
+      const rows = result20?.rows || [];
+      const row = rows[0];
+      if (!row) return res.status(404).send("Not found");
+
+      const theme = sanitizeThemeNameServer(row.theme);
+      if (!row.theme) await pgSafe("UPDATE users SET theme = $1 WHERE id = $2", [theme, req.session.user.id]);
+
+      req.session.user.theme = theme;
+          // Enforce private-theme rules server-side
+      const effective = canUseTheme(req.session.user, theme) ? theme : DEFAULT_THEME;
+      req.session.user.theme = effective;
+      return res.json({ theme: effective });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+
+  app.post("/api/me/theme", strictLimiter, requireLogin, async (req, res) => {
+    try {
+      const theme = sanitizeThemeNameServer(req.body?.theme);
+
+      // Enforce private-theme rules server-side
+      if (!canUseTheme(req.session.user, theme)) {
+        return res.status(403).json({ error: "Theme not allowed" });
+      }
+
+
+      // Update Postgres (new source of truth for theme)
+      await pgSafe("UPDATE users SET theme = $1 WHERE id = $2", [theme, req.session.user.id]);
+
+      // Keep SQLite in sync until login/user migration is fully done
+      db.run("UPDATE users SET theme = ? WHERE id = ?", [theme, req.session.user.id]);
+
+      req.session.user.theme = theme;
+      return res.json({ theme });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.post("/api/themes/purchase", strictLimiter, requireLogin, express.json({ limit: "8kb" }), async (req, res) => {
+    const userId = req.session.user.id;
+    const themeId = String(req.body?.themeId || "").trim();
+    const theme = THEME_BY_ID.get(themeId);
+    if (!theme) return res.status(404).json({ ok: false, error: "theme_not_found" });
+    if (!theme.isPurchasable || !theme.goldPrice) {
+      return res.status(400).json({ ok: false, error: "theme_not_purchasable" });
+    }
+
+    try {
+      if (await pgUserExists(userId)) {
+        const client = await pgPool.connect();
+        try {
+          await client.query("BEGIN");
+          const { rows } = await client.query(
+            "SELECT gold, prefs_json FROM users WHERE id = $1 LIMIT 1 FOR UPDATE",
+            [userId]
+          );
+          const row = rows?.[0];
+          if (!row) {
+            await client.query("ROLLBACK");
+            return res.status(404).json({ ok: false, error: "user_not_found" });
+          }
+          const gold = Number(row.gold || 0);
+          const prefs = normalizePrefs(safeJsonParse(row.prefs_json, {}), req.session.user.role);
+          const owned = new Set(normalizeThemeIdList(prefs.ownedThemeIds));
+          if (owned.has(themeId)) {
+            await client.query("COMMIT");
+            return res.json({ ok: true, gold, ownedThemeIds: Array.from(owned) });
+          }
+          if (gold < theme.goldPrice) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({ ok: false, error: "insufficient_gold", gold });
+          }
+          const nextGold = gold - theme.goldPrice;
+          owned.add(themeId);
+          const nextPrefs = normalizePrefs({ ...prefs, ownedThemeIds: Array.from(owned) }, req.session.user.role);
+          await client.query("UPDATE users SET gold = $1, prefs_json = $2::jsonb WHERE id = $3", [
+            nextGold,
+            JSON.stringify(nextPrefs),
+            userId,
+          ]);
+          await client.query("COMMIT");
+          db.run("UPDATE users SET gold = ?, prefs_json = ? WHERE id = ?", [
+            nextGold,
+            JSON.stringify(nextPrefs),
+            userId,
+          ]);
+          return res.json({ ok: true, gold: nextGold, ownedThemeIds: nextPrefs.ownedThemeIds });
+        } catch (e) {
+          await client.query("ROLLBACK");
+          throw e;
+        } finally {
+          client.release();
+        }
+      }
+    } catch (e) {
+      console.warn("[themes][purchase][pg] failed, falling back to sqlite:", e?.message || e);
+    }
+
+    db.get("SELECT gold, prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
+      if (!row) return res.status(404).json({ ok: false, error: "user_not_found" });
+      const gold = Number(row.gold || 0);
+      const prefs = normalizePrefs(safeJsonParse(row.prefs_json, {}), req.session.user.role);
+      const owned = new Set(normalizeThemeIdList(prefs.ownedThemeIds));
+      if (owned.has(themeId)) {
+        return res.json({ ok: true, gold, ownedThemeIds: Array.from(owned) });
+      }
+      if (gold < theme.goldPrice) {
+        return res.status(400).json({ ok: false, error: "insufficient_gold", gold });
+      }
+      const nextGold = gold - theme.goldPrice;
+      owned.add(themeId);
+      const nextPrefs = normalizePrefs({ ...prefs, ownedThemeIds: Array.from(owned) }, req.session.user.role);
+      db.run(
+        "UPDATE users SET gold = ?, prefs_json = ? WHERE id = ?",
+        [nextGold, JSON.stringify(nextPrefs), userId],
+        (err2) => {
+          if (err2) return res.status(500).json({ ok: false, error: "purchase_failed" });
+          return res.json({ ok: true, gold: nextGold, ownedThemeIds: nextPrefs.ownedThemeIds });
+        }
+      );
+    });
+  });
+
+  // ---- User prefs (badge colors, DM theme, etc)
+  function safeJsonParse(raw, fallback) {
+    try {
+      if (raw == null || raw === "") return fallback;
+      if (typeof raw === "object") return raw; // pg may already return json
+      return JSON.parse(raw);
+    } catch {
+      return fallback;
+    }
+  }
+  function safeString(value, fallback = "") {
+    if (typeof value === "string") return value;
+    if (value === null || value === undefined) return fallback;
+    return String(value);
+  }
+  function safeNumber(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  const PREFS_DEFAULTS = Object.freeze({
+    dmBadgePrefs: { direct: "#ed4245", group: "#5865f2" },
+    dmNeonColor: "#5865f2",
+    dmThemePrefs: { background: "#1e1f22" },
+    pinnedThemeIds: [],
+    favoriteThemeIds: [],
+    ownedThemeIds: [],
+    sound: {
+      enabled: false,
+      room: true,
+      dm: true,
+      mention: true,
+      sent: false,
+      receive: false,
+      reaction: false,
+    },
+  });
+  function normalizeSoundPrefs(raw) {
+    const base = { ...PREFS_DEFAULTS.sound };
+    if (!raw || typeof raw !== "object") return base;
+    for (const key of Object.keys(base)) {
+      if (typeof raw[key] === "boolean") base[key] = raw[key];
+    }
+    return base;
+  }
+  function normalizeThemeIdList(raw) {
+    if (!Array.isArray(raw)) return [];
+    const unique = [];
+    const seen = new Set();
+    for (const id of raw) {
+      const key = String(id || "");
+      if (!THEME_ID_SET.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      unique.push(key);
+    }
+    return unique;
+  }
+  function enforcePinnedLimit(prefs, role) {
+    const maxPins = roleRank(role || "User") >= roleRank("VIP") ? 5 : 2;
+    prefs.pinnedThemeIds = normalizeThemeIdList(prefs.pinnedThemeIds).slice(0, maxPins);
+    return prefs;
+  }
+  function normalizePrefs(raw, role = "User") {
+    const prefs = raw && typeof raw === "object" ? raw : {};
+    const dmBadgePrefs = { ...PREFS_DEFAULTS.dmBadgePrefs };
+    if (prefs.dmBadgePrefs && typeof prefs.dmBadgePrefs === "object") {
+      if (typeof prefs.dmBadgePrefs.direct === "string") dmBadgePrefs.direct = prefs.dmBadgePrefs.direct;
+      if (typeof prefs.dmBadgePrefs.group === "string") dmBadgePrefs.group = prefs.dmBadgePrefs.group;
+    }
+    const dmNeonColor = typeof prefs.dmNeonColor === "string"
+      ? prefs.dmNeonColor
+      : (typeof prefs.dmThemePrefs?.background === "string" ? prefs.dmThemePrefs.background : PREFS_DEFAULTS.dmNeonColor);
+    const dmThemePrefs = { ...PREFS_DEFAULTS.dmThemePrefs };
+    if (prefs.dmThemePrefs && typeof prefs.dmThemePrefs === "object") {
+      if (typeof prefs.dmThemePrefs.background === "string") dmThemePrefs.background = prefs.dmThemePrefs.background;
+    }
+    return {
+      ...prefs,
+      pinnedThemeIds: normalizeThemeIdList(prefs.pinnedThemeIds),
+      favoriteThemeIds: normalizeThemeIdList(prefs.favoriteThemeIds),
+      ownedThemeIds: normalizeThemeIdList(prefs.ownedThemeIds),
+      dmBadgePrefs,
+      dmNeonColor,
+      dmThemePrefs,
+      sound: normalizeSoundPrefs(prefs.sound),
+      chatFx: sanitizeChatFx(prefs.chatFx),
+      textStyle: sanitizeTextStyle(prefs.textStyle, role),
+      customization: sanitizeCustomization(prefs.customization, prefs.textStyle, role)
+    };
+  }
+  function sanitizePrefsInput(p, role = "User") {
+    const out = {};
+    if (p && typeof p === "object") {
+      if (p.dmBadgePrefs && typeof p.dmBadgePrefs === "object") out.dmBadgePrefs = p.dmBadgePrefs;
+      if (typeof p.dmNeonColor === "string") out.dmNeonColor = p.dmNeonColor;
+      if (p.dmThemePrefs && typeof p.dmThemePrefs === "object") out.dmThemePrefs = p.dmThemePrefs;
+      if (Array.isArray(p.pinnedThemeIds)) out.pinnedThemeIds = normalizeThemeIdList(p.pinnedThemeIds);
+      if (Array.isArray(p.favoriteThemeIds)) out.favoriteThemeIds = normalizeThemeIdList(p.favoriteThemeIds);
+      if (p.chatFx && typeof p.chatFx === "object") out.chatFx = sanitizeChatFx(p.chatFx);
+      if (p.textStyle && typeof p.textStyle === "object") out.textStyle = sanitizeTextStyle(p.textStyle, role);
+      if (p.customization && typeof p.customization === "object") {
+        out.customization = sanitizeCustomization(p.customization, p.textStyle, role);
+      }
+      if (p.userNameStyle && typeof p.userNameStyle === "object") {
+        out.customization = sanitizeCustomization({ userNameStyle: p.userNameStyle }, p.textStyle, role);
+      }
+      if (p.messageTextStyle && typeof p.messageTextStyle === "object") {
+        const existing = out.customization || sanitizeCustomization(p.customization, p.textStyle, role) || {};
+        out.customization = sanitizeCustomization({ ...existing, messageTextStyle: p.messageTextStyle }, p.textStyle, role);
+      }
+      if (p.sound && typeof p.sound === "object") {
+        const sound = {};
+        for (const key of ["enabled", "room", "dm", "mention", "sent", "receive", "reaction"]) {
+          if (typeof p.sound[key] === "boolean") sound[key] = p.sound[key];
+        }
+        out.sound = sound;
+      }
+    }
+    return out;
+  }
+
+  function buildAuthorsFxMap(usernames, cb) {
+    const unique = Array.from(new Set((usernames || []).filter((name) => typeof name === "string" && name.trim())));
+    if (!unique.length) return cb({});
+
+    // Prefer Postgres during the SQLite -> PG migration.
+    (async () => {
+      const base = {};
+      for (const name of unique) base[name] = mergeChatFxWithCustomization(null, null, null);
+
+      try {
+        if (pgPool) {
+            const result4 = await pgSafe(
+              "SELECT username, prefs_json FROM users WHERE username = ANY($1::text[])",
+              [unique]
+            );
+            const rows = result4?.rows || [];
+            for (const row of rows || []) {
+              const prefs = safeJsonParse(row?.prefs_json, {});
+              base[row.username] = mergeChatFxWithCustomization(prefs?.chatFx, prefs?.customization, prefs?.textStyle);
+            }
+            return cb(base);
+          }
+      } catch (e) {
+        console.warn("[chatFx][authorsFx][pg] failed, falling back to sqlite:", e?.message || e);
+      }
+
+      const placeholders = unique.map(() => "?").join(",");
+      db.all(
+        `SELECT username, prefs_json FROM users WHERE username IN (${placeholders})`,
+        unique,
+        (_e, rows) => {
+          for (const row of rows || []) {
+            const prefs = safeJsonParse(row?.prefs_json, {});
+            base[row.username] = mergeChatFxWithCustomization(prefs?.chatFx, prefs?.customization, prefs?.textStyle);
+          }
+          cb(base);
+        }
+      );
+    })();
+  }
+
+  function emitUserFxUpdate(socket) {
+    if (!socket?.user) return;
+    io.emit("user fx updated", {
+      userId: socket.user.id,
+      username: socket.user.username,
+      chatFx: mergeChatFxWithCustomization(socket.user.chatFx, socket.user.customization, socket.user.textStyle, socket.user.role),
+      customization: sanitizeCustomization(socket.user.customization, socket.user.textStyle, socket.user.role)
+    });
+  }
+
+  function updateLiveChatFx(userId, chatFx) {
+    const sid = socketIdByUserId.get(userId);
+    const s = sid ? io.sockets.sockets.get(sid) : null;
+    if (!s?.user) return;
+    s.user.chatFx = sanitizeChatFx(chatFx);
+    if (s.currentRoom) emitUserList(s.currentRoom);
+    emitUserFxUpdate(s);
+  }
+
+  function updateLiveCustomization(userId, customization, textStyle) {
+    const sid = socketIdByUserId.get(userId);
+    const s = sid ? io.sockets.sockets.get(sid) : null;
+    if (!s?.user) return;
+    s.user.customization = sanitizeCustomization(customization, textStyle, s.user.role);
+    s.user.textStyle = sanitizeTextStyle(textStyle, s.user.role);
+    if (s.currentRoom) emitUserList(s.currentRoom);
+    emitUserFxUpdate(s);
+  }
+
+  // API endpoint to get text style presets (gradient and neon)
+  app.get("/api/text-style-presets", requireLogin, (req, res) => {
+    const userRole = req.session.user?.role || "User";
+    const isVip = requireMinRole(userRole, "VIP");
+  
+    // Only VIP+ users can access gradient and neon presets
+    if (!isVip) {
+      return res.json({
+        gradients: {},
+        neons: {},
+        vipRequired: true
+      });
+    }
+  
+    return res.json({
+      gradients: GRADIENT_PRESETS,
+      neons: NEON_PRESETS,
+      vipRequired: false
+    });
+  });
+
+  app.get("/api/me/prefs", requireLogin, async (req, res) => {
+    const userId = req.session.user.id;
+    const userRole = req.session.user.role || "User";
+    try {
+      // Prefer Postgres if the user exists there
+      if (await pgUserExists(userId)) {
+        const result25 = await pgSafe("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
+        const rows = result25?.rows || [];
+        const prefs = normalizePrefs(safeJsonParse(rows?.[0]?.prefs_json, {}), userRole);
+        return res.json({ prefs });
+      }
+    } catch (e) {
+      console.warn("[prefs][pg] read failed, falling back to sqlite:", e?.message || e);
+    }
+
+    db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (err, row) => {
+      if (err) return res.status(500).send("Failed");
+      const prefs = normalizePrefs(safeJsonParse(row?.prefs_json, {}), userRole);
+      return res.json({ prefs });
+    });
+  });
+
+  app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
+    const userId = req.session.user.id;
+    const userRole = req.session.user.role || "User";
+    const incoming = sanitizePrefsInput(req.body?.prefs ?? req.body, userRole);
+    const shouldUpdateChatFx = Object.prototype.hasOwnProperty.call(incoming || {}, "chatFx");
+    const shouldUpdateTextStyle = Object.prototype.hasOwnProperty.call(incoming || {}, "textStyle");
+    const shouldUpdateCustomization = Object.prototype.hasOwnProperty.call(incoming || {}, "customization")
+      || Object.prototype.hasOwnProperty.call(incoming || {}, "userNameStyle")
+      || Object.prototype.hasOwnProperty.call(incoming || {}, "messageTextStyle");
+
+    try {
+      if (await pgUserExists(userId)) {
+        const result26 = await pgSafe("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
+        const rows = result26?.rows || [];
+        const current = safeJsonParse(rows?.[0]?.prefs_json, {});
+        const currentPrefs = normalizePrefs(current || {}, userRole);
+        const mergedCustomization = sanitizeCustomization(
+          { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
+          currentPrefs.textStyle || incoming.textStyle,
+          userRole
+        );
+        const merged = enforcePinnedLimit(
+          normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }, userRole),
+          userRole
+        );
+        // IMPORTANT: node-postgres does not reliably serialize plain JS objects to JSON/JSONB.
+        // Always stringify and cast to jsonb to ensure prefs are actually persisted.
+        await pgSafe("UPDATE users SET prefs_json = $1::jsonb WHERE id = $2", [JSON.stringify(merged), userId]);
+
+        // Keep SQLite in sync
+        db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId]);
+        if (shouldUpdateChatFx) {
+          req.session.user.chatFx = sanitizeChatFx(merged.chatFx);
+          updateLiveChatFx(userId, merged.chatFx);
+        }
+        if (shouldUpdateTextStyle) {
+          req.session.user.textStyle = sanitizeTextStyle(merged.textStyle, userRole);
+        }
+        if (shouldUpdateCustomization) {
+          req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle, userRole);
+          updateLiveCustomization(userId, merged.customization, merged.textStyle);
+        }
+        return res.json({ ok: true, prefs: merged });
+      }
+    } catch (e) {
+      console.warn("[prefs][pg] update failed, falling back to sqlite:", e?.message || e);
+    }
+
+    // SQLite fallback
+    db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
+      const current = safeJsonParse(row?.prefs_json, {});
+      const currentPrefs = normalizePrefs(current || {}, userRole);
+      const mergedCustomization = sanitizeCustomization(
+        { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
+        currentPrefs.textStyle || incoming.textStyle,
+        userRole
+      );
+      const merged = enforcePinnedLimit(
+        normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }, userRole),
+        userRole
+      );
+      db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId], (err2) => {
+        if (err2) return res.status(500).send("Failed");
+        if (shouldUpdateChatFx) {
+          req.session.user.chatFx = sanitizeChatFx(merged.chatFx);
+          updateLiveChatFx(userId, merged.chatFx);
+        }
+        if (shouldUpdateTextStyle) {
+          req.session.user.textStyle = sanitizeTextStyle(merged.textStyle, userRole);
+        }
+        if (shouldUpdateCustomization) {
+          req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle, userRole);
+          updateLiveCustomization(userId, merged.customization, merged.textStyle);
+        }
+        return res.json({ ok: true, prefs: merged });
+      });
+    });
+  });
+
+  app.post("/api/profile/customization", strictLimiter, requireLogin, async (req, res) => {
+    const userId = req.session.user.id;
+    const userRole = req.session.user.role || "User";
+    const rawCustomization = req.body?.customization ?? {
+      userNameStyle: req.body?.userNameStyle,
+      messageTextStyle: req.body?.messageTextStyle
+    };
+    const incoming = sanitizePrefsInput({ customization: rawCustomization, textStyle: req.body?.textStyle }, userRole);
+    const shouldUpdateCustomization = Object.prototype.hasOwnProperty.call(incoming || {}, "customization");
+    if (!shouldUpdateCustomization) return res.status(400).send("Invalid customization");
+
+    try {
+      if (await pgUserExists(userId)) {
+        const result27 = await pgSafe("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
+        const rows = result27?.rows || [];
+        const current = safeJsonParse(rows?.[0]?.prefs_json, {});
+        const currentPrefs = normalizePrefs(current || {}, userRole);
+        const mergedCustomization = sanitizeCustomization(
+          { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
+          currentPrefs.textStyle || incoming.textStyle,
+          userRole
+        );
+        const merged = enforcePinnedLimit(
+          normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }, userRole),
+          userRole
+        );
+        await pgSafe("UPDATE users SET prefs_json = $1::jsonb WHERE id = $2", [JSON.stringify(merged), userId]);
+        db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId]);
+        req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle, userRole);
+        updateLiveCustomization(userId, merged.customization, merged.textStyle);
+        return res.json({ ok: true, customization: merged.customization, prefs: merged });
+      }
+    } catch (e) {
+      console.warn("[prefs][pg] customization update failed, falling back to sqlite:", e?.message || e);
+    }
+
+    db.get("SELECT prefs_json FROM users WHERE id = ?", [userId], (_e, row) => {
+      const current = safeJsonParse(row?.prefs_json, {});
+      const currentPrefs = normalizePrefs(current || {}, userRole);
+      const mergedCustomization = sanitizeCustomization(
+        { ...(currentPrefs.customization || {}), ...(incoming.customization || {}) },
+        currentPrefs.textStyle || incoming.textStyle,
+        userRole
+      );
+      const merged = enforcePinnedLimit(
+        normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }, userRole),
+        userRole
+      );
+      db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId], (err2) => {
+        if (err2) return res.status(500).send("Failed");
+        req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle, userRole);
+        updateLiveCustomization(userId, merged.customization, merged.textStyle);
+        return res.json({ ok: true, customization: merged.customization, prefs: merged });
+      });
+    });
+  });
+
+  function sortLeaderboardRows(rows, valueKey) {
+    return rows
+      .map((r) => ({ ...r, username: r.username || "" }))
+      .sort((a, b) => {
+        const diff = Number(b[valueKey] || 0) - Number(a[valueKey] || 0);
+        if (diff !== 0) return diff;
+        const base = String(a.username).localeCompare(String(b.username), undefined, { sensitivity: "base" });
+        if (base !== 0) return base;
+        return String(a.username).localeCompare(String(b.username));
+      });
+  }
+
+  let leaderboardCache = { payload: null, updatedAt: 0, inFlight: null };
+
+  async function buildLeaderboardPayload() {
+    const merged = new Map();
+
+    if (await pgUsersEnabled()) {
+      try {
+        const result28 = await pgSafe(
+          `SELECT u.id,
+                  u.username,
+                  COALESCE(u.xp, 0) AS xp,
+                  COALESCE(u.gold, 0) AS gold,
+                  COALESCE(u.dice_sixes, 0) AS dice_sixes,
+                  COALESCE(COUNT(pl.user_id), 0) AS likes
+             FROM users u
+             LEFT JOIN profile_likes pl ON pl.target_user_id = u.id
+            GROUP BY u.id`
+        );
+        const rows = result28?.rows || [];
+        for (const row of rows || []) {
+          const id = Number(row.id);
+          if (!Number.isInteger(id)) continue;
+          merged.set(id, row);
+        }
+      } catch (e) {
+        console.warn("[leaderboard][pg] failed, falling back to sqlite:", e?.message || e);
+      }
+    }
+
+    // Backfill any users that only exist in SQLite so the leaderboard includes everyone.
+    const sqliteRows = await dbAllAsync(
+      `SELECT u.id,
+              u.username,
+              COALESCE(u.xp, 0) AS xp,
+              COALESCE(u.gold, 0) AS gold,
+              COALESCE(u.dice_sixes, 0) AS dice_sixes,
+              COALESCE(COUNT(pl.user_id), 0) AS likes
+         FROM users u
+         LEFT JOIN profile_likes pl ON pl.target_user_id = u.id
+        GROUP BY u.id`
+    );
+    for (const row of sqliteRows || []) {
+      const id = Number(row.id);
+      if (!Number.isInteger(id) || merged.has(id)) continue;
+      merged.set(id, row);
+    }
+
+    const rows = Array.from(merged.values());
+    const xpRowsRaw = rows.map((r) => ({ username: r.username, xp: r.xp }));
+    const goldRowsRaw = rows.map((r) => ({ username: r.username, gold: r.gold }));
+    const diceRowsRaw = rows.map((r) => ({ username: r.username, dice_sixes: r.dice_sixes }));
+    const likeRowsRaw = rows.map((r) => ({ username: r.username, likes: r.likes }));
+
+    const xpRows = sortLeaderboardRows(xpRowsRaw, "xp");
+    const goldRows = sortLeaderboardRows(goldRowsRaw, "gold");
+    const diceRows = sortLeaderboardRows(diceRowsRaw, "dice_sixes");
+    const likeRows = sortLeaderboardRows(likeRowsRaw, "likes");
+
+    return {
+      xp: xpRows.map((r) => ({ username: r.username, level: levelInfo(r.xp || 0).level, xp: Number(r.xp || 0) })),
+      gold: goldRows.map((r) => ({ username: r.username, gold: Number(r.gold || 0) })),
+      dice: diceRows.map((r) => ({ username: r.username, sixes: Number(r.dice_sixes || 0) })),
+      likes: likeRows.map((r) => ({ username: r.username, likes: Number(r.likes || 0) })),
+    };
+  }
+
+  async function rebuildLeaderboards({ force = false } = {}) {
+    if (leaderboardCache.inFlight && !force) return leaderboardCache.inFlight;
+    leaderboardCache.inFlight = (async () => {
+      const payload = await buildLeaderboardPayload();
+      leaderboardCache.payload = payload;
+      leaderboardCache.updatedAt = Date.now();
+      return payload;
+    })();
+    try {
+      return await leaderboardCache.inFlight;
+    } finally {
+      leaderboardCache.inFlight = null;
+    }
+  }
+
+  async function sendLeaderboard(res) {
+    try {
+      const now = Date.now();
+      const shouldRefresh = !leaderboardCache.payload || (now - leaderboardCache.updatedAt > 10_000);
+      const payload = shouldRefresh ? await rebuildLeaderboards({ force: true }) : leaderboardCache.payload;
+      return res.json(payload);
+    } catch (err) {
+      return res.status(500).json({ ok: false });
+    }
+  }
+
+  async function fetchChessLeaderboard(limit = 50, offset = 0) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    if (await chessPgEnabled()) {
+      const result21 = await pgSafe(
+        `SELECT s.user_id,
+                u.username,
+                s.chess_elo,
+                s.chess_games_played,
+                s.chess_wins,
+                s.chess_losses,
+                s.chess_draws,
+                s.chess_peak_elo
+           FROM chess_user_stats s
+           JOIN users u ON u.id = s.user_id
+          ORDER BY s.chess_elo DESC, s.chess_games_played DESC, u.username ASC
+          LIMIT $1 OFFSET $2`,
+        [safeLimit, safeOffset]
+      );
+      const rows = result21?.rows || [];
+      return rows || [];
+    }
+
+    const rows = await dbAllAsync(
+      `SELECT s.user_id,
+              u.username,
+              s.chess_elo,
+              s.chess_games_played,
+              s.chess_wins,
+              s.chess_losses,
+              s.chess_draws,
+              s.chess_peak_elo
+         FROM chess_user_stats s
+         JOIN users u ON u.id = s.user_id
+        ORDER BY s.chess_elo DESC, s.chess_games_played DESC, u.username ASC
+        LIMIT ? OFFSET ?`,
+      [safeLimit, safeOffset]
+    );
+    return rows || [];
+  }
+
+  app.get("/api/leaderboard", requireLogin, async (_req, res) => sendLeaderboard(res));
+  app.get("/api/leaderboards", requireLogin, async (_req, res) => sendLeaderboard(res));
+
+  app.get("/api/chess/leaderboard", requireLogin, async (req, res) => {
+    try {
+      const rows = await fetchChessLeaderboard(req.query?.limit, req.query?.offset);
+      const payload = rows.map((row) => {
+        const games = Number(row.chess_games_played || 0);
+        const wins = Number(row.chess_wins || 0);
+        const losses = Number(row.chess_losses || 0);
+        const draws = Number(row.chess_draws || 0);
+        const winrate = games > 0 ? Math.round((wins / games) * 1000) / 10 : 0;
+        return {
+          userId: Number(row.user_id),
+          username: row.username,
+          elo: Number(row.chess_elo || CHESS_DEFAULT_ELO),
+          gamesPlayed: games,
+          wins,
+          losses,
+          draws,
+          winrate,
+          peakElo: Number(row.chess_peak_elo || row.chess_elo || CHESS_DEFAULT_ELO),
+        };
+      });
+      return res.json({ rows: payload, limit: Number(req.query?.limit || 50), offset: Number(req.query?.offset || 0) });
+    } catch (err) {
+      console.warn("[chess] leaderboard failed:", err?.message || err);
+      return res.status(500).json({ ok: false });
+    }
+  });
+
+  app.post("/api/me/award-gold", strictLimiter, requireLogin, (req, res) => {
+    if (process.env.ALLOW_DEV_AWARD_GOLD !== "1") return res.status(404).send("Not found");
+    const amount = clamp(req.body?.amount ?? req.body?.gold ?? 0, 1, 100000);
+    if (!amount) return res.status(400).send("Invalid amount");
+
+    db.run("UPDATE users SET gold = gold + ? WHERE id = ?", [amount, req.session.user.id], (err) => {
+      if (err) return res.status(500).send("Failed");
+      emitProgressionUpdate(req.session.user.id);
+      db.get("SELECT gold FROM users WHERE id = ?", [req.session.user.id], (_e, row) => {
+        return res.json({ ok: true, gold: row?.gold || 0 });
+      });
+    });
+  });
+  // ---- Rooms API
+  app.get("/rooms", requireLogin, async (req, res) => {
+    try {
+      const payload = await buildRoomStructurePayload(req.session?.user?.id);
+      return res.json(payload);
+    } catch (e) {
+      console.warn("[rooms] failed to load room structure", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.get("/api/rooms/structure", requireLogin, async (req, res) => {
+    try {
+      const payload = await buildRoomStructurePayload(req.session?.user?.id);
+      return res.json(payload);
+    } catch (e) {
+      console.warn("[rooms] failed to load room structure", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  async function buildSurvivalHistoryPayload() {
+    const seasons = await fetchSurvivalHistory(10);
+    const result = [];
+    for (const season of seasons || []) {
+      const winner = season.status === "finished" ? await fetchSurvivalWinner(season.id) : null;
+      result.push({
+        id: season.id,
+        title: season.title,
+        status: season.status,
+        created_at: season.created_at,
+        winner,
+      });
+    }
+    return result;
+  }
+
+  function formatSurvivalSeason(season) {
+    if (!season) return null;
+    const { seed, options } = parseSurvivalSeedPayload(season.rng_seed);
+    return {
+      id: season.id,
+      room_id: season.room_id,
+      created_by_user_id: season.created_by_user_id,
+      title: season.title,
+      status: season.status,
+      day_index: season.day_index,
+      phase: season.phase,
+      rng_seed: seed || null,
+      options: options || {},
+      created_at: season.created_at,
+      updated_at: season.updated_at,
+    };
+  }
+
+
+  function buildSurvivalArenaPayload(season, participants = []) {
+    if (!season) return null;
+    const { seed } = parseSurvivalSeedPayload(season.rng_seed);
+    const rng = createSeededRng(`${seed || "survival"}:arena:${season.day_index}:${season.phase}`);
+    const dangerLevels = {};
+    for (const z of SURVIVAL_ZONES) {
+      // 0–5, lightly influenced by population + RNG (purely cosmetic for now).
+      const pop = participants.filter((p) => p.alive && normalizeSurvivalZoneName(p.location) === z).length;
+      const base = clamp(Math.round(rng() * 3) + (pop ? 1 : 0), 0, 5);
+      dangerLevels[z] = base;
+    }
+    const lobbySet = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
+    return {
+      zones: [...SURVIVAL_ZONES],
+      dangerLevels,
+      lobbyUserIds: Array.from(lobbySet.values()),
+    };
+  }
+
+  async function buildSurvivalPayload(season, { beforeId = null, limit = 200 } = {}) {
+    if (!season) {
+      return { season: null, participants: [], alliances: [], events: [], history: await buildSurvivalHistoryPayload() };
+    }
+    const [participants, alliances, events, history, winner] = await Promise.all([
+      fetchSurvivalParticipants(season.id),
+      fetchSurvivalAlliances(season.id),
+      fetchSurvivalEvents(season.id, { limit, beforeId }),
+      buildSurvivalHistoryPayload(),
+      season.status === "finished" ? fetchSurvivalWinner(season.id) : Promise.resolve(null),
+    ]);
+    return {
+      season: formatSurvivalSeason(season),
+      participants,
+      alliances,
+      events,
+      winner,
+      history,
+      arena: buildSurvivalArenaPayload(season, participants),
+    };
+  }
+
+  // Admin+ can create rooms
+  app.post("/rooms", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
+    const actor = req.session.user;
+    if (!requireMinRole(actor.role, "Admin")) return res.status(403).send("Forbidden");
+
+    const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+    if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+
+    const name = sanitizeRoomName(req.body?.name || req.body?.room || "");
+    if (!name) return res.status(400).send("Invalid room name");
+
+    try {
+      const row = await (await pgUsersEnabled())
+        ? (async () => {
+          const result2 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [name]);
+          const rows = result2?.rows || [];
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(`SELECT name FROM rooms WHERE name=?`, [name]);
+      if (row) return res.status(409).send("Room already exists");
+
+      const requestedCategoryId = Number(req.body?.category_id) || null;
+      const requestedMasterId = Number(req.body?.master_id) || null;
+      const requestedUserRoom = req.body?.is_user_room ? true : false;
+      const resolved = await resolveRoomCategoryId({
+        categoryId: requestedCategoryId,
+        masterId: requestedMasterId,
+        isUserRoom: requestedUserRoom,
+      });
+      const categoryId = resolved?.categoryId ?? null;
+      let categoryRow = null;
+      if (categoryId) {
+        if (await pgUsersEnabled()) {
+          const result3 = await pgSafe(
+            `SELECT c.id, c.master_id, m.name as master_name
+               FROM room_categories c
+               JOIN room_master_categories m ON m.id = c.master_id
+              WHERE c.id = $1 LIMIT 1`,
+            [categoryId]
+          );
+          const rows = result3?.rows || [];
+          categoryRow = rows?.[0] || null;
+        } else {
+          categoryRow = await dbGetAsync(
+            `SELECT c.id, c.master_id, m.name as master_name
+               FROM room_categories c
+               JOIN room_master_categories m ON m.id = c.master_id
+              WHERE c.id = ? LIMIT 1`,
+            [categoryId]
+          );
+        }
+      }
+      const isUserRoom = categoryRow?.master_name === "User Rooms" ? 1 : 0;
+      let nextSort = { maxSort: 0, maxsort: 0 };
+      if (categoryId) {
+        if (await pgUsersEnabled()) {
+          const result4 = await pgSafe(
+            `SELECT COALESCE(MAX(room_sort_order), 0) as maxsort FROM rooms WHERE category_id = $1`,
+            [categoryId]
+          );
+          const rows = result4?.rows || [];
+          nextSort = rows?.[0] || nextSort;
+        } else {
+          nextSort = await dbGetAsync(
+            `SELECT COALESCE(MAX(room_sort_order), 0) as maxSort FROM rooms WHERE category_id = ?`,
+            [categoryId]
+          );
+        }
+      }
+      const sortOrder = Number(nextSort?.maxsort || nextSort?.maxSort || 0) + 1;
+
+      if (await pgUsersEnabled()) {
+        await pgSafe(
+          `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived, is_system)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+          [name, actor.id, Date.now(), categoryId, sortOrder, actor.id, isUserRoom,
+           Number(req.body?.vip_only)||0,
+           Number(req.body?.staff_only)||0,
+           Math.max(0, Math.min(999, Number(req.body?.min_level)||0)),
+           Number(req.body?.is_locked)||0,
+           Number(req.body?.maintenance_mode)||0,
+           (req.body?.events_enabled === 0 || req.body?.events_enabled === "0") ? 0 : 1,
+           Math.max(0, Math.min(3600, Number(req.body?.slowmode_seconds)||0)),
+           0,
+           0]
+        );
+      } else {
+        await dbRunAsync(
+          `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived, is_system)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [name, actor.id, Date.now(), categoryId, sortOrder, actor.id, isUserRoom,
+           Number(req.body?.vip_only)||0,
+           Number(req.body?.staff_only)||0,
+           Math.max(0, Math.min(999, Number(req.body?.min_level)||0)),
+           Number(req.body?.is_locked)||0,
+           Number(req.body?.maintenance_mode)||0,
+           (req.body?.events_enabled === 0 || req.body?.events_enabled === "0") ? 0 : 1,
+           Math.max(0, Math.min(3600, Number(req.body?.slowmode_seconds)||0)),
+           0,
+           0]
+        );
+      }
+
+      logModAction({ actor, action: "room.create", room: name, details: null });
+      await applyRoomStructureChange({
+        action: "room.create",
+        actorUserId: actor.id,
+        auditPayload: { name, category_id: categoryId, is_user_room: isUserRoom },
+      });
+
+      return res.json({ ok: true, name });
+    } catch (e) {
+      console.warn("[rooms] create failed", e?.message || e);
+      return res.status(500).send("Failed to create room");
+    }
+  });
+
+  // ---- Survival Simulator API
+
+  // Lobby endpoints (opt-in list for quick season fills)
+  app.get("/api/survival/lobby", requireLogin, async (_req, res) => {
+    try {
+      const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
+      return res.json({ user_ids: Array.from(set.values()) });
+    } catch {
+      return res.json({ user_ids: [] });
+    }
+  });
+
+  app.post("/api/survival/lobby/join", requireLogin, async (req, res) => {
+    try {
+      const uid = Number(req.session?.user?.id);
+      if (!uid) return res.status(401).send("Unauthorized");
+      const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
+      set.add(uid);
+      io.to(SURVIVAL_ROOM_ID).emit("survival:lobby", { user_ids: Array.from(set.values()) });
+      return res.json({ ok: true, user_ids: Array.from(set.values()) });
+    } catch (e) {
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.post("/api/survival/lobby/leave", requireLogin, async (req, res) => {
+    try {
+      const uid = Number(req.session?.user?.id);
+      if (!uid) return res.status(401).send("Unauthorized");
+      const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
+      set.delete(uid);
+      io.to(SURVIVAL_ROOM_ID).emit("survival:lobby", { user_ids: Array.from(set.values()) });
+      return res.json({ ok: true, user_ids: Array.from(set.values()) });
+    } catch (e) {
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.get("/api/survival/current", requireLogin, async (_req, res) => {
+    try {
+      const season = await fetchSurvivalCurrentSeason();
+      const payload = await buildSurvivalPayload(season);
+      return res.json(payload);
+    } catch (e) {
+      console.warn("[survival] current failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.get("/api/survival/seasons/:id", requireLogin, async (req, res) => {
+    try {
+      const beforeId = req.query?.before ? Number(req.query.before) : null;
+      const season = await fetchSurvivalSeasonById(req.params.id);
+      if (!season) return res.status(404).send("Not found");
+      const payload = await buildSurvivalPayload(season, { beforeId });
+      return res.json(payload);
+    } catch (e) {
+      console.warn("[survival] fetch season failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json({ limit: "32kb" }), async (req, res) => {
+    const now = Date.now();
+    const lastStart = survivalSeasonCooldownByRoom.get(SURVIVAL_ROOM_DB_ID) || 0;
+    if (now - lastStart < SURVIVAL_SEASON_COOLDOWN_MS) {
+      return res.status(429).json({ message: "Please wait before starting another season." });
+    }
+
+    const running = await fetchSurvivalCurrentSeason();
+    if (running && running.status === "running") {
+      return res.status(409).json({ message: "A season is already running." });
+    }
+
+    const titleRaw = String(req.body?.title || "").trim();
+    const title = titleRaw || `Season — ${new Date(now).toLocaleString()}`;
+    const participantIds = Array.isArray(req.body?.participant_user_ids)
+      ? req.body.participant_user_ids
+      : [];
+    const npcRaw = String(req.body?.npc_names || "").trim();
+    const fillSlots = Number(req.body?.fill_slots || 0) || 0;
+    // include_lobby is accepted for client compatibility; if you later persist lobby signups,
+    // this flag can add them here.
+    const includeLobby = !!req.body?.include_lobby;
+    const options = {
+      includeCouples: !!req.body?.options?.includeCouples,
+      chaoticMode: !!req.body?.options?.chaoticMode,
+    };
+
+    // If requested, merge in current lobby signups as participants (deduped).
+    if (includeLobby) {
+      const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
+      const lobbyIds = Array.from(set.values()).map((x) => Number(x)).filter((x) => x > 0);
+      if (lobbyIds.length) {
+        const merged = new Set([...(participantIds || []).map((x) => Number(x)).filter((x) => x > 0), ...lobbyIds]);
+        participantIds.length = 0;
+        for (const id of merged.values()) participantIds.push(id);
+      }
+    }
+    // User snapshots (real site users)
+    const userSnapshots = await fetchSurvivalUserSnapshots(participantIds);
+
+    // NPC names typed by owner (comma/newline separated)
+    const npcTyped = npcRaw
+      ? npcRaw
+          .split(/[\n,]/g)
+          .map((s) => String(s || "").trim())
+          .filter(Boolean)
+      : [];
+    const npcNames = [];
+    {
+      const seen = new Set();
+      for (const n of npcTyped) {
+        const key = n.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        npcNames.push(n.slice(0, 40));
+        if (npcNames.length >= 80) break;
+      }
+    }
+
+    // Total participants can be users + NPCs. We only require at least two TOTAL.
+    const baseCount = userSnapshots.length + npcNames.length;
+    const desiredCount = fillSlots > 0 ? Math.max(fillSlots, baseCount) : baseCount;
+    if (desiredCount < 2) {
+      return res.status(400).json({ message: "Add at least two total participants (users or NPC names)." });
+    }
+
+    const seed = crypto.randomBytes(8).toString("hex");
+    const rng = createSeededRng(seed);
+
+    // Auto-fill NPC slots to desiredCount using a fixed pool (25 male / 25 female)
+    if (desiredCount > baseCount) {
+      const used = new Set([
+        ...userSnapshots.map((u) => String(u.display_name || "").toLowerCase()),
+        ...npcNames.map((n) => String(n).toLowerCase()),
+      ]);
+      const pool = [...SURVIVAL_AUTOFILL_POOL.female, ...SURVIVAL_AUTOFILL_POOL.male];
+      // Shuffle with seeded RNG
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        const tmp = pool[i];
+        pool[i] = pool[j];
+        pool[j] = tmp;
+      }
+      let need = desiredCount - baseCount;
+      for (const name of pool) {
+        if (need <= 0) break;
+        const key = String(name).toLowerCase();
+        if (used.has(key)) continue;
+        used.add(key);
+        npcNames.push(String(name));
+        need--;
+      }
+      // Hard fallback if pool exhausted
+      let t = 1;
+      while (need > 0) {
+        const name = `Tribute ${t++}`;
+        const key = name.toLowerCase();
+        if (!used.has(key)) {
+          used.add(key);
+          npcNames.push(name);
+          need--;
+        }
+      }
+    }
+    const seasonPayload = {
+      room_id: SURVIVAL_ROOM_DB_ID,
+      created_by_user_id: req.session.user.id,
+      title: title.slice(0, 120),
+      status: "running",
+      day_index: 1,
+      phase: "day",
+      rng_seed: buildSurvivalSeedPayload(seed, options),
+      created_at: now,
+      updated_at: now,
+    };
+
+    let seasonId = null;
+    try {
+      if (await pgUsersEnabled()) {
+        await pgSafe("BEGIN");
+        const result29 = await pgSafe(
+          `INSERT INTO survival_seasons (room_id, created_by_user_id, title, status, day_index, phase, rng_seed, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+           RETURNING id`,
+          [
+            seasonPayload.room_id,
+            seasonPayload.created_by_user_id,
+            seasonPayload.title,
+            seasonPayload.status,
+            seasonPayload.day_index,
+            seasonPayload.phase,
+            seasonPayload.rng_seed,
+            seasonPayload.created_at,
+            seasonPayload.updated_at,
+          ]
+        );
+        const rows = result29?.rows || [];
+        seasonId = rows[0]?.id;
+        if (!seasonId) throw new Error("missing season id");
+        for (const user of userSnapshots) {
+          const traits = buildSurvivalTraits(rng, options.chaoticMode);
+          const location = pickSurvivalSpawnLocation(rng);
+          await pgSafe(
+            `INSERT INTO survival_participants
+             (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
+             VALUES ($1,$2,$3,$4,1,100,0,NULL,$5,$6,$7,NULL,$8)`,
+            [
+              seasonId,
+              user.id,
+              user.username,
+              user.avatar || null,
+              JSON.stringify([]),
+              JSON.stringify(traits),
+              location,
+              now,
+            ]
+          );
+        }
+
+        // NPC participants (custom + autofill)
+        for (const name of npcNames) {
+          const traits = buildSurvivalTraits(rng, options.chaoticMode);
+          const location = pickSurvivalSpawnLocation(rng);
+          await pgSafe(
+            `INSERT INTO survival_participants
+             (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
+             VALUES ($1, NULL, $2, NULL, 1, 100, 0, NULL, $3, $4, $5, NULL, $6)`,
+            [
+              seasonId,
+              String(name).slice(0, 40),
+              JSON.stringify([]),
+              JSON.stringify(traits),
+              location,
+              now,
+            ]
+          );
+        }
+        await pgSafe("COMMIT");
+      } else {
+        await dbRunAsync("BEGIN");
+        const result = await dbRunAsync(
+          `INSERT INTO survival_seasons
+           (room_id, created_by_user_id, title, status, day_index, phase, rng_seed, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            seasonPayload.room_id,
+            seasonPayload.created_by_user_id,
+            seasonPayload.title,
+            seasonPayload.status,
+            seasonPayload.day_index,
+            seasonPayload.phase,
+            seasonPayload.rng_seed,
+            seasonPayload.created_at,
+            seasonPayload.updated_at,
+          ]
+        );
+        seasonId = result.lastID;
+        for (const user of userSnapshots) {
+          const traits = buildSurvivalTraits(rng, options.chaoticMode);
+          const location = pickSurvivalSpawnLocation(rng);
+          await dbRunAsync(
+            `INSERT INTO survival_participants
+             (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
+             VALUES (?, ?, ?, ?, 1, 100, 0, NULL, ?, ?, ?, NULL, ?)`,
+            [
+              seasonId,
+              user.id,
+              user.username,
+              user.avatar || null,
+              JSON.stringify([]),
+              JSON.stringify(traits),
+              location,
+              now,
+            ]
+          );
+        }
+
+        // NPC participants (custom + autofill). SQLite has no FK on user_id here, so we use 0.
+        for (const name of npcNames) {
+          const traits = buildSurvivalTraits(rng, options.chaoticMode);
+          const location = pickSurvivalSpawnLocation(rng);
+          await dbRunAsync(
+            `INSERT INTO survival_participants
+             (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
+             VALUES (?, 0, ?, NULL, 1, 100, 0, NULL, ?, ?, ?, NULL, ?)`,
+            [
+              seasonId,
+              String(name).slice(0, 40),
+              JSON.stringify([]),
+              JSON.stringify(traits),
+              location,
+              now,
+            ]
+          );
+        }
+        await dbRunAsync("COMMIT");
+      }
+    } catch (e) {
+      try { await dbRunAsync("ROLLBACK"); } catch {}
+      try { if (await pgUsersEnabled()) await pgSafe("ROLLBACK"); } catch {}
+      console.warn("[survival] create season failed", e?.message || e);
+      return res.status(500).json({ message: "Failed to start season." });
+    }
+
+    survivalSeasonCooldownByRoom.set(SURVIVAL_ROOM_DB_ID, now);
+
+    // Clear lobby signups when a season starts (so the next season starts fresh).
+    try {
+      const set = getSurvivalLobbySet(SURVIVAL_ROOM_DB_ID);
+      if (set.size) {
+        set.clear();
+        io.to(SURVIVAL_ROOM_ID).emit("survival:lobby", { user_ids: [] });
+      }
+    } catch {}
+    const season = await fetchSurvivalSeasonById(seasonId);
+    const payload = await buildSurvivalPayload(season);
+    io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
+    // Mirror the narrative into the room as system messages.
+    try {
+      emitRoomSystem(SURVIVAL_ROOM_ID, `🏟️ Survival season started: ${payload?.season?.title || title}`, { kind: "survival" });
+      emitRoomSystem(SURVIVAL_ROOM_ID, `Day ${payload?.season?.day_index || 1} — ${String(payload?.season?.phase || "day").toUpperCase()}`, { kind: "survival" });
+    } catch {}
+    return res.json(payload);
+  });
+
+  app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, express.json({ limit: "16kb" }), async (req, res) => {
+    const seasonId = Number(req.params.id);
+    if (!seasonId) return res.status(400).json({ message: "Invalid season." });
+    const now = Date.now();
+    const lastAdvance = survivalAdvanceCooldownBySeason.get(seasonId) || 0;
+    if (now - lastAdvance < SURVIVAL_ADVANCE_COOLDOWN_MS) {
+      return res.status(429).json({ message: "Slow down." });
+    }
+    survivalAdvanceCooldownBySeason.set(seasonId, now);
+
+    const season = await fetchSurvivalSeasonById(seasonId);
+    if (!season) return res.status(404).json({ message: "Season not found." });
+    if (season.status !== "running") return res.status(400).json({ message: "Season is not running." });
+
+    const participants = await fetchSurvivalParticipants(seasonId);
+    const alliances = await fetchSurvivalAlliances(seasonId);
+    participants.forEach((p) => {
+      p.location = normalizeSurvivalZoneName(p.location) || SURVIVAL_ZONES[0];
+    });
+    const alive = participants.filter((p) => p.alive);
+    if (alive.length <= 1) {
+      season.status = "finished";
+    }
+
+    const { seed, options } = parseSurvivalSeedPayload(season.rng_seed);
+    const rng = createSeededRng(`${seed || "survival"}:${season.day_index}:${season.phase}:${now}`);
+    const couples = options?.includeCouples
+      ? await (async () => {
+        try {
+          if (await pgUsersEnabled()) {
+            const ids = alive.map((p) => p.user_id);
+            const result5 = await pgSafe(
+              `SELECT user1_id, user2_id FROM couple_links WHERE user1_id = ANY($1::int[]) OR user2_id = ANY($1::int[])`,
+              [ids]
+            );
+            const rows = result5?.rows || [];
+            return (rows || []).map((row) => [Number(row.user1_id), Number(row.user2_id)]);
+          }
+        } catch (e) {
+          console.warn("[survival] couple lookup failed:", e?.message || e);
+        }
+        const rows = await dbAllAsync(
+          `SELECT user1_id, user2_id FROM couple_links`
+        );
+        return (rows || []).map((row) => [Number(row.user1_id), Number(row.user2_id)]);
+      })()
+      : [];
+
+  
+    // Chaos baseline (extra events after the guaranteed participation pass)
+    // NOTE: We enforce EXACTLY one participant-scoped event per alive participant per phase
+    // (day + night), so we disable extra participant-scoped "chaos" events here.
+    // Arena / zone-wide events still provide chaos without starving or spamming individuals.
+    const chaosEventCount = 0;
+
+    const events = [];
+    const pendingAlliances = [];
+    const appearanceCount = new Map();
+    const existingAllianceNames = alliances.map((a) => a.name);
+    const templatePool = selectSurvivalTemplate({
+      aliveCount: alive.length,
+      phase: season.phase,
+      dayIndex: season.day_index,
+      options,
+    });
+
+    let orderIndex = 0;
+
+    // GUARANTEE: Every alive participant appears in EXACTLY ONE participant-scoped event per phase.
+    // IMPORTANT: If someone is included in a multi-person event, they do NOT get an additional solo event in the same phase.
+    // We track by participant.id (NOT user_id) so NPCs are treated as unique individuals.
+    const remainingForGuarantee = new Set(alive.map((p) => p.id));
+
+    let guard = 0;
+    while (remainingForGuarantee.size > 0 && guard < 5000) {
+      guard += 1;
+
+      // Only pick from participants that haven't yet appeared this phase (and are still alive).
+      const eligibleAlive = participants.filter((p) => p.alive && remainingForGuarantee.has(p.id));
+      if (eligibleAlive.length < 1) break;
+
+      // Constrain templates so we never request more participants than we have eligible.
+      const constrainedPool = templatePool.filter((t) => Number(t?.participants || 1) <= eligibleAlive.length);
+
+      let selectedTemplate = null;
+      let selectedParticipants = null;
+
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        const template = pickWeighted(constrainedPool, rng);
+        if (!template) break;
+
+        const picked = pickParticipantsForTemplate({
+          template,
+          alive: eligibleAlive,
+          rng,
+          appearanceCount,
+          couples,
+        });
+
+        if (!picked || picked.length < template.participants) continue;
+
+        selectedTemplate = template;
+        selectedParticipants = picked;
+        break;
+      }
+
+      if (!selectedTemplate || !selectedParticipants) {
+        // Guaranteed fallback: at least a solo neutral event for one remaining participant.
+        const fallback = SURVIVAL_EVENT_TEMPLATES.find((t) => t.id.startsWith("solo_neutral_"));
+        selectedTemplate = fallback || SURVIVAL_EVENT_TEMPLATES.find((t) => Number(t?.participants || 1) === 1) || null;
+        if (!selectedTemplate) break;
+        selectedParticipants = [eligibleAlive[0]];
+      }
+
+      selectedParticipants.forEach((p) => {
+        const k = p.user_id ? `u:${p.user_id}` : `p:${p.id}`;
+        appearanceCount.set(k, (appearanceCount.get(k) || 0) + 1);
+        p.last_event_at = now;
+        remainingForGuarantee.delete(p.id);
+      });
+
+      const text = renderSurvivalEventText(selectedTemplate, selectedParticipants, rng);
+      const outcome = applySurvivalOutcome({
+        template: selectedTemplate,
+        participants: selectedParticipants,
+        rng,
+        pendingAlliances,
+        existingAllianceNames,
+      });
+
+      // Attach a best-guess zone for this event so the arena map can filter/animate.
+      try {
+        const zones = (selectedParticipants || [])
+          .map((p) => normalizeSurvivalZoneName(p.location))
+          .filter(Boolean);
+        const zone = zones.length
+          ? zones
+              .sort(
+                (a, b) =>
+                  zones.filter((z) => z === a).length - zones.filter((z) => z === b).length
+              )
+              .pop()
+          : null;
+        if (zone) outcome.zone = normalizeSurvivalZoneName(zone) || zone;
+      } catch {}
+
+      orderIndex += 1;
+      events.push({
+        id: null,
+        season_id: seasonId,
+        day_index: season.day_index,
+        phase: season.phase,
+        order_index: orderIndex,
+        text,
+        // Only store real user IDs (NPCs have user_id NULL/0 and should not collide in logs).
+        involved_user_ids: selectedParticipants.map((p) => p.user_id).filter((id) => Number(id) > 0),
+        outcome,
+        created_at: now,
+      });
+    }
+
+    // NOTE: participant-scoped chaos events intentionally disabled (see chaosEventCount above).
+
+
+
+    // Occasional zone-wide / arena-wide events (adds variety + makes the map feel alive).
+    try {
+      const arenaEv = maybeGenerateArenaEvent({ season, participants, rng, now });
+      if (arenaEv && arenaEv.text) {
+        orderIndex += 1;
+        events.push({
+          id: null,
+          season_id: seasonId,
+          day_index: season.day_index,
+          phase: season.phase,
+          order_index: orderIndex,
+          text: arenaEv.text,
+          involved_user_ids: Array.isArray(arenaEv.outcome?.affected_user_ids)
+            ? arenaEv.outcome.affected_user_ids.filter((id) => Number(id) > 0)
+            : [],
+          outcome: arenaEv.outcome || { type: "arena", scope: "global" },
+          created_at: now,
+        });
+      }
+    } catch (e) {
+      console.warn("[survival] arena event failed:", e?.message || e);
+    }
+
+    const aliveAfter = participants.filter((p) => p.alive);
+    if (aliveAfter.length <= 1 && season.status !== "finished") {
+      season.status = "finished";
+      const winner = aliveAfter[0];
+      if (winner) {
+        const winnerName = sanitizeDisplayName(winner.display_name);
+        const winnerTag = winner.user_id ? `@${winnerName}` : winnerName;
+        events.push({
+          id: null,
+          season_id: seasonId,
+          day_index: season.day_index,
+          phase: season.phase,
+          order_index: orderIndex + 1,
+          text: `🏆 ${winnerTag} wins the season!`,
+          involved_user_ids: winner.user_id ? [winner.user_id] : [],
+          outcome: { type: "winner" },
+          created_at: now,
+        });
+      } else {
+        events.push({
+          id: null,
+          season_id: seasonId,
+          day_index: season.day_index,
+          phase: season.phase,
+          order_index: orderIndex + 1,
+          text: "No one survived the season. Wild.",
+          involved_user_ids: [],
+          outcome: { type: "draw" },
+          created_at: now,
+        });
+      }
+    }
+
+    if (season.status !== "finished") {
+      if (season.phase === "day") {
+        season.phase = "night";
+      } else {
+        season.phase = "day";
+        season.day_index = Number(season.day_index || 1) + 1;
+      }
+    }
+    season.updated_at = now;
+
+    const pendingMap = new Map();
+    try {
+      if (await pgUsersEnabled()) {
+        await pgSafe("BEGIN");
+        for (const pending of pendingAlliances) {
+          const result5 = await pgSafe(
+            `INSERT INTO survival_alliances (season_id, name, created_at) VALUES ($1,$2,$3) RETURNING id`,
+            [seasonId, pending.name, now]
+          );
+          const rows = result5?.rows || [];
+          const actualId = rows[0]?.id;
+          pendingMap.set(pending.tempId, actualId);
+        }
+
+        for (const participant of participants) {
+          const allianceId = pendingMap.get(participant.alliance_id) || participant.alliance_id;
+          participant.alliance_id = allianceId && allianceId < 0 ? null : allianceId;
+          await pgSafe(
+            `UPDATE survival_participants
+             SET alive=$1, hp=$2, kills=$3, alliance_id=$4, inventory_json=$5, traits_json=$6, location=$7, last_event_at=$8
+             WHERE id=$9`,
+            [
+              participant.alive ? 1 : 0,
+              participant.hp,
+              participant.kills,
+              participant.alliance_id,
+              JSON.stringify(participant.inventory || []),
+              JSON.stringify(participant.traits || {}),
+              participant.location || null,
+              participant.last_event_at,
+              participant.id,
+            ]
+          );
+        }
+
+        for (const event of events) {
+          if (event.outcome?.alliance?.id && pendingMap.has(event.outcome.alliance.id)) {
+            event.outcome.alliance.id = pendingMap.get(event.outcome.alliance.id);
+          }
+          const result6 = await pgSafe(
+            `INSERT INTO survival_events
+             (season_id, day_index, phase, order_index, text, involved_user_ids_json, outcome_json, created_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+             RETURNING id`,
+            [
+              seasonId,
+              event.day_index,
+              event.phase,
+              event.order_index,
+              event.text,
+              JSON.stringify(event.involved_user_ids || []),
+              JSON.stringify(event.outcome || {}),
+              event.created_at,
+            ]
+          );
+          const rows = result6?.rows || [];
+          event.id = rows[0]?.id;
+        }
+
+        await pgSafe(
+          `UPDATE survival_seasons SET status=$1, day_index=$2, phase=$3, updated_at=$4 WHERE id=$5`,
+          [season.status, season.day_index, season.phase, season.updated_at, seasonId]
+        );
+        await pgSafe("COMMIT");
+      } else {
+        await dbRunAsync("BEGIN");
+        for (const pending of pendingAlliances) {
+          const result = await dbRunAsync(
+            `INSERT INTO survival_alliances (season_id, name, created_at) VALUES (?, ?, ?)`,
+            [seasonId, pending.name, now]
+          );
+          pendingMap.set(pending.tempId, result.lastID);
+        }
+
+        for (const participant of participants) {
+          const allianceId = pendingMap.get(participant.alliance_id) || participant.alliance_id;
+          participant.alliance_id = allianceId && allianceId < 0 ? null : allianceId;
+          await dbRunAsync(
+            `UPDATE survival_participants
+             SET alive=?, hp=?, kills=?, alliance_id=?, inventory_json=?, traits_json=?, location=?, last_event_at=?
+             WHERE id=?`,
+            [
+              participant.alive ? 1 : 0,
+              participant.hp,
+              participant.kills,
+              participant.alliance_id,
+              JSON.stringify(participant.inventory || []),
+              JSON.stringify(participant.traits || {}),
+              participant.location || null,
+              participant.last_event_at,
+              participant.id,
+            ]
+          );
+        }
+
+        for (const event of events) {
+          if (event.outcome?.alliance?.id && pendingMap.has(event.outcome.alliance.id)) {
+            event.outcome.alliance.id = pendingMap.get(event.outcome.alliance.id);
+          }
+          const result = await dbRunAsync(
+            `INSERT INTO survival_events
+             (season_id, day_index, phase, order_index, text, involved_user_ids_json, outcome_json, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              seasonId,
+              event.day_index,
+              event.phase,
+              event.order_index,
+              event.text,
+              JSON.stringify(event.involved_user_ids || []),
+              JSON.stringify(event.outcome || {}),
+              event.created_at,
+            ]
+          );
+          event.id = result.lastID;
+        }
+
+        await dbRunAsync(
+          `UPDATE survival_seasons SET status=?, day_index=?, phase=?, updated_at=? WHERE id=?`,
+          [season.status, season.day_index, season.phase, season.updated_at, seasonId]
+        );
+        await dbRunAsync("COMMIT");
+      }
+    } catch (e) {
+      try { await dbRunAsync("ROLLBACK"); } catch {}
+      try { if (await pgUsersEnabled()) await pgSafe("ROLLBACK"); } catch {}
+      console.warn("[survival] advance failed", e?.message || e);
+      return res.status(500).json({ message: "Failed to advance." });
+    }
+
+    const payload = await buildSurvivalPayload(await fetchSurvivalSeasonById(seasonId));
+    io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
+    io.to(SURVIVAL_ROOM_ID).emit("survival:events", { seasonId, events });
+
+    // Mirror every simulator event into room system messages so spectators see the full story.
+    try {
+      for (const ev of events || []) {
+        if (!ev || !ev.text) continue;
+        emitRoomSystem(SURVIVAL_ROOM_ID, `⚔️ ${ev.text}`, { kind: "survival" });
+      }
+    } catch {}
+
+    return res.json(payload);
+  });
+
+  app.post("/api/survival/seasons/:id/end", survivalLimiter, requireCoOwner, express.json({ limit: "8kb" }), async (req, res) => {
+    const seasonId = Number(req.params.id);
+    if (!seasonId) return res.status(400).json({ message: "Invalid season." });
+    const season = await fetchSurvivalSeasonById(seasonId);
+    if (!season) return res.status(404).json({ message: "Season not found." });
+    if (season.status === "finished") {
+      const payload = await buildSurvivalPayload(season);
+      return res.json(payload);
+    }
+    const now = Date.now();
+    try {
+      if (await pgUsersEnabled()) {
+        await pgSafe(`UPDATE survival_seasons SET status='finished', updated_at=$1 WHERE id=$2`, [now, seasonId]);
+      } else {
+        await dbRunAsync(`UPDATE survival_seasons SET status='finished', updated_at=? WHERE id=?`, [now, seasonId]);
+      }
+    } catch (e) {
+      console.warn("[survival] end failed", e?.message || e);
+      return res.status(500).json({ message: "Failed to end season." });
+    }
+    const payload = await buildSurvivalPayload(await fetchSurvivalSeasonById(seasonId));
+    io.to(SURVIVAL_ROOM_ID).emit("survival:update", payload);
+    return res.json(payload);
+  });
+
+  // ---- Room structure management (Owner-only)
+  app.post("/api/room-masters", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
+    const name = sanitizeRoomGroupName(req.body?.name || "");
+    if (!name) return res.status(400).send("Invalid name");
+    try {
+      const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+      if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+      let sortOrder = 0;
+      let insertedId = null;
+      const now = Date.now();
+      if (await pgUsersEnabled()) {
+        const result30 = await pgSafe(
+          `SELECT id FROM room_master_categories WHERE lower(name) = lower($1)`,
+          [name]
+        );
+        const exists = result30?.rows || [];
+        if (exists?.[0]) return res.status(409).send("Master exists");
+        const result31 = await pgSafe(`SELECT COALESCE(MAX(sort_order), 0) as maxsort FROM room_master_categories`);
+        const maxRows = result31?.rows || [];
+        sortOrder = Number(maxRows?.[0]?.maxsort || 0) + 1;
+        const result32 = await pgSafe(
+          `INSERT INTO room_master_categories (name, sort_order, created_at) VALUES ($1, $2, $3) RETURNING id`,
+          [name, sortOrder, now]
+        );
+        const rows = result32?.rows || [];
+        insertedId = rows?.[0]?.id ?? null;
+      } else {
+        const existing = await dbGetAsync(`SELECT id FROM room_master_categories WHERE lower(name) = lower(?)`, [name]);
+        if (existing) return res.status(409).send("Master exists");
+        const maxRow = await dbGetAsync(`SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_master_categories`);
+        sortOrder = Number(maxRow?.maxSort || 0) + 1;
+        const ins = await dbRunAsync(
+          `INSERT INTO room_master_categories (name, sort_order, created_at) VALUES (?, ?, ?)`,
+          [name, sortOrder, now]
+        );
+        insertedId = ins?.lastID || null;
+      }
+      await applyRoomStructureChange({
+        action: "room_master.create",
+        actorUserId: req.session?.user?.id,
+        auditPayload: { id: insertedId, name, sort_order: sortOrder },
+      });
+      return res.json({ ok: true, id: insertedId, name, sort_order: sortOrder });
+    } catch (e) {
+      console.warn("[room-masters] create failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.patch("/api/room-masters/reorder", strictLimiter, requireAdminPlus, express.json({ limit: "32kb" }), async (req, res) => {
+    const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
+    if (!orderedIds?.length) return res.status(400).send("Missing order");
+    try {
+      const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+      if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+      if (await pgUsersEnabled()) {
+        for (let i = 0; i < orderedIds.length; i += 1) {
+          const id = Number(orderedIds[i]);
+          if (!id) continue;
+          await pgSafe(`UPDATE room_master_categories SET sort_order = $1 WHERE id = $2`, [i, id]);
+        }
+      } else {
+        for (let i = 0; i < orderedIds.length; i += 1) {
+          const id = Number(orderedIds[i]);
+          if (!id) continue;
+          await dbRunAsync(`UPDATE room_master_categories SET sort_order = ? WHERE id = ?`, [i, id]);
+        }
+      }
+      await applyRoomStructureChange({
+        action: "room_master.reorder",
+        actorUserId: req.session?.user?.id,
+        auditPayload: { orderedIds },
+      });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[room-masters] reorder failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.patch("/api/room-masters/:id", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).send("Invalid master");
+    try {
+      const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+      if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+      const row = await (await pgUsersEnabled())
+        ? (async () => {
+          const result7 = await pgSafe(`SELECT id, name FROM room_master_categories WHERE id = $1`, [id]);
+          const rows = result7?.rows || [];
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(`SELECT id, name FROM room_master_categories WHERE id = ?`, [id]);
+      if (!row) return res.status(404).send("Not found");
+      const updates = [];
+      const params = [];
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "name")) {
+        const name = sanitizeRoomGroupName(req.body?.name || "");
+        if (!name) return res.status(400).send("Invalid name");
+        if (DEFAULT_ROOM_MASTERS.includes(row.name) && name !== row.name) {
+          return res.status(400).send("Cannot rename default master");
+        }
+        const existing = await (await pgUsersEnabled())
+          ? (async () => {
+            const result6 = await pgSafe(
+              `SELECT id FROM room_master_categories WHERE lower(name) = lower($1) AND id != $2`,
+              [name, id]
+            );
+            const rows = result6?.rows || [];
+            return rows?.[0] || null;
+          })()
+          : await dbGetAsync(
+            `SELECT id FROM room_master_categories WHERE lower(name) = lower(?) AND id != ?`,
+            [name, id]
+          );
+        if (existing) return res.status(409).send("Name exists");
+        updates.push("name = ?");
+        params.push(name);
+      }
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "sort_order")) {
+        const sortOrder = Number(req.body?.sort_order);
+        if (Number.isFinite(sortOrder)) {
+          updates.push("sort_order = ?");
+          params.push(sortOrder);
+        }
+      }
+      if (!updates.length) return res.json({ ok: true });
+      if (await pgUsersEnabled()) {
+        const pgUpdates = updates.map((item, idx) => item.replace("?", `$${idx + 1}`));
+        const pgParams = [...params, id];
+        await pgSafe(`UPDATE room_master_categories SET ${pgUpdates.join(", ")} WHERE id = $${pgParams.length}`, pgParams);
+      } else {
+        params.push(id);
+        await dbRunAsync(`UPDATE room_master_categories SET ${updates.join(", ")} WHERE id = ?`, params);
+      }
+      await applyRoomStructureChange({
+        action: "room_master.update",
+        actorUserId: req.session?.user?.id,
+        auditPayload: { id, updates: req.body || {} },
+      });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[room-masters] patch failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.delete("/api/room-masters/:id", strictLimiter, requireOwner, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).send("Invalid master");
+    try {
+      const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+      if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+      const row = await (await pgUsersEnabled())
+        ? (async () => {
+          const result8 = await pgSafe(`SELECT id, name FROM room_master_categories WHERE id = $1`, [id]);
+          const rows = result8?.rows || [];
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(`SELECT id, name FROM room_master_categories WHERE id = ?`, [id]);
+      if (!row) return res.status(404).send("Not found");
+      if (DEFAULT_ROOM_MASTERS.includes(row.name)) {
+        return res.status(400).send("Cannot delete default master");
+      }
+      const defaults = await getDefaultMasterIds();
+      const fallbackCategoryId = await getUncategorizedCategoryId(defaults.site);
+      if (await pgUsersEnabled()) {
+        const result33 = await pgSafe(`SELECT id FROM room_categories WHERE master_id = $1`, [id]);
+        const categories = result33?.rows || [];
+        const categoryIds = (categories || []).map((c) => c.id).filter(Boolean);
+        if (categoryIds.length && fallbackCategoryId) {
+          await pgSafe(
+            `UPDATE rooms SET category_id = $1 WHERE category_id = ANY($2::int[])`,
+            [fallbackCategoryId, categoryIds]
+          );
+        }
+        await pgSafe(`DELETE FROM room_categories WHERE master_id = $1`, [id]);
+        await pgSafe(`DELETE FROM room_master_categories WHERE id = $1`, [id]);
+      } else {
+        const categories = await dbAllAsync(`SELECT id FROM room_categories WHERE master_id = ?`, [id]);
+        const categoryIds = categories.map((c) => c.id).filter(Boolean);
+        if (categoryIds.length && fallbackCategoryId) {
+          const placeholders = categoryIds.map(() => "?").join(",");
+          await dbRunAsync(
+            `UPDATE rooms SET category_id = ? WHERE category_id IN (${placeholders})`,
+            [fallbackCategoryId, ...categoryIds]
+          );
+        }
+        await dbRunAsync(`DELETE FROM room_categories WHERE master_id = ?`, [id]);
+        await dbRunAsync(`DELETE FROM room_master_categories WHERE id = ?`, [id]);
+      }
+      await applyRoomStructureChange({
+        action: "room_master.delete",
+        actorUserId: req.session?.user?.id,
+        auditPayload: { id, name: row.name },
+      });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[room-masters] delete failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.post("/api/room-categories", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
+    const masterId = Number(req.body?.master_id);
+    const name = sanitizeRoomGroupName(req.body?.name || "");
+    if (!masterId) return res.status(400).send("Invalid master");
+    if (!name) return res.status(400).send("Invalid name");
+    try {
+      const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+      if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+      let sortOrder = 0;
+      let insertedId = null;
+      const now = Date.now();
+      if (await pgUsersEnabled()) {
+        const result34 = await pgSafe(
+          `SELECT id FROM room_master_categories WHERE id = $1`,
+          [masterId]
+        );
+        const masterRows = result34?.rows || [];
+        if (!masterRows?.[0]) return res.status(404).send("Master not found");
+        const result35 = await pgSafe(
+          `SELECT id FROM room_categories WHERE master_id = $1 AND lower(name) = lower($2)`,
+          [masterId, name]
+        );
+        const existingRows = result35?.rows || [];
+        if (existingRows?.[0]) return res.status(409).send("Category exists");
+        const result36 = await pgSafe(
+          `SELECT COALESCE(MAX(sort_order), 0) as maxsort FROM room_categories WHERE master_id = $1`,
+          [masterId]
+        );
+        const maxRows = result36?.rows || [];
+        sortOrder = Number(maxRows?.[0]?.maxsort || 0) + 1;
+        const result37 = await pgSafe(
+          `INSERT INTO room_categories (master_id, name, sort_order, created_at) VALUES ($1, $2, $3, $4) RETURNING id`,
+          [masterId, name, sortOrder, now]
+        );
+        const rows = result37?.rows || [];
+        insertedId = rows?.[0]?.id ?? null;
+      } else {
+        const master = await dbGetAsync(`SELECT id FROM room_master_categories WHERE id = ?`, [masterId]);
+        if (!master) return res.status(404).send("Master not found");
+        const existing = await dbGetAsync(
+          `SELECT id FROM room_categories WHERE master_id = ? AND lower(name) = lower(?)`,
+          [masterId, name]
+        );
+        if (existing) return res.status(409).send("Category exists");
+        const maxRow = await dbGetAsync(
+          `SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_categories WHERE master_id = ?`,
+          [masterId]
+        );
+        sortOrder = Number(maxRow?.maxSort || 0) + 1;
+        const ins = await dbRunAsync(
+          `INSERT INTO room_categories (master_id, name, sort_order, created_at) VALUES (?, ?, ?, ?)`,
+          [masterId, name, sortOrder, now]
+        );
+        insertedId = ins?.lastID || null;
+      }
+      await applyRoomStructureChange({
+        action: "room_category.create",
+        actorUserId: req.session?.user?.id,
+        auditPayload: { id: insertedId, master_id: masterId, name, sort_order: sortOrder },
+      });
+      return res.json({ ok: true, id: insertedId, master_id: masterId, name });
+    } catch (e) {
+      console.warn("[room-categories] create failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.patch("/api/room-categories/reorder", strictLimiter, requireAdminPlus, express.json({ limit: "32kb" }), async (req, res) => {
+    const masterId = Number(req.body?.master_id);
+    const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
+    if (!masterId || !orderedIds?.length) return res.status(400).send("Invalid order");
+    try {
+      const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+      if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+      if (await pgUsersEnabled()) {
+        for (let i = 0; i < orderedIds.length; i += 1) {
+          const id = Number(orderedIds[i]);
+          if (!id) continue;
+          await pgSafe(
+            `UPDATE room_categories SET sort_order = $1 WHERE id = $2 AND master_id = $3`,
+            [i, id, masterId]
+          );
+        }
+      } else {
+        for (let i = 0; i < orderedIds.length; i += 1) {
+          const id = Number(orderedIds[i]);
+          if (!id) continue;
+          await dbRunAsync(
+            `UPDATE room_categories SET sort_order = ? WHERE id = ? AND master_id = ?`,
+            [i, id, masterId]
+          );
+        }
+      }
+      await applyRoomStructureChange({
+        action: "room_category.reorder",
+        actorUserId: req.session?.user?.id,
+        auditPayload: { master_id: masterId, orderedIds },
+      });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[room-categories] reorder failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.patch("/api/room-categories/:id", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).send("Invalid category");
+    try {
+      const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+      if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+      const row = await (await pgUsersEnabled())
+        ? (async () => {
+          const result9 = await pgSafe(`SELECT id, name, master_id FROM room_categories WHERE id = $1`, [id]);
+          const rows = result9?.rows || [];
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(`SELECT id, name, master_id FROM room_categories WHERE id = ?`, [id]);
+      if (!row) return res.status(404).send("Not found");
+      const updates = [];
+      const params = [];
+
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "name")) {
+        const name = sanitizeRoomGroupName(req.body?.name || "");
+        if (!name) return res.status(400).send("Invalid name");
+        if (normalizeRoomGroupName(row.name) === normalizeRoomGroupName(DEFAULT_ROOM_CATEGORY) && name !== row.name) {
+          return res.status(400).send("Cannot rename Uncategorized");
+        }
+        const targetMaster = Number(req.body?.master_id) || row.master_id;
+        const existing = await (await pgUsersEnabled())
+          ? (async () => {
+            const result7 = await pgSafe(
+              `SELECT id FROM room_categories WHERE master_id = $1 AND lower(name) = lower($2) AND id != $3`,
+              [targetMaster, name, id]
+            );
+            const rows = result7?.rows || [];
+            return rows?.[0] || null;
+          })()
+          : await dbGetAsync(
+            `SELECT id FROM room_categories WHERE master_id = ? AND lower(name) = lower(?) AND id != ?`,
+            [targetMaster, name, id]
+          );
+        if (existing) return res.status(409).send("Name exists");
+        updates.push("name = ?");
+        params.push(name);
+      }
+
+      let nextMasterId = row.master_id;
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "master_id")) {
+        const masterId = Number(req.body?.master_id);
+        if (!masterId) return res.status(400).send("Invalid master");
+        if (normalizeRoomGroupName(row.name) === normalizeRoomGroupName(DEFAULT_ROOM_CATEGORY) && masterId !== row.master_id) {
+          return res.status(400).send("Cannot move Uncategorized");
+        }
+        const masterRow = await (await pgUsersEnabled())
+          ? (async () => {
+            const result8 = await pgSafe(`SELECT id FROM room_master_categories WHERE id = $1`, [masterId]);
+            const rows = result8?.rows || [];
+            return rows?.[0] || null;
+          })()
+          : await dbGetAsync(`SELECT id FROM room_master_categories WHERE id = ?`, [masterId]);
+        if (!masterRow) return res.status(404).send("Master not found");
+        nextMasterId = masterId;
+        updates.push("master_id = ?");
+        params.push(masterId);
+      }
+
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "sort_order")) {
+        const sortOrder = Number(req.body?.sort_order);
+        if (Number.isFinite(sortOrder)) {
+          updates.push("sort_order = ?");
+          params.push(sortOrder);
+        }
+      }
+
+      if (!updates.length) return res.json({ ok: true });
+
+      if (nextMasterId !== row.master_id && !Object.prototype.hasOwnProperty.call(req.body || {}, "sort_order")) {
+        const maxRow = await (await pgUsersEnabled())
+          ? (async () => {
+            const result9 = await pgSafe(
+              `SELECT COALESCE(MAX(sort_order), 0) as maxsort FROM room_categories WHERE master_id = $1`,
+              [nextMasterId]
+            );
+            const rows = result9?.rows || [];
+            return rows?.[0] || null;
+          })()
+          : await dbGetAsync(
+            `SELECT COALESCE(MAX(sort_order), 0) as maxSort FROM room_categories WHERE master_id = ?`,
+            [nextMasterId]
+          );
+        const sortOrder = Number(maxRow?.maxsort || maxRow?.maxSort || 0) + 1;
+        updates.push("sort_order = ?");
+        params.push(sortOrder);
+      }
+
+      if (await pgUsersEnabled()) {
+        const pgUpdates = updates.map((item, idx) => item.replace("?", `$${idx + 1}`));
+        const pgParams = [...params, id];
+        await pgSafe(`UPDATE room_categories SET ${pgUpdates.join(", ")} WHERE id = $${pgParams.length}`, pgParams);
+      } else {
+        params.push(id);
+        await dbRunAsync(`UPDATE room_categories SET ${updates.join(", ")} WHERE id = ?`, params);
+      }
+      await applyRoomStructureChange({
+        action: "room_category.update",
+        actorUserId: req.session?.user?.id,
+        auditPayload: { id, updates: req.body || {} },
+      });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[room-categories] patch failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.delete("/api/room-categories/:id", strictLimiter, requireAdminPlus, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).send("Invalid category");
+    try {
+      const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+      if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+      const row = await (await pgUsersEnabled())
+        ? (async () => {
+          const result10 = await pgSafe(`SELECT id, name, master_id FROM room_categories WHERE id = $1`, [id]);
+          const rows = result10?.rows || [];
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(`SELECT id, name, master_id FROM room_categories WHERE id = ?`, [id]);
+      if (!row) return res.status(404).send("Not found");
+      if (normalizeRoomGroupName(row.name) === normalizeRoomGroupName(DEFAULT_ROOM_CATEGORY)) {
+        return res.status(400).send("Cannot delete Uncategorized");
+      }
+      const rooms = await (await pgUsersEnabled())
+        ? (async () => {
+          const result11 = await pgSafe(`SELECT name FROM rooms WHERE category_id = $1`, [id]);
+          const rows = result11?.rows || [];
+          return rows || [];
+        })()
+        : await dbAllAsync(`SELECT name FROM rooms WHERE category_id = ?`, [id]);
+      if (rooms?.length) return res.status(409).send("Category must be empty to delete");
+      if (await pgUsersEnabled()) {
+        await pgSafe(`DELETE FROM room_categories WHERE id = $1`, [id]);
+      } else {
+        await dbRunAsync(`DELETE FROM room_categories WHERE id = ?`, [id]);
+      }
+      await applyRoomStructureChange({
+        action: "room_category.delete",
+        actorUserId: req.session?.user?.id,
+        auditPayload: { id, name: row.name },
+      });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[room-categories] delete failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.patch("/api/rooms/:id/move", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
+    const roomName = sanitizeRoomName(req.params.id || "");
+    if (!roomName) return res.status(400).send("Invalid room");
+    try {
+      const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+      if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+      const roomRow = await (await pgUsersEnabled())
+        ? (async () => {
+          const result12 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+          const rows = result12?.rows || [];
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
+      if (!roomRow) return res.status(404).send("Not found");
+      const requestedCategoryId = Number(req.body?.category_id) || null;
+      const resolved = await resolveRoomCategoryId({ categoryId: requestedCategoryId, isUserRoom: false });
+      const categoryId = resolved?.categoryId ?? null;
+      let categoryRow = null;
+      if (categoryId) {
+        if (await pgUsersEnabled()) {
+          const result13 = await pgSafe(
+            `SELECT c.id, m.name as master_name
+               FROM room_categories c
+               JOIN room_master_categories m ON m.id = c.master_id
+              WHERE c.id = $1 LIMIT 1`,
+            [categoryId]
+          );
+          const rows = result13?.rows || [];
+          categoryRow = rows?.[0] || null;
+        } else {
+          categoryRow = await dbGetAsync(
+            `SELECT c.id, m.name as master_name
+               FROM room_categories c
+               JOIN room_master_categories m ON m.id = c.master_id
+              WHERE c.id = ? LIMIT 1`,
+            [categoryId]
+          );
+        }
+      }
+      const isUserRoom = categoryRow?.master_name === "User Rooms" ? 1 : 0;
+      let sortOrder = Number(req.body?.room_sort_order);
+      if (!Number.isFinite(sortOrder)) {
+        let maxRow = { maxSort: 0, maxsort: 0 };
+        if (categoryId) {
+          if (await pgUsersEnabled()) {
+            const result10 = await pgSafe(
+              `SELECT COALESCE(MAX(room_sort_order), 0) as maxsort FROM rooms WHERE category_id = $1`,
+              [categoryId]
+            );
+            const rows = result10?.rows || [];
+            maxRow = rows?.[0] || maxRow;
+          } else {
+            maxRow = await dbGetAsync(
+              `SELECT COALESCE(MAX(room_sort_order), 0) as maxSort FROM rooms WHERE category_id = ?`,
+              [categoryId]
+            );
+          }
+        }
+        sortOrder = Number(maxRow?.maxsort || maxRow?.maxSort || 0) + 1;
+      }
+      if (await pgUsersEnabled()) {
+        await pgSafe(
+          `UPDATE rooms SET category_id = $1, room_sort_order = $2, is_user_room = $3 WHERE name = $4`,
+          [categoryId, sortOrder, isUserRoom, roomName]
+        );
+      } else {
+        await dbRunAsync(
+          `UPDATE rooms SET category_id = ?, room_sort_order = ?, is_user_room = ? WHERE name = ?`,
+          [categoryId, sortOrder, isUserRoom, roomName]
+        );
+      }
+      await applyRoomStructureChange({
+        action: "room.move",
+        actorUserId: req.session?.user?.id,
+        auditPayload: { name: roomName, category_id: categoryId, room_sort_order: sortOrder },
+      });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[rooms] move failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.patch("/api/rooms/:id/settings", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
+    const roomName = sanitizeRoomName(req.params.id || "");
+    if (!roomName) return res.status(400).send("Invalid room");
+    const slowmode = Number(req.body?.slowmode_seconds ?? req.body?.slowmode ?? 0);
+    const isLocked = Number(req.body?.is_locked ?? 0) ? 1 : 0;
+    const maintenance = Number(req.body?.maintenance_mode ?? 0) ? 1 : 0;
+    const vipOnly = Number(req.body?.vip_only ?? 0) ? 1 : 0;
+    const staffOnly = Number(req.body?.staff_only ?? 0) ? 1 : 0;
+    const minLevel = Math.max(0, Math.min(999, Number(req.body?.min_level ?? 0) || 0));
+    const eventsEnabled = Number(req.body?.events_enabled ?? 1) ? 1 : 0;
+
+    if (!Number.isFinite(slowmode) || slowmode < 0 || slowmode > 3600) {
+      return res.status(400).send("Invalid slowmode");
+    }
+    try {
+      const roomRow = await (await pgUsersEnabled())
+        ? (async () => {
+          const result14 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+          const rows = result14?.rows || [];
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
+      if (!roomRow) return res.status(404).send("Not found");
+      if (await pgUsersEnabled()) {
+        await pgSafe(
+          `UPDATE rooms
+              SET slowmode_seconds = $1,
+                  is_locked = $2,
+                  maintenance_mode = $3,
+                  vip_only = $4,
+                  staff_only = $5,
+                  min_level = $6,
+                  events_enabled = $7
+            WHERE name = $8`,
+          [slowmode, isLocked, maintenance, vipOnly, staffOnly, minLevel, eventsEnabled, roomName]
+        );
+      } else {
+        await dbRunAsync(
+          `UPDATE rooms
+              SET slowmode_seconds = ?,
+                  is_locked = ?,
+                  maintenance_mode = ?,
+                  vip_only = ?,
+                  staff_only = ?,
+                  min_level = ?,
+                  events_enabled = ?
+            WHERE name = ?`,
+          [slowmode, isLocked, maintenance, vipOnly, staffOnly, minLevel, eventsEnabled, roomName]
+        );
+      }
+      await emitRoomStructureUpdate();
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[rooms][settings]", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.patch("/api/rooms/:id/archive", strictLimiter, requireAdminPlus, async (req, res) => {
+    const roomName = sanitizeRoomName(req.params.id || "");
+    if (!roomName) return res.status(400).send("Invalid room");
+    const actor = req.session?.user;
+    if (isCoreRoomName(roomName) && !requireMinRole(actor?.role, "Owner")) {
+      return res.status(403).send("Core rooms can only be archived by the Owner");
+    }
+    try {
+      const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+      if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+      const row = await (await pgUsersEnabled())
+        ? (async () => {
+          const result15 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+          const rows = result15?.rows || [];
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
+      if (!row) return res.status(404).send("Not found");
+      if (await pgUsersEnabled()) {
+        await pgSafe(`UPDATE rooms SET archived = 1 WHERE name = $1`, [roomName]);
+      } else {
+        await dbRunAsync(`UPDATE rooms SET archived = 1 WHERE name = ?`, [roomName]);
+      }
+      await applyRoomStructureChange({
+        action: "room.archive",
+        actorUserId: req.session?.user?.id,
+        auditPayload: { name: roomName },
+      });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[rooms] archive failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.patch("/api/rooms/:id/restore", strictLimiter, requireAdminPlus, async (req, res) => {
+    const roomName = sanitizeRoomName(req.params.id || "");
+    if (!roomName) return res.status(400).send("Invalid room");
+    try {
+      const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+      if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+      const row = await (await pgUsersEnabled())
+        ? (async () => {
+          const result16 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+          const rows = result16?.rows || [];
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
+      if (!row) return res.status(404).send("Not found");
+      if (await pgUsersEnabled()) {
+        await pgSafe(`UPDATE rooms SET archived = 0 WHERE name = $1`, [roomName]);
+      } else {
+        await dbRunAsync(`UPDATE rooms SET archived = 0 WHERE name = ?`, [roomName]);
+      }
+      await applyRoomStructureChange({
+        action: "room.restore",
+        actorUserId: req.session?.user?.id,
+        auditPayload: { name: roomName },
+      });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[rooms] restore failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.get("/api/rooms/:id/events", strictLimiter, requireAdminPlus, async (req, res) => {
+    const roomName = sanitizeRoomName(req.params.id || "");
+    if (!roomName) return res.status(400).send("Invalid room");
+    return res.json({ ok: true, events: getActiveEventsForRoom(roomName) });
+  });
+
+  app.post("/api/rooms/:id/events", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
+    const roomName = sanitizeRoomName(req.params.id || "");
+    if (!roomName) return res.status(400).send("Invalid room");
+    const type = String(req.body?.type || "").trim();
+    const allowedTypes = new Set(["announcement", "prompt", "flair"]);
+    if (!allowedTypes.has(type)) return res.status(400).send("Invalid event type");
+    const roomRow = await dbGetAsync(`SELECT events_enabled, archived FROM rooms WHERE name = ?`, [roomName]);
+    if (!roomRow) return res.status(404).send("Not found");
+    if (Number(roomRow.archived || 0) === 1) return res.status(400).send("Room is archived");
+    if (Number(roomRow.events_enabled ?? 1) === 0) return res.status(400).send("Events are disabled for this room");
+    const durationSec = Math.max(0, Math.min(24 * 60 * 60, Number(req.body?.duration_seconds ?? 0) || 0));
+    const payload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
+    const id = ROOM_EVENT_SEQ++;
+    const startedAt = Date.now();
+    const endsAt = durationSec ? startedAt + durationSec * 1000 : null;
+    const rawText = String(payload?.text || "").trim();
+    if (type === "announcement" && !rawText) return res.status(400).send("Text required");
+    const resolvedText = type === "prompt" ? (rawText || selectPromptText()) : rawText;
+    const title = resolvedText ? resolvedText.slice(0, 80) : type === "flair" ? "Visual Flair" : "Room Event";
+    const ev = { id, type, title, payload: { ...payload, text: resolvedText }, startedAt, endsAt, createdBy: req.session?.user?.username || null };
+    await addRoomEvent(roomName, ev);
+    io.to(roomName).emit("room:event", { room: roomName, active: ev, at: Date.now() });
+
+    if (type === "announcement" || type === "prompt") {
+      const text = resolvedText ? String(resolvedText).slice(0, 500) : "💬 Prompt event started.";
+      emitRoomSystem(roomName, text);
+    }
+
+    return res.json({ ok: true, event: ev });
+  });
+
+  app.post("/api/room-events/:id/stop", strictLimiter, requireAdminPlus, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id < 1) return res.status(400).send("Invalid event");
+    const stopped = await stopRoomEventById(id);
+    if (!stopped) return res.status(404).send("Not found");
+    emitRoomSystem(stopped.room, "⛔ Room event ended.");
+    io.to(stopped.room).emit("room:event", { room: stopped.room, active: null, at: Date.now() });
+    return res.json({ ok: true });
+  });
+
+
+  app.patch("/api/rooms/:id", strictLimiter, requireAdminPlus, express.json({ limit: "16kb" }), async (req, res) => {
+    const oldName = sanitizeRoomName(req.params.id || "");
+    const nextName = sanitizeRoomName(req.body?.name || "");
+    if (!oldName || !nextName) return res.status(400).send("Invalid room");
+    if (oldName === nextName) return res.json({ ok: true, name: nextName });
+    const actor = req.session?.user;
+    if (isCoreRoomName(oldName) && !requireMinRole(actor?.role, "Owner")) {
+      return res.status(403).send("Core rooms can only be renamed by the Owner");
+    }
+    try {
+      const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+      if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+      const roomRow = await (await pgUsersEnabled())
+        ? (async () => {
+          const result17 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [oldName]);
+          const rows = result17?.rows || [];
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [oldName]);
+      if (!roomRow) return res.status(404).send("Not found");
+      const exists = await (await pgUsersEnabled())
+        ? (async () => {
+          const result18 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [nextName]);
+          const rows = result18?.rows || [];
+          return rows?.[0] || null;
+        })()
+        : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [nextName]);
+      if (exists) return res.status(409).send("Room already exists");
+
+      // Update rooms primary key name + all references that store room name
+      if (await pgUsersEnabled()) {
+        await pgSafe(`UPDATE rooms SET name = $1 WHERE name = $2`, [nextName, oldName]);
+      } else {
+        await dbRunAsync(`UPDATE rooms SET name = ? WHERE name = ?`, [nextName, oldName]);
+      }
+
+      // Best-effort updates for related tables (some installs may not have all tables)
+      const safeUpdate = async (sql, params) => {
+        try { await dbRunAsync(sql, params); } catch (_) {}
+      };
+      await safeUpdate(`UPDATE messages SET room = ? WHERE room = ?`, [nextName, oldName]);
+      await safeUpdate(`UPDATE mod_logs SET room = ? WHERE room = ?`, [nextName, oldName]);
+      await safeUpdate(`UPDATE command_audit SET room = ? WHERE room = ?`, [nextName, oldName]);
+
+      if (await pgUsersEnabled()) {
+        const safeUpdatePg = async (sql, params) => {
+          try { await pgSafe(sql, params); } catch (_) {}
+        };
+        await safeUpdatePg(`UPDATE messages SET room = $1 WHERE room = $2`, [nextName, oldName]);
+        await safeUpdatePg(`UPDATE mod_logs SET room = $1 WHERE room = $2`, [nextName, oldName]);
+        await safeUpdatePg(`UPDATE command_audit SET room = $1 WHERE room = $2`, [nextName, oldName]);
+      }
+
+      // Move live sockets currently in the old room to the new room to prevent "ghost" rooms.
+      try {
+        const sockets = await io.in(oldName).fetchSockets();
+        for (const sock of sockets) {
+          try { sock.leave(oldName); } catch (_) {}
+          try { sock.join(nextName); } catch (_) {}
+          if (sock.currentRoom === oldName) sock.currentRoom = nextName;
+          if (sock.data?.currentRoom === oldName) sock.data.currentRoom = nextName;
+        }
+      } catch (_) {}
+
+      await applyRoomStructureChange({
+        action: "room.rename",
+        actorUserId: actor?.id,
+        auditPayload: { from: oldName, to: nextName },
+      });
+      return res.json({ ok: true, name: nextName });
+    } catch (e) {
+      console.warn("[rooms] rename failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.patch("/api/rooms/reorder", strictLimiter, requireAdminPlus, express.json({ limit: "32kb" }), async (req, res) => {
+    const categoryId = Number(req.body?.category_id);
+    const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : null;
+    if (!categoryId || !orderedIds?.length) return res.status(400).send("Invalid order");
+    try {
+      const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+      if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+      if (await pgUsersEnabled()) {
+        for (let i = 0; i < orderedIds.length; i += 1) {
+          const roomName = sanitizeRoomName(orderedIds[i] || "");
+          if (!roomName) continue;
+          await pgSafe(
+            `UPDATE rooms SET room_sort_order = $1 WHERE name = $2 AND category_id = $3`,
+            [i, roomName, categoryId]
+          );
+        }
+      } else {
+        for (let i = 0; i < orderedIds.length; i += 1) {
+          const roomName = sanitizeRoomName(orderedIds[i] || "");
+          if (!roomName) continue;
+          await dbRunAsync(
+            `UPDATE rooms SET room_sort_order = ? WHERE name = ? AND category_id = ?`,
+            [i, roomName, categoryId]
+          );
+        }
+      }
+      await applyRoomStructureChange({
+        action: "room.reorder",
+        actorUserId: req.session?.user?.id,
+        auditPayload: { category_id: categoryId, orderedIds },
+      });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[rooms] reorder failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  app.post("/api/rooms/reset_defaults", strictLimiter, requireAdminPlus, async (req, res) => {
+    try {
+      const versionCheck = await ensureRoomStructureVersionMatch(extractExpectedRoomVersion(req));
+      if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
+      await ensureCoreRoomsExist();
+      await applyRoomStructureChange({
+        action: "room.reset_defaults",
+        actorUserId: req.session?.user?.id,
+        auditPayload: { restored: "missing_system_rooms" },
+      });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[rooms] reset defaults failed", e?.message || e);
+      return res.status(500).send("Failed");
+    }
+  });
+
+  // ---- Moderation Cases API
+  app.get("/api/mod/cases", strictLimiter, requireLogin, async (req, res) => {
+    const actor = req.session?.user;
+    if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
+
+    const status = String(req.query?.status || "").trim();
+    const type = String(req.query?.type || "").trim();
+    const assigned = String(req.query?.assigned || "").trim();
+    const isAdmin = canViewAllCases(actor.role);
+    const limit = Math.min(200, Math.max(1, Number(req.query?.limit || 200)));
+
+    try {
+      if (await pgUsersEnabled()) {
+        const where = [];
+        const params = [];
+        if (!isAdmin) {
+          where.push("(status = 'open' OR assigned_to_user_id = $1 OR created_by_user_id = $2)");
+          params.push(actor.id, actor.id);
+        }
+        if (status) { params.push(status); where.push(`status = $${params.length}`); }
+        if (type) { params.push(type); where.push(`type = $${params.length}`); }
+        if (assigned === "me") { params.push(actor.id); where.push(`assigned_to_user_id = $${params.length}`); }
+        if (assigned === "unassigned") { where.push("assigned_to_user_id IS NULL"); }
+        if (assigned && assigned !== "me" && assigned !== "unassigned") {
+          const assignedId = Number(assigned);
+          if (Number.isFinite(assignedId) && assignedId > 0) {
+            params.push(assignedId);
+            where.push(`assigned_to_user_id = $${params.length}`);
+          }
+        }
+        const sql = `SELECT * FROM mod_cases ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY updated_at DESC LIMIT ${limit}`;
+        const result38 = await pgSafe(sql, params);
+        const rows = result38?.rows || [];
+        return res.json({ ok: true, items: rows || [] });
+      }
+
+      const where = [];
+      const params = [];
+      if (!isAdmin) {
+        where.push("(status = 'open' OR assigned_to_user_id = ? OR created_by_user_id = ?)");
+        params.push(actor.id, actor.id);
+      }
+      if (status) { where.push("status = ?"); params.push(status); }
+      if (type) { where.push("type = ?"); params.push(type); }
+      if (assigned === "me") { where.push("assigned_to_user_id = ?"); params.push(actor.id); }
+      if (assigned === "unassigned") { where.push("assigned_to_user_id IS NULL"); }
+      if (assigned && assigned !== "me" && assigned !== "unassigned") {
+        const assignedId = Number(assigned);
+        if (Number.isFinite(assignedId) && assignedId > 0) {
+          where.push("assigned_to_user_id = ?");
+          params.push(assignedId);
+        }
+      }
+      const sql = `SELECT * FROM mod_cases ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY updated_at DESC LIMIT ${limit}`;
+      const items = await dbAllAsync(sql, params);
+      return res.json({ ok: true, items });
+    } catch (e) {
+      console.warn("[mod-cases] list failed", e?.message || e);
+      return res.status(500).json({ ok: false, error: "failed_to_list" });
+    }
+  });
+
+  app.get("/api/mod/cases/:id", strictLimiter, requireLogin, async (req, res) => {
+    const actor = req.session?.user;
+    if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).send("Invalid case");
+
+    try {
+      const caseRow = await fetchModCaseById(id);
+      if (!caseRow) return res.status(404).send("Not found");
+      const isAdmin = canViewAllCases(actor.role);
+      if (!isAdmin) {
+        const allowed =
+          caseRow.status === "open" ||
+          Number(caseRow.assigned_to_user_id || 0) === Number(actor.id) ||
+          Number(caseRow.created_by_user_id || 0) === Number(actor.id);
+        if (!allowed) return res.status(403).send("Forbidden");
+      }
+
+      const events = await (await pgUsersEnabled())
+        ? (async () => {
+          const result19 = await pgSafe(
+            `SELECT * FROM mod_case_events WHERE case_id = $1 ORDER BY created_at ASC`,
+            [id]
+          );
+          const rows = result19?.rows || [];
+          return rows || [];
+        })()
+        : await dbAllAsync(`SELECT * FROM mod_case_events WHERE case_id = ? ORDER BY created_at ASC`, [id]);
+      const notes = await (await pgUsersEnabled())
+        ? (async () => {
+          const result20 = await pgSafe(
+            `SELECT * FROM mod_case_notes WHERE case_id = $1 ORDER BY created_at ASC`,
+            [id]
+          );
+          const rows = result20?.rows || [];
+          return rows || [];
+        })()
+        : await dbAllAsync(`SELECT * FROM mod_case_notes WHERE case_id = ? ORDER BY created_at ASC`, [id]);
+      const evidence = await (await pgUsersEnabled())
+        ? (async () => {
+          const result21 = await pgSafe(
+            `SELECT * FROM mod_case_evidence WHERE case_id = $1 ORDER BY created_at ASC`,
+            [id]
+          );
+          const rows = result21?.rows || [];
+          return rows || [];
+        })()
+        : await dbAllAsync(`SELECT * FROM mod_case_evidence WHERE case_id = ? ORDER BY created_at ASC`, [id]);
+
+      const parsedEvents = (events || []).map((ev) => ({
+        ...ev,
+        event_payload: typeof ev.event_payload === "string" ? safeJsonParse(ev.event_payload, {}) : ev.event_payload,
+      }));
+
+      return res.json({ ok: true, case: caseRow, events: parsedEvents, notes, evidence });
+    } catch (e) {
+      console.warn("[mod-cases] fetch failed", e?.message || e);
+      return res.status(500).json({ ok: false, error: "failed_to_fetch" });
+    }
+  });
+
+  app.post("/api/mod/cases", strictLimiter, requireLogin, express.json({ limit: "32kb" }), async (req, res) => {
+    const actor = req.session?.user;
+    if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
+    const type = String(req.body?.type || "").trim();
+    const allowedTypes = new Set(["flag", "appeal", "referral", "investigation"]);
+    if (!allowedTypes.has(type)) return res.status(400).send("Invalid type");
+
+    try {
+      const caseRow = await createModCase({
+        type,
+        status: "open",
+        priority: String(req.body?.priority || "normal"),
+        subjectUserId: Number(req.body?.subject_user_id) || null,
+        createdByUserId: actor.id,
+        assignedToUserId: Number(req.body?.assigned_to_user_id) || null,
+        roomId: req.body?.room_id ? String(req.body.room_id) : null,
+        title: req.body?.title ? String(req.body.title).slice(0, 160) : null,
+        summary: req.body?.summary ? String(req.body.summary).slice(0, 2000) : null,
+      });
+      if (!caseRow?.id) return res.status(500).json({ ok: false, error: "create_failed" });
+      await addModCaseEvent(caseRow.id, { actorUserId: actor.id, eventType: "created", payload: { type } });
+      emitToStaff("mod:case_created", { id: caseRow.id, type: caseRow.type, status: caseRow.status });
+      return res.json({ ok: true, case: caseRow });
+    } catch (e) {
+      console.warn("[mod-cases] create failed", e?.message || e);
+      return res.status(500).json({ ok: false, error: "create_failed" });
+    }
+  });
+
+  app.patch("/api/mod/cases/:id", strictLimiter, requireLogin, express.json({ limit: "32kb" }), async (req, res) => {
+    const actor = req.session?.user;
+    if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).send("Invalid case");
+
+    try {
+      const caseRow = await fetchModCaseById(id);
+      if (!caseRow) return res.status(404).send("Not found");
+      const isAdmin = canViewAllCases(actor.role);
+      const isOwnerOrAssignee =
+        Number(caseRow.assigned_to_user_id || 0) === Number(actor.id) ||
+        Number(caseRow.created_by_user_id || 0) === Number(actor.id);
+      if (!isAdmin && !isOwnerOrAssignee) return res.status(403).send("Forbidden");
+
+      const updates = [];
+      const params = [];
+      const fields = [
+        ["assigned_to_user_id", "assigned_to_user_id"],
+        ["priority", "priority"],
+        ["title", "title"],
+        ["summary", "summary"],
+        ["room_id", "room_id"],
+        ["subject_user_id", "subject_user_id"],
+      ];
+      for (const [key, col] of fields) {
+        if (!Object.prototype.hasOwnProperty.call(req.body || {}, key)) continue;
+        updates.push(col);
+        params.push(req.body[key] == null ? null : req.body[key]);
+      }
+      if (!updates.length) return res.json({ ok: true, case: caseRow });
+
+      const now = Date.now();
+      if (await pgUsersEnabled()) {
+        const setParts = updates.map((col, idx) => `${col} = $${idx + 1}`);
+        const pgParams = [...params, now, id];
+        await pgSafe(
+          `UPDATE mod_cases SET ${setParts.join(", ")}, updated_at = $${pgParams.length - 1} WHERE id = $${pgParams.length}`,
+          pgParams
+        );
+      } else {
+        const setParts = updates.map(() => "?");
+        await dbRunAsync(
+          `UPDATE mod_cases SET ${updates.map((col, idx) => `${col} = ${setParts[idx]}`).join(", ")}, updated_at = ? WHERE id = ?`,
+          [...params, now, id]
+        );
+      }
+      await addModCaseEvent(id, { actorUserId: actor.id, eventType: "updated", payload: { updates: req.body || {} } });
+      emitToStaff("mod:case_updated", { id, updates: req.body || {} });
+      const updated = await fetchModCaseById(id);
+      return res.json({ ok: true, case: updated });
+    } catch (e) {
+      console.warn("[mod-cases] update failed", e?.message || e);
+      return res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.post("/api/mod/cases/:id/status", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
+    const actor = req.session?.user;
+    if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
+    const id = Number(req.params.id);
+    const status = String(req.body?.status || "").trim();
+    if (!Number.isFinite(id) || !status) return res.status(400).send("Invalid status");
+    const allowedStatuses = new Set(["open", "closed", "resolved", "pending"]);
+    if (!allowedStatuses.has(status)) return res.status(400).send("Invalid status");
+
+    try {
+      const caseRow = await fetchModCaseById(id);
+      if (!caseRow) return res.status(404).send("Not found");
+      const isAdmin = canViewAllCases(actor.role);
+      const isOwnerOrAssignee =
+        Number(caseRow.assigned_to_user_id || 0) === Number(actor.id) ||
+        Number(caseRow.created_by_user_id || 0) === Number(actor.id);
+      if (!isAdmin && !isOwnerOrAssignee) return res.status(403).send("Forbidden");
+
+      const now = Date.now();
+      const closedAt = status === "closed" ? now : null;
+      const closedReason = req.body?.closed_reason ? String(req.body.closed_reason).slice(0, 400) : null;
+      if (await pgUsersEnabled()) {
+        await pgSafe(
+          `UPDATE mod_cases SET status = $1, updated_at = $2, closed_at = $3, closed_reason = $4 WHERE id = $5`,
+          [status, now, closedAt, closedReason, id]
+        );
+      } else {
+        await dbRunAsync(
+          `UPDATE mod_cases SET status = ?, updated_at = ?, closed_at = ?, closed_reason = ? WHERE id = ?`,
+          [status, now, closedAt, closedReason, id]
+        );
+      }
+      await addModCaseEvent(id, { actorUserId: actor.id, eventType: "status_changed", payload: { status, closed_reason: closedReason } });
+      emitToStaff("mod:case_updated", { id, status });
+      const updated = await fetchModCaseById(id);
+      return res.json({ ok: true, case: updated });
+    } catch (e) {
+      console.warn("[mod-cases] status update failed", e?.message || e);
+      return res.status(500).json({ ok: false, error: "status_failed" });
+    }
+  });
+
+  app.post("/api/mod/cases/:id/notes", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
+    const actor = req.session?.user;
+    if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
+    const id = Number(req.params.id);
+    const body = String(req.body?.body || "").trim();
+    if (!Number.isFinite(id) || !body) return res.status(400).send("Invalid note");
+    try {
+      const caseRow = await fetchModCaseById(id);
+      if (!caseRow) return res.status(404).send("Not found");
+      const note = await addModCaseNote(id, { authorUserId: actor.id, body: body.slice(0, 2000) });
+      await addModCaseEvent(id, { actorUserId: actor.id, eventType: "note_added" });
+      emitToStaff("mod:case_event", { caseId: id, eventType: "note_added" });
+      return res.json({ ok: true, note });
+    } catch (e) {
+      console.warn("[mod-cases] note failed", e?.message || e);
+      return res.status(500).json({ ok: false, error: "note_failed" });
+    }
+  });
+
+  app.post("/api/mod/cases/:id/evidence", strictLimiter, requireLogin, express.json({ limit: "32kb" }), async (req, res) => {
+    const actor = req.session?.user;
+    if (!actor || !isStaffRole(actor.role)) return res.status(403).send("Forbidden");
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).send("Invalid case");
+    const evidenceType = String(req.body?.evidence_type || "").trim();
+    const allowedTypes = new Set(["message", "text", "link"]);
+    if (!allowedTypes.has(evidenceType)) return res.status(400).send("Invalid evidence type");
+
+    try {
+      const caseRow = await fetchModCaseById(id);
+      if (!caseRow) return res.status(404).send("Not found");
+      const evidence = await addModCaseEvidence(id, {
+        createdByUserId: actor.id,
+        evidenceType,
+        roomId: req.body?.room_id ? String(req.body.room_id) : null,
+        messageId: Number(req.body?.message_id) || null,
+        messageExcerpt: req.body?.message_excerpt ? String(req.body.message_excerpt).slice(0, 500) : null,
+        url: req.body?.url ? String(req.body.url).slice(0, 600) : null,
+        text: req.body?.text ? String(req.body.text).slice(0, 2000) : null,
+      });
+      await addModCaseEvent(id, { actorUserId: actor.id, eventType: "evidence_added", payload: { evidence_type: evidenceType } });
+      emitToStaff("mod:case_event", { caseId: id, eventType: "evidence_added" });
+      return res.json({ ok: true, evidence });
+    } catch (e) {
+      console.warn("[mod-cases] evidence failed", e?.message || e);
+      return res.status(500).json({ ok: false, error: "evidence_failed" });
+    }
+  });
+
+  // ========================================
+  // Word Filter Management API (Admin/Co-owner/Owner only)
+  // ========================================
+
+  // Get all word filters
+  app.get("/api/word-filters", requireLogin, async (req, res) => {
+    const actor = req.session?.user;
+    if (!actor || !requireMinRole(actor.role, "Admin")) {
+      return res.status(403).json({ ok: false, error: "Forbidden" });
+    }
+
+    try {
+      const filters = await dbAllAsync(
+        "SELECT id, filter_text, is_phrase, is_hardcoded, added_by_username, created_at, notes FROM word_filters ORDER BY created_at DESC"
+      );
+      return res.json({ ok: true, filters });
+    } catch (e) {
+      console.error("[word-filters] get failed", e);
+      return res.status(500).json({ ok: false, error: "Failed to fetch filters" });
+    }
+  });
+
+  // Add a new word filter
+  app.post("/api/word-filters", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
+    const actor = req.session?.user;
+    if (!actor || !requireMinRole(actor.role, "Admin")) {
+      return res.status(403).json({ ok: false, error: "Forbidden" });
+    }
+
+    const filterText = String(req.body?.filter_text || "").trim();
+    const isPhrase = !!req.body?.is_phrase;
+    const notes = String(req.body?.notes || "").trim().slice(0, 500);
+
+    if (!filterText || filterText.length < 2 || filterText.length > 100) {
+      return res.status(400).json({ ok: false, error: "Filter text must be between 2 and 100 characters" });
+    }
+
+    try {
+      // Check for duplicates
+      const existing = await dbGetAsync("SELECT id FROM word_filters WHERE filter_text = ?", [filterText]);
+      if (existing) {
+        return res.status(400).json({ ok: false, error: "Filter already exists" });
+      }
+
+      const result = await dbRunAsync(
+        `INSERT INTO word_filters (filter_text, is_phrase, is_hardcoded, added_by_user_id, added_by_username, created_at, notes)
+         VALUES (?, ?, 0, ?, ?, ?, ?)`,
+        [filterText, isPhrase ? 1 : 0, actor.id, actor.username, Date.now(), notes || null]
+      );
+
+      // Reload cache
+      await loadWordFilters();
+
+      return res.json({ ok: true, filterId: result.lastID });
+    } catch (e) {
+      console.error("[word-filters] add failed", e);
+      return res.status(500).json({ ok: false, error: "Failed to add filter" });
+    }
+  });
+
+  // Delete a word filter (cannot delete hardcoded filters)
+  app.delete("/api/word-filters/:id", strictLimiter, requireLogin, async (req, res) => {
+    const actor = req.session?.user;
+    if (!actor || !requireMinRole(actor.role, "Admin")) {
+      return res.status(403).json({ ok: false, error: "Forbidden" });
+    }
+
+    const filterId = Number(req.params.id);
+    if (!Number.isFinite(filterId)) {
+      return res.status(400).json({ ok: false, error: "Invalid filter ID" });
+    }
+
+    try {
+      // Check if hardcoded
+      const filter = await dbGetAsync("SELECT is_hardcoded FROM word_filters WHERE id = ?", [filterId]);
+      if (!filter) {
+        return res.status(404).json({ ok: false, error: "Filter not found" });
+      }
+      if (filter.is_hardcoded === 1) {
+        return res.status(400).json({ ok: false, error: "Cannot delete hardcoded filter" });
+      }
+
+      await dbRunAsync("DELETE FROM word_filters WHERE id = ?", [filterId]);
+
+      // Reload cache
+      await loadWordFilters();
+
+      return res.json({ ok: true });
+    } catch (e) {
+      console.error("[word-filters] delete failed", e);
+      return res.status(500).json({ ok: false, error: "Failed to delete filter" });
+    }
+  });
+
+  // ---- Room collapse persistence
+  app.patch(
+    "/api/users/me/room-master-collapsed",
+    strictLimiter,
+    requireLogin,
+    express.json({ limit: "8kb" }),
+    async (req, res) => {
+      const userId = req.session?.user?.id;
+      const masterId = String(req.body?.master_id || "").trim();
+      const collapsed = !!req.body?.collapsed;
+      if (!masterId) return res.status(400).send("Invalid master");
+      try {
+        const current = await getUserRoomCollapseState(userId);
+        const next = { ...(current.master || {}) };
+        next[masterId] = collapsed;
+        const serialized = JSON.stringify(next);
+        await dbRunAsync(`UPDATE users SET room_master_collapsed = ? WHERE id = ?`, [serialized, userId]);
+        try {
+          await pgSafe(`UPDATE users SET room_master_collapsed = $1 WHERE id = $2`, [serialized, userId]);
+        } catch {}
+        return res.json({ ok: true });
+      } catch (e) {
+        console.warn("[rooms] master collapse failed", e?.message || e);
+        return res.status(500).send("Failed");
+      }
+    }
+  );
+
+  app.patch(
+    "/api/users/me/room-category-collapsed",
+    strictLimiter,
+    requireLogin,
+    express.json({ limit: "8kb" }),
+    async (req, res) => {
+      const userId = req.session?.user?.id;
+      const categoryId = String(req.body?.category_id || "").trim();
+      const collapsed = !!req.body?.collapsed;
+      if (!categoryId) return res.status(400).send("Invalid category");
+      try {
+        const current = await getUserRoomCollapseState(userId);
+        const next = { ...(current.category || {}) };
+        next[categoryId] = collapsed;
+        const serialized = JSON.stringify(next);
+        await dbRunAsync(`UPDATE users SET room_category_collapsed = ? WHERE id = ?`, [serialized, userId]);
+        try {
+          await pgSafe(`UPDATE users SET room_category_collapsed = $1 WHERE id = $2`, [serialized, userId]);
+        } catch {}
+        return res.json({ ok: true });
+      } catch (e) {
+        console.warn("[rooms] category collapse failed", e?.message || e);
+        return res.status(500).send("Failed");
+      }
+    }
+  );
+
+  // ---- Changelog API
+  app.get("/api/changelog", requireLogin, async (req, res) => {
+    const limit = clamp(req.query?.limit || 0, 0, 200);
+    try {
+      const rows = await fetchChangelogEntriesWithReactions({ limit, userId: req.session?.user?.id });
+      return res.json(rows || []);
+    } catch (e) {
+      console.error("[changelog] load failed:", e?.message || e);
+      return res.status(500).send("Failed to load changelog");
+    }
+  });
+
+  app.post("/api/changelog", strictLimiter, requireOwner, async (req, res) => {
+    const cleaned = cleanChangelogInput(req.body?.title, req.body?.body);
+    if (cleaned.error) return res.status(400).send(cleaned.error);
+
+    try {
+      let entry = null;
+
+      if (await pgChangelogEnabled()) {
+        try {
+          entry = await pgCreateChangelogEntry({
+            title: cleaned.title,
+            body: cleaned.body,
+            authorId: req.session.user.id,
+          });
+        } catch (e) {
+          console.warn("[changelog] PG POST failed, falling back to sqlite:", e?.message || e);
+        }
+      }
+
+      if (!entry) {
+        entry = await createChangelogEntrySqlite({
+          title: cleaned.title,
+          body: cleaned.body,
+          authorId: req.session.user.id,
+        });
+      }
+
+      const payload = toChangelogPayload(entry);
+      io.emit("changelog updated");
+      return res.json(payload);
+    } catch (err) {
+      console.error("[changelog] create failed:", err?.message || err);
+      return res.status(500).send("Failed to create changelog entry");
+    }
+  });
+
+  app.put("/api/changelog/:id", requireOwner, async (req, res) => {
+    const id = Number(req.params?.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).send("Invalid entry id");
+
+    const cleaned = cleanChangelogInput(req.body?.title, req.body?.body);
+    if (cleaned.error) return res.status(400).send(cleaned.error);
+
+    try {
+      if (await pgChangelogEnabled()) {
+        try {
+          const row = await pgUpdateChangelogEntry({ id, title: cleaned.title, body: cleaned.body });
+          if (row) {
+            io.emit("changelog updated");
+            return res.json(toChangelogPayload(row));
+          }
+        } catch (e) {
+          console.warn("[changelog] PG PUT failed, falling back to sqlite:", e?.message || e);
+        }
+      }
+
+      // sqlite fallback
+      const now = Date.now();
+      const result = await dbRunAsync(
+        `UPDATE changelog_entries SET title=?, body=?, updated_at=? WHERE id=?`,
+        [cleaned.title, cleaned.body, now, id]
+      );
+      if (!result?.changes) return res.status(404).send("Entry not found");
+
+      const row = await dbGetAsync(
+        `SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries WHERE id=?`,
+        [id]
+      );
+      io.emit("changelog updated");
+      return res.json(toChangelogPayload(row));
+    } catch (err) {
+      console.error("[changelog] update failed:", err?.message || err);
+      return res.status(500).send("Failed to update changelog entry");
+    }
+  });
+
+  app.delete("/api/changelog/:id", strictLimiter, requireOwner, async (req, res) => {
+    const id = Number(req.params?.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).send("Invalid entry id");
+
+    const confirmed = req.body?.confirm === true || req.body?.confirm === "true";
+    if (!confirmed) return res.status(400).send("Confirmation required");
+
+    try {
+      if (await pgChangelogEnabled()) {
+        try {
+          const ok = await pgDeleteChangelogEntry(id);
+          if (ok) {
+            io.emit("changelog updated");
+            return res.json({ ok: true });
+          }
+        } catch (e) {
+          console.warn("[changelog] PG DELETE failed, falling back to sqlite:", e?.message || e);
+        }
+      }
+
+      // sqlite fallback
+      await dbRunAsync(`DELETE FROM changelog_reactions WHERE entry_id=?`, [id]);
+      const result = await dbRunAsync(`DELETE FROM changelog_entries WHERE id=?`, [id]);
+      if (!result?.changes) return res.status(404).send("Entry not found");
+      io.emit("changelog updated");
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error("[changelog] delete failed:", err?.message || err);
+      return res.status(500).send("Failed to delete changelog entry");
+    }
+  });
+
+  app.post("/api/changelog/:id/reaction", strictLimiter, requireLogin, async (req, res) => {
+    const entryId = Number(req.params?.id);
+    const reaction = normalizeReactionKey(req.body?.reaction);
+    if (!Number.isFinite(entryId) || entryId <= 0) return res.status(400).send("Invalid entry id");
+    if (!reaction) return res.status(400).send("Invalid reaction");
+
+    const userId = req.session.user.id;
+    let payload = null;
+    let usedPg = false;
+
+    if (await pgChangelogEnabled()) {
+      try {
+        const exists = await pgChangelogEntryExists(entryId);
+        if (!exists) return res.status(404).send("Entry not found");
+        await pgToggleChangelogReaction(entryId, userId, reaction);
+        usedPg = true;
+        payload = await pgChangelogReactionPayload(entryId, userId);
+      } catch (e) {
+        console.warn("[changelog] PG reaction toggle fallback:", e?.message || e);
+        if (usedPg) return res.status(500).send("Failed to update reaction");
+      }
+    }
+
+    if (!payload && !usedPg) {
+      const exists = await sqliteChangelogEntryExists(entryId);
+      if (!exists) return res.status(404).send("Entry not found");
+      await sqliteToggleChangelogReaction(entryId, userId, reaction);
+      payload = await sqliteChangelogReactionPayload(entryId, userId);
+    } else if (!payload && usedPg) {
+      return res.status(500).send("Failed to update reaction");
+    }
+
+    if (!payload) return res.status(500).send("Failed to update reaction");
+
+    io.emit("changelog reactions updated");
+    return res.json(payload);
+  });
+
+  app.get("/api/faq", requireLogin, async (req, res) => {
+    try {
+      const rows = await fetchFaqQuestionsWithReactions(req.session?.user?.username);
+      return res.json(rows || []);
+    } catch (e) {
+      console.error("[faq] load failed:", e?.message || e);
+      return res.status(500).send("Failed to load FAQ");
+    }
+  });
+
+  app.post("/api/faq", strictLimiter, requireLogin, async (req, res) => {
+    const cleaned = cleanFaqInput(req.body?.title, req.body?.details);
+    if(cleaned.error) return res.status(400).send(cleaned.error);
+
+    const userId = req.session.user.id;
+    const now = Date.now();
+    const last = faqAskCooldown.get(userId) || 0;
+    if(now - last < FAQ_RATE_LIMIT_MS) return res.status(429).send("Please wait before asking another question.");
+    faqAskCooldown.set(userId, now);
+
+    try{
+      let row = null;
+      if(await pgChangelogEnabled()){
+        try{ row = await pgCreateFaqQuestion(cleaned); }catch(e){ console.warn("[faq] PG create fallback:", e?.message || e); }
+      }
+      if(!row){
+        row = await sqliteCreateFaqQuestion(cleaned);
+      }
+      const payload = toFaqPayload(row);
+      io.emit("faq:update");
+      return res.json(payload);
+    }catch(err){
+      console.error("[faq] create failed:", err?.message || err);
+      return res.status(500).send("Failed to submit question");
+    }
+  });
+
+  app.patch("/api/faq/:id/answer", requireLogin, async (req, res) => {
+    const questionId = Number(req.params?.id);
+    if(!Number.isFinite(questionId) || questionId <= 0) return res.status(400).send("Invalid question id");
+    if(!requireMinRole(req.session.user.role, "Admin")) return res.status(403).send("Forbidden");
+
+    const answerBody = String(req.body?.answer || "").trimEnd();
+    // Allow effectively unlimited answers (TEXT field), but keep a high ceiling
+    // to protect the service from accidental paste-bombs.
+    if(answerBody.length > 50000) return res.status(400).send("Answer is too long");
+
+    try{
+      let row = null;
+      if(await pgChangelogEnabled()){
+        try{ row = await pgUpdateFaqAnswer({ id: questionId, answerBody, answeredBy: req.session.user.id }); }catch(e){ console.warn("[faq] PG answer fallback:", e?.message || e); }
+      }
+      if(!row){
+        row = await sqliteUpdateFaqAnswer({ id: questionId, answerBody, answeredBy: req.session.user.id });
+      }
+      if(!row) return res.status(404).send("Question not found");
+      const payload = toFaqPayload(row);
+      io.emit("faq:update");
+      return res.json(payload);
+    }catch(err){
+      console.error("[faq] answer failed:", err?.message || err);
+      return res.status(500).send("Failed to save answer");
+    }
+  });
+
+  app.delete("/api/faq/:id", strictLimiter, requireLogin, async (req, res) => {
+    const questionId = Number(req.params?.id);
+    if(!Number.isFinite(questionId) || questionId <= 0) return res.status(400).send("Invalid question id");
+    // Admin, Co-owner, Owner
+    if(!requireMinRole(req.session.user.role, "Admin")) return res.status(403).send("Forbidden");
+
+    try{
+      let ok = false;
+      if(await pgChangelogEnabled()){
+        try{ ok = await pgDeleteFaqQuestion(questionId); }catch(e){ console.warn("[faq] PG delete fallback:", e?.message || e); }
+      }
+      if(!ok){
+        ok = await sqliteDeleteFaqQuestion(questionId);
+      }
+      if(!ok) return res.status(404).send("Question not found");
+      io.emit("faq:update");
+      return res.json({ ok:true });
+    }catch(err){
+      console.error("[faq] delete failed:", err?.message || err);
+      return res.status(500).send("Failed to delete question");
+    }
+  });
+
+  app.post("/api/faq/:id/react", strictLimiter, requireLogin, async (req, res) => {
+    const questionId = Number(req.params?.id);
+    const reaction = normalizeFaqReactionKey(req.body?.reaction);
+    if(!Number.isFinite(questionId) || questionId <= 0) return res.status(400).send("Invalid question id");
+    if(!reaction) return res.status(400).send("Invalid reaction");
+
+    const username = req.session.user.username;
+    let usedPg = false;
+    try{
+      if(await pgChangelogEnabled()){
+        const exists = await pgFaqQuestionExists(questionId);
+        if(!exists) return res.status(404).send("Question not found");
+        await pgToggleFaqReaction(questionId, username, reaction);
+        usedPg = true;
+        const payload = await faqReactionPayload(questionId, username);
+        io.emit("faq:update");
+        return res.json(payload);
+      }
+    }catch(e){
+      console.warn("[faq] PG reaction toggle fallback:", e?.message || e);
+      if(usedPg) return res.status(500).send("Failed to update reaction");
+    }
+
+    try{
+      const exists = await sqliteFaqQuestionExists(questionId);
+      if(!exists) return res.status(404).send("Question not found");
+      await sqliteToggleFaqReaction(questionId, username, reaction);
+      const payload = await faqReactionPayload(questionId, username);
+      io.emit("faq:update");
+      return res.json(payload);
+    }catch(err){
+      console.error("[faq] reaction failed:", err?.message || err);
+      return res.status(500).send("Failed to update reaction");
+    }
+  });
+  // ---- Profile routes
+  app.get("/api/profile", requireLogin, (req, res) => res.redirect(307, "/profile"));
+
+  async function fetchProfileLikeStats(targetUserId, viewerId) {
+    if (await pgUsersEnabled()) {
+      try {
+        const result39 = await pgSafe(
+          `SELECT COUNT(*)::int AS likes,
+                  EXISTS(SELECT 1 FROM profile_likes WHERE user_id = $2 AND target_user_id = $1) AS liked`,
+          [targetUserId, viewerId]
+        );
+        const rows = result39?.rows || [];
+        return { likes: Number(rows?.[0]?.likes || 0), liked: !!rows?.[0]?.liked };
+      } catch (e) {
+        console.warn("[profile likes][pg] failed, falling back to sqlite:", e?.message || e);
+      }
+    }
+
+    return await new Promise((resolve) => {
+      db.get(
+        `SELECT
+          (SELECT COUNT(*) FROM profile_likes WHERE target_user_id = ?) AS likes,
+          EXISTS(SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?) AS liked`,
+        [targetUserId, viewerId, targetUserId],
+        (_likeErr, likesRow) => {
+          resolve({
+            likes: Number(likesRow?.likes || 0),
+            liked: !!Number(likesRow?.liked || 0),
+          });
+        }
+      );
+    });
+  }
+
+  async function toggleProfileLike(userId, targetUserId) {
+    if (await pgUsersEnabled()) {
+      try {
+        const now = Date.now();
+        await pgSafe(
+          `WITH deleted AS (
+              DELETE FROM profile_likes
+               WHERE user_id = $1 AND target_user_id = $2
+               RETURNING 1
+           ),
+           inserted AS (
+             INSERT INTO profile_likes (user_id, target_user_id, created_at)
+             SELECT $1, $2, $3
+              WHERE NOT EXISTS (SELECT 1 FROM deleted)
+             ON CONFLICT (user_id, target_user_id) DO NOTHING
+             RETURNING 1
+           )
+           SELECT 1`,
+          [userId, targetUserId, now]
+        );
+        const stats = await fetchProfileLikeStats(targetUserId, userId);
+        // Best-effort mirror to SQLite so legacy reads stay consistent.
+        try {
+          if (stats.liked) {
+            await dbRunAsync(
+              `INSERT OR IGNORE INTO profile_likes (user_id, target_user_id, created_at) VALUES (?, ?, ?)`,
+              [userId, targetUserId, now]
+            );
+          } else {
+            await dbRunAsync(`DELETE FROM profile_likes WHERE user_id = ? AND target_user_id = ?`, [userId, targetUserId]);
+          }
+        } catch (e) {
+          console.warn("[profile likes][sqlite mirror]", e?.message || e);
+        }
+        return stats;
+      } catch (e) {
+        console.warn("[profile likes][pg toggle] failed, falling back to sqlite:", e?.message || e);
+      }
+    }
+
+    const existing = await dbGetAsync(
+      `SELECT 1 FROM profile_likes WHERE user_id = ? AND target_user_id = ?`,
+      [userId, targetUserId]
+    ).catch(() => null);
+    if (existing) {
+      await dbRunAsync(`DELETE FROM profile_likes WHERE user_id = ? AND target_user_id = ?`, [userId, targetUserId]);
+    } else {
+      await dbRunAsync(
+        `INSERT OR IGNORE INTO profile_likes (user_id, target_user_id, created_at) VALUES (?, ?, ?)`,
+        [userId, targetUserId, Date.now()]
+      );
+    }
+    return await fetchProfileLikeStats(targetUserId, userId);
+  }
+
+  app.get("/profile", requireLogin, async (req, res) => {
+    const userId = req.session.user.id;
+
+    try {
+      // Prefer Postgres if this user exists there (Render prod path)
+      if (await pgUserExists(userId)) {
+        const row = await pgGetUserRowById(userId, [
+          "id",
+          "username",
+          "role",
+          "avatar",
+          "avatar_updated",
+          "bio",
+          "mood",
+          "age",
+          "gender",
+          "header_grad_a",
+          "header_grad_b",
+          "created_at",
+          "last_seen",
+          "last_room",
+          "last_status",
+          "gold",
+          "xp",
+          "vibe_tags",
+        ]);
+        if (!row) return res.status(404).send("Not found");
+
+        const live = onlineState.get(row.id);
+        const lastStatus = normalizeStatus(live?.status || row.last_status, "");
+        const lastSeen = resolveLastSeen(row, live, lastStatus);
+
+        const likeStats = await fetchProfileLikeStats(row.id, userId);
+        const payload = {
+          id: row.id,
+          username: row.username,
+          role: row.role,
+          avatar: avatarUrlFromRow(row),
+          bio: row.bio,
+          mood: row.mood,
+          age: row.age,
+          gender: row.gender,
+          created_at: row.created_at,
+          last_seen: lastSeen,
+          last_room: row.last_room,
+          last_status: lastStatus || null,
+          current_room: live?.room || null,
+          header_grad_a: sanitizeHexColor(row.header_grad_a),
+          header_grad_b: sanitizeHexColor(row.header_grad_b),
+          likes: likeStats.likes,
+          likedByMe: likeStats.liked,
+          vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
+          ...progressionFromRow(row, true),
+        };
+        return res.json(payload);
+      }
+    } catch (e) {
+      console.warn("[/profile][pg] failed, falling back to sqlite:", e?.message || e);
+    }
+
+    // SQLite fallback (original behavior)
+    const row = await dbGet(
+      `SELECT id, username FROM users WHERE id = ?`,
+      [userId]
+    );
+    if (!row) return res.status(404).send("Not found");
+    const live = onlineState.get(row.id);
+    const lastStatus = normalizeStatus(live?.status || row.last_status, "");
+    const lastSeen = resolveLastSeen(row, live, lastStatus);
+    const likeStats = await fetchProfileLikeStats(row.id, userId);
+    const payload = {
+      id: row.id,
+      username: row.username,
+      role: row.role,
+      avatar: avatarUrlFromRow(row),
+      bio: row.bio,
+      mood: row.mood,
+      age: row.age,
+      gender: row.gender,
+      created_at: row.created_at,
+      last_seen: lastSeen,
+      last_room: row.last_room,
+      last_status: lastStatus || null,
+      current_room: live?.room || null,
+      header_grad_a: sanitizeHexColor(row.header_grad_a),
+      header_grad_b: sanitizeHexColor(row.header_grad_b),
+      likes: likeStats.likes,
+      likedByMe: likeStats.liked,
+      vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
+      ...progressionFromRow(row, true),
+    };
+    return res.json(payload);
+  });
+
+  app.get("/profile/:username", requireLogin, async (req, res) => {
+    const rawParam = String(req.params.username || "");
+    let decoded = rawParam;
+    try { decoded = decodeURIComponent(rawParam); } catch {}
+    const rawName = String(decoded || "").trim().slice(0, 64);
+    const cleaned = cleanUsernameForLookup(rawName);
+    const legacy = sanitizeUsername(rawName);
+
+    const candidates = Array.from(new Set([rawName, cleaned, legacy].filter(Boolean)));
+    if (!candidates.length) return res.status(400).send("Bad username");
+
+    try {
+      // Prefer Postgres first (Render/prod path). Some users may not exist in SQLite yet.
+      let row = null;
+      let fromPg = false;
+      try {
+        for (const cand of candidates) {
+          try {
+            const r = await pgSafe(
+              `SELECT id, username FROM users WHERE username = $1 OR lower(username) = lower($1)
+               LIMIT 1`,
+              [cand]
+            );
+            row = r.rows?.[0] || null;
+            if (row) break;
+          } catch {}
+        }
+        if (row) fromPg = true;
+      } catch {}
+
+      // Fallback to SQLite
+      if (!row) {
+        for (const cand of candidates) {
+          row = await dbGet(
+            `SELECT id, username FROM users WHERE username = ? OR lower(username) = lower(?)`,
+            [cand, cand]
+          );
+          if (row) break;
+        }
+      }
+
+      if (!row) return res.status(404).send("Not found");
+
+      // IMPORTANT: The quick lookup above only selects id/username.
+      // We must fetch the full profile row, otherwise the UI will show blanks
+      // and appear to "not pull" changes after edits.
+      const PROFILE_COLS = [
+        "id",
+        "username",
+        "role",
+        "created_at",
+        "avatar",
+        "avatar_bytes",
+        "avatar_mime",
+        "avatar_updated",
+        "bio",
+        "mood",
+        "age",
+        "gender",
+        "last_seen",
+        "last_room",
+        "last_status",
+        "gold",
+        "xp",
+        "vibe_tags",
+        "header_grad_a",
+        "header_grad_b",
+      ];
+
+      if (fromPg) {
+        try {
+          const full = await pgGetUserRowById(Number(row.id) || 0, PROFILE_COLS);
+          if (full) row = full;
+        } catch {}
+      } else {
+        // SQLite full fetch
+        try {
+          const full = await dbGet(
+            `SELECT ${PROFILE_COLS.filter((c) => c !== "avatar_bytes" && c !== "avatar_mime" && c !== "avatar_updated").join(", ")}
+             FROM users WHERE id = ? LIMIT 1`,
+            [Number(row.id) || 0]
+          );
+          if (full) row = full;
+        } catch {}
+      }
+
+      const live = onlineState.get(row.id);
+      const lastStatus = normalizeStatus(live?.status || row.last_status, "");
+      const lastSeen = resolveLastSeen(row, live, lastStatus);
+      const includePrivate = req.session.user.id === row.id;
+
+      const likeStats = await fetchProfileLikeStats(row.id, req.session.user.id);
+      const payload = {
+        id: row.id,
+        username: row.username,
+        role: row.role,
+        avatar: avatarUrlFromRow(row),
+        bio: row.bio,
+        mood: live?.mood ?? row.mood,
+        age: row.age,
+        gender: row.gender,
+        created_at: row.created_at,
+        last_seen: lastSeen,
+        last_room: row.last_room,
+        last_status: lastStatus || null,
+        current_room: live?.room || null,
+        header_grad_a: sanitizeHexColor(row.header_grad_a),
+        header_grad_b: sanitizeHexColor(row.header_grad_b),
+        likes: likeStats.likes,
+        likedByMe: likeStats.liked,
+        vibe_tags: sanitizeVibeTags(row.vibe_tags || []),
+        ...progressionFromRow(row, includePrivate),
+      };
+
+      // Couple info (opt-in, privacy-friendly)
+      try {
+        if (PG_READY && row?.id) {
+          const targetId = Number(row.id) || 0;
+          const result22 = await pgSafe(
+            `
+            SELECT cl.*,
+                   u1.username AS user1_name,
+                   u2.username AS user2_name,
+                   u1.avatar AS user1_avatar,
+                   u2.avatar AS user2_avatar,
+                   u1.role AS user1_role,
+                   u2.role AS user2_role,
+                   p1.enabled AS p1_enabled, p1.show_profile AS p1_show_profile, p1.show_members AS p1_show_members,
+                   p1.group_members AS p1_group_members, p1.aura AS p1_aura, p1.badge AS p1_badge,
+                   p2.enabled AS p2_enabled, p2.show_profile AS p2_show_profile, p2.show_members AS p2_show_members,
+                   p2.group_members AS p2_group_members, p2.aura AS p2_aura, p2.badge AS p2_badge
+              FROM couple_links cl
+              JOIN users u1 ON u1.id = cl.user1_id
+              JOIN users u2 ON u2.id = cl.user2_id
+              LEFT JOIN couple_prefs p1 ON p1.link_id = cl.id AND p1.user_id = cl.user1_id
+              LEFT JOIN couple_prefs p2 ON p2.link_id = cl.id AND p2.user_id = cl.user2_id
+             WHERE cl.status='active'
+               AND (cl.user1_id=$1 OR cl.user2_id=$1)
+             ORDER BY cl.updated_at DESC
+             LIMIT 1
+            `,
+            [targetId]
+          );
+          const clRows = result22?.rows || [];
+
+          const cl = clRows[0];
+          if (cl) {
+            const isU1 = Number(cl.user1_id) === targetId;
+            const partnerName = isU1 ? cl.user2_name : cl.user1_name;
+            const partnerId = getCouplePartnerId(targetId, cl);
+            const viewerId = Number(req.session.user?.id) || 0;
+            const isMember = isCoupleMember(viewerId, cl);
+            const privacy = cl.privacy || "private";
+
+            const mePrefs = isU1 ? {
+              enabled: !!cl.p1_enabled,
+              showProfile: !!cl.p1_show_profile,
+              showMembers: !!cl.p1_show_members,
+              groupMembers: !!cl.p1_group_members,
+              aura: !!cl.p1_aura,
+              badge: !!cl.p1_badge
+            } : {
+              enabled: !!cl.p2_enabled,
+              showProfile: !!cl.p2_show_profile,
+              showMembers: !!cl.p2_show_members,
+              groupMembers: !!cl.p2_group_members,
+              aura: !!cl.p2_aura,
+              badge: !!cl.p2_badge
+            };
+
+            const partnerPrefs = isU1 ? {
+              enabled: !!cl.p2_enabled,
+              showProfile: !!cl.p2_show_profile,
+              showMembers: !!cl.p2_show_members,
+              groupMembers: !!cl.p2_group_members,
+              aura: !!cl.p2_aura,
+              badge: !!cl.p2_badge
+            } : {
+              enabled: !!cl.p1_enabled,
+              showProfile: !!cl.p1_show_profile,
+              showMembers: !!cl.p1_show_members,
+              groupMembers: !!cl.p1_group_members,
+              aura: !!cl.p1_aura,
+              badge: !!cl.p1_badge
+            };
+
+            let privacyAllows = privacy === "public";
+            if (privacy === "private") privacyAllows = isMember;
+            if (privacy === "friends" && !privacyAllows) {
+              if (isMember) privacyAllows = true;
+              else if (viewerId && viewerId !== targetId && partnerId) {
+                try {
+                  if (PG_READY && FRIENDS_READY) {
+                    privacyAllows = (await pgAreFriends(viewerId, targetId)) || (await pgAreFriends(viewerId, partnerId));
+                  } else {
+                    privacyAllows = (await dbAreFriends(viewerId, targetId)) || (await dbAreFriends(viewerId, partnerId));
+                  }
+                } catch {}
+              }
+            }
+
+            if (privacyAllows && canShowCoupleFeature(mePrefs, partnerPrefs, "profile")) {
+              payload.couple = {
+                partner: partnerName,
+                since: Number(cl.activated_at || cl.created_at) || null,
+                statusEmoji: cl.status_emoji || "💜",
+                statusLabel: cl.status_label || "Linked",
+                badge: canShowCoupleBadge(mePrefs, partnerPrefs, cl),
+                aura: canShowCoupleFeature(mePrefs, partnerPrefs, "aura"),
+                showMembers: canShowCoupleFeature(mePrefs, partnerPrefs, "members"),
+                groupMembers: canShowCoupleFeature(mePrefs, partnerPrefs, "group")
+              };
+            }
+
+            if (privacyAllows && isCouplesV2EnabledFor(req.session.user)) {
+              const members = [
+                {
+                  id: Number(cl.user1_id) || 0,
+                  username: cl.user1_name,
+                  avatar: avatarUrlFromRow({ avatar: cl.user1_avatar }),
+                  role: cl.user1_role || "User"
+                },
+                {
+                  id: Number(cl.user2_id) || 0,
+                  username: cl.user2_name,
+                  avatar: avatarUrlFromRow({ avatar: cl.user2_avatar }),
+                  role: cl.user2_role || "User"
+                }
+              ];
+              payload.coupleCard = {
+                coupleName: cl.couple_name || "",
+                coupleBio: cl.couple_bio || "",
+                privacy,
+                showBadge: cl.show_badge !== false,
+                statusEmoji: cl.status_emoji || "💜",
+                statusLabel: cl.status_label || "Linked",
+                since: Number(cl.activated_at || cl.created_at) || null,
+                members
+              };
+            }
+          }
+        }
+      } catch {}
+
+      // Friend relationship info (for showing accept/decline/add friend UI)
+      try {
+        const viewerId = Number(req.session.user?.id) || 0;
+        const targetId = Number(payload.id) || 0;
+        if (viewerId && targetId && viewerId !== targetId) {
+          let status = null;
+          let requestId = null;
+          if (PG_READY && FRIENDS_READY) {
+            const friends = await pgAreFriends(viewerId, targetId);
+            if (friends) {
+              status = 'friends';
+            } else {
+              const incoming = await pgGetPendingFriendRequest(targetId, viewerId);
+              const outgoing = await pgGetPendingFriendRequest(viewerId, targetId);
+              if (incoming?.id) { status = 'incoming'; requestId = Number(incoming.id) || null; }
+              else if (outgoing?.id) { status = 'outgoing'; requestId = Number(outgoing.id) || null; }
+              else status = 'none';
+            }
+          } else {
+            const friends = await dbAreFriends(viewerId, targetId);
+            if (friends) {
+              status = 'friends';
+            } else {
+              const incoming = await dbGetPendingFriendRequest(targetId, viewerId);
+              const outgoing = await dbGetPendingFriendRequest(viewerId, targetId);
+              if (incoming?.id) { status = 'incoming'; requestId = Number(incoming.id) || null; }
+              else if (outgoing?.id) { status = 'outgoing'; requestId = Number(outgoing.id) || null; }
+              else status = 'none';
+            }
+          }
+          payload.friend = { status, requestId };
+        }
+      } catch {}
+
+
+      return res.json(payload);
+    } catch (e) {
+      return res.status(500).send("Server error");
+    }
+  });
+
+  app.get("/api/memory-settings", requireLogin, async (req, res) => {
+    try {
+      const settings = await getMemorySettingsForUser(req.session.user);
+      return res.json({ ok: true, ...settings });
+    } catch (e) {
+      console.warn("[memory] settings fetch failed:", e?.message || e);
+      return res.status(500).json({ ok: false, error: "failed_to_load_settings" });
+    }
+  });
+
+  app.post("/api/memory-settings", strictLimiter, requireLogin, express.json({ limit: "16kb" }), async (req, res) => {
+    try {
+      const user = req.session.user;
+      const settings = await getMemorySettingsForUser(user);
+      if (!settings.available) return res.status(403).json({ ok: false, error: "feature_disabled" });
+      const enabled = !!req.body?.enabled;
+      await setMemorySettingsRow(user.id, enabled);
+      return res.json({ ok: true, available: true, enabled });
+    } catch (e) {
+      console.warn("[memory] settings update failed:", e?.message || e);
+      return res.status(500).json({ ok: false, error: "failed_to_save_settings" });
+    }
+  });
+
+  app.get("/api/memories", requireLogin, async (req, res) => {
+    const user = req.session.user;
+    try {
+      const settings = await getMemorySettingsForUser(user);
+      if (!settings.available || !settings.enabled) return res.status(403).json({ ok: false, error: "disabled" });
+
+      const types = resolveMemoryTypes(req.query?.filter);
+      if (await pgUserExists(user.id)) {
+        const params = [user.id];
+        let whereSql = "user_id = $1";
+        if (types?.length) {
+          params.push(types);
+          whereSql += ` AND type = ANY($${params.length}::text[])`;
+        }
+        const result40 = await pgSafe(
+          `SELECT * FROM memories WHERE ${whereSql} ORDER BY created_at DESC`,
+          params
+        );
+        const rows = result40?.rows || [];
+        const memories = rows.map(normalizeMemoryRow);
+        return res.json({ ok: true, memories });
+      }
+    } catch (e) {
+      console.warn("[memory] pg list failed, falling back to sqlite:", e?.message || e);
+    }
+
+    try {
+      const params = [user.id];
+      let whereSql = "user_id = ?";
+      if (types?.length) {
+        whereSql += ` AND type IN (${types.map(() => "?").join(", ")})`;
+        params.push(...types);
+      }
+      const rows = await dbAllAsync(
+        `SELECT * FROM memories WHERE ${whereSql} ORDER BY created_at DESC`,
+        params
+      );
+      const memories = rows.map(normalizeMemoryRow);
+      return res.json({ ok: true, memories });
+    } catch (e) {
+      console.warn("[memory] sqlite list failed:", e?.message || e);
+      return res.status(500).json({ ok: false, error: "failed_to_load_memories" });
+    }
+  });
+
+  app.post("/api/memories/:id/pin", strictLimiter, requireLogin, async (req, res) => {
+    const user = req.session.user;
+    const memoryId = Number(req.params.id) || 0;
+    if (!memoryId) return res.status(400).json({ ok: false, error: "bad_request" });
+
+    try {
+      const settings = await getMemorySettingsForUser(user);
+      if (!settings.available || !settings.enabled) return res.status(403).json({ ok: false, error: "disabled" });
+
+      if (await pgUserExists(user.id)) {
+        const result41 = await pgSafe(
+          `UPDATE memories SET pinned = NOT pinned WHERE id = $1 AND user_id = $2 RETURNING pinned`,
+          [memoryId, user.id]
+        );
+        const rows = result41?.rows || [];
+        const row = rows[0];
+        if (!row) return res.status(404).json({ ok: false, error: "not_found" });
+        return res.json({ ok: true, pinned: normalizeMemoryBool(row.pinned) });
+      }
+    } catch (e) {
+      console.warn("[memory] pg pin failed, falling back to sqlite:", e?.message || e);
+    }
+
+    try {
+      await dbRunAsync(
+        `UPDATE memories SET pinned = CASE WHEN pinned = 1 THEN 0 ELSE 1 END WHERE id = ? AND user_id = ?`,
+        [memoryId, user.id]
+      );
+      const row = await dbGetAsync(`SELECT pinned FROM memories WHERE id = ? AND user_id = ?`, [memoryId, user.id]);
+      if (!row) return res.status(404).json({ ok: false, error: "not_found" });
+      return res.json({ ok: true, pinned: normalizeMemoryBool(row.pinned) });
+    } catch (e) {
+      console.warn("[memory] sqlite pin failed:", e?.message || e);
+      return res.status(500).json({ ok: false, error: "failed_to_pin" });
+    }
+  });
+
+
+  // ---- Couples API (opt-in). Postgres only.
+  app.get("/api/couples/me", requireLogin, async (req, res) => {
+    try {
+      if (!PG_READY) return res.status(503).send("DB not ready");
+      if (!COUPLES_READY) return res.status(503).send("Couples not ready");
+      const summary = await pgGetCoupleSummaryFor(req.session.user);
+      if (summary?.v2Enabled && summary?.couple) {
+        ensureCoupleMilestoneMemories(summary.couple).catch((e) => {
+          console.warn("[couples] milestone memory failed:", e?.message || e);
+        });
+      }
+      return res.json(summary);
+    } catch (e) {
+      console.warn("[couples] /me failed:", e?.message || e);
+      return res.status(500).send("Could not load couples");
+    }
+  });
+
+  app.post("/api/couples/request", strictLimiter, requireLogin, async (req, res) => {
+    try {
+      if (!PG_READY) return res.status(503).send("DB not ready");
+      if (!COUPLES_READY) return res.status(503).send("Couples not ready");
+
+      const targetRaw = String(req.body?.targetUsername || "").trim().slice(0, 64);
+      const targetName = sanitizeUsername(targetRaw);
+      if (!targetName) return res.status(400).send("Bad username");
+      if (targetName.toLowerCase() === String(req.session.user?.username || "").toLowerCase()) {
+        return res.status(400).send("You cannot link with yourself");
+      }
+
+      const result22 = await pgSafe(`SELECT id, username FROM users WHERE lower(username)=lower($1) LIMIT 1`, [targetName]);
+      const trg = result22?.rows || [];
+      const target = trg[0];
+      if (!target) return res.status(404).send("User not found");
+
+      const meId = Number(req.session.user?.id) || 0;
+      if (!meId) return res.status(401).send("Not logged in");
+      const otherId = Number(target.id) || 0;
+      const [u1, u2] = orderPair(meId, otherId);
+      const now = Date.now();
+
+      const result23 = await pgSafe(
+        `SELECT id, status FROM couple_links WHERE user1_id=$1 AND user2_id=$2 LIMIT 1`,
+        [u1, u2]
+      );
+      const existing = result23?.rows || [];
+      if (existing[0]) {
+        if (existing[0].status === "active") return res.status(409).send("Already linked");
+        return res.status(409).send("A link request already exists");
+      }
+
+      const result24 = await pgSafe(
+        `
+        INSERT INTO couple_links(user1_id, user2_id, requested_by_id, status, status_emoji, status_label, created_at, updated_at)
+        VALUES($1,$2,$3,'pending','💜','Linked',$4,$4)
+        RETURNING id
+        `,
+        [u1, u2, meId, now]
+      );
+      const created = result24?.rows || [];
+      const linkId = created?.[0]?.id;
+
+      await pgSafe(
+        `
+        INSERT INTO couple_prefs(link_id, user_id, enabled, show_profile, show_members, group_members, aura, badge, allow_ping, updated_at)
+        VALUES
+          ($1,$2,true,true,true,false,true,true,true,$4),
+          ($1,$3,true,true,true,false,true,true,true,$4)
+        ON CONFLICT (link_id, user_id) DO NOTHING
+        `,
+        [linkId, u1, u2, now]
+      );
+
+      const summary = await pgGetCoupleSummaryFor(req.session.user);
+      return res.json(summary);
+    } catch (e) {
+      console.warn("[couples] request failed:", e?.message || e);
+      return res.status(500).send("Could not create request");
+    }
+  });
+
+  app.post("/api/couples/respond", strictLimiter, requireLogin, async (req, res) => {
+    try {
+      if (!PG_READY) return res.status(503).send("DB not ready");
+      if (!COUPLES_READY) return res.status(503).send("Couples not ready");
+      const linkId = Number(req.body?.linkId) || 0;
+      const accept = !!req.body?.accept;
+      if (!linkId) return res.status(400).send("Bad request");
+
+      const meId = Number(req.session.user?.id) || 0;
+      const result25 = await pgSafe(`SELECT * FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+      const rows = result25?.rows || [];
+      const link = rows[0];
+      if (!link) return res.status(404).send("Not found");
+      if (link.status !== "pending") return res.status(409).send("Not pending");
+      if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
+
+      if (!accept) {
+        await pgSafe(`DELETE FROM couple_links WHERE id=$1`, [linkId]);
+        emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
+        const summary = await pgGetCoupleSummaryFor(req.session.user);
+        return res.json(summary);
+      }
+
+      const now = Date.now();
+      await pgSafe(
+        `UPDATE couple_links SET status='active', activated_at=$2, updated_at=$2 WHERE id=$1`,
+        [linkId, now]
+      );
+      emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
+
+      // Ensure both sides have default prefs rows (so both requestor + acceptor see options)
+      try {
+        await pgUpsertCouplePrefs(linkId, Number(link.user1_id) || 0, {});
+        await pgUpsertCouplePrefs(linkId, Number(link.user2_id) || 0, {});
+      } catch (e) {
+        console.warn("[couples] ensure prefs rows failed:", e?.message || e);
+      }
+
+      try {
+        await ensureCoupleLinkedMemories(link);
+      } catch (e) {
+        console.warn("[couples] memory create failed:", e?.message || e);
+      }
+
+      const summary = await pgGetCoupleSummaryFor(req.session.user);
+      return res.json(summary);
+    } catch (e) {
+      console.warn("[couples] respond failed:", e?.message || e);
+      return res.status(500).send("Could not respond");
+    }
+  });
+
+  app.post("/api/couples/unlink", strictLimiter, requireLogin, async (req, res) => {
+    try {
+      if (!PG_READY) return res.status(503).send("DB not ready");
+      if (!COUPLES_READY) return res.status(503).send("Couples not ready");
+      const linkId = Number(req.body?.linkId) || 0;
+      if (!linkId) return res.status(400).send("Bad request");
+
+      const meId = Number(req.session.user?.id) || 0;
+      const result26 = await pgSafe(`SELECT user1_id,user2_id FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+      const rows = result26?.rows || [];
+      const link = rows[0];
+      if (!link) return res.status(404).send("Not found");
+      if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
+
+      await pgSafe(`DELETE FROM couple_links WHERE id=$1`, [linkId]);
+      emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
+      const summary = await pgGetCoupleSummaryFor(req.session.user);
+      return res.json(summary);
+    } catch (e) {
+      console.warn("[couples] unlink failed:", e?.message || e);
+      return res.status(500).send("Could not unlink");
+    }
+  });
+
+  app.post("/api/couples/prefs", strictLimiter, requireLogin, async (req, res) => {
+    try {
+      if (!PG_READY) return res.status(503).send("DB not ready");
+      if (!COUPLES_READY) return res.status(503).send("Couples not ready");
+      const linkId = Number(req.body?.linkId) || 0;
+      if (!linkId) return res.status(400).send("Bad request");
+      const meId = Number(req.session.user?.id) || 0;
+
+      const result27 = await pgSafe(`SELECT user1_id,user2_id FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+      const rows = result27?.rows || [];
+      const link = rows[0];
+      if (!link) return res.status(404).send("Not found");
+      if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
+
+      await pgUpsertCouplePrefs(linkId, meId, req.body?.prefs || {});
+      emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
+      const summary = await pgGetCoupleSummaryFor(req.session.user);
+      return res.json(summary);
+    } catch (e) {
+      console.warn("[couples] prefs failed:", e?.message || e);
+      return res.status(500).send("Could not update prefs");
+    }
+  });
+
+  app.post("/api/couples/status", strictLimiter, requireLogin, async (req, res) => {
+    try {
+      if (!PG_READY) return res.status(503).send("DB not ready");
+      if (!COUPLES_READY) return res.status(503).send("Couples not ready");
+      const linkId = Number(req.body?.linkId) || 0;
+      if (!linkId) return res.status(400).send("Bad request");
+
+      const meId = Number(req.session.user?.id) || 0;
+      const result28 = await pgSafe(`SELECT user1_id,user2_id,status FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+      const rows = result28?.rows || [];
+      const link = rows[0];
+      if (!link) return res.status(404).send("Not found");
+      if (link.status !== "active") return res.status(409).send("Not active");
+      if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
+
+      const emoji = String(req.body?.statusEmoji || "💜").trim().slice(0, 8) || "💜";
+      const label = String(req.body?.statusLabel || "Linked").trim().slice(0, 20) || "Linked";
+      const now = Date.now();
+
+      await pgSafe(
+        `UPDATE couple_links SET status_emoji=$2, status_label=$3, updated_at=$4 WHERE id=$1`,
+        [linkId, emoji, label, now]
+      );
+      emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
+
+      const summary = await pgGetCoupleSummaryFor(req.session.user);
+      return res.json(summary);
+    } catch (e) {
+      console.warn("[couples] status failed:", e?.message || e);
+      return res.status(500).send("Could not update status");
+    }
+  });
+
+  app.post("/api/couples/settings", strictLimiter, requireLogin, async (req, res) => {
+    try {
+      if (!PG_READY) return res.status(503).send("DB not ready");
+      if (!COUPLES_READY) return res.status(503).send("Couples not ready");
+      if (!isCouplesV2EnabledFor(req.session.user)) return res.status(403).send("Forbidden");
+
+      const link = await pgGetActiveCoupleLinkForUser(req.session.user.id);
+      if (!link) return res.status(404).send("Not linked");
+      if (!isCoupleMember(req.session.user.id, link)) return res.status(403).send("Forbidden");
+
+      const privacyRaw = String(req.body?.privacy || "").trim().toLowerCase();
+      const privacy = ["private", "friends", "public"].includes(privacyRaw) ? privacyRaw : undefined;
+      const coupleName = typeof req.body?.couple_name === "string" ? String(req.body.couple_name).trim().slice(0, 48) : undefined;
+      const coupleBio = typeof req.body?.couple_bio === "string" ? String(req.body.couple_bio).trim().slice(0, 220) : undefined;
+      const showBadge = typeof req.body?.show_badge === "boolean" ? req.body.show_badge : undefined;
+      const bonusesEnabled = typeof req.body?.bonuses_enabled === "boolean" ? req.body.bonuses_enabled : undefined;
+      const now = Date.now();
+
+      const sets = [];
+      const vals = [];
+      if (privacy) { sets.push(`privacy=$${vals.length + 1}`); vals.push(privacy); }
+      if (coupleName !== undefined) { sets.push(`couple_name=$${vals.length + 1}`); vals.push(coupleName || null); }
+      if (coupleBio !== undefined) { sets.push(`couple_bio=$${vals.length + 1}`); vals.push(coupleBio || null); }
+      if (showBadge !== undefined) { sets.push(`show_badge=$${vals.length + 1}`); vals.push(showBadge); }
+      if (bonusesEnabled !== undefined) { sets.push(`bonuses_enabled=$${vals.length + 1}`); vals.push(bonusesEnabled); }
+      sets.push(`updated_at=$${vals.length + 1}`); vals.push(now);
+
+      if (sets.length) {
+        vals.push(link.id);
+        await pgSafe(`UPDATE couple_links SET ${sets.join(", ")} WHERE id=$${vals.length}`, vals);
+      }
+
+      emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId: link.id });
+      const summary = await pgGetCoupleSummaryFor(req.session.user);
+      return res.json(summary);
+    } catch (e) {
+      console.warn("[couples] settings failed:", e?.message || e);
+      return res.status(500).send("Could not update settings");
+    }
+  });
+
+  const coupleNudgeCooldownMs = 60_000;
+  const coupleNudgeLastByUser = new Map(); // key: `${linkId}:${userId}` -> ts
+
+  app.post("/api/couples/nudge", strictLimiter, requireLogin, async (req, res) => {
+    try {
+      if (!PG_READY) return res.status(503).send("DB not ready");
+      if (!COUPLES_READY) return res.status(503).send("Couples not ready");
+      if (!isCouplesV2EnabledFor(req.session.user)) return res.status(403).send("Forbidden");
+
+      const link = await pgGetActiveCoupleLinkForUser(req.session.user.id);
+      if (!link) return res.status(404).send("Not linked");
+      if (!isCoupleMember(req.session.user.id, link)) return res.status(403).send("Forbidden");
+
+      const partnerId = getCouplePartnerId(req.session.user.id, link);
+      if (!partnerId) return res.status(404).send("Partner not found");
+      const prefsPartner = await pgGetCouplePrefs(link.id, partnerId);
+      if (prefsPartner && prefsPartner.allow_ping === false) return res.status(403).send("Partner muted nudges");
+
+      const key = `${link.id}:${req.session.user.id}`;
+      const last = coupleNudgeLastByUser.get(key) || 0;
+      if (Date.now() - last < coupleNudgeCooldownMs) return res.status(429).send("Slow down");
+      coupleNudgeLastByUser.set(key, Date.now());
+
+      emitToUserIds([partnerId], "couples:nudge", {
+        fromId: req.session.user.id,
+        fromName: req.session.user.username,
+        linkId: link.id
+      });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn("[couples] nudge failed:", e?.message || e);
+      return res.status(500).send("Could not send nudge");
+    }
+  });
+
+
+  // --- Friends API
+  app.get("/api/friends/requests", requireLogin, async (req, res) => {
+    try {
+      const meId = Number(req.session.user?.id) || 0;
+      if (!meId) return res.status(401).send("Not logged in");
+      const rows = (PG_READY && FRIENDS_READY)
+        ? await pgListIncomingFriendRequests(meId)
+        : await dbListIncomingFriendRequests(meId);
+
+      const payload = rows.map((r) => ({
+        id: Number(r.id) || 0,
+        createdAt: Number(r.created_at) || Date.now(),
+        from: {
+          id: Number(r.from_id) || null,
+          username: r.from_username || r.username || null,
+          avatar: (PG_READY && FRIENDS_READY) ? avatarUrlFromRow(r) : (r.avatar || null)
+        }
+      })).filter((x) => x.id && x.from?.username);
+
+      return res.json({ incoming: payload });
+    } catch (e) {
+      console.warn('[friends] requests list failed:', e?.message || e);
+      return res.status(500).send('Could not load requests');
+    }
+  });
+
+  app.get("/api/friends/list", requireLogin, async (req, res) => {
+    try {
+      const meId = Number(req.session.user?.id) || 0;
+      if (!meId) return res.status(401).send("Not logged in");
+      const rows = (PG_READY && FRIENDS_READY)
+        ? await pgListFriendsForUser(meId)
+        : await dbListFriendsForUser(meId);
+
+      const friends = rows.map((r) => {
+        const uid = Number(r.id) || Number(r.friend_user_id) || 0;
+        const live = onlineState.get(uid);
+        const online = !!socketIdByUserId.get(uid);
+        return {
+          id: uid,
+          username: r.username,
+          role: r.role,
+          avatar: (PG_READY && FRIENDS_READY) ? avatarUrlFromRow(r) : (r.avatar || null),
+          isFavorite: !!r.is_favorite,
+          online,
+          currentRoom: live?.room || null,
+          lastSeen: r.last_seen || null,
+          lastRoom: r.last_room || null,
+          lastStatus: live?.status || r.last_status || null,
+        };
+      }).filter((f) => f.id && f.username);
+
+      return res.json({ friends });
+    } catch (e) {
+      console.warn('[friends] list failed:', e?.message || e);
+      return res.status(500).send('Could not load friends');
+    }
+  });
+
+  app.post("/api/friends/request", strictLimiter, requireLogin, async (req, res) => {
+    try {
+      const meId = Number(req.session.user?.id) || 0;
+      const toName = String(req.body?.to || '').trim().slice(0, 64);
+      const toUser = await findUserByUsername(toName);
+      if (!toUser) return res.status(404).send('User not found');
+      if (Number(toUser.id) === meId) return res.status(400).send('You cannot friend yourself');
+
+      // Already friends?
+      const already = (PG_READY && FRIENDS_READY)
+        ? await pgAreFriends(meId, toUser.id)
+        : await dbAreFriends(meId, toUser.id);
+      if (already) return res.json({ ok: true, status: 'friends', autoAccepted: true });
+
+      // If they already requested you, auto-accept
+      const incoming = (PG_READY && FRIENDS_READY)
+        ? await pgGetPendingFriendRequest(toUser.id, meId)
+        : await dbGetPendingFriendRequest(toUser.id, meId);
+
+      const now = Date.now();
+
+      if (incoming?.id) {
+        if (PG_READY && FRIENDS_READY) {
+          await pgSafe(`UPDATE friend_requests SET status='accepted', updated_at=$2 WHERE id=$1`, [incoming.id, now]);
+          await pgCreateFriendsPair(meId, toUser.id);
+        } else {
+          await dbRunAsync(`UPDATE friend_requests SET status='accepted', updated_at=? WHERE id=?`, [now, incoming.id]);
+          await dbCreateFriendsPair(meId, toUser.id);
+        }
+
+        // notify both
+        const sOther = socketIdByUserId.get(Number(toUser.id));
+        if (sOther) io.to(sOther).emit('friend:accepted', { username: req.session.user.username, by: req.session.user.username });
+        const sMe = socketIdByUserId.get(meId);
+        if (sMe) io.to(sMe).emit('friend:accepted', { username: toUser.username, by: req.session.user.username });
+
+        return res.json({ ok: true, status: 'friends', autoAccepted: true });
+      }
+
+      // Existing outgoing pending?
+      const outgoing = (PG_READY && FRIENDS_READY)
+        ? await pgGetPendingFriendRequest(meId, toUser.id)
+        : await dbGetPendingFriendRequest(meId, toUser.id);
+      if (outgoing?.id) return res.json({ ok: true, status: 'pending', requestId: Number(outgoing.id) });
+
+      let requestId = 0;
+      if (PG_READY && FRIENDS_READY) {
+        const result42 = await pgSafe(
+          `INSERT INTO friend_requests(from_user_id, to_user_id, status, created_at, updated_at)
+           VALUES ($1,$2,'pending',$3,$3)
+           RETURNING id`,
+          [meId, toUser.id, now]
+        );
+        const rows = result42?.rows || [];
+        requestId = Number(rows?.[0]?.id) || 0;
+      } else {
+        const r = await dbRunAsync(
+          `INSERT INTO friend_requests(from_user_id, to_user_id, status, created_at, updated_at)
+           VALUES (?,?, 'pending', ?, ?)`,
+          [meId, toUser.id, now, now]
+        );
+        requestId = Number(r?.lastID) || 0;
+      }
+
+      // notify receiver (personalized flair via client notification)
+      const sOther = socketIdByUserId.get(Number(toUser.id));
+      if (sOther) {
+        io.to(sOther).emit('friend:request', {
+          requestId,
+          from: {
+            id: meId,
+            username: req.session.user.username,
+            avatar: await getAvatarUrlForUserId(meId),
+          },
+          createdAt: now,
+        });
+      }
+
+      return res.json({ ok: true, status: 'pending', requestId });
+    } catch (e) {
+      console.warn('[friends] request failed:', e?.message || e);
+      return res.status(500).send('Could not send request');
+    }
+  });
+
+  app.post("/api/friends/respond", strictLimiter, requireLogin, async (req, res) => {
+    try {
+      const meId = Number(req.session.user?.id) || 0;
+      const requestId = Number(req.body?.requestId) || 0;
+      const action = String(req.body?.action || '').toLowerCase();
+      if (!requestId || !['accept','decline'].includes(action)) return res.status(400).send('Bad request');
+
+      const now = Date.now();
+
+      if (PG_READY && FRIENDS_READY) {
+        const result43 = await pgSafe(`SELECT * FROM friend_requests WHERE id=$1 LIMIT 1`, [requestId]);
+        const rows = result43?.rows || [];
+        const fr = rows[0];
+        if (!fr) return res.status(404).send('Not found');
+        if (String(fr.status) !== 'pending') return res.json({ ok: true, status: fr.status });
+        if (Number(fr.to_user_id) !== meId) return res.status(403).send('Forbidden');
+
+        if (action === 'accept') {
+          await pgSafe(`UPDATE friend_requests SET status='accepted', updated_at=$2 WHERE id=$1`, [requestId, now]);
+          await pgCreateFriendsPair(fr.from_user_id, fr.to_user_id);
+        } else {
+          await pgSafe(`UPDATE friend_requests SET status='declined', updated_at=$2 WHERE id=$1`, [requestId, now]);
+        }
+
+        const fromId = Number(fr.from_user_id) || 0;
+        const fromUser = await pgGetUserById(fromId).catch(()=>null);
+        const sFrom = socketIdByUserId.get(fromId);
+        const sMe = socketIdByUserId.get(meId);
+        if (action === 'accept') {
+          if (sFrom) io.to(sFrom).emit('friend:accepted', { username: req.session.user.username, by: req.session.user.username });
+          if (sMe && fromUser?.username) io.to(sMe).emit('friend:accepted', { username: fromUser.username, by: req.session.user.username });
+        } else {
+          if (sFrom) io.to(sFrom).emit('friend:declined', { username: req.session.user.username });
+        }
+
+        return res.json({ ok: true, status: action === 'accept' ? 'accepted' : 'declined' });
+      }
+
+      // SQLite fallback
+      const fr = await dbGetAsync(`SELECT * FROM friend_requests WHERE id=? LIMIT 1`, [requestId]).catch(()=>null);
+      if (!fr) return res.status(404).send('Not found');
+      if (String(fr.status) !== 'pending') return res.json({ ok: true, status: fr.status });
+      if (Number(fr.to_user_id) !== meId) return res.status(403).send('Forbidden');
+
+      if (action === 'accept') {
+        await dbRunAsync(`UPDATE friend_requests SET status='accepted', updated_at=? WHERE id=?`, [now, requestId]);
+        await dbCreateFriendsPair(fr.from_user_id, fr.to_user_id);
+      } else {
+        await dbRunAsync(`UPDATE friend_requests SET status='declined', updated_at=? WHERE id=?`, [now, requestId]);
+      }
+
+      const sFrom = socketIdByUserId.get(Number(fr.from_user_id));
+      if (action === 'accept') {
+        if (sFrom) io.to(sFrom).emit('friend:accepted', { username: req.session.user.username, by: req.session.user.username });
+      } else {
+        if (sFrom) io.to(sFrom).emit('friend:declined', { username: req.session.user.username });
+      }
+
+      return res.json({ ok: true, status: action === 'accept' ? 'accepted' : 'declined' });
+    } catch (e) {
+      console.warn('[friends] respond failed:', e?.message || e);
+      return res.status(500).send('Could not respond');
+    }
+  });
+
+  app.post("/api/friends/favorite", strictLimiter, requireLogin, async (req, res) => {
+    try {
+      const meId = Number(req.session.user?.id) || 0;
+      const uname = String(req.body?.username || '').trim().slice(0,64);
+      const other = await findUserByUsername(uname);
+      if (!other) return res.status(404).send('User not found');
+      const isFavorite = !!req.body?.isFavorite;
+
+      if (PG_READY && FRIENDS_READY) {
+        await pgSafe(
+          `UPDATE friends SET is_favorite=$3 WHERE user_id=$1 AND friend_user_id=$2`,
+          [meId, other.id, isFavorite]
+        );
+      } else {
+        await dbRunAsync(`UPDATE friends SET is_favorite=? WHERE user_id=? AND friend_user_id=?`, [isFavorite ? 1 : 0, meId, other.id]);
+      }
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn('[friends] favorite failed:', e?.message || e);
+      return res.status(500).send('Could not update favorite');
+    }
+  });
+
+  app.post("/api/friends/remove", strictLimiter, requireLogin, async (req, res) => {
+    try {
+      const meId = Number(req.session.user?.id) || 0;
+      const uname = String(req.body?.username || '').trim().slice(0,64);
+      const other = await findUserByUsername(uname);
+      if (!other) return res.status(404).send('User not found');
+
+      if (PG_READY && FRIENDS_READY) {
+        await pgSafe(`DELETE FROM friends WHERE (user_id=$1 AND friend_user_id=$2) OR (user_id=$2 AND friend_user_id=$1)`, [meId, other.id]);
+      } else {
+        await dbRunAsync(`DELETE FROM friends WHERE (user_id=? AND friend_user_id=?) OR (user_id=? AND friend_user_id=?)`, [meId, other.id, other.id, meId]);
+      }
+      // notify other (optional)
+      const sOther = socketIdByUserId.get(Number(other.id));
+      if (sOther) io.to(sOther).emit('friend:removed', { username: req.session.user.username });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.warn('[friends] remove failed:', e?.message || e);
+      return res.status(500).send('Could not remove friend');
+    }
+  });
+
+
+
+  app.post("/profile/:username/like", strictLimiter, requireLogin, async (req, res) => {
+    const u = sanitizeUsername(req.params.username);
+    if (!u) return res.status(400).send("Bad username");
+
+    const target = await findUserByUsername(u);
+    if (!target) return res.status(404).send("Not found");
+    if (target.id === req.session.user.id) {
+      return res.status(400).json({ ok: false, message: "You cannot like yourself." });
+    }
+
+    try {
+      const stats = await toggleProfileLike(req.session.user.id, target.id);
+      return res.json({
+        ok: true,
+        likes: stats.likes,
+        liked: stats.liked,
+      });
+    } catch (e) {
+      return res.status(500).json({ ok: false, message: "Could not update like" });
+    }
+  });
+
+  // Avatar upload for profile edits (2MB max, in-memory only)
+  const AVATAR_ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+  const avatarUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 2 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      const ok = AVATAR_ALLOWED_MIME.has(String(file.mimetype || "").toLowerCase());
+      cb(ok ? null : new Error("Invalid avatar type"), ok);
+    },
+  });
+
+  // IMPORTANT: Most of your app now reads profiles from Postgres (when the user exists there).
+  // The old version of this route only updated SQLite, so uploads "worked" but never showed up.
+  app.post("/profile", strictLimiter, requireLogin, (req, res) => {
+    avatarUpload.single("avatar")(req, res, async (err) => {
+      if (err) {
+        const msg =
+          err.code === "LIMIT_FILE_SIZE"
+            ? "Avatar too large (max 2MB)."
+            : (err.message || "Avatar upload failed.");
+        return res.status(400).json({ ok: false, message: msg });
+      }
+
+      const userId = req.session.user.id;
+      const mood = String(req.body?.mood || "").slice(0, 40);
+      const bio = String(req.body?.bio || "").slice(0, 2000);
+      const age = req.body?.age === "" || req.body?.age == null ? null : clamp(req.body.age, 18, 120);
+      const gender = String(req.body?.gender || "").slice(0, 40);
+      const vibeTags = sanitizeVibeTags(req.body?.vibeTags);
+      const headerGradA = sanitizeHexColor(req.body?.headerColorA);
+      const headerGradB = sanitizeHexColor(req.body?.headerColorB);
+      // Postgres stores vibe_tags as JSONB. node-postgres will otherwise serialize arrays
+      // as Postgres array literals, which causes the UPDATE to fail and makes changes
+      // appear to "revert" on refresh (because /profile reads from Postgres first).
+      const vibeTagsJson = JSON.stringify(vibeTags);
+      const file = req.file || null;
+      if (file) {
+        const sniffed = sniffImageMime(file.buffer);
+        if (!sniffed || !AVATAR_ALLOWED_MIME.has(sniffed)) {
+          return res.status(400).json({ ok: false, message: "Invalid avatar content." });
+        }
+      }
+      const avatarUpdated = file ? Date.now() : null;
+      const avatarUrl = file ? `/avatar/${userId}?v=${avatarUpdated}` : null;
+
+      // Best-effort: push updated profile bits into the currently-connected socket (so members list/chat updates immediately)
+      const refreshLivePresence = () => {
+        const sid = socketIdByUserId.get(userId);
+        const s = sid ? io.sockets.sockets.get(sid) : null;
+        if (!s?.user) return;
+        if (avatarUrl) s.user.avatar = avatarUrl;
+        s.user.mood = mood;
+        s.user.vibe_tags = vibeTags;
+        if (s.currentRoom) emitUserList(s.currentRoom);
+      };
+
+      try {
+        // Prefer Postgres if this user exists there (Render prod path)
+        if (await pgUserExists(userId)) {
+          if (file) {
+            await pgSafe(
+              `UPDATE users
+                 SET mood = $1,
+                     bio = $2,
+                     age = $3,
+                     gender = $4,
+                     avatar_bytes = $5,
+                     avatar_mime = $6,
+                     avatar_updated = $7,
+                     avatar = NULL,
+                     vibe_tags = $8::jsonb,
+                     header_grad_a = COALESCE($9, header_grad_a),
+                     header_grad_b = COALESCE($10, header_grad_b)
+               WHERE id = $11`,
+              [mood, bio, age, gender, file.buffer, file.mimetype, avatarUpdated, vibeTagsJson, headerGradA, headerGradB, userId]
+            );
+          } else {
+            await pgSafe(
+              `UPDATE users
+                 SET mood = $1,
+                     bio = $2,
+                     age = $3,
+                     gender = $4,
+                     vibe_tags = $5::jsonb,
+                     header_grad_a = COALESCE($6, header_grad_a),
+                     header_grad_b = COALESCE($7, header_grad_b)
+               WHERE id = $8`,
+              [mood, bio, age, gender, vibeTagsJson, headerGradA, headerGradB, userId]
+            );
+          }
+          if (avatarUrl) req.session.user.avatar = avatarUrl;
+          // Reinforcement: persist the updated session before responding so refresh
+          // cannot revert to a stale/empty avatar due to an unsaved session write.
+          return req.session.save((saveErr) => {
+            if (saveErr) return res.status(500).json({ ok: false, message: "Session save failed" });
+            refreshLivePresence();
+            return res.json({ ok: true, avatar: avatarUrl });
+          });
+        }
+      } catch (e) {
+        console.warn("[/profile][pg] update failed, falling back to sqlite:", e?.message || e);
+      }
+
+      if (file) {
+        return res.status(500).json({ ok: false, message: "Avatar storage unavailable right now." });
+      }
+
+      // SQLite fallback (original behavior)
+      db.get("SELECT avatar, vibe_tags, header_grad_a, header_grad_b FROM users WHERE id = ?", [userId], (_e, old) => {
+        const newAvatar = old?.avatar || null;
+        const oldVibes = sanitizeVibeTags(old?.vibe_tags || []);
+        const vibeJson = JSON.stringify(vibeTags.length ? vibeTags : oldVibes);
+        const newHeaderGradA = headerGradA ?? sanitizeHexColor(old?.header_grad_a);
+        const newHeaderGradB = headerGradB ?? sanitizeHexColor(old?.header_grad_b);
+
+        db.run(
+          `UPDATE users SET mood=?, bio=?, age=?, gender=?, avatar=?, vibe_tags=?, header_grad_a=?, header_grad_b=? WHERE id=?`,
+          [mood, bio, age, gender, newAvatar, vibeJson, newHeaderGradA, newHeaderGradB, userId],
+          (err2) => {
+            if (err2) return res.status(500).send("Save failed");
+            if (avatarUrl) req.session.user.avatar = avatarUrl;
+            refreshLivePresence();
+            return res.json({ ok: true, avatar: avatarUrl });
+          }
+        );
+      });
+    });
+  });
+
+
+
+  // Remove avatar (clears avatar field; best-effort deletes local file if present)
+  app.delete("/profile/avatar", strictLimiter, requireLogin, async (req, res) => {
+    const userId = req.session.user.id;
+
+    const clearAvatarInLivePresence = () => {
+      const sid = socketIdByUserId.get(userId);
+      const s = sid ? io.sockets.sockets.get(sid) : null;
+      if (!s?.user) return;
+      s.user.avatar = null;
+      if (s.currentRoom) emitUserList(s.currentRoom);
+    };
+
+    const tryDeleteLocalAvatarFile = (avatarUrl) => {
+      try {
+        const rel = String(avatarUrl || "");
+        if (!rel.startsWith("/avatars/")) return;
+        const fp = path.join(AVATARS_DIR, path.basename(rel));
+        fs.unlink(fp, () => {});
+      } catch {}
+    };
+
+    try {
+      // Prefer Postgres if present
+      if (await pgUserExists(userId)) {
+        const result44 = await pgSafe(`SELECT avatar FROM users WHERE id = $1`, [userId]);
+        const rows = result44?.rows || [];
+        const oldAvatar = rows?.[0]?.avatar || null;
+
+        await pgSafe(
+          `UPDATE users
+              SET avatar = NULL,
+                  avatar_bytes = NULL,
+                  avatar_mime = NULL,
+                  avatar_updated = NULL
+            WHERE id = $1`,
+          [userId]
+        );
+        req.session.user.avatar = null;
+        clearAvatarInLivePresence();
+        tryDeleteLocalAvatarFile(oldAvatar);
+        return res.json({ ok: true });
+      }
+    } catch (e) {
+      console.warn("[/profile/avatar][pg] delete failed, falling back to sqlite:", e?.message || e);
+    }
+
+    // SQLite fallback
+    db.get("SELECT avatar FROM users WHERE id = ?", [userId], (_e, row) => {
+      const oldAvatar = row?.avatar || null;
+      db.run(`UPDATE users SET avatar = NULL WHERE id = ?`, [userId], (err2) => {
+        if (err2) return res.status(500).send("Could not remove avatar");
+        req.session.user.avatar = null;
+        clearAvatarInLivePresence();
+        tryDeleteLocalAvatarFile(oldAvatar);
+        return res.json({ ok: true });
+      });
+    });
+  });
+
+  // ---- Uploads (25MB images/gifs, 100MB videos). VIP can upload videos, everyone can upload images.
+  const MAX_IMAGE_GIF_BYTES = 25 * 1024 * 1024;
+  const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
+  const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+  const IMAGE_UPLOAD_ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+  const AUDIO_UPLOAD_ALLOWED_MIME = new Set(["audio/mpeg", "audio/mp4", "audio/aac"]);
+  const VIDEO_UPLOAD_ALLOWED_MIME = new Set(["video/mp4", "video/webm"]);
+  const AUDIO_UPLOAD_ALLOWED_EXT = new Set([".mp3", ".m4a", ".aac"]);
+  const IMAGE_UPLOAD_ALLOWED_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
+  const VIDEO_UPLOAD_ALLOWED_EXT = new Set([".mp4", ".webm"]);
+  const SAFE_UPLOAD_EXT_BY_MIME = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/aac": ".aac",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+  };
+
+  function inferUploadMimeFromName(originalname){
+    const name = String(originalname || "").toLowerCase();
+    const ext = (name.includes(".") ? name.split(".").pop() : "").slice(0, 10);
+    switch(ext){
+      case "mp3": return "audio/mpeg";
+      case "m4a": return "audio/mp4";
+      case "aac": return "audio/aac";
+      case "wav": return "audio/wav";
+      case "ogg":
+      case "oga": return "audio/ogg";
+      case "opus": return "audio/opus";
+      case "webm": return "audio/webm";
+      default: return "";
+    }
+  }
+
+  function safeUploadExt(mime, originalname) {
+    const ext = path.extname(originalname || "").toLowerCase();
+    if (IMAGE_UPLOAD_ALLOWED_EXT.has(ext) || AUDIO_UPLOAD_ALLOWED_EXT.has(ext) || VIDEO_UPLOAD_ALLOWED_EXT.has(ext)) {
+      return ext;
+    }
+    return SAFE_UPLOAD_EXT_BY_MIME[mime] || "";
+  }
+
+  function readFileHeader(filePath, length = 32) {
+    try {
+      const fd = fs.openSync(filePath, "r");
+      const buffer = Buffer.alloc(length);
+      fs.readSync(fd, buffer, 0, length, 0);
+      fs.closeSync(fd);
+      return buffer;
+    } catch {
+      return null;
+    }
+  }
+
+  function sniffImageMime(buffer) {
+    if (!buffer) return "";
+    if (buffer.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))) {
+      return "image/png";
+    }
+    if (buffer.slice(0, 3).equals(Buffer.from([0xFF, 0xD8, 0xFF]))) return "image/jpeg";
+    if (buffer.slice(0, 6).toString("ascii") === "GIF87a" || buffer.slice(0, 6).toString("ascii") === "GIF89a") {
+      return "image/gif";
+    }
+    if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WEBP") {
+      return "image/webp";
+    }
+    return "";
+  }
+
+  function sniffMp3(buffer) {
+    if (!buffer) return false;
+    if (buffer.slice(0, 3).toString("ascii") === "ID3") return true;
+    return buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0;
+  }
+
+  function sniffAac(buffer) {
+    if (!buffer) return false;
+    return buffer[0] === 0xff && (buffer[1] & 0xf6) === 0xf0;
+  }
+
+  function sniffMp4Container(buffer) {
+    if (!buffer) return false;
+    return buffer.slice(4, 8).toString("ascii") === "ftyp";
+  }
+
+  function sniffWebm(buffer) {
+    if (!buffer) return false;
+    return buffer.slice(0, 4).equals(Buffer.from([0x1A, 0x45, 0xDF, 0xA3]));
+  }
+  const chatUpload = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+      filename: (_req, file, cb) => {
+        const ext = safeUploadExt(file.mimetype, file.originalname) || "";
+        cb(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`);
+      },
+    }),
+    limits: { fileSize: MAX_VIDEO_BYTES },
+  });
+
+  app.post("/upload", uploadLimiter, uploadUserLimiter, requireLogin, (req, res) => {
+    chatUpload.single("file")(req, res, (err) => {
+      if (err) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return res.status(413).json({ message: "File too large (max 100MB)." });
+        }
+        return res.status(400).json({ message: err.message || "Upload failed." });
+      }
+      if (!req.file) return res.status(400).send("No file");
+
+      const uploadKind = String(req.body?.uploadKind || "").trim();
+      let mime = String(req.file.mimetype || "");
+      if(!mime || mime === "application/octet-stream"){
+        const inferred = inferUploadMimeFromName(req.file.originalname);
+        if(inferred) mime = inferred;
+      }
+      const role = req.session.user.role;
+
+      const isSvg = mime === "image/svg+xml";
+      const isImage = IMAGE_UPLOAD_ALLOWED_MIME.has(mime);
+      const isAudio = AUDIO_UPLOAD_ALLOWED_MIME.has(mime);
+      const isVideo = VIDEO_UPLOAD_ALLOWED_MIME.has(mime);
+
+      const cleanupUpload = () => {
+        try { fs.unlinkSync(path.join(UPLOADS_DIR, req.file.filename)); } catch {}
+      };
+
+      if (isSvg || (!isImage && !isAudio && !isVideo)) {
+        cleanupUpload();
+        return res.status(400).json({ message: "File type not allowed" });
+      }
+
+      if (isAudio && uploadKind === "audio-upload") {
+        const ext = path.extname(req.file.originalname || "").toLowerCase();
+        const mimeAllowed = AUDIO_UPLOAD_ALLOWED_MIME.has(mime);
+        const extAllowed = AUDIO_UPLOAD_ALLOWED_EXT.has(ext);
+        if (!mimeAllowed || !extAllowed) {
+          cleanupUpload();
+          return res.status(400).json({ message: "Audio upload supports MP3, M4A, or AAC only." });
+        }
+      }
+
+      if (isImage && !IMAGE_UPLOAD_ALLOWED_EXT.has(path.extname(req.file.originalname || "").toLowerCase())) {
+        cleanupUpload();
+        return res.status(400).json({ message: "Image type not allowed." });
+      }
+
+      const header = readFileHeader(path.join(UPLOADS_DIR, req.file.filename), 32);
+      if (isImage) {
+        const sniffed = sniffImageMime(header);
+        if (!sniffed || !IMAGE_UPLOAD_ALLOWED_MIME.has(sniffed)) {
+          cleanupUpload();
+          return res.status(400).json({ message: "Image content invalid." });
+        }
+        mime = sniffed;
+      }
+
+      if (isAudio) {
+        const isMp3 = sniffMp3(header);
+        const isAac = sniffAac(header);
+        const isMp4 = sniffMp4Container(header);
+        if (!(isMp3 || isAac || isMp4)) {
+          cleanupUpload();
+          return res.status(400).json({ message: "Audio content invalid." });
+        }
+      }
+
+      if (isVideo) {
+        const isMp4 = sniffMp4Container(header);
+        const isW = sniffWebm(header);
+        if (!(isMp4 || isW)) {
+          cleanupUpload();
+          return res.status(400).json({ message: "Video content invalid." });
+        }
+      }
+
+      if (isImage && req.file.size > MAX_IMAGE_GIF_BYTES) {
+        cleanupUpload();
+        return res.status(413).json({ message: "Image/GIF too large (max 25MB)." });
+      }
+
+      if (isAudio && req.file.size > MAX_AUDIO_BYTES) {
+        cleanupUpload();
+        return res.status(413).json({ message: "Audio too large (max 15MB)." });
+      }
+
+      if (isVideo && req.file.size > MAX_VIDEO_BYTES) {
+        cleanupUpload();
+        return res.status(413).json({ message: "Video too large (max 100MB)." });
+      }
+
+      if (isVideo && !requireMinRole(role, "VIP")) {
+        cleanupUpload();
+        return res.status(403).json({ message: "VIP required for video uploads" });
+      }
+
+      const url = `/uploads/${req.file.filename}`;
+      const type = isImage ? "image" : (isAudio ? "audio" : "video");
+
+      if (req.session?.user?.id) {
+        const userHint = req.session.user;
+        if (isAudio && uploadKind === "audio-upload") {
+          void ensureMemory(req.session.user.id, "first_voice_note", {
+            type: "media",
+            title: "First voice note",
+            description: "Sent your first voice note.",
+            icon: "🎙️",
+            metadata: { kind: "voice_note" },
+          }, userHint);
+        }
+        if (isImage) {
+          void ensureMemory(req.session.user.id, "first_image_upload", {
+            type: "media",
+            title: "First image upload",
+            description: "Shared your first image.",
+            icon: "🖼️",
+            metadata: { kind: "image" },
+          }, userHint);
+        }
+      }
+
+      logSecurityEvent("upload", {
+        ip: getClientIp(req),
+        userId: req.session?.user?.id || null,
+        username: req.session?.user?.username || null,
+        type,
+        mime,
+        size: req.file.size,
+      });
+
+      return res.json({
+        url,
+        mime,
+        size: req.file.size,
+        type,
+      });
+    });
+  });
+
+
+  // ---- Mod logs API (Moderator+)
+  app.get("/mod/logs", requireLogin, (req, res) => {
+    const role = req.session.user.role;
+    if (!requireMinRole(role, "Moderator")) return res.status(403).send("Forbidden");
+
+    const limit = clamp(req.query.limit || 50, 1, 200);
+    const user = String(req.query.user || "").trim().slice(0, 40);
+    const action = String(req.query.action || "").trim().slice(0, 40);
+
+    const wh = [];
+    const args = [];
+
+    if (user) {
+      wh.push("(lower(actor_username) = lower(?) OR lower(target_username) = lower(?))");
+      args.push(user, user);
+    }
+    if (action) {
+      wh.push("action = ?");
+      args.push(action);
+    }
+
+    const whereSql = wh.length ? `WHERE ${wh.join(" AND ")}` : "";
+    db.all(
+      `SELECT ts, actor_username, actor_role, action, target_username, room, details
+       FROM mod_logs ${whereSql}
+       ORDER BY ts DESC LIMIT ?`,
+      [...args, limit],
+      (err, rows) => {
+        if (err) return res.status(500).send("Failed");
+        return res.json(rows || []);
+      }
+    );
+  });
+
+  // ---- Direct messages API
+  // NOTE: This handler is used for BOTH /dm/threads and /api/dm/threads.
+  // Older builds mounted everything under /api; newer builds use /dm.
+  // Keeping both paths avoids breaking clients and prevents 404s.
+  function handleListDmThreads(req, res) {
+    const userId = req.session.user.id;
+
+    db.all(
+      `SELECT t.id, t.title, t.is_group, t.created_at,
+              COALESCE(
+                (SELECT id FROM dm_messages WHERE id=t.last_message_id AND deleted=0),
+                (SELECT id FROM dm_messages WHERE thread_id=t.id AND deleted=0 ORDER BY ts DESC LIMIT 1)
+              ) AS last_message_id,
+              (SELECT text FROM dm_messages WHERE thread_id=t.id AND deleted=0 ORDER BY ts DESC LIMIT 1) AS last_text,
+              COALESCE(
+                (SELECT ts FROM dm_messages WHERE id=t.last_message_id AND deleted=0),
+                t.last_message_at,
+                (SELECT ts FROM dm_messages WHERE thread_id=t.id AND deleted=0 ORDER BY ts DESC LIMIT 1)
+              ) AS last_ts,
+              (SELECT COUNT(*) FROM dm_messages m
+                WHERE m.thread_id = t.id
+                  AND m.deleted = 0
+                  AND m.user_id != ?
+                  AND m.ts > COALESCE(pself.last_read_at, 0)
+              ) AS unreadCount
+       FROM dm_threads t
+       INNER JOIN dm_participants pself ON pself.thread_id = t.id AND pself.user_id = ?
+       ORDER BY COALESCE(t.last_message_at, last_ts, t.created_at) DESC`,
+      [userId, userId],
+      (err, threads) => {
+        if (err) {
+          console.error("[dm/threads]", err);
+          return res.status(500).send("Failed to load threads");
+        }
+        if (!threads?.length) return res.json([]);
+
+        const ids = threads.map((t) => t.id);
+        const placeholders = ids.map(() => "?").join(",");
+
+        db.all(
+          `SELECT dp.thread_id, u.id as user_id, u.username, u.avatar
+           FROM dm_participants dp
+           JOIN users u ON u.id = dp.user_id
+           WHERE dp.thread_id IN (${placeholders})`,
+          ids,
+          (_e, parts) => {
+            const grouped = new Map();
+            for (const p of parts || []) {
+              if (!grouped.has(p.thread_id)) grouped.set(p.thread_id, []);
+              grouped.get(p.thread_id).push(p);
+            }
+
+            const result = threads.map((t) => {
+              const members = grouped.get(t.id) || [];
+              const other = members.find((m) => Number(m.user_id) !== Number(userId)) || members[0] || null;
+              return {
+                ...t,
+                participants: members.map((p) => p.username),
+                participantIds: members.map((p) => p.user_id),
+                participantsDetail: members.map((p) => ({ id: p.user_id, username: p.username, avatar: avatarUrlFromRow(p) })),
+                otherUser: other
+                  ? { id: other.user_id, username: other.username, avatar: avatarUrlFromRow(other) }
+                  : null,
+                unreadCount: Number(t.unreadCount || 0),
+              };
+            });
+            res.json(result);
+          }
+        );
+      }
+    );
+  }
+
+  app.get("/dm/threads", requireLogin, handleListDmThreads);
+  app.get("/api/dm/threads", requireLogin, handleListDmThreads);
+
+  app.get("/dm/thread/:id", requireLogin, (req, res) => {
+    const tid = Number(req.params.id);
+    if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
+    loadThreadForUser(tid, req.session.user.id, (err, thread) => {
+      if (err) return res.status(403).send("Not allowed");
+      return res.json(thread);
+    });
+  });
+
+  app.get("/api/dm/thread/:id", requireLogin, (req, res) => {
+    const tid = Number(req.params.id);
+    if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
+    loadThreadForUser(tid, req.session.user.id, (err, thread) => {
+      if (err) return res.status(403).send("Not allowed");
+      return res.json(thread);
+    });
+  });
+
+    // --- DM thread creation (shared by /dm and /api prefixes)
+    async function handleCreateDmThread(req, res) {
+      // Accept multiple payload shapes for compatibility:
+      // { participants:["a"], kind:"direct" }
+      // { participant:"a" } / { user:"a" } / { to:"a" } / { username:"a" }
+      let participantNames = req.body?.participants;
+      let participantIds = req.body?.participantIds || req.body?.participantsIds;
+      if (!Array.isArray(participantIds)) {
+        const singleId =
+          req.body?.participantId ??
+          req.body?.toId ??
+          req.body?.userId ??
+          req.body?.targetId ??
+          null;
+        participantIds = singleId != null ? [singleId] : [];
+      }
+
+      // Normalize participants list (strings) and allow mixed arrays (ids or usernames)
+      if (Array.isArray(participantNames)) {
+        const nextNames = [];
+        for (const v of participantNames) {
+          const n = Number(v);
+          if (Number.isInteger(n) && n > 0) participantIds.push(n);
+          else nextNames.push(v);
+        }
+        participantNames = nextNames;
+      } else {
+        const raw = String(
+          participantNames ||
+          req.body?.participant ||
+          req.body?.user ||
+          req.body?.to ||
+          req.body?.username ||
+          ""
+        );
+        participantNames = raw.split(",");
+      }
+
+      // De-dupe ids
+      participantIds = Array.from(
+        new Set(
+          participantIds
+            .map((v) => Number(v))
+            .filter((n) => Number.isInteger(n) && n > 0)
+        )
+      );
+
+      const kindRaw = String(req.body?.kind || "").trim().toLowerCase();
+      let title = String(req.body?.title || "").trim().slice(0, 80);
+      const cleanedNames = [];
+      const seen = new Set();
+      for (const name of participantNames || []) {
+        const s = cleanUsernameForLookup(name);
+        const key = normKey(s);
+        if (!s || seen.has(key)) continue;
+        if (key === normKey(req.session.user.username)) continue;
+        seen.add(key);
+        cleanedNames.push(s);
+      }
+
+      // If client passed ids, allow creating threads without relying on username matching.
+      if (!cleanedNames.length && !participantIds.length) {
+        return res.status(400).send("Pick someone to message");
+      }
+
+      // NOTE:
+      // The client may pass BOTH `participants` (names) and `participantIds` for the SAME user.
+      // If we derive group/direct from the raw request counts, a normal direct DM can be
+      // misclassified as a group chat (e.g. 1 name + 1 id = 2 requestedCount).
+      // Instead, determine group/direct based on the *resolved unique recipients*.
+      //
+      // Also: if the client explicitly requests a direct DM, honor that.
+      const requestedKind = kindRaw === "group" ? "group" : (kindRaw === "direct" ? "direct" : "auto");
+
+      try {
+        const usersByName = await fetchUsersByNames(cleanedNames);
+        if (usersByName.length !== cleanedNames.length) {
+          const found = new Set((usersByName || []).map((u) => normKey(u.username)));
+          const missing = cleanedNames.filter((n) => !found.has(normKey(n))).slice(0, 3);
+          return res.status(404).send(missing.length ? `User not found: ${missing.join(", ")}` : "User not found");
+        }
+
+        const myId = req.session.user.id;
+        const myName = req.session.user.username;
+
+        const usersById = await fetchUsersByIds(participantIds);
+        if (usersById.length !== participantIds.length) {
+          const foundIds = new Set((usersById || []).map((u) => Number(u.id)));
+          const missingIds = participantIds.filter((id) => !foundIds.has(Number(id))).slice(0, 3);
+          return res.status(404).send(missingIds.length ? `User not found (id): ${missingIds.join(", ")}` : "User not found");
+        }
+
+        const merged = new Map();
+        for (const u of usersByName || []) merged.set(Number(u.id), u);
+        for (const u of usersById || []) merged.set(Number(u.id), u);
+        merged.delete(Number(myId));
+
+        const recipients = Array.from(merged.values());
+
+        // Determine group/direct from resolved recipients.
+        const isGroup = (requestedKind === "group") || (requestedKind === "auto" && (recipients.length > 1 || !!title));
+
+        if (requestedKind === "group" && recipients.length < 2) {
+          return res.status(400).send("Group chats need 2+ participants (or a title)");
+        }
+
+        if (!isGroup && recipients.length !== 1) {
+          return res.status(400).send("Pick exactly one person for a direct DM");
+        }
+
+        const recipientIds = recipients.map((u) => Number(u.id));
+        const recipientNames = recipients.map((u) => u.username);
+        const allParticipantIds = Array.from(new Set([...recipientIds, myId]));
+        const allParticipantNames = Array.from(new Set([...recipientNames, myName]));
+
+        const notifyParticipants = (threadId, reused, isGroupThread, threadTitle = title || null) => {
+          for (const uid of allParticipantIds) {
+            const sid = socketIdByUserId.get(uid);
+            if (sid) {
+              const sock = io.sockets.sockets.get(sid);
+              if (sock) sock.join(`dm:${threadId}`);
+              io.to(sid).emit("dm thread invited", {
+                threadId,
+                title: threadTitle,
+                isGroup: isGroupThread,
+                participants: allParticipantNames,
+              });
+            }
+          }
+
+          return res.json({ ok: true, threadId, reused, isGroup: isGroupThread, participants: allParticipantNames });
+        };
+
+        const threadParticipants = allParticipantIds;
+        return resolveOrCreateThread(
+          {
+            participantIds: threadParticipants,
+            isGroup,
+            title,
+            createdBy: myId,
+          },
+          (err3, info) => {
+            if (err3) {
+              console.error("[dm:create] resolve failed", err3);
+              return res.status(500).send("Failed to create thread");
+            }
+            notifyParticipants(info.id, !info.created, isGroup, title || null);
+          }
+        );
+      } catch (err) {
+        console.error("[dm:create] failed", err);
+        return res.status(500).send("Failed to create thread");
+      }
+    }
+
+  app.post("/dm/thread", dmLimiter, requireLogin, handleCreateDmThread);
+  app.post("/api/dm/thread", dmLimiter, requireLogin, handleCreateDmThread);
+
+  app.post("/dm/thread/:id/participants", dmLimiter, requireLogin, (req, res) => {
+    const tid = Number(req.params.id);
+    if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
+
+    loadThreadForUser(tid, req.session.user.id, (err, thread) => {
+      if (err) return res.status(403).send("Not allowed");
+      if (!thread.is_group) return res.status(400).send("Only group DMs can add members");
+
+      let participants = req.body?.participants;
+      if (!Array.isArray(participants)) participants = [];
+
+      const cleaned = [];
+      const seen = new Set();
+      for (const name of participants || []) {
+        const s = cleanUsernameForLookup(name);
+        const key = normKey(s);
+        if (!s || seen.has(key)) continue;
+        if (key === normKey(req.session.user.username)) continue;
+        seen.add(key);
+        cleaned.push(s);
+      }
+
+      if (!cleaned.length) return res.status(400).send("Pick at least one new member");
+
+      (async () => {
+        try {
+          const users = await fetchUsersByNames(cleaned);
+          if (users.length !== cleaned.length) {
+            const found = new Set((users || []).map((u) => normKey(u.username)));
+            const missing = cleaned.filter((n) => !found.has(normKey(n))).slice(0, 3);
+            return res.status(404).send(missing.length ? `User not found: ${missing.join(", ")}` : "User not found");
+          }
+
+          db.all(
+            `SELECT user_id FROM dm_participants WHERE thread_id = ?`,
+            [tid],
+            (listErr, rows) => {
+              if (listErr) return res.status(500).send("Failed to add members");
+              const existingIds = new Set((rows || []).map((r) => r.user_id));
+              const newUsers = users.filter((u) => !existingIds.has(u.id));
+              if (!newUsers.length) return res.status(400).send("Everyone is already in the group");
+
+              const now = Date.now();
+              for (const u of newUsers) {
+                db.run(
+                  `INSERT OR IGNORE INTO dm_participants (thread_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)`,
+                  [tid, u.id, req.session.user.id, now]
+                );
+                const sid = socketIdByUserId.get(u.id);
+                if (sid) {
+                  const sock = io.sockets.sockets.get(sid);
+                  if (sock) sock.join(`dm:${tid}`);
+                  io.to(sid).emit("dm thread invited", {
+                    threadId: tid,
+                    title: thread.title || null,
+                    isGroup: true,
+                    participants: thread.participants,
+                  });
+                }
+              }
+
+              loadThreadForUser(tid, req.session.user.id, (infoErr, fresh) => {
+                if (infoErr) return res.status(500).send("Added but could not refresh");
+                return res.json({ ok: true, participants: fresh.participants });
+              });
+            }
+          );
+        } catch (fetchErr) {
+          console.error("[dm:add] failed", fetchErr);
+          return res.status(500).send("Failed to add members");
+        }
+      })();
+    });
+  });
+
+  app.post("/dm/thread/:id/leave", dmLimiter, requireLogin, (req, res) => {
+    const tid = Number(req.params.id);
+    if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
+    loadThreadForUser(tid, req.session.user.id, (err, thread) => {
+      if (err) return res.status(403).send("Not allowed");
+      if (!thread.is_group) return res.status(400).send("Leaving only available in group chats");
+
+      db.run(
+        `DELETE FROM dm_participants WHERE thread_id = ? AND user_id = ?`,
+        [tid, req.session.user.id],
+        (delErr) => {
+          if (delErr) return res.status(500).send("Could not leave group");
+          return res.json({ ok: true });
+        }
+      );
+    });
+  });
+
+  app.delete("/dm/thread/:id/messages", dmLimiter, requireLogin, (req, res) => {
+    const tid = Number(req.params.id);
+    if (!Number.isInteger(tid)) return res.status(400).send("Invalid thread");
+
+    loadThreadForUser(tid, req.session.user.id, (err) => {
+      if (err) return res.status(403).send("Not allowed");
+
+      db.run("DELETE FROM dm_messages WHERE thread_id = ?", [tid], (delErr) => {
+        if (delErr) return res.status(500).send("Failed to delete history");
+
+        io.to(`dm:${tid}`).emit("dm history cleared", { threadId: tid });
+        res.json({ ok: true });
+      });
+    });
+  });
+
+  console.log('[startup]   ✓ Routes registered');
+}
+
+/**
+ * Register all Socket.IO event handlers
+ * Called during Phase 9 of startup
+ */
+function registerSocketHandlers(io) {
+  console.log('[startup] Phase 9: Registering Socket.IO handlers...');
+
+// ---- Socket auth middleware (session)
+io.use((socket, next) => {
+  const origin = String(socket.handshake.headers.origin || "");
+  const hostHeader = String(socket.handshake.headers.host || "");
+  const referer = String(socket.handshake.headers.referer || "");
+  const secFetchSite = String(socket.handshake.headers["sec-fetch-site"] || "").toLowerCase();
+  const secFetchMode = String(socket.handshake.headers["sec-fetch-mode"] || "").toLowerCase();
+  const secFetchDest = String(socket.handshake.headers["sec-fetch-dest"] || "").toLowerCase();
+  const allowRefererFallbackInDev = !IS_PROD;
+  if (SOCKET_IO_DEBUG_ENABLED) {
+    console.log("[socket.io] Handshake headers", {
+      origin,
+      host: hostHeader,
+      referer,
+      secFetchSite,
+      secFetchMode,
+      secFetchDest,
+    });
+  }
+  if (origin) {
+    if (!isAllowedOrigin(origin, hostHeader)) {
+      console.warn("[socket.io] Origin not allowed", { origin, host: hostHeader });
+      return next(new Error("Origin not allowed"));
+    }
+    return next();
+  }
+  if (secFetchSite === "same-origin" && secFetchMode === "websocket" && secFetchDest === "websocket") {
+    return next();
+  }
+  if (hostHeader && isAllowedHostHeader(hostHeader)) {
+    return next();
+  }
+  if (referer && allowRefererFallbackInDev) {
+    // Referrer (Referer header) can be spoofed or omitted; only use as a best-effort fallback.
+    const refOrigin = safeParseUrl(referer)?.origin || "";
+    if (refOrigin && isAllowedOrigin(refOrigin, hostHeader)) return next();
+  }
+  if (IS_PROD) {
+    console.warn("[socket.io] Origin required", { host: hostHeader });
+    return next(new Error("Origin required"));
+  }
+  return next();
+});
+
+io.use((socket, next) => {
+  const fakeRes = socket.request.res || {
+    getHeader: () => undefined,
+    setHeader: () => {},
+    writeHead: () => {},
+  };
+  sessionMiddleware(socket.request, fakeRes, () => {
+    if (!socket.request.session?.user?.id) {
+      return next(new Error("Not authenticated"));
+    }
+    next();
+  });
+});
+
+
 io.on("connection", async (socket) => {
   const sessUser = socket.request.session?.user;
   if (!sessUser?.id) {
@@ -18837,262 +19155,7 @@ socket.on("disconnect", (reason) => {
 
 });
 
-// ===================================================================
-// STRUCTURED STARTUP SEQUENCE
-// ===================================================================
-
-let SERVER_STARTED = false;
-
-/**
- * Phase 1: Validate Environment
- * Ensures all required environment variables are set
- */
-async function validateEnvironment() {
-  console.log('[startup] Phase 1: Environment validation');
-  
-  const required = ['SESSION_SECRET'];
-  const missing = required.filter(key => !process.env[key]);
-  
-  if (missing.length && !IS_DEV_MODE) {
-    console.error('[startup] ✗ Missing required environment variables:', missing);
-    process.exit(1);
-  }
-  
-  if (process.env.SESSION_SECRET && process.env.SESSION_SECRET.length < 32) {
-    console.error('[startup] ✗ SESSION_SECRET must be at least 32 characters for production security');
-    process.exit(1);
-  }
-  
-  console.log('[startup] ✓ Environment validation complete');
-}
-
-/**
- * Phase 2: Initialize Database
- * Runs migrations and validates database is ready
- */
-async function initializeDatabase() {
-  console.log('[startup] Phase 2: Database initialization');
-  
-  // Run SQLite migrations
-  console.log('[startup]   Running SQLite migrations...');
-  try {
-    await runAllMigrations();
-    console.log('[startup]   ✓ SQLite migrations complete');
-  } catch (err) {
-    console.error('[startup]   ✗ SQLite migration failed:', err.message);
-    process.exit(1);
-  }
-  
-  // Validate core tables exist
-  const tables = ['users', 'messages', 'rooms'];
-  for (const table of tables) {
-    try {
-      const result = await dbAllAsync(
-        `SELECT name FROM sqlite_master WHERE type='table' AND name=?`,
-        [table]
-      );
-      if (!result || result.length === 0) {
-        console.error(`[startup]   ✗ Critical table missing: ${table}`);
-        process.exit(1);
-      }
-    } catch (err) {
-      console.error(`[startup]   ✗ Failed to validate table ${table}:`, err.message);
-      process.exit(1);
-    }
-  }
-  
-  console.log('[startup]   ✓ SQLite ready with all core tables');
-  
-  // Initialize Postgres if available
-  if (POSTGRES_ENABLED && pgPool) {
-    console.log('[startup]   Initializing Postgres...');
-    
-    try {
-      await pgInitPromise; // Wait for Postgres schema creation
-      await pgPool.query('SELECT 1'); // Validate connection
-      console.log('[startup]   ✓ Postgres ready');
-    } catch (err) {
-      console.warn('[startup]   ⚠ Postgres failed (continuing with SQLite only):', err.message);
-    }
-  }
-  
-  console.log('[startup] ✓ Database initialization complete');
-}
-
-/**
- * Phase 3: Initialize State Management
- * Sets up state persistence tables
- */
-async function initializeStateManagement() {
-  console.log('[startup] Phase 3: State management initialization');
-  
-  try {
-    initStateManagement(dbRunAsync, dbAllAsync, pgPool);
-    await createStateTables();
-    
-    // Validate state tables exist
-    const result = await dbAllAsync(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name='state_kv'`
-    );
-    if (!result || result.length === 0) {
-      console.error('[startup]   ✗ State persistence tables failed to create');
-      process.exit(1);
-    }
-    
-    console.log('[startup] ✓ State management ready');
-  } catch (err) {
-    console.error('[startup]   ✗ State persistence init failed:', err.message);
-    process.exit(1);
-  }
-}
-
-/**
- * Phase 4: Initialize Core Data
- * Ensures core rooms and seed data exist
- */
-async function initializeCoreData() {
-  console.log('[startup] Phase 4: Core data initialization');
-  
-  try {
-    await ensureCoreRoomsExist();
-    console.log('[startup]   ✓ Core rooms ready');
-  } catch (err) {
-    console.warn('[startup]   ⚠ Core rooms setup failed:', err.message);
-  }
-  
-  try {
-    await ensureDevSeedUser();
-    console.log('[startup]   ✓ Dev seed user ready');
-  } catch (err) {
-    console.warn('[startup]   ⚠ Dev seed user failed:', err.message);
-  }
-  
-  console.log('[startup] ✓ Core data initialization complete');
-}
-
-/**
- * Phase 5: Initialize Word Filters
- * Sets up content filtering system
- */
-async function initializeWordFilters() {
-  console.log('[startup] Phase 5: Word filters initialization');
-  
-  try {
-    await initializeHardcodedFilters();
-    await loadWordFilters();
-    console.log('[startup] ✓ Word filters ready');
-  } catch (err) {
-    console.warn('[startup]   ⚠ Word filter init failed:', err.message);
-  }
-}
-
-/**
- * Phase 6: Start HTTP Server
- * Begins listening for connections
- */
-async function startHttpServer() {
-  console.log('[startup] Phase 6: Starting HTTP server');
-  
-  return new Promise((resolve, reject) => {
-    httpServer.listen(PORT, (err) => {
-      if (err) {
-        console.error('[startup] ✗ Failed to start server:', err);
-        reject(err);
-        return;
-      }
-      
-      SERVER_STARTED = true;
-      console.log(`[startup] ✓ HTTP server listening on port ${PORT}`);
-      console.log(`[startup]   Database mode: ${POSTGRES_ENABLED && PG_READY ? 'Postgres + SQLite' : 'SQLite-only'}`);
-      resolve();
-    });
-  });
-}
-
-/**
- * Initialize Redis connection for Socket.IO adapter
- * Called during Phase 5a of startup
- * Note: Socket.IO is already created at module load; this function connects Redis and prepares the adapter
- * Returns true if Redis connected, false otherwise
- */
-async function initializeRedis() {
-  if (!process.env.REDIS_URL) {
-    console.log('[startup] Phase 5a: Redis not configured, skipping');
-    return false;
-  }
-  
-  console.log('[startup] Phase 5a: Connecting to Redis...');
-  
-  try {
-    const { createClient } = require("redis");
-    const { createAdapter } = require("@socket.io/redis-adapter");
-    
-    redisClient = createClient({ url: process.env.REDIS_URL });
-    redisClient.on("error", (err) => console.error("[Redis] Client error:", err));
-    
-    // AWAIT the connection!
-    await redisClient.connect();
-    console.log('[startup]   ✓ Redis connected');
-    
-    const subClient = redisClient.duplicate();
-    redisAdapter = createAdapter(redisClient, subClient);
-    console.log('[startup]   ✓ Redis adapter created');
-    
-    return true;
-  } catch (err) {
-    console.warn('[startup]   ⚠ Redis connection failed (continuing without):', err.message);
-    redisAdapter = null;
-    redisClient = null;
-    return false;
-  }
-}
-
-/**
- * Attach Redis adapter to Socket.IO
- * Called during Phase 6 of startup (after Redis connects, if configured)
- */
-function attachRedisAdapter() {
-  console.log('[startup] Phase 6: Attaching Redis adapter to Socket.IO...');
-  if (redisAdapter) {
-    io.adapter(redisAdapter);
-    console.log('[startup]   ✓ Redis adapter attached to Socket.IO');
-  } else {
-    console.log('[startup]   ⚠ No Redis adapter to attach (Redis not configured or connection failed)');
-  }
-  console.log('[startup]   ✓ Phase 6 complete');
-}
-
-/**
- * Register all Express middleware
- * Called during Phase 7 of startup  
- * Note: Middleware is already registered at module level (historical architecture)
- */
-function registerMiddleware() {
-  console.log('[startup] Phase 7: Middleware registration check...');
-  console.log('[startup]   ℹ️ Middleware registered at module load (historical architecture)');
-  console.log('[startup]   ✓ Phase 7 complete');
-}
-
-/**
- * Register all HTTP routes
- * Called during Phase 8 of startup
- * Note: Routes are already registered at module level (historical architecture)
- */
-function registerRoutes() {
-  console.log('[startup] Phase 8: Routes registration check...');
-  console.log('[startup]   ℹ️ Routes registered at module load (historical architecture)');
-  console.log('[startup]   ✓ Phase 8 complete');
-}
-
-/**
- * Register all Socket.IO event handlers
- * Called during Phase 9 of startup
- * Note: Socket handlers are already registered at module level (historical architecture)
- */
-function registerSocketHandlers() {
-  console.log('[startup] Phase 9: Socket handlers registration check...');
-  console.log('[startup]   ℹ️ Socket handlers registered at module load (historical architecture)');
-  console.log('[startup]   ✓ Phase 9 complete');
+  console.log('[startup]   ✓ Socket handlers registered');
 }
 
 /**
@@ -19180,17 +19243,22 @@ async function startServer() {
     // Phase 5a: Connect Redis (optional, for multi-instance Socket.IO)
     await initializeRedis();
     
-    // Phase 6: Attach Redis adapter to Socket.IO (if Redis connected)
+    // Phase 6: Create Express app and servers
+    app = createExpressApp();
+    httpServer = createHttpServer(app);
+    io = createSocketIOServer(httpServer);
+    
+    // Phase 6d: Attach Redis adapter (if connected)
     attachRedisAdapter();
     
-    // Phase 7: Middleware registration check (already done at module load)
-    registerMiddleware();
+    // Phase 7: Register all middleware
+    registerMiddleware(app);
     
-    // Phase 8: Routes registration check (already done at module load)
-    registerRoutes();
+    // Phase 8: Register all HTTP routes
+    registerRoutes(app);
     
-    // Phase 9: Socket handlers registration check (already done at module load)
-    registerSocketHandlers();
+    // Phase 9: Register all Socket.IO handlers
+    registerSocketHandlers(io);
     
     // Phase 10: Start background tasks
     startBackgroundTasks();
@@ -19217,7 +19285,16 @@ if (require.main === module) {
   startServer();
 }
 
-module.exports = { app, httpServer, io, startServer };
+module.exports = { 
+  app,              // Will be undefined until startServer() called
+  httpServer,       // Will be undefined until startServer() called
+  io,               // Will be undefined until startServer() called
+  startServer,
+  // Export creation functions for testing
+  createExpressApp,
+  createHttpServer,
+  createSocketIOServer,
+};
 
 
 function normalizeUserKey(value) {
