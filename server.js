@@ -361,6 +361,13 @@ const ALLOWED_ORIGINS = new Set(
     .map((origin) => origin.trim())
     .filter(Boolean)
 );
+const PUBLIC_ORIGIN = String(
+  process.env.PUBLIC_ORIGIN ||
+  process.env.RENDER_EXTERNAL_URL ||
+  "https://banter-and-brats.onrender.com"
+).trim();
+if (PUBLIC_ORIGIN.length) ALLOWED_ORIGINS.add(PUBLIC_ORIGIN);
+const SOCKET_IO_DEBUG_ENABLED = String(process.env.SOCKET_IO_DEBUG || "").toLowerCase() === "true";
 
 const LOCAL_DEV = process.env.LOCAL_DEV === "1";
 // ---- Startup sanity checks (fail fast in production)
@@ -387,11 +394,18 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
 // ---- App + Server
   console.log("[startup] Initializing Express app and HTTP server...");
   const app = express();
+  // Trust proxy before Socket.IO initialization so secure cookies + IPs are correct behind Render.
+  app.set("trust proxy", 1);
   const httpServer = http.createServer(app);
   console.log("[startup] Initializing Socket.IO...");
   const io = new Server(httpServer, {
     // Render uses HTTPS -> allow websocket upgrade
-    cors: { origin: true, credentials: true },
+    cors: {
+      origin: true,
+      credentials: true,
+    },
+    // Explicit transports to ensure Render proxies fall back to polling if WebSocket upgrade fails.
+    transports: ["websocket", "polling"],
 
     // Origin allowlist for Socket.IO handshake
     allowRequest: (req, cb) => {
@@ -399,10 +413,19 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
         const origin = req.headers.origin;
         const host = req.headers.host;
         if (!origin) {
-          return cb(null, true);
+          if (isAllowedHostHeader(host)) {
+            return cb(null, true);
+          }
+          console.warn("[socket.io] Handshake rejected: origin required", { host });
+          return cb(null, false);
         }
-        return cb(null, isAllowedOrigin(origin, host));
-      } catch {
+        if (!isAllowedOrigin(origin, host)) {
+          console.warn("[socket.io] Handshake rejected: origin not allowed", { origin, host });
+          return cb(null, false);
+        }
+        return cb(null, true);
+      } catch (err) {
+        console.warn("[socket.io] Handshake rejected: error", err?.message || err);
         return cb(null, false);
       }
     },
@@ -1407,8 +1430,6 @@ try {
     return false;
   }
 })() : Promise.resolve(null);
-// IMPORTANT for Render/any reverse proxy so secure cookies work
-app.set("trust proxy", 1);
 // ---- DB
 async function pgUserExists(userId) {
   if (!pgPool || !PG_READY) return false;
@@ -1885,6 +1906,23 @@ function isLocalhostOrigin(origin) {
   return LOCALHOST_HOSTS.has(url.hostname);
 }
 
+function isAllowedHostHeader(hostHeader) {
+  if (!hostHeader) return false;
+  const httpsUrl = safeParseUrl(`https://${hostHeader}`);
+  if (httpsUrl) {
+    if (ALLOWED_ORIGINS.has(httpsUrl.origin)) return true;
+    if (!IS_PROD && isLocalhostOrigin(httpsUrl.origin)) return true;
+  }
+  if (!IS_PROD) {
+    const httpUrl = safeParseUrl(`http://${hostHeader}`);
+    if (httpUrl) {
+      if (ALLOWED_ORIGINS.has(httpUrl.origin)) return true;
+      if (isLocalhostOrigin(httpUrl.origin)) return true;
+    }
+  }
+  return false;
+}
+
 function isAllowedOrigin(origin, hostHeader) {
   if (!origin) return false;
   const url = safeParseUrl(origin);
@@ -2098,6 +2136,7 @@ const postOriginGuard = (req, res, next) => {
 
   if (origin) {
     if (isAllowedOrigin(origin, hostHeader)) return next();
+    console.warn("[http] Origin not allowed", { origin, host: hostHeader, path: req.path });
     return res.status(403).json({ message: "Origin not allowed." });
   }
 
@@ -2107,6 +2146,8 @@ const postOriginGuard = (req, res, next) => {
   }
 
   if (secFetchSite === "same-origin" || secFetchSite === "same-site") return next();
+  if (isAllowedHostHeader(hostHeader)) return next();
+  console.warn("[http] Origin required", { host: hostHeader, path: req.path });
   return res.status(403).json({ message: "Origin required." });
 };
 
@@ -15140,13 +15181,27 @@ io.use((socket, next) => {
   const secFetchMode = String(socket.handshake.headers["sec-fetch-mode"] || "").toLowerCase();
   const secFetchDest = String(socket.handshake.headers["sec-fetch-dest"] || "").toLowerCase();
   const allowRefererFallbackInDev = !IS_PROD;
+  if (SOCKET_IO_DEBUG_ENABLED) {
+    console.log("[socket.io] Handshake headers", {
+      origin,
+      host: hostHeader,
+      referer,
+      secFetchSite,
+      secFetchMode,
+      secFetchDest,
+    });
+  }
   if (origin) {
     if (!isAllowedOrigin(origin, hostHeader)) {
+      console.warn("[socket.io] Origin not allowed", { origin, host: hostHeader });
       return next(new Error("Origin not allowed"));
     }
     return next();
   }
   if (secFetchSite === "same-origin" && secFetchMode === "websocket" && secFetchDest === "websocket") {
+    return next();
+  }
+  if (hostHeader && isAllowedHostHeader(hostHeader)) {
     return next();
   }
   if (referer && allowRefererFallbackInDev) {
@@ -15155,6 +15210,7 @@ io.use((socket, next) => {
     if (refOrigin && isAllowedOrigin(refOrigin, hostHeader)) return next();
   }
   if (IS_PROD) {
+    console.warn("[socket.io] Origin required", { host: hostHeader });
     return next(new Error("Origin required"));
   }
   return next();
