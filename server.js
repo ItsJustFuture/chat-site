@@ -14,9 +14,9 @@ async function setRoleEverywhere(targetId, username, role) {
   // Postgres
   try {
     if (targetId != null) {
-      await pgPool.query("UPDATE users SET role=$1 WHERE id=$2", [role, targetId]);
+      await pgSafe("UPDATE users SET role=$1 WHERE id=$2", [role, targetId]);
     } else if (username) {
-      await pgPool.query("UPDATE users SET role=$1 WHERE lower(username)=lower($2)", [role, username]);
+      await pgSafe("UPDATE users SET role=$1 WHERE lower(username)=lower($2)", [role, username]);
     }
   } catch {}
 }
@@ -207,7 +207,12 @@ const PgSession = require("connect-pg-simple")(session);
 const bcrypt = require("bcrypt");
 const rateLimit = require("express-rate-limit");
 const multer = require("multer");
-const { Pool } = require("pg");
+// Postgres is OPTIONAL - only load if DATABASE_URL is present
+const POSTGRES_ENABLED = !!process.env.DATABASE_URL;
+let Pool = null;
+if (POSTGRES_ENABLED) {
+  Pool = require("pg").Pool;
+}
 const http = require("http");
 const {
   DICE_VARIANTS,
@@ -363,9 +368,9 @@ if (IS_PROD) {
     console.error("FATAL: SESSION_SECRET is missing/too short. Set a strong secret in your environment.");
     process.exit(1);
   }
+  // DATABASE_URL is now OPTIONAL - SQLite fallback is acceptable
   if (!process.env.DATABASE_URL) {
-    console.error("FATAL: DATABASE_URL is missing. Set your Postgres connection string in your environment.");
-    process.exit(1);
+    console.warn("WARN: DATABASE_URL not set. Using SQLite-only mode.");
   }
 }
 
@@ -475,8 +480,7 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
       console.log("[rooms] system emit", { room: "__global__", text: payload.text, meta: payload.meta || null });
     }
   }
-const PG_ENABLED = Boolean(process.env.DATABASE_URL);
-const pgPool = PG_ENABLED
+const pgPool = POSTGRES_ENABLED && Pool
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: NODE_ENV === "production"
@@ -484,8 +488,20 @@ const pgPool = PG_ENABLED
         : false,
     })
   : null;
-if (!PG_ENABLED && IS_DEV_MODE) {
-  console.warn("[db] PG unavailable, using SQLite dev fallback:", DB_FILE);
+
+// Safe Postgres query helper - never blocks or crashes
+async function pgSafe(query, params = []) {
+  if (!POSTGRES_ENABLED || !pgPool) return null;
+  try {
+    return await pgPool.query(query, params);
+  } catch (err) {
+    console.warn("[Postgres skipped]", err.message);
+    return null;
+  }
+}
+
+if (!POSTGRES_ENABLED && IS_DEV_MODE) {
+  console.warn("[db] Postgres unavailable, using SQLite-only mode:", DB_FILE);
 }
 let DB_BACKEND = "sqlite";
 // ---- Postgres: helpers to keep legacy schemas compatible
@@ -560,11 +576,11 @@ let COUPLES_READY = false;
 let FRIENDS_READY = false;
 let PG_INIT_ERROR = null;
 // ---- Postgres table setup
-// Run once on boot, and start the server only after this finishes (so schema/type fixes apply before /register).
-const pgInitPromise = PG_ENABLED ? (async () => {
+// Run once on boot. Server starts regardless of Postgres status.
+const pgInitPromise = POSTGRES_ENABLED && pgPool ? (async () => {
   try {
     // Base tables (SQL only)
-    await pgPool.query(`
+    await pgSafe(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
@@ -610,7 +626,7 @@ const pgInitPromise = PG_ENABLED ? (async () => {
       );
     `);
 
-    await pgPool.query(`
+    await pgSafe(`
       CREATE TABLE IF NOT EXISTS room_master_categories (
         id SERIAL PRIMARY KEY,
         name TEXT UNIQUE NOT NULL,
@@ -663,28 +679,29 @@ const pgInitPromise = PG_ENABLED ? (async () => {
       `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_system INTEGER NOT NULL DEFAULT 0`,
     ];
     for (const q of roomCols) {
-      try { await pgPool.query(q); } catch (_) {}
+      try { await pgSafe(q); } catch (_) {}
     }
 
     try {
       const now = Date.now();
-      await pgPool.query(
+      await pgSafe(
         `INSERT INTO room_master_categories (name, sort_order, created_at)
          VALUES ($1, $2, $3)
          ON CONFLICT (name) DO NOTHING`,
         ["Site Rooms", 0, now]
       );
-      await pgPool.query(
+      await pgSafe(
         `INSERT INTO room_master_categories (name, sort_order, created_at)
          VALUES ($1, $2, $3)
          ON CONFLICT (name) DO NOTHING`,
         ["User Rooms", 1, now]
       );
-      const { rows: masterRows } = await pgPool.query(
+      const result = await pgSafe(
         `SELECT id, name FROM room_master_categories WHERE name IN ('Site Rooms', 'User Rooms')`
       );
+      const masterRows = result?.rows || [];
       for (const master of masterRows || []) {
-        await pgPool.query(
+        await pgSafe(
           `INSERT INTO room_categories (master_id, name, sort_order, created_at)
            VALUES ($1, 'Uncategorized', 0, $2)
            ON CONFLICT (master_id, name) DO NOTHING`,
@@ -696,14 +713,14 @@ const pgInitPromise = PG_ENABLED ? (async () => {
     }
 
     try {
-      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_categories_master_sort ON room_categories(master_id, sort_order)`);
-      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_rooms_category_sort ON rooms(category_id, room_sort_order)`);
+      await pgSafe(`CREATE INDEX IF NOT EXISTS idx_room_categories_master_sort ON room_categories(master_id, sort_order)`);
+      await pgSafe(`CREATE INDEX IF NOT EXISTS idx_rooms_category_sort ON rooms(category_id, room_sort_order)`);
     } catch (e) {
       console.warn("[pg-init] room hierarchy indexes failed:", e?.message || e);
     }
 
     try {
-      await pgPool.query(`
+      await pgSafe(`
         CREATE TABLE IF NOT EXISTS mod_cases (
           id SERIAL PRIMARY KEY,
           type TEXT NOT NULL,
@@ -748,17 +765,17 @@ const pgInitPromise = PG_ENABLED ? (async () => {
           created_at BIGINT NOT NULL
         );
       `);
-      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_mod_cases_status ON mod_cases(status)`);
-      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_mod_cases_type ON mod_cases(type)`);
-      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_mod_case_events_case ON mod_case_events(case_id)`);
-      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_mod_case_notes_case ON mod_case_notes(case_id)`);
-      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_mod_case_evidence_case ON mod_case_evidence(case_id)`);
+      await pgSafe(`CREATE INDEX IF NOT EXISTS idx_mod_cases_status ON mod_cases(status)`);
+      await pgSafe(`CREATE INDEX IF NOT EXISTS idx_mod_cases_type ON mod_cases(type)`);
+      await pgSafe(`CREATE INDEX IF NOT EXISTS idx_mod_case_events_case ON mod_case_events(case_id)`);
+      await pgSafe(`CREATE INDEX IF NOT EXISTS idx_mod_case_notes_case ON mod_case_notes(case_id)`);
+      await pgSafe(`CREATE INDEX IF NOT EXISTS idx_mod_case_evidence_case ON mod_case_evidence(case_id)`);
     } catch (e) {
       console.warn("[pg-init] mod cases tables failed:", e?.message || e);
     }
 
     try {
-      await pgPool.query(`
+      await pgSafe(`
         CREATE TABLE IF NOT EXISTS room_structure_audit (
           id SERIAL PRIMARY KEY,
           action TEXT NOT NULL,
@@ -773,7 +790,7 @@ const pgInitPromise = PG_ENABLED ? (async () => {
 
     // Room management tables (owner, admins, bans)
     try {
-      await pgPool.query(`
+      await pgSafe(`
         CREATE TABLE IF NOT EXISTS room_members (
           id SERIAL PRIMARY KEY,
           room_name TEXT NOT NULL,
@@ -785,11 +802,11 @@ const pgInitPromise = PG_ENABLED ? (async () => {
           UNIQUE(room_name, user_id)
         );
       `);
-      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_members_room ON room_members(room_name)`);
-      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(user_id)`);
-      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_members_role ON room_members(room_name, role)`);
+      await pgSafe(`CREATE INDEX IF NOT EXISTS idx_room_members_room ON room_members(room_name)`);
+      await pgSafe(`CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(user_id)`);
+      await pgSafe(`CREATE INDEX IF NOT EXISTS idx_room_members_role ON room_members(room_name, role)`);
 
-      await pgPool.query(`
+      await pgSafe(`
         CREATE TABLE IF NOT EXISTS room_bans (
           id SERIAL PRIMARY KEY,
           room_name TEXT NOT NULL,
@@ -802,15 +819,15 @@ const pgInitPromise = PG_ENABLED ? (async () => {
           UNIQUE(room_name, user_id)
         );
       `);
-      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_bans_room ON room_bans(room_name)`);
-      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_bans_user ON room_bans(user_id)`);
-      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_room_bans_expires ON room_bans(expires_at)`);
+      await pgSafe(`CREATE INDEX IF NOT EXISTS idx_room_bans_room ON room_bans(room_name)`);
+      await pgSafe(`CREATE INDEX IF NOT EXISTS idx_room_bans_user ON room_bans(user_id)`);
+      await pgSafe(`CREATE INDEX IF NOT EXISTS idx_room_bans_expires ON room_bans(expires_at)`);
     } catch (e) {
       console.warn("[pg-init] room management tables failed:", e?.message || e);
     }
 
     // Changelog tables (Postgres) — ensures changelog persists across restarts
-    await pgPool.query(`
+    await pgSafe(`
       CREATE SEQUENCE IF NOT EXISTS changelog_seq;
       CREATE TABLE IF NOT EXISTS changelog_entries (
         id SERIAL PRIMARY KEY,
@@ -832,7 +849,7 @@ const pgInitPromise = PG_ENABLED ? (async () => {
       CREATE INDEX IF NOT EXISTS idx_changelog_react_user ON changelog_reactions(user_id);
     `);
 
-    await pgPool.query(`
+    await pgSafe(`
       CREATE TABLE IF NOT EXISTS faq_questions (
         id SERIAL PRIMARY KEY,
         created_at BIGINT,
@@ -854,7 +871,7 @@ const pgInitPromise = PG_ENABLED ? (async () => {
     `);
 
     // Track profile likes in Postgres so we can keep counts consistent across PG-first reads.
-    await pgPool.query(`
+    await pgSafe(`
       CREATE TABLE IF NOT EXISTS profile_likes (
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         target_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -865,7 +882,7 @@ const pgInitPromise = PG_ENABLED ? (async () => {
       CREATE INDEX IF NOT EXISTS idx_profile_likes_user ON profile_likes(user_id);
     `);
 
-    await pgPool.query(`
+    await pgSafe(`
       CREATE TABLE IF NOT EXISTS chess_user_stats (
         user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         chess_elo INTEGER NOT NULL DEFAULT 1200,
@@ -914,7 +931,7 @@ const pgInitPromise = PG_ENABLED ? (async () => {
       CREATE INDEX IF NOT EXISTS idx_chess_challenges_status ON chess_challenges(status);
     `);
 
-    await pgPool.query(`
+    await pgSafe(`
       CREATE TABLE IF NOT EXISTS memories (
         id BIGSERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -942,7 +959,7 @@ const pgInitPromise = PG_ENABLED ? (async () => {
     `);
 
     // Centralized gold spending ledger so spend reasons can be audited later.
-    await pgPool.query(`
+    await pgSafe(`
       CREATE TABLE IF NOT EXISTS gold_transactions (
         id BIGSERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -955,7 +972,7 @@ const pgInitPromise = PG_ENABLED ? (async () => {
     `);
 
     // Daily micro-challenges progress (per-user, per-day)
-    await pgPool.query(`
+    await pgSafe(`
       CREATE TABLE IF NOT EXISTS daily_challenge_progress (
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         day_key TEXT NOT NULL,
@@ -974,7 +991,7 @@ const pgInitPromise = PG_ENABLED ? (async () => {
     try {
       const sqliteLikes = await dbAllAsync("SELECT user_id, target_user_id, created_at FROM profile_likes");
       for (const row of sqliteLikes || []) {
-        await pgPool.query(
+        await pgSafe(
           `INSERT INTO profile_likes (user_id, target_user_id, created_at)
            VALUES ($1, $2, $3)
            ON CONFLICT (user_id, target_user_id) DO NOTHING`,
@@ -1039,7 +1056,7 @@ try {
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_updated BIGINT`,
     ];
     for (const q of addCols) {
-      try { await pgPool.query(q); } catch (_) {}
+      try { await pgSafe(q); } catch (_) {}
     }
 
     // Migrate legacy timestamp/int columns to epoch-ms BIGINT so inserts don't fail.
@@ -1077,7 +1094,7 @@ try {
 
 // --- Kick/Ban restrictions + appeals (persistent)
 try {
-  await pgPool.query(`
+  await pgSafe(`
     CREATE TABLE IF NOT EXISTS user_restrictions (
       username TEXT PRIMARY KEY,
       restriction_type TEXT NOT NULL DEFAULT 'none', -- 'none'|'kick'|'ban'
@@ -1089,7 +1106,7 @@ try {
     )
   `);
 
-  await pgPool.query(`
+  await pgSafe(`
     CREATE TABLE IF NOT EXISTS moderation_actions (
       id SERIAL PRIMARY KEY,
       target_username TEXT NOT NULL,
@@ -1102,7 +1119,7 @@ try {
     )
   `);
 
-  await pgPool.query(`
+  await pgSafe(`
     CREATE TABLE IF NOT EXISTS appeals (
       id SERIAL PRIMARY KEY,
       username TEXT NOT NULL,
@@ -1115,10 +1132,10 @@ try {
       last_user_reply_at BIGINT
     )
   `);
-  await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_appeals_status ON appeals(status)`);
-  await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_appeals_username ON appeals(username)`);
+  await pgSafe(`CREATE INDEX IF NOT EXISTS idx_appeals_status ON appeals(status)`);
+  await pgSafe(`CREATE INDEX IF NOT EXISTS idx_appeals_username ON appeals(username)`);
 
-  await pgPool.query(`
+  await pgSafe(`
     CREATE TABLE IF NOT EXISTS appeal_messages (
       id SERIAL PRIMARY KEY,
       appeal_id INTEGER NOT NULL REFERENCES appeals(id) ON DELETE CASCADE,
@@ -1128,11 +1145,11 @@ try {
       created_at BIGINT NOT NULL
     )
   `);
-  await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_appeal_messages_appeal ON appeal_messages(appeal_id)`);
+  await pgSafe(`CREATE INDEX IF NOT EXISTS idx_appeal_messages_appeal ON appeal_messages(appeal_id)`);
 
   // Single OPEN appeal per user (best-effort; if already exists, ignore)
   try {
-    await pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_open_appeal_per_user ON appeals(username) WHERE status='open'`);
+    await pgSafe(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_open_appeal_per_user ON appeals(username) WHERE status='open'`);
   } catch {}
 } catch (e) {
   console.warn("[pg-init] restrictions/appeals tables failed:", e?.message || e);
@@ -1140,13 +1157,14 @@ try {
   // --- Couples (opt-in linked profiles)
   try {
     // Adapt to existing DBs where users.id may be INTEGER or BIGINT
-    const { rows: idInfo } = await pgPool.query(
+    const result = await pgSafe(
       `SELECT udt_name FROM information_schema.columns WHERE table_name='users' AND column_name='id' LIMIT 1`
     );
+    const idInfo = result?.rows || [];
     const udt = (idInfo?.[0]?.udt_name || '').toLowerCase();
     const ID_TYPE = (udt == 'int8' || udt == 'bigint') ? 'BIGINT' : 'INTEGER';
 
-    await pgPool.query(`
+    await pgSafe(`
       CREATE TABLE IF NOT EXISTS couple_links (
         id SERIAL PRIMARY KEY,
         user1_id ${ID_TYPE} NOT NULL,
@@ -1166,27 +1184,27 @@ try {
         updated_at BIGINT NOT NULL
       )
     `);
-    await pgPool.query(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS privacy TEXT NOT NULL DEFAULT 'private'`);
-    await pgPool.query(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS couple_name TEXT`);
-    await pgPool.query(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS couple_bio TEXT`);
-    await pgPool.query(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS settings_json TEXT`);
-    await pgPool.query(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS show_badge BOOLEAN NOT NULL DEFAULT true`);
-    await pgPool.query(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS bonuses_enabled BOOLEAN NOT NULL DEFAULT false`);
+    await pgSafe(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS privacy TEXT NOT NULL DEFAULT 'private'`);
+    await pgSafe(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS couple_name TEXT`);
+    await pgSafe(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS couple_bio TEXT`);
+    await pgSafe(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS settings_json TEXT`);
+    await pgSafe(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS show_badge BOOLEAN NOT NULL DEFAULT true`);
+    await pgSafe(`ALTER TABLE couple_links ADD COLUMN IF NOT EXISTS bonuses_enabled BOOLEAN NOT NULL DEFAULT false`);
 
     // Best-effort FK constraints (may fail if legacy schemas differ); couples will still work without them.
     try {
-      await pgPool.query(`ALTER TABLE couple_links ADD CONSTRAINT couple_links_user1_fk FOREIGN KEY (user1_id) REFERENCES users(id) ON DELETE CASCADE`);
+      await pgSafe(`ALTER TABLE couple_links ADD CONSTRAINT couple_links_user1_fk FOREIGN KEY (user1_id) REFERENCES users(id) ON DELETE CASCADE`);
     } catch {}
     try {
-      await pgPool.query(`ALTER TABLE couple_links ADD CONSTRAINT couple_links_user2_fk FOREIGN KEY (user2_id) REFERENCES users(id) ON DELETE CASCADE`);
+      await pgSafe(`ALTER TABLE couple_links ADD CONSTRAINT couple_links_user2_fk FOREIGN KEY (user2_id) REFERENCES users(id) ON DELETE CASCADE`);
     } catch {}
     try {
-      await pgPool.query(`ALTER TABLE couple_links ADD CONSTRAINT couple_links_requested_by_fk FOREIGN KEY (requested_by_id) REFERENCES users(id) ON DELETE SET NULL`);
+      await pgSafe(`ALTER TABLE couple_links ADD CONSTRAINT couple_links_requested_by_fk FOREIGN KEY (requested_by_id) REFERENCES users(id) ON DELETE SET NULL`);
     } catch {}
 
-    await pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_couple_pair ON couple_links(user1_id, user2_id)`);
+    await pgSafe(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_couple_pair ON couple_links(user1_id, user2_id)`);
 
-    await pgPool.query(`
+    await pgSafe(`
       CREATE TABLE IF NOT EXISTS couple_prefs (
         link_id INTEGER NOT NULL REFERENCES couple_links(id) ON DELETE CASCADE,
         user_id ${ID_TYPE} NOT NULL,
@@ -1201,9 +1219,9 @@ try {
         PRIMARY KEY (link_id, user_id)
       )
     `);
-    await pgPool.query(`ALTER TABLE couple_prefs ADD COLUMN IF NOT EXISTS allow_ping BOOLEAN NOT NULL DEFAULT true`);
+    await pgSafe(`ALTER TABLE couple_prefs ADD COLUMN IF NOT EXISTS allow_ping BOOLEAN NOT NULL DEFAULT true`);
     try {
-      await pgPool.query(`ALTER TABLE couple_prefs ADD CONSTRAINT couple_prefs_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`);
+      await pgSafe(`ALTER TABLE couple_prefs ADD CONSTRAINT couple_prefs_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`);
     } catch {}
 
     COUPLES_READY = true;
@@ -1215,13 +1233,14 @@ try {
 
   // --- Friends (requests + favorites)
   try {
-    const { rows: idInfoF } = await pgPool.query(
+    const result2 = await pgSafe(
       `SELECT udt_name FROM information_schema.columns WHERE table_name='users' AND column_name='id' LIMIT 1`
     );
+    const idInfoF = result2?.rows || [];
     const udtF = (idInfoF?.[0]?.udt_name || '').toLowerCase();
     const ID_TYPE_F = (udtF == 'int8' || udtF == 'bigint') ? 'BIGINT' : 'INTEGER';
 
-    await pgPool.query(`
+    await pgSafe(`
       CREATE TABLE IF NOT EXISTS friend_requests (
         id SERIAL PRIMARY KEY,
         from_user_id ${ID_TYPE_F} NOT NULL,
@@ -1232,7 +1251,7 @@ try {
       )
     `);
 
-    await pgPool.query(`
+    await pgSafe(`
       CREATE TABLE IF NOT EXISTS friends (
         user_id ${ID_TYPE_F} NOT NULL,
         friend_user_id ${ID_TYPE_F} NOT NULL,
@@ -1243,15 +1262,15 @@ try {
     `);
 
     // Best-effort FK constraints
-    try { await pgPool.query(`ALTER TABLE friend_requests ADD CONSTRAINT friend_requests_from_fk FOREIGN KEY (from_user_id) REFERENCES users(id) ON DELETE CASCADE`); } catch {}
-    try { await pgPool.query(`ALTER TABLE friend_requests ADD CONSTRAINT friend_requests_to_fk FOREIGN KEY (to_user_id) REFERENCES users(id) ON DELETE CASCADE`); } catch {}
-    try { await pgPool.query(`ALTER TABLE friends ADD CONSTRAINT friends_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`); } catch {}
-    try { await pgPool.query(`ALTER TABLE friends ADD CONSTRAINT friends_friend_fk FOREIGN KEY (friend_user_id) REFERENCES users(id) ON DELETE CASCADE`); } catch {}
+    try { await pgSafe(`ALTER TABLE friend_requests ADD CONSTRAINT friend_requests_from_fk FOREIGN KEY (from_user_id) REFERENCES users(id) ON DELETE CASCADE`); } catch {}
+    try { await pgSafe(`ALTER TABLE friend_requests ADD CONSTRAINT friend_requests_to_fk FOREIGN KEY (to_user_id) REFERENCES users(id) ON DELETE CASCADE`); } catch {}
+    try { await pgSafe(`ALTER TABLE friends ADD CONSTRAINT friends_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`); } catch {}
+    try { await pgSafe(`ALTER TABLE friends ADD CONSTRAINT friends_friend_fk FOREIGN KEY (friend_user_id) REFERENCES users(id) ON DELETE CASCADE`); } catch {}
 
-    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_friend_requests_to_status ON friend_requests(to_user_id, status)`);
-    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_friend_requests_from_status ON friend_requests(from_user_id, status)`);
+    await pgSafe(`CREATE INDEX IF NOT EXISTS idx_friend_requests_to_status ON friend_requests(to_user_id, status)`);
+    await pgSafe(`CREATE INDEX IF NOT EXISTS idx_friend_requests_from_status ON friend_requests(from_user_id, status)`);
     // One pending request per direction
-    try { await pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_friend_request_pending ON friend_requests(from_user_id, to_user_id) WHERE status='pending'`); } catch {}
+    try { await pgSafe(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_friend_request_pending ON friend_requests(from_user_id, to_user_id) WHERE status='pending'`); } catch {}
 
     FRIENDS_READY = true;
   } catch (e) {
@@ -1260,7 +1279,7 @@ try {
   }
 
   try {
-    await pgPool.query(`
+    await pgSafe(`
       CREATE TABLE IF NOT EXISTS survival_seasons (
         id SERIAL PRIMARY KEY,
         room_id INTEGER NOT NULL,
@@ -1310,24 +1329,24 @@ try {
       );
     `);
 
-    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_seasons_room ON survival_seasons(room_id)`);
-    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_participants_season ON survival_participants(season_id)`);
-    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_alliances_season ON survival_alliances(season_id)`);
-    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_events_season ON survival_events(season_id)`);
-    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_survival_events_day_phase ON survival_events(season_id, day_index, phase)`);
+    await pgSafe(`CREATE INDEX IF NOT EXISTS idx_survival_seasons_room ON survival_seasons(room_id)`);
+    await pgSafe(`CREATE INDEX IF NOT EXISTS idx_survival_participants_season ON survival_participants(season_id)`);
+    await pgSafe(`CREATE INDEX IF NOT EXISTS idx_survival_alliances_season ON survival_alliances(season_id)`);
+    await pgSafe(`CREATE INDEX IF NOT EXISTS idx_survival_events_season ON survival_events(season_id)`);
+    await pgSafe(`CREATE INDEX IF NOT EXISTS idx_survival_events_day_phase ON survival_events(season_id, day_index, phase)`);
 
     // Migrations / compatibility:
     // - Allow NPC participants by letting user_id be nullable (FK still applies for real users; NULL is allowed).
     // - Ensure location column exists for arena map.
-    try { await pgPool.query(`ALTER TABLE survival_participants ALTER COLUMN user_id DROP NOT NULL`); } catch(e) {}
-    try { await pgPool.query(`ALTER TABLE survival_participants ADD COLUMN IF NOT EXISTS location TEXT`); } catch(e) {}
+    try { await pgSafe(`ALTER TABLE survival_participants ALTER COLUMN user_id DROP NOT NULL`); } catch(e) {}
+    try { await pgSafe(`ALTER TABLE survival_participants ADD COLUMN IF NOT EXISTS location TEXT`); } catch(e) {}
   } catch (e) {
     console.warn('[pg-init] survival tables failed:', e?.message || e);
   }
 
   // === User address tracking for moderation and linked accounts ===
   try {
-    await pgPool.query(`
+    await pgSafe(`
       CREATE TABLE IF NOT EXISTS user_addresses (
         id SERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1352,11 +1371,11 @@ try {
       );
     `);
 
-    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_user_addresses_user ON user_addresses(user_id)`);
-    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_user_addresses_value ON user_addresses(address_value, address_type)`);
-    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_user_addresses_last_seen ON user_addresses(last_seen)`);
-    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_address_bans_value ON address_bans(address_value, address_type)`);
-    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_address_bans_expires ON address_bans(expires_at)`);
+    await pgSafe(`CREATE INDEX IF NOT EXISTS idx_user_addresses_user ON user_addresses(user_id)`);
+    await pgSafe(`CREATE INDEX IF NOT EXISTS idx_user_addresses_value ON user_addresses(address_value, address_type)`);
+    await pgSafe(`CREATE INDEX IF NOT EXISTS idx_user_addresses_last_seen ON user_addresses(last_seen)`);
+    await pgSafe(`CREATE INDEX IF NOT EXISTS idx_address_bans_value ON address_bans(address_value, address_type)`);
+    await pgSafe(`CREATE INDEX IF NOT EXISTS idx_address_bans_expires ON address_bans(expires_at)`);
   } catch (e) {
     console.warn('[pg-init] user address tracking tables failed:', e?.message || e);
   }
@@ -1364,19 +1383,15 @@ try {
     PG_READY = true;
     PG_INIT_ERROR = null;
     DB_BACKEND = "postgres";
-    console.log("Postgres tables ready");
+    console.log("[pg-init] Postgres tables ready");
 
-    // Clean up guest accounts on startup
-    await pgPool.query("DELETE FROM users WHERE role = 'Guest'").catch(err => console.error("Guest cleanup error:", err));
+    // Clean up guest accounts on startup - optional, never blocking
+    pgSafe("DELETE FROM users WHERE role = 'Guest'").catch(err => console.warn("[pg-init] Guest cleanup skipped:", err?.message));
   } catch (err) {
     PG_READY = false;
     PG_INIT_ERROR = err;
-    if (IS_DEV_MODE) {
-      console.warn("[db] PG unavailable, using SQLite dev fallback:", err?.message || err);
-      return false;
-    }
-    console.error("Postgres init error:", err);
-    throw err;
+    console.warn("[pg-init] Postgres init failed, falling back to SQLite-only:", err?.message || err);
+    return false;
   }
 })() : Promise.resolve(null);
 // IMPORTANT for Render/any reverse proxy so secure cookies work
@@ -1384,7 +1399,8 @@ app.set("trust proxy", 1);
 // ---- DB
 async function pgUserExists(userId) {
   if (!pgPool || !PG_READY) return false;
-  const { rows } = await pgPool.query("SELECT 1 FROM users WHERE id=$1 LIMIT 1", [userId]);
+  const result = await pgSafe("SELECT 1 FROM users WHERE id=$1 LIMIT 1", [userId]);
+  const rows = result?.rows || [];
   return !!rows[0];
 }
 
@@ -1425,7 +1441,7 @@ function getCouplePartnerId(userId, couple) {
 async function pgGetCoupleLinkForUser(userId) {
   const uid = Number(userId) || 0;
   if (!uid) return null;
-  const { rows } = await pgPool.query(
+  const result2 = await pgSafe(
     `
     SELECT cl.*,
            u1.username AS user1_name,
@@ -1439,13 +1455,14 @@ async function pgGetCoupleLinkForUser(userId) {
     `,
     [uid]
   );
+  const rows = result2?.rows || [];
   return rows[0] || null;
 }
 
 async function pgGetActiveCoupleLinkForUser(userId) {
   const uid = Number(userId) || 0;
   if (!uid) return null;
-  const { rows } = await pgPool.query(
+  const result3 = await pgSafe(
     `
     SELECT cl.*,
            u1.username AS user1_name,
@@ -1464,14 +1481,16 @@ async function pgGetActiveCoupleLinkForUser(userId) {
     `,
     [uid]
   );
+  const rows = result3?.rows || [];
   return rows[0] || null;
 }
 
 async function pgGetCouplePrefs(linkId, userId) {
-  const { rows } = await pgPool.query(
+  const result4 = await pgSafe(
     `SELECT * FROM couple_prefs WHERE link_id=$1 AND user_id=$2 LIMIT 1`,
     [Number(linkId) || 0, Number(userId) || 0]
   );
+  const rows = result4?.rows || [];
   return rows[0] || null;
 }
 
@@ -1480,7 +1499,7 @@ async function pgGetCoupleSummaryFor(user) {
   const link = await pgGetActiveCoupleLinkForUser(userId);
 
   // Pending links involving this user (incoming/outgoing)
-  const { rows: pending } = await pgPool.query(
+  const result5 = await pgSafe(
     `
     SELECT cl.*,
            u1.username AS user1_name,
@@ -1496,6 +1515,7 @@ async function pgGetCoupleSummaryFor(user) {
     `,
     [Number(userId) || 0]
   );
+  const pending = result5?.rows || [];
 
   const incoming = [];
   const outgoing = [];
@@ -1611,10 +1631,11 @@ async function ensureCoupleLinkedMemories(link) {
   if (!link) return;
   const userIds = [Number(link.user1_id) || 0, Number(link.user2_id) || 0].filter(Boolean);
   if (userIds.length !== 2) return;
-  const { rows: users } = await pgPool.query(
+  const result6 = await pgSafe(
     `SELECT id, username, role FROM users WHERE id = ANY($1::int[])`,
     [userIds]
   );
+  const users = result6?.rows || [];
   const map = new Map(users.map((u) => [Number(u.id), u]));
   const u1 = map.get(userIds[0]);
   const u2 = map.get(userIds[1]);
@@ -1643,10 +1664,11 @@ async function ensureCoupleMilestoneMemories(link) {
   if (days < 7) return;
   const userIds = [Number(link.user1_id ?? link.user_a_id) || 0, Number(link.user2_id ?? link.user_b_id) || 0].filter(Boolean);
   if (userIds.length !== 2) return;
-  const { rows: users } = await pgPool.query(
+  const result7 = await pgSafe(
     `SELECT id, username, role FROM users WHERE id = ANY($1::int[])`,
     [userIds]
   );
+  const users = result7?.rows || [];
   const map = new Map(users.map((u) => [Number(u.id), u]));
   const u1 = map.get(userIds[0]);
   const u2 = map.get(userIds[1]);
@@ -1689,7 +1711,7 @@ async function pgUpsertCouplePrefs(linkId, userId, patch) {
   // If row doesn't exist, insert defaults first
   const existing = await pgGetCouplePrefs(linkId, userId);
   if (!existing) {
-    await pgPool.query(
+    await pgSafe(
       `
       INSERT INTO couple_prefs(link_id, user_id, enabled, show_profile, show_members, group_members, aura, badge, allow_ping, updated_at)
       VALUES($1,$2,true,true,true,false,true,true,true,$3)
@@ -1711,7 +1733,7 @@ async function pgUpsertCouplePrefs(linkId, userId, patch) {
   vals.push(now);
   vals.push(Number(linkId) || 0);
   vals.push(Number(userId) || 0);
-  await pgPool.query(
+  await pgSafe(
     `UPDATE couple_prefs SET ${sets.join(", ")}, updated_at=$${i++} WHERE link_id=$${i++} AND user_id=$${i++}`,
     vals
   );
@@ -1722,27 +1744,29 @@ async function pgUpsertCouplePrefs(linkId, userId, patch) {
 async function pgAreFriends(userId, otherId){
   const uid=Number(userId)||0; const oid=Number(otherId)||0;
   if(!uid||!oid) return false;
-  const { rows } = await pgPool.query(
+  const result8 = await pgSafe(
     `SELECT 1 FROM friends WHERE user_id=$1 AND friend_user_id=$2 LIMIT 1`,
     [uid, oid]
   );
+  const rows = result8?.rows || [];
   return !!rows[0];
 }
 
 async function pgGetPendingFriendRequest(fromId, toId){
   const a=Number(fromId)||0; const b=Number(toId)||0;
   if(!a||!b) return null;
-  const { rows } = await pgPool.query(
+  const result9 = await pgSafe(
     `SELECT * FROM friend_requests WHERE from_user_id=$1 AND to_user_id=$2 AND status='pending' ORDER BY id DESC LIMIT 1`,
     [a, b]
   );
+  const rows = result9?.rows || [];
   return rows[0] || null;
 }
 
 async function pgListIncomingFriendRequests(userId){
   const uid=Number(userId)||0;
   if(!uid) return [];
-  const { rows } = await pgPool.query(
+  const result10 = await pgSafe(
     `SELECT fr.id, fr.created_at, u.id AS from_id, u.username AS from_username, u.avatar, u.avatar_bytes, u.avatar_mime, u.avatar_updated
        FROM friend_requests fr
        JOIN users u ON u.id = fr.from_user_id
@@ -1750,6 +1774,7 @@ async function pgListIncomingFriendRequests(userId){
       ORDER BY fr.created_at DESC`,
     [uid]
   );
+  const rows = result10?.rows || [];
   return rows || [];
 }
 
@@ -1757,13 +1782,13 @@ async function pgCreateFriendsPair(a, b){
   const uid=Number(a)||0; const oid=Number(b)||0;
   const now=Date.now();
   if(!uid||!oid||uid===oid) return;
-  await pgPool.query(
+  await pgSafe(
     `INSERT INTO friends(user_id, friend_user_id, is_favorite, created_at)
      VALUES ($1,$2,false,$3)
      ON CONFLICT (user_id, friend_user_id) DO NOTHING`,
     [uid, oid, now]
   );
-  await pgPool.query(
+  await pgSafe(
     `INSERT INTO friends(user_id, friend_user_id, is_favorite, created_at)
      VALUES ($1,$2,false,$3)
      ON CONFLICT (user_id, friend_user_id) DO NOTHING`,
@@ -1774,7 +1799,7 @@ async function pgCreateFriendsPair(a, b){
 async function pgListFriendsForUser(userId){
   const uid=Number(userId)||0;
   if(!uid) return [];
-  const { rows } = await pgPool.query(
+  const result11 = await pgSafe(
     `SELECT f.friend_user_id AS id,
             f.is_favorite,
             u.username,
@@ -1789,6 +1814,7 @@ async function pgListFriendsForUser(userId){
       ORDER BY f.is_favorite DESC, lower(u.username) ASC`,
     [uid]
   );
+  const rows = result11?.rows || [];
   return rows || [];
 }
 
@@ -2089,10 +2115,11 @@ app.get("/avatar/:id", async (req, res) => {
   if (!Number.isFinite(id) || id <= 0) return res.status(400).send("Invalid id");
 
   try {
-    const { rows } = await pgPool.query(
+    const result3 = await pgSafe(
       `SELECT avatar_bytes, avatar_mime, avatar_updated FROM users WHERE id = $1 LIMIT 1`,
       [id]
     );
+    const rows = result3?.rows || [];
     const row = rows?.[0];
     if (!row?.avatar_bytes) return res.status(404).send("Not found");
 
@@ -2483,7 +2510,7 @@ async function syncGoldXpThemeToPg(uid) {
   const theme = sanitizeThemeNameServer(row.theme);
 
   // Push into Postgres (so /api/me/* can read from PG)
-  await pgPool.query(
+  await pgSafe(
     `UPDATE users
        SET gold = $1,
            xp = $2,
@@ -2496,19 +2523,21 @@ async function syncGoldXpThemeToPg(uid) {
 
 async function pgGetUserByUsername(username) {
   if (!pgPool || !PG_READY) return null;
-  const { rows } = await pgPool.query(
+  const result12 = await pgSafe(
     `SELECT * FROM users WHERE lower(username) = lower($1) LIMIT 1`,
     [username]
   );
+  const rows = result12?.rows || [];
   return pgRowToUser(rows[0]);
 }
 
 async function pgGetUserById(id) {
   if (!pgPool || !PG_READY) return null;
-  const { rows } = await pgPool.query(
+  const result13 = await pgSafe(
     `SELECT * FROM users WHERE id = $1 LIMIT 1`,
     [id]
   );
+  const rows = result13?.rows || [];
   return pgRowToUser(rows[0]);
 }
 
@@ -2528,7 +2557,8 @@ async function pgGetUserRowById(id, columns) {
     : ["*"];
 
   const selectSql = cols[0] === "*" ? "*" : cols.map((c) => `"${c}"`).join(", ");
-  const { rows } = await pgPool.query(`SELECT ${selectSql} FROM users WHERE id = $1 LIMIT 1`, [id]);
+  const result14 = await pgSafe(`SELECT ${selectSql} FROM users WHERE id = $1 LIMIT 1`, [id]);
+  const rows = result14?.rows || [];
   return rows[0] || null;
 }
 async function pgUpsertFromSqliteRow(row) {
@@ -2589,7 +2619,7 @@ async function pgUpsertFromSqliteRow(row) {
     RETURNING *;
   `;
 
-  const { rows } = await pgPool.query(q, [
+  const result15 = await pgSafe(q, [
     username, passwordHash, role, createdAt,
     row.avatar || null, row.bio || "", row.mood || "", row.age ?? null, row.gender || "",
     row.last_seen ?? null, row.last_room || null, row.last_status || null,
@@ -2597,6 +2627,7 @@ async function pgUpsertFromSqliteRow(row) {
     row.lastXpMessageAt ?? null, row.lastDailyLoginAt ?? null, row.lastGoldTickAt ?? null, row.lastMessageGoldAt ?? null, row.lastDailyLoginGoldAt ?? null,
     row.lastDiceRollAt ?? null, row.dice_sixes ?? 0, row.luck ?? 0, row.roll_streak ?? 0, row.last_qual_msg_hash ?? null, row.last_qual_msg_at ?? null
   ]);
+  const rows = result15?.rows || [];
 
   return pgRowToUser(rows[0]);
 }
@@ -2695,10 +2726,11 @@ function findUserByMention(raw, cb) {
     if (mentionId) {
       if (await pgUsersEnabled()) {
         try {
-          const { rows } = await pgPool.query(
+          const result = await pgSafe(
             "SELECT id, username FROM users WHERE id = $1 LIMIT 1",
             [mentionId]
           );
+          const rows = result?.rows || [];
           const row = rows?.[0] || null;
           if (row?.id && row?.username) return cb(null, row);
         } catch (e) {
@@ -2713,13 +2745,14 @@ function findUserByMention(raw, cb) {
       // Prefer Postgres when enabled (Render/prod), but fall back to SQLite.
       if (await pgUsersEnabled()) {
         try {
-          const { rows } = await pgPool.query(
+          const result2 = await pgSafe(
             `SELECT id, username FROM users WHERE username = $1
                 OR lower(username) = lower($2)
              ORDER BY CASE WHEN username = $3 THEN 0 ELSE 1 END
              LIMIT 1`,
             [name, name, name]
           );
+          const rows = result2?.rows || [];
           const row = rows?.[0] || null;
           if (row?.id && row?.username) return cb(null, row);
         } catch (e) {
@@ -2740,10 +2773,11 @@ async function findUserByUsername(rawName) {
   if (!name) return null;
   if (await pgUsersEnabled()) {
     try {
-      const { rows } = await pgPool.query(
+      const result2 = await pgSafe(
         "SELECT id, username FROM users WHERE lower(username) = lower($1) LIMIT 1",
         [name]
       );
+      const rows = result2?.rows || [];
       if (rows?.[0]) return rows[0];
     } catch (e) {
       console.warn("[findUserByUsername][pg] failed, falling back to sqlite:", e?.message || e);
@@ -3122,7 +3156,8 @@ async function setConfigValue(key, value) {
 async function getConfigValuePg(key) {
   if (!(await pgUsersEnabled())) return null;
   try {
-    const { rows } = await pgPool.query(`SELECT value FROM config WHERE key = $1 LIMIT 1`, [key]);
+    const result4 = await pgSafe(`SELECT value FROM config WHERE key = $1 LIMIT 1`, [key]);
+    const rows = result4?.rows || [];
     return rows?.[0]?.value ?? null;
   } catch (e) {
     console.warn("[config][pg] read failed:", e?.message || e);
@@ -3134,7 +3169,7 @@ async function setConfigValuePg(key, value) {
   if (!(await pgUsersEnabled())) return null;
   const v = value == null ? "" : String(value);
   try {
-    await pgPool.query(
+    await pgSafe(
       `INSERT INTO config (key, value) VALUES ($1, $2)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
       [key, v]
@@ -3309,7 +3344,7 @@ async function ensureChessStatsRow(userId) {
   if (!userId) return;
   if (await chessPgEnabled()) {
     try {
-      await pgPool.query(
+      await pgSafe(
         `INSERT INTO chess_user_stats (user_id, chess_elo, chess_peak_elo, updated_at)
          VALUES ($1, $2, $2, $3)
          ON CONFLICT (user_id) DO NOTHING`,
@@ -3332,11 +3367,12 @@ async function loadChessStats(userId) {
   await ensureChessStatsRow(userId);
   if (await chessPgEnabled()) {
     try {
-      const { rows } = await pgPool.query(
+      const result3 = await pgSafe(
         `SELECT user_id, chess_elo, chess_games_played, chess_wins, chess_losses, chess_draws, chess_peak_elo, chess_last_game_at, updated_at
          FROM chess_user_stats WHERE user_id = $1`,
         [userId]
       );
+      const rows = result3?.rows || [];
       return rows?.[0] || null;
     } catch (e) {
       console.warn("[chess][pg] load stats failed:", e?.message || e);
@@ -3390,7 +3426,8 @@ function chessComputeElo(whiteStats, blackStats, result) {
 async function chessGetGameById(gameId) {
   if (!gameId) return null;
   if (await chessPgEnabled()) {
-    const { rows } = await pgPool.query(`SELECT * FROM chess_games WHERE game_id = $1`, [gameId]);
+    const result5 = await pgSafe(`SELECT * FROM chess_games WHERE game_id = $1`, [gameId]);
+    const rows = result5?.rows || [];
     return normalizeChessGameRow(rows?.[0] || null);
   }
   const row = await dbGetAsync(`SELECT * FROM chess_games WHERE game_id = ?`, [gameId]).catch(() => null);
@@ -3400,12 +3437,13 @@ async function chessGetGameById(gameId) {
 async function chessGetActiveGameForContext(contextType, contextId) {
   if (!contextType || !contextId) return null;
   if (await chessPgEnabled()) {
-    const { rows } = await pgPool.query(
+    const result6 = await pgSafe(
       `SELECT * FROM chess_games
        WHERE context_type = $1 AND context_id = $2 AND status IN ('active', 'pending')
        ORDER BY updated_at DESC LIMIT 1`,
       [contextType, contextId]
     );
+    const rows = result6?.rows || [];
     return normalizeChessGameRow(rows?.[0] || null);
   }
   const row = await dbGetAsync(
@@ -3420,12 +3458,13 @@ async function chessGetActiveGameForContext(contextType, contextId) {
 async function chessGetLatestGameForContext(contextType, contextId) {
   if (!contextType || !contextId) return null;
   if (await chessPgEnabled()) {
-    const { rows } = await pgPool.query(
+    const result7 = await pgSafe(
       `SELECT * FROM chess_games
        WHERE context_type = $1 AND context_id = $2
        ORDER BY updated_at DESC LIMIT 1`,
       [contextType, contextId]
     );
+    const rows = result7?.rows || [];
     return normalizeChessGameRow(rows?.[0] || null);
   }
   const row = await dbGetAsync(
@@ -3446,7 +3485,7 @@ async function chessCreateGame(contextType, contextId, whiteId, blackId) {
   const status = whiteId && blackId ? "active" : "pending";
   const turn = chess.turn();
   if (await chessPgEnabled()) {
-    await pgPool.query(
+    await pgSafe(
       `INSERT INTO chess_games
        (game_id, context_type, context_id, white_user_id, black_user_id, fen, pgn, status, turn, created_at, updated_at, last_move_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
@@ -3496,7 +3535,7 @@ async function chessUpdateGame(gameId, updates = {}) {
     }
     if (!set.length) return await chessGetGameById(gameId);
     vals.push(gameId);
-    await pgPool.query(`UPDATE chess_games SET ${set.join(", ")} WHERE game_id = $${idx}`, vals);
+    await pgSafe(`UPDATE chess_games SET ${set.join(", ")} WHERE game_id = $${idx}`, vals);
   } else {
     const set = [];
     const vals = [];
@@ -3516,7 +3555,7 @@ async function chessCreateChallenge(dmThreadId, challengerId, challengedId) {
   const now = Date.now();
   const challengeId = createChessId();
   if (await chessPgEnabled()) {
-    await pgPool.query(
+    await pgSafe(
       `INSERT INTO chess_challenges
        (challenge_id, dm_thread_id, challenger_user_id, challenged_user_id, status, created_at, updated_at)
        VALUES ($1,$2,$3,$4,'pending',$5,$6)`,
@@ -3536,7 +3575,8 @@ async function chessCreateChallenge(dmThreadId, challengerId, challengedId) {
 async function chessGetChallengeById(challengeId) {
   if (!challengeId) return null;
   if (await chessPgEnabled()) {
-    const { rows } = await pgPool.query(`SELECT * FROM chess_challenges WHERE challenge_id = $1`, [challengeId]);
+    const result8 = await pgSafe(`SELECT * FROM chess_challenges WHERE challenge_id = $1`, [challengeId]);
+    const rows = result8?.rows || [];
     return normalizeChessChallengeRow(rows?.[0] || null);
   }
   const row = await dbGetAsync(`SELECT * FROM chess_challenges WHERE challenge_id = ?`, [challengeId]).catch(() => null);
@@ -3546,10 +3586,11 @@ async function chessGetChallengeById(challengeId) {
 async function chessGetLatestChallengeForThread(dmThreadId) {
   if (!dmThreadId) return null;
   if (await chessPgEnabled()) {
-    const { rows } = await pgPool.query(
+    const result9 = await pgSafe(
       `SELECT * FROM chess_challenges WHERE dm_thread_id = $1 ORDER BY updated_at DESC LIMIT 1`,
       [dmThreadId]
     );
+    const rows = result9?.rows || [];
     return normalizeChessChallengeRow(rows?.[0] || null);
   }
   const row = await dbGetAsync(
@@ -3577,7 +3618,7 @@ async function chessUpdateChallenge(challengeId, updates = {}) {
     }
     if (!set.length) return await chessGetChallengeById(challengeId);
     vals.push(challengeId);
-    await pgPool.query(`UPDATE chess_challenges SET ${set.join(", ")} WHERE challenge_id = $${idx}`, vals);
+    await pgSafe(`UPDATE chess_challenges SET ${set.join(", ")} WHERE challenge_id = $${idx}`, vals);
   } else {
     const set = [];
     const vals = [];
@@ -3636,7 +3677,7 @@ async function chessApplyEloUpdate(game, result) {
   if (await chessPgEnabled()) {
     await pgPool.query("BEGIN");
     try {
-      await pgPool.query(
+      await pgSafe(
         `UPDATE chess_user_stats
          SET chess_elo = $2,
              chess_games_played = $3,
@@ -3649,7 +3690,7 @@ async function chessApplyEloUpdate(game, result) {
          WHERE user_id = $1`,
         [whiteId, whiteUpdate.chess_elo, whiteUpdate.chess_games_played, whiteUpdate.chess_wins, whiteUpdate.chess_losses, whiteUpdate.chess_draws, whiteUpdate.chess_peak_elo, whiteUpdate.chess_last_game_at, whiteUpdate.updated_at]
       );
-      await pgPool.query(
+      await pgSafe(
         `UPDATE chess_user_stats
          SET chess_elo = $2,
              chess_games_played = $3,
@@ -3968,10 +4009,11 @@ function normalizeMemoryBool(value) {
 async function getMemorySettingsRow(userId) {
   try {
     if (await pgUserExists(userId)) {
-      const { rows } = await pgPool.query(
+      const result4 = await pgSafe(
         "SELECT enabled, last_seen_at FROM memory_settings WHERE user_id = $1 LIMIT 1",
         [userId]
       );
+      const rows = result4?.rows || [];
       return rows[0] || null;
     }
   } catch (e) {
@@ -3990,7 +4032,7 @@ async function setMemorySettingsRow(userId, enabled) {
   const isEnabled = !!enabled;
   try {
     if (await pgUserExists(userId)) {
-      await pgPool.query(
+      await pgSafe(
         `
         INSERT INTO memory_settings (user_id, enabled)
         VALUES ($1, $2)
@@ -4088,7 +4130,7 @@ async function ensureMemory(userId, key, payload, userHint) {
 
   try {
     if (await pgUserExists(identity.id)) {
-      const { rows } = await pgPool.query(
+      const result5 = await pgSafe(
         `
         INSERT INTO memories (user_id, room_id, type, key, title, description, icon, created_at, metadata, visibility, pinned, seen)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,false,false)
@@ -4108,6 +4150,7 @@ async function ensureMemory(userId, key, payload, userHint) {
           memory.visibility,
         ]
       );
+      const rows = result5?.rows || [];
       const created = normalizeMemoryRow(rows[0]);
       if (created) {
         const sid = socketIdByUserId.get(identity.id);
@@ -4559,10 +4602,11 @@ const commandRegistry = {
       let nextSort = { maxSort: 0, maxsort: 0 };
       if (categoryId) {
         if (await pgUsersEnabled()) {
-          const { rows } = await pgPool.query(
+          const result3 = await pgSafe(
             `SELECT COALESCE(MAX(room_sort_order), 0) as maxsort FROM rooms WHERE category_id = $1`,
             [categoryId]
           );
+          const rows = result3?.rows || [];
           nextSort = rows?.[0] || nextSort;
         } else {
           nextSort = await dbGetAsync(
@@ -4573,7 +4617,7 @@ const commandRegistry = {
       }
       const sortOrder = Number(nextSort?.maxsort || nextSort?.maxSort || 0) + 1;
       if (await pgUsersEnabled()) {
-        await pgPool.query(
+        await pgSafe(
           `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room, is_system)
            VALUES ($1, $2, $3, $4, $5, $6, 0, 0)
            ON CONFLICT (name) DO NOTHING`,
@@ -4596,7 +4640,7 @@ const commandRegistry = {
       if (actor?.id) {
         const now = Date.now();
         if (await pgUsersEnabled()) {
-          await pgPool.query(
+          await pgSafe(
             `INSERT INTO room_members (room_name, user_id, role, assigned_by_user_id, assigned_at)
              VALUES ($1, $2, 'owner', $2, $3)
              ON CONFLICT (room_name, user_id) DO UPDATE SET role = 'owner'`,
@@ -4623,8 +4667,8 @@ const commandRegistry = {
       const name = sanitizeRoomName(args[0] || "");
       if (!name) return { ok: false, message: "Invalid room" };
       if (await pgUsersEnabled()) {
-        await pgPool.query(`DELETE FROM rooms WHERE name=$1`, [name]);
-        await pgPool.query(`DELETE FROM messages WHERE room=$1`, [name]).catch(() => {});
+        await pgSafe(`DELETE FROM rooms WHERE name=$1`, [name]);
+        await pgSafe(`DELETE FROM messages WHERE room=$1`, [name]).catch(() => {});
       } else {
         await dbRunAsync(`DELETE FROM rooms WHERE name=?`, [name]);
         await dbRunAsync(`DELETE FROM messages WHERE room=?`, [name]);
@@ -5075,10 +5119,11 @@ function emitLeaderboardUpdateThrottled() {
 async function getProgressionRow(userId) {
   try {
     if (await pgUserExists(userId)) {
-      const { rows } = await pgPool.query(
+      const result6 = await pgSafe(
         'SELECT username, role, xp, "lastMessageXpAt", "lastLoginXpAt", "lastOnlineXpAt", "lastXpMessageAt", "lastDailyLoginAt" FROM users WHERE id=$1 LIMIT 1',
         [userId]
       );
+      const rows = result6?.rows || [];
       if (rows?.[0]) return rows[0];
     }
   } catch (e) {
@@ -5136,7 +5181,7 @@ async function persistXpState(userId, data) {
         idx += 1;
       }
       params.push(userId);
-      await pgPool.query(`UPDATE users SET ${sets.join(", ")} WHERE id = $${idx}`, params);
+      await pgSafe(`UPDATE users SET ${sets.join(", ")} WHERE id = $${idx}`, params);
     }
   } catch (e) {
     console.warn("[xp][pg persist]", e?.message || e);
@@ -5309,7 +5354,7 @@ function initGoldTick(userId, now = Date.now()) {
     try {
       if (await pgUserExists(userId)) {
         // IMPORTANT: camelCase columns must be quoted in Postgres.
-        await pgPool.query('UPDATE users SET "lastGoldTickAt" = $1 WHERE id = $2', [now, userId]);
+        await pgSafe('UPDATE users SET "lastGoldTickAt" = $1 WHERE id = $2', [now, userId]);
         return;
       }
     } catch (e) {
@@ -5339,7 +5384,7 @@ function awardPassiveGold(userId, cb) {
 
         const last = Number(row.lastGoldTickAt || 0);
         if (!last) {
-              await pgPool.query('UPDATE users SET "lastGoldTickAt" = $1 WHERE id = $2', [now, userId]);
+              await pgSafe('UPDATE users SET "lastGoldTickAt" = $1 WHERE id = $2', [now, userId]);
           // Best-effort mirror to SQLite to prevent double-award if we fall back later.
           db.run("UPDATE users SET lastGoldTickAt = ? WHERE id = ?", [now, userId], () => {});
           return done(null, 0);
@@ -5350,7 +5395,7 @@ function awardPassiveGold(userId, cb) {
         if (ticks <= 0) return done(null, 0);
 
         const newTickTs = last + ticks * GOLD_TICK_MS;
-          await pgPool.query(
+          await pgSafe(
             'UPDATE users SET gold = gold + $1, "lastGoldTickAt" = $2 WHERE id = $3',
             [ticks, newTickTs, userId]
           );
@@ -5380,7 +5425,7 @@ function awardPassiveGold(userId, cb) {
             // Best-effort mirror to Postgres to prevent double-award if PG becomes available again.
             try {
               if (await pgUserExists(userId)) {
-                await pgPool.query('UPDATE users SET "lastGoldTickAt" = $1 WHERE id = $2', [now, userId]);
+                await pgSafe('UPDATE users SET "lastGoldTickAt" = $1 WHERE id = $2', [now, userId]);
               }
             } catch {}
             done(null, 0);
@@ -5403,7 +5448,7 @@ function awardPassiveGold(userId, cb) {
           // Best-effort mirror to Postgres to prevent double-award if PG becomes available again.
           try {
             if (await pgUserExists(userId)) {
-              await pgPool.query(
+              await pgSafe(
                 'UPDATE users SET gold = gold + $1, "lastGoldTickAt" = $2 WHERE id = $3',
                 [ticks, newTickTs, userId]
               );
@@ -5439,7 +5484,7 @@ function awardMessageGold(userId, cb) {
         if (last && now - last < MESSAGE_GOLD_COOLDOWN_MS) return done(null, 0);
 
         // Award message gold in Postgres
-        await pgPool.query(
+        await pgSafe(
           'UPDATE users SET gold = gold + 5, "lastMessageGoldAt" = $1 WHERE id = $2',
           [now, userId]
         );
@@ -5473,7 +5518,7 @@ function awardMessageGold(userId, cb) {
           // Best-effort mirror to Postgres to prevent double-awarding if PG becomes available again
           try {
             if (await pgUserExists(userId)) {
-              await pgPool.query(
+              await pgSafe(
                 'UPDATE users SET gold = gold + 5, "lastMessageGoldAt" = $1 WHERE id = $2',
                 [now, userId]
               );
@@ -5567,7 +5612,7 @@ async function ensureDevSeedUser() {
   try {
     if (PG_READY && pgPool) {
       const hash = await bcrypt.hash(seed.password, 10);
-      await pgPool.query(
+      await pgSafe(
         `
         INSERT INTO users (username, password_hash, role, created_at)
         VALUES ($1, $2, $3, $4)
@@ -5629,11 +5674,12 @@ async function fetchUsersByNames(usernames) {
 
   if (await pgUsersEnabled()) {
     try {
-      const { rows } = await pgPool.query(
+      const result7 = await pgSafe(
         `SELECT id, username FROM users WHERE username = ANY($1::text[])
             OR lower(username) = ANY($2::text[])`,
         [exacts, lowers]
       );
+      const rows = result7?.rows || [];
       for (const row of rows || []) {
         if (!row?.id || !row?.username) continue;
         const id = Number(row.id);
@@ -5690,10 +5736,11 @@ async function fetchUsersByIds(ids) {
 
   if (await pgUsersEnabled()) {
     try {
-      const { rows } = await pgPool.query(
+      const result8 = await pgSafe(
         `SELECT id, username FROM users WHERE id = ANY($1::int[])`,
         [cleaned]
       );
+      const rows = result8?.rows || [];
       const merged = new Map();
       for (const row of rows || []) {
         const id = Number(row?.id);
@@ -5736,10 +5783,11 @@ async function fetchSurvivalUserSnapshots(userIds) {
 
   if (await pgUsersEnabled()) {
     try {
-      const { rows } = await pgPool.query(
+      const result9 = await pgSafe(
         `SELECT id, username, avatar, avatar_bytes, avatar_mime, avatar_updated FROM users WHERE id = ANY($1::int[])`,
         [cleaned]
       );
+      const rows = result9?.rows || [];
       return (rows || []).map((row) => ({
         id: row.id,
         username: row.username,
@@ -5960,7 +6008,8 @@ async function fetchSurvivalSeasonById(seasonId) {
   if (!sid) return null;
   if (await pgUsersEnabled()) {
     try {
-      const { rows } = await pgPool.query(`SELECT * FROM survival_seasons WHERE id = $1 LIMIT 1`, [sid]);
+      const result10 = await pgSafe(`SELECT * FROM survival_seasons WHERE id = $1 LIMIT 1`, [sid]);
+      const rows = result10?.rows || [];
       return rows[0] || null;
     } catch (e) {
       console.warn("[survival][pg] fetch season failed:", e?.message || e);
@@ -5972,12 +6021,13 @@ async function fetchSurvivalSeasonById(seasonId) {
 async function fetchSurvivalCurrentSeason() {
   if (await pgUsersEnabled()) {
     try {
-      const { rows } = await pgPool.query(
+      const result11 = await pgSafe(
         `SELECT * FROM survival_seasons WHERE room_id = $1 AND status = 'running' ORDER BY id DESC LIMIT 1`,
         [SURVIVAL_ROOM_DB_ID]
       );
+      const rows = result11?.rows || [];
       if (rows[0]) return rows[0];
-      const fallback = await pgPool.query(
+      const fallback = await pgSafe(
         `SELECT * FROM survival_seasons WHERE room_id = $1 ORDER BY updated_at DESC, id DESC LIMIT 1`,
         [SURVIVAL_ROOM_DB_ID]
       );
@@ -6003,10 +6053,11 @@ async function fetchSurvivalParticipants(seasonId) {
   if (!sid) return [];
   if (await pgUsersEnabled()) {
     try {
-      const { rows } = await pgPool.query(
+      const result12 = await pgSafe(
         `SELECT * FROM survival_participants WHERE season_id = $1 ORDER BY id ASC`,
         [sid]
       );
+      const rows = result12?.rows || [];
       return rows.map(normalizeSurvivalParticipantRow).filter(Boolean);
     } catch (e) {
       console.warn("[survival][pg] fetch participants failed:", e?.message || e);
@@ -6024,10 +6075,11 @@ async function fetchSurvivalAlliances(seasonId) {
   if (!sid) return [];
   if (await pgUsersEnabled()) {
     try {
-      const { rows } = await pgPool.query(
+      const result13 = await pgSafe(
         `SELECT * FROM survival_alliances WHERE season_id = $1 ORDER BY id ASC`,
         [sid]
       );
+      const rows = result13?.rows || [];
       return rows || [];
     } catch (e) {
       console.warn("[survival][pg] fetch alliances failed:", e?.message || e);
@@ -6048,16 +6100,18 @@ async function fetchSurvivalEvents(seasonId, { limit = 200, beforeId = null } = 
   if (await pgUsersEnabled()) {
     try {
       if (before) {
-        const { rows } = await pgPool.query(
+        const result = await pgSafe(
           `SELECT * FROM survival_events WHERE season_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3`,
           [sid, before, lim]
         );
+        const rows = result?.rows || [];
         return rows.map(normalizeSurvivalEventRow).filter(Boolean).reverse();
       }
-      const { rows } = await pgPool.query(
+      const result14 = await pgSafe(
         `SELECT * FROM survival_events WHERE season_id = $1 ORDER BY id DESC LIMIT $2`,
         [sid, lim]
       );
+      const rows = result14?.rows || [];
       return rows.map(normalizeSurvivalEventRow).filter(Boolean).reverse();
     } catch (e) {
       console.warn("[survival][pg] fetch events failed:", e?.message || e);
@@ -6082,10 +6136,11 @@ async function fetchSurvivalHistory(limit = 10) {
   const lim = clamp(Number(limit) || 10, 1, 25);
   if (await pgUsersEnabled()) {
     try {
-      const { rows } = await pgPool.query(
+      const result15 = await pgSafe(
         `SELECT * FROM survival_seasons WHERE room_id = $1 ORDER BY created_at DESC LIMIT $2`,
         [SURVIVAL_ROOM_DB_ID, lim]
       );
+      const rows = result15?.rows || [];
       return rows || [];
     } catch (e) {
       console.warn("[survival][pg] fetch history failed:", e?.message || e);
@@ -6102,10 +6157,11 @@ async function fetchSurvivalWinner(seasonId) {
   if (!sid) return null;
   if (await pgUsersEnabled()) {
     try {
-      const { rows } = await pgPool.query(
+      const result16 = await pgSafe(
         `SELECT display_name FROM survival_participants WHERE season_id = $1 AND alive = 1 LIMIT 1`,
         [sid]
       );
+      const rows = result16?.rows || [];
       return rows[0]?.display_name || null;
     } catch (e) {
       console.warn("[survival][pg] fetch winner failed:", e?.message || e);
@@ -6472,10 +6528,11 @@ async function getUserRoomCollapseState(userId) {
   if (!userId) return fallback;
   let row = null;
   try {
-    const { rows } = await pgPool.query(
+    const result10 = await pgSafe(
       `SELECT room_master_collapsed, room_category_collapsed FROM users WHERE id = $1 LIMIT 1`,
       [userId]
     );
+    const rows = result10?.rows || [];
     row = rows[0] || null;
   } catch {}
 
@@ -6499,13 +6556,13 @@ async function getUserRoomCollapseState(userId) {
 async function buildRoomStructure() {
   // Discovery: room structure is sourced from room_master_categories/room_categories/rooms tables.
   if (await pgUsersEnabled()) {
-    const mastersRes = await pgPool.query(
+    const mastersRes = await pgSafe(
       `SELECT id, name, sort_order FROM room_master_categories ORDER BY sort_order ASC, id ASC`
     );
-    const categoriesRes = await pgPool.query(
+    const categoriesRes = await pgSafe(
       `SELECT id, master_id, name, sort_order FROM room_categories ORDER BY sort_order ASC, id ASC`
     );
-    const roomsRes = await pgPool.query(
+    const roomsRes = await pgSafe(
       `SELECT name, category_id, room_sort_order, slowmode_seconds, is_locked, maintenance_mode, vip_only, staff_only, min_level, events_enabled, archived,
               created_by, created_by_user_id, is_user_room, is_system
          FROM rooms
@@ -6601,7 +6658,7 @@ async function logRoomStructureAudit({ action, actorUserId, payload }) {
   const serialized = payload ? JSON.stringify(payload) : null;
   if (await pgUsersEnabled()) {
     try {
-      await pgPool.query(
+      await pgSafe(
         `INSERT INTO room_structure_audit (action, actor_user_id, payload, created_at)
          VALUES ($1, $2, $3, $4)`,
         [action, actorUserId || null, serialized ? JSON.parse(serialized) : null, now]
@@ -6652,10 +6709,11 @@ function extractExpectedRoomVersion(req) {
 
 async function getDefaultMasterIds() {
   if (await pgUsersEnabled()) {
-    const { rows } = await pgPool.query(
+    const result11 = await pgSafe(
       `SELECT id, name FROM room_master_categories WHERE name = ANY($1::text[])`,
       [DEFAULT_ROOM_MASTERS]
     );
+    const rows = result11?.rows || [];
     const map = new Map((rows || []).map((row) => [row.name, row.id]));
     return {
       site: map.get("Site Rooms") || null,
@@ -6678,10 +6736,11 @@ async function resolveSiteUncategorizedCategoryId() {
     const ids = await getDefaultMasterIds();
     if (!ids.site) return null;
     if (await pgUsersEnabled()) {
-      const { rows } = await pgPool.query(
+      const result17 = await pgSafe(
         `SELECT id FROM room_categories WHERE master_id = $1 AND lower(name) = lower('Uncategorized') LIMIT 1`,
         [ids.site]
       );
+      const rows = result17?.rows || [];
       return rows?.[0]?.id ?? null;
     }
     const row = await dbGetAsync(
@@ -6722,13 +6781,14 @@ async function ensureCoreRoomsExist() {
   if (!PG_READY) return;
   const pgCategoryId = await (async () => {
     try {
-      const { rows } = await pgPool.query(
+      const result18 = await pgSafe(
         `SELECT c.id
            FROM room_categories c
            JOIN room_master_categories m ON m.id = c.master_id
           WHERE m.name = 'Site Rooms' AND lower(c.name) = lower('Uncategorized')
           LIMIT 1`
       );
+      const rows = result18?.rows || [];
       return rows?.[0]?.id ?? null;
     } catch {
       return null;
@@ -6736,10 +6796,11 @@ async function ensureCoreRoomsExist() {
   })();
   for (const room of CORE_ROOMS) {
     try {
-      const { rows } = await pgPool.query(`SELECT name, category_id FROM rooms WHERE name = $1 LIMIT 1`, [room.name]);
+      const result19 = await pgSafe(`SELECT name, category_id FROM rooms WHERE name = $1 LIMIT 1`, [room.name]);
+      const rows = result19?.rows || [];
       const existing = rows?.[0] || null;
       if (!existing) {
-        await pgPool.query(
+        await pgSafe(
           `INSERT INTO rooms
             (name, created_by, created_at, category_id, room_sort_order, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived, is_system)
            VALUES ($1, NULL, $2, $3, $4, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1)
@@ -6747,7 +6808,7 @@ async function ensureCoreRoomsExist() {
           [room.name, now, pgCategoryId, room.sortOrder ?? 0]
         );
       } else {
-        await pgPool.query(
+        await pgSafe(
           `UPDATE rooms
               SET category_id = COALESCE(category_id, $1),
                   room_sort_order = COALESCE(room_sort_order, $2),
@@ -6766,10 +6827,11 @@ async function ensureCoreRoomsExist() {
 async function getUncategorizedCategoryId(masterId) {
   if (!masterId) return null;
   if (await pgUsersEnabled()) {
-    const { rows } = await pgPool.query(
+    const result12 = await pgSafe(
       `SELECT id FROM room_categories WHERE master_id = $1 AND lower(name) = lower($2) LIMIT 1`,
       [masterId, DEFAULT_ROOM_CATEGORY]
     );
+    const rows = result12?.rows || [];
     return rows?.[0]?.id ?? null;
   }
   const row = await dbGetAsync(
@@ -6783,10 +6845,11 @@ async function resolveRoomCategoryId({ categoryId, masterId, isUserRoom }) {
   let categoryRow = null;
   if (categoryId) {
     if (await pgUsersEnabled()) {
-      const { rows } = await pgPool.query(
+      const result20 = await pgSafe(
         `SELECT id, master_id FROM room_categories WHERE id = $1 LIMIT 1`,
         [categoryId]
       );
+      const rows = result20?.rows || [];
       categoryRow = rows?.[0] || null;
     } else {
       categoryRow = await dbGetAsync(
@@ -7128,10 +7191,11 @@ async function findUserIdByUsername(username) {
   if (!clean) return null;
   if (await pgUsersEnabled()) {
     try {
-      const { rows } = await pgPool.query(
+      const result21 = await pgSafe(
         `SELECT id FROM users WHERE lower(username) = lower($1) LIMIT 1`,
         [clean]
       );
+      const rows = result21?.rows || [];
       return rows?.[0]?.id ?? null;
     } catch {
       return null;
@@ -7154,13 +7218,14 @@ async function createModCase({
 }) {
   const now = Date.now();
   if (await pgUsersEnabled()) {
-    const { rows } = await pgPool.query(
+    const result13 = await pgSafe(
       `INSERT INTO mod_cases
         (type, status, priority, subject_user_id, created_by_user_id, assigned_to_user_id, room_id, title, summary, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        RETURNING *`,
       [type, status, priority, subjectUserId, createdByUserId, assignedToUserId, roomId, title, summary, now, now]
     );
+    const rows = result13?.rows || [];
     return rows?.[0] || null;
   }
   const result = await dbRunAsync(
@@ -7175,12 +7240,12 @@ async function createModCase({
 async function addModCaseEvent(caseId, { actorUserId = null, eventType, payload = null }) {
   const now = Date.now();
   if (await pgUsersEnabled()) {
-    await pgPool.query(
+    await pgSafe(
       `INSERT INTO mod_case_events (case_id, actor_user_id, event_type, event_payload, created_at)
        VALUES ($1, $2, $3, $4, $5)`,
       [caseId, actorUserId, eventType, payload ?? null, now]
     );
-    await pgPool.query(`UPDATE mod_cases SET updated_at = $1 WHERE id = $2`, [now, caseId]).catch(() => {});
+    await pgSafe(`UPDATE mod_cases SET updated_at = $1 WHERE id = $2`, [now, caseId]).catch(() => {});
     return;
   }
   await dbRunAsync(
@@ -7194,13 +7259,14 @@ async function addModCaseEvent(caseId, { actorUserId = null, eventType, payload 
 async function addModCaseNote(caseId, { authorUserId = null, body }) {
   const now = Date.now();
   if (await pgUsersEnabled()) {
-    const { rows } = await pgPool.query(
+    const result14 = await pgSafe(
       `INSERT INTO mod_case_notes (case_id, author_user_id, body, created_at)
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
       [caseId, authorUserId, body, now]
     );
-    await pgPool.query(`UPDATE mod_cases SET updated_at = $1 WHERE id = $2`, [now, caseId]).catch(() => {});
+    const rows = result14?.rows || [];
+    await pgSafe(`UPDATE mod_cases SET updated_at = $1 WHERE id = $2`, [now, caseId]).catch(() => {});
     return rows?.[0] || null;
   }
   const result = await dbRunAsync(
@@ -7215,14 +7281,15 @@ async function addModCaseNote(caseId, { authorUserId = null, body }) {
 async function addModCaseEvidence(caseId, { createdByUserId = null, evidenceType, roomId = null, messageId = null, messageExcerpt = null, url = null, text = null }) {
   const now = Date.now();
   if (await pgUsersEnabled()) {
-    const { rows } = await pgPool.query(
+    const result15 = await pgSafe(
       `INSERT INTO mod_case_evidence
         (case_id, evidence_type, room_id, message_id, message_excerpt, url, text, created_by_user_id, created_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING *`,
       [caseId, evidenceType, roomId, messageId, messageExcerpt, url, text, createdByUserId, now]
     );
-    await pgPool.query(`UPDATE mod_cases SET updated_at = $1 WHERE id = $2`, [now, caseId]).catch(() => {});
+    const rows = result15?.rows || [];
+    await pgSafe(`UPDATE mod_cases SET updated_at = $1 WHERE id = $2`, [now, caseId]).catch(() => {});
     return rows?.[0] || null;
   }
   const result = await dbRunAsync(
@@ -7237,7 +7304,8 @@ async function addModCaseEvidence(caseId, { createdByUserId = null, evidenceType
 
 async function fetchModCaseById(caseId) {
   if (await pgUsersEnabled()) {
-    const { rows } = await pgPool.query(`SELECT * FROM mod_cases WHERE id = $1`, [caseId]);
+    const result16 = await pgSafe(`SELECT * FROM mod_cases WHERE id = $1`, [caseId]);
+    const rows = result16?.rows || [];
     return rows?.[0] || null;
   }
   return dbGetAsync(`SELECT * FROM mod_cases WHERE id = ?`, [caseId]);
@@ -7338,7 +7406,7 @@ function clearPasswordUpgradeFailures(req) {
 async function invalidateSessionsForUserId(userId) {
   if (!userId || !PG_READY) return;
   try {
-    await pgPool.query(
+    await pgSafe(
       `DELETE FROM session WHERE (sess->'user'->>'id')::int = $1`,
       [Number(userId)]
     );
@@ -7473,7 +7541,7 @@ async function pgChangelogEnabled(){
     await pgInitPromise;
     if (!PG_READY) return false;
     // simple connectivity check
-    await pgPool.query('SELECT 1');
+    await pgSafe('SELECT 1');
     return true;
   } catch (e) {
     return false;
@@ -7483,35 +7551,39 @@ async function pgChangelogEnabled(){
 async function pgAllChangelog(limit = 0){
   await pgInitPromise;
   if(limit){
-    const { rows } = await pgPool.query(
+    const result17 = await pgSafe(
       "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries ORDER BY seq DESC LIMIT $1",
       [limit]
     );
+    const rows = result17?.rows || [];
     return rows;
   }
-  const { rows } = await pgPool.query(
+  const result16 = await pgSafe(
     "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries ORDER BY seq DESC"
   );
+  const rows = result16?.rows || [];
   return rows;
 }
 
 async function pgChangelogByIds(ids = []){
   await pgInitPromise;
   if(!ids?.length) return [];
-  const { rows } = await pgPool.query(
+  const result17 = await pgSafe(
     "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries WHERE id = ANY($1) ORDER BY seq DESC",
     [ids]
   );
+  const rows = result17?.rows || [];
   return rows;
 }
 
 async function pgFetchChangelogReactionCounts(entryIds = []){
   if(!entryIds.length) return {};
   const map = {};
-  const { rows } = await pgPool.query(
+  const result18 = await pgSafe(
     "SELECT entry_id, reaction, COUNT(*) as count FROM changelog_reactions WHERE entry_id = ANY($1) GROUP BY entry_id, reaction",
     [entryIds]
   );
+  const rows = result18?.rows || [];
   for(const row of rows || []){
     const id = Number(row.entry_id);
     const key = normalizeReactionKey(row.reaction);
@@ -7525,10 +7597,11 @@ async function pgFetchChangelogReactionCounts(entryIds = []){
 async function pgFetchFaqReactionCounts(questionIds = []){
   if(!questionIds.length) return {};
   const map = {};
-  const { rows } = await pgPool.query(
+  const result19 = await pgSafe(
     "SELECT question_id, reaction_key, COUNT(*) as count FROM faq_reactions WHERE question_id = ANY($1) GROUP BY question_id, reaction_key",
     [questionIds]
   );
+  const rows = result19?.rows || [];
   for(const row of rows || []){
     const id = Number(row.question_id);
     const key = normalizeFaqReactionKey(row.reaction_key);
@@ -7542,10 +7615,11 @@ async function pgFetchFaqReactionCounts(questionIds = []){
 async function pgFaqMyReactions(questionIds = [], username){
   if(!questionIds.length || !username) return {};
   const map = {};
-  const { rows } = await pgPool.query(
+  const result20 = await pgSafe(
     "SELECT question_id, reaction_key FROM faq_reactions WHERE question_id = ANY($1) AND username=$2",
     [questionIds, username]
   );
+  const rows = result20?.rows || [];
   for(const row of rows || []){
     const id = Number(row.question_id);
     const key = normalizeFaqReactionKey(row.reaction_key);
@@ -7559,10 +7633,11 @@ async function pgFaqMyReactions(questionIds = [], username){
 async function pgFetchChangelogUserReactions(entryIds = [], userId){
   if(!entryIds.length || !userId) return {};
   const mine = {};
-  const { rows } = await pgPool.query(
+  const result21 = await pgSafe(
     "SELECT entry_id, reaction FROM changelog_reactions WHERE entry_id = ANY($1) AND user_id=$2",
     [entryIds, userId]
   );
+  const rows = result21?.rows || [];
   for(const row of rows || []){
     const id = Number(row.entry_id);
     const key = normalizeReactionKey(row.reaction);
@@ -7590,9 +7665,10 @@ async function pgFetchChangelogEntriesWithReactions({ limit = 0, ids = null, use
 
 async function pgFetchFaqQuestionsWithReactions(username){
   await pgInitPromise;
-  const { rows } = await pgPool.query(
+  const result22 = await pgSafe(
     "SELECT id, created_at, question_title, question_details, answer_body, answered_at, answered_by, is_deleted FROM faq_questions WHERE is_deleted=0 ORDER BY created_at DESC"
   );
+  const rows = result22?.rows || [];
   const payloads = (rows || []).map((r) => toFaqPayload(r)).filter(Boolean);
   const ids = payloads.map((p) => p.id).filter(Boolean);
   if(!ids.length) return payloads;
@@ -7608,73 +7684,83 @@ async function pgFetchFaqQuestionsWithReactions(username){
 async function pgCreateChangelogEntry({ title, body, authorId }){
   await pgInitPromise;
   const now = Date.now();
-  const { rows } = await pgPool.query(
+  const result23 = await pgSafe(
     "INSERT INTO changelog_entries (title, body, created_at, updated_at, author_id) VALUES ($1,$2,$3,$4,$5) RETURNING id, seq, title, body, created_at, updated_at, author_id",
     [title, body, now, now, authorId]
   );
+  const rows = result23?.rows || [];
   return rows[0];
 }
 
 async function pgCreateFaqQuestion({ title, details }){
   await pgInitPromise;
   const now = Date.now();
-  const { rows } = await pgPool.query(
+  const result24 = await pgSafe(
     "INSERT INTO faq_questions (created_at, question_title, question_details, answer_body, answered_at, answered_by, is_deleted) VALUES ($1,$2,$3,'', NULL, NULL, 0) RETURNING id, created_at, question_title, question_details, answer_body, answered_at, answered_by, is_deleted",
     [now, title, details]
   );
+  const rows = result24?.rows || [];
   return rows[0] || null;
 }
 
 async function pgUpdateChangelogEntry({ id, title, body }){
   await pgInitPromise;
   const now = Date.now();
-  const { rowCount } = await pgPool.query(
+  const result24 = await pgSafe(
     "UPDATE changelog_entries SET title=$1, body=$2, updated_at=$3 WHERE id=$4",
     [title, body, now, id]
   );
+  const rowCount = result24?.rowCount || 0;
   if(!rowCount) return null;
-  const { rows } = await pgPool.query(
+  const result25 = await pgSafe(
     "SELECT id, seq, title, body, created_at, updated_at, author_id FROM changelog_entries WHERE id=$1",
     [id]
   );
+  const rows = result25?.rows || [];
   return rows[0] || null;
 }
 
 async function pgUpdateFaqAnswer({ id, answerBody, answeredBy }){
   await pgInitPromise;
   const now = Date.now();
-  const { rowCount, rows } = await pgPool.query(
+  const result26 = await pgSafe(
     "UPDATE faq_questions SET answer_body=$1, answered_at=$2, answered_by=$3 WHERE id=$4 AND is_deleted=0 RETURNING id, created_at, question_title, question_details, answer_body, answered_at, answered_by, is_deleted",
     [answerBody, now, answeredBy, id]
   );
+  const rowCount = result26?.rowCount || 0;
+  const rows = result26?.rows || [];
   if(!rowCount) return null;
   return rows[0] || null;
 }
 
 async function pgDeleteChangelogEntry(id){
   await pgInitPromise;
-  await pgPool.query("DELETE FROM changelog_reactions WHERE entry_id=$1", [id]);
-  const { rowCount } = await pgPool.query("DELETE FROM changelog_entries WHERE id=$1", [id]);
+  await pgSafe("DELETE FROM changelog_reactions WHERE entry_id=$1", [id]);
+  const result27 = await pgSafe("DELETE FROM changelog_entries WHERE id=$1", [id]);
+  const rowCount = result27?.rowCount || 0;
   return rowCount > 0;
 }
 
 async function pgChangelogEntryExists(entryId){
   await pgInitPromise;
-  const { rowCount } = await pgPool.query("SELECT 1 FROM changelog_entries WHERE id=$1", [entryId]);
+  const result28 = await pgSafe("SELECT 1 FROM changelog_entries WHERE id=$1", [entryId]);
+  const rowCount = result28?.rowCount || 0;
   return rowCount > 0;
 }
 
 async function pgFaqQuestionExists(questionId){
   await pgInitPromise;
-  const { rowCount } = await pgPool.query("SELECT 1 FROM faq_questions WHERE id=$1 AND is_deleted=0", [questionId]);
+  const result29 = await pgSafe("SELECT 1 FROM faq_questions WHERE id=$1 AND is_deleted=0", [questionId]);
+  const rowCount = result29?.rowCount || 0;
   return rowCount > 0;
 }
 
 async function pgDeleteFaqQuestion(id){
   await pgInitPromise;
   // Soft-delete to preserve audit/history and avoid breaking references.
-  await pgPool.query("DELETE FROM faq_reactions WHERE question_id=$1", [id]);
-  const { rowCount } = await pgPool.query("UPDATE faq_questions SET is_deleted=1 WHERE id=$1", [id]);
+  await pgSafe("DELETE FROM faq_reactions WHERE question_id=$1", [id]);
+  const result30 = await pgSafe("UPDATE faq_questions SET is_deleted=1 WHERE id=$1", [id]);
+  const rowCount = result30?.rowCount || 0;
   return rowCount > 0;
 }
 
@@ -8105,7 +8191,7 @@ app.get("/api/captcha-config", (_req, res) => {
 // ---- Auth routes
 // ---- Auth routes
 
-// --- Guest Login Endpoint
+// --- Guest Login Endpoint (CRITICAL: SQLite-only, Postgres optional)
 app.post("/guest-login", async (req, res) => {
   const { username } = req.body;
   if (!username || username.length < 2 || username.length > 20) {
@@ -8113,35 +8199,45 @@ app.post("/guest-login", async (req, res) => {
   }
   
   try {
-    // Check if user exists
-    const existing = await pgPool.query("SELECT id FROM users WHERE lower(username) = lower($1)", [username]);
-    if (existing.rows.length > 0) {
+    // Check if user exists in SQLite (source of truth)
+    const existing = await dbAllAsync("SELECT id FROM users WHERE lower(username) = lower(?)", [username]);
+    if (existing && existing.length > 0) {
       return res.status(400).send("Username already taken.");
     }
 
+    // Create guest user in SQLite (MUST succeed)
     const now = Date.now();
-    const result = await pgPool.query(
-      `INSERT INTO users (username, role, created_at, last_seen)
-       VALUES ($1, 'Guest', $2, $2)
-       RETURNING id, username, role`,
-      [username, now]
+    const sqliteResult = await dbRunAsync(
+      `INSERT INTO users (username, role, created_at, last_seen, theme)
+       VALUES (?, 'Guest', ?, ?, ?)`,
+      [username, now, now, DEFAULT_THEME]
     );
 
-    const user = result.rows[0];
-    req.session.user = {
-      id: user.id,
-      username: user.username,
-      role: user.role,
+    const guestUser = {
+      id: sqliteResult.lastID,
+      username: username,
+      role: 'Guest',
       theme: DEFAULT_THEME,
       avatar: "",
       avatar_updated: null,
     };
+
+    // Optionally mirror to Postgres (never blocking)
+    pgSafe(
+      `INSERT INTO users (id, username, role, created_at, last_seen, theme)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (id) DO NOTHING`,
+      [guestUser.id, guestUser.username, guestUser.role, now, now, DEFAULT_THEME]
+    );
+
+    // Set session and respond
+    req.session.user = guestUser;
     req.session.save((saveErr) => {
       if (saveErr) return res.status(500).send("Session save failed");
-      return res.json({ ok: true, user });
+      return res.json({ ok: true, user: guestUser });
     });
   } catch (err) {
-    console.error("Guest login error:", err);
+    console.error("[guest-login] Error:", err);
     res.status(500).send("Guest login failed.");
   }
 });
@@ -8176,12 +8272,13 @@ app.post("/register", registerLimiter, async (req, res) => {
     let user = null;
     if (PG_READY && pgPool) {
       const createdAtValue = PG_USERS_CREATED_AT_IS_TIMESTAMP ? new Date(createdAt) : createdAt;
-      const { rows } = await pgPool.query(
+      const result22 = await pgSafe(
         `INSERT INTO users (username, password_hash, role, created_at, theme)
          VALUES ($1,$2,$3,$4,$5)
          RETURNING id, username, role, theme`,
         [username, hash, role, createdAtValue, theme]
       );
+      const rows = result22?.rows || [];
       user = rows[0] || null;
     } else {
       const existingSqlite = await dbGetAsync(
@@ -8290,7 +8387,7 @@ app.post("/login", loginIpLimiter, async (req, res) => {
         ok = password === stored;
         if (ok) {
           const upgraded = await bcrypt.hash(password, 10);
-          await pgPool.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [upgraded, pgUser.id]).catch(() => {});
+          await pgSafe(`UPDATE users SET password_hash = $1 WHERE id = $2`, [upgraded, pgUser.id]).catch(() => {});
           pgUser.password_hash = upgraded;
         }
       }
@@ -8464,7 +8561,7 @@ app.post("/login", loginIpLimiter, async (req, res) => {
     }
 
     if (PG_READY && pgPool) {
-      await pgPool.query(
+      await pgSafe(
         `INSERT INTO users (id, username, password_hash, role, created_at, theme, gold, xp)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
          ON CONFLICT (username) DO UPDATE
@@ -8581,12 +8678,12 @@ app.post("/password-upgrade", passwordUpgradeLimiter, async (req, res) => {
     const newHash = await bcrypt.hash(newPassword, 12);
 
     if (pgUser?.id) {
-      await pgPool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [newHash, pgUser.id]).catch(() => {});
+      await pgSafe("UPDATE users SET password_hash = $1 WHERE id = $2", [newHash, pgUser.id]).catch(() => {});
     } else if (sqliteRow?.id) {
       const createdAtValue = PG_USERS_CREATED_AT_IS_TIMESTAMP
         ? new Date(Number(sqliteRow.created_at || Date.now()))
         : Number(sqliteRow.created_at || Date.now());
-      await pgPool.query(
+      await pgSafe(
         `INSERT INTO users (id, username, password_hash, role, created_at, theme, gold, xp)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
          ON CONFLICT (username) DO UPDATE
@@ -8681,7 +8778,7 @@ app.get("/me", async (req, res) => {
     // IMPORTANT: /me is used to hydrate the session and client state.
     // We MUST select role/theme and avatar fields; otherwise we may overwrite
     // req.session.user.role/theme with undefined, which breaks permission gating.
-    const { rows } = await pgPool.query(
+    const result18 = await pgSafe(
       `SELECT id,
               username,
               role,
@@ -8694,6 +8791,7 @@ app.get("/me", async (req, res) => {
         LIMIT 1`,
       [req.session.user.id]
     );
+    const rows = result18?.rows || [];
 
     let row = rows[0];
 
@@ -8712,7 +8810,7 @@ app.get("/me", async (req, res) => {
       // (If your login migration creates PG users with matching ids, this will work;
       // otherwise we’ll handle it during login migration.)
       try {
-        await pgPool.query(
+        await pgSafe(
           "UPDATE users SET theme = $1, role = $2 WHERE id = $3",
           [theme, srow.role, srow.id]
         );
@@ -8731,7 +8829,7 @@ app.get("/me", async (req, res) => {
     }
 
     const theme = sanitizeThemeNameServer(row.theme);
-    if (!row.theme) await pgPool.query("UPDATE users SET theme = $1 WHERE id = $2", [theme, row.id]);
+    if (!row.theme) await pgSafe("UPDATE users SET theme = $1 WHERE id = $2", [theme, row.id]);
 
     const computedAvatar = avatarUrlFromRow(row) || "";
     req.session.user = {
@@ -8885,10 +8983,11 @@ async function loadDailyProgress(userId, dayKey) {
   const now = Date.now();
   // prefer PG if user exists there
   if (await pgUserExists(userId)) {
-    const { rows } = await pgPool.query(
+    const result19 = await pgSafe(
       "SELECT progress_json, claimed_json FROM daily_challenge_progress WHERE user_id=$1 AND day_key=$2",
       [userId, dayKey]
     );
+    const rows = result19?.rows || [];
     if (rows?.length) return { progress: rows[0].progress_json || {}, claimed: rows[0].claimed_json || {}, updatedAt: now, pg: true };
     return { progress: {}, claimed: {}, updatedAt: now, pg: true };
   }
@@ -8907,7 +9006,7 @@ async function loadDailyProgress(userId, dayKey) {
 async function saveDailyProgress(userId, dayKey, progress, claimed, pg) {
   const now = Date.now();
   if (pg) {
-    await pgPool.query(
+    await pgSafe(
       `INSERT INTO daily_challenge_progress (user_id, day_key, progress_json, claimed_json, updated_at)
        VALUES ($1,$2,$3::jsonb,$4::jsonb,$5)
        ON CONFLICT (user_id, day_key)
@@ -9052,10 +9151,11 @@ app.get("/api/me/progression", requireLogin, async (req, res) => {
       // Keep current tick logic (SQLite) but mirror results into Postgres
       await syncGoldXpThemeToPg(uid);
 
-      const { rows } = await pgPool.query(
+      const result23 = await pgSafe(
         "SELECT gold, xp FROM users WHERE id = $1 LIMIT 1",
         [uid]
       );
+      const rows = result23?.rows || [];
       const row = rows[0];
       if (!row) return res.status(404).send("Not found");
 
@@ -9082,10 +9182,11 @@ app.get("/api/me/gold", requireLogin, async (req, res) => {
     try {
       await syncGoldXpThemeToPg(uid);
 
-      const { rows } = await pgPool.query(
+      const result24 = await pgSafe(
         "SELECT gold FROM users WHERE id = $1 LIMIT 1",
         [uid]
       );
+      const rows = result24?.rows || [];
       const row = rows[0];
       if (!row) return res.status(404).send("Not found");
 
@@ -9181,15 +9282,16 @@ app.post("/api/me/username", strictLimiter, requireLogin, async (req, res) => {
 app.get("/api/me/theme", requireLogin, async (req, res) => {
   try {
     // Prefer Postgres
-    const { rows } = await pgPool.query(
+    const result20 = await pgSafe(
       "SELECT theme FROM users WHERE id = $1 LIMIT 1",
       [req.session.user.id]
     );
+    const rows = result20?.rows || [];
     const row = rows[0];
     if (!row) return res.status(404).send("Not found");
 
     const theme = sanitizeThemeNameServer(row.theme);
-    if (!row.theme) await pgPool.query("UPDATE users SET theme = $1 WHERE id = $2", [theme, req.session.user.id]);
+    if (!row.theme) await pgSafe("UPDATE users SET theme = $1 WHERE id = $2", [theme, req.session.user.id]);
 
     req.session.user.theme = theme;
         // Enforce private-theme rules server-side
@@ -9214,7 +9316,7 @@ app.post("/api/me/theme", strictLimiter, requireLogin, async (req, res) => {
 
 
     // Update Postgres (new source of truth for theme)
-    await pgPool.query("UPDATE users SET theme = $1 WHERE id = $2", [theme, req.session.user.id]);
+    await pgSafe("UPDATE users SET theme = $1 WHERE id = $2", [theme, req.session.user.id]);
 
     // Keep SQLite in sync until login/user migration is fully done
     db.run("UPDATE users SET theme = ? WHERE id = ?", [theme, req.session.user.id]);
@@ -9443,10 +9545,11 @@ function buildAuthorsFxMap(usernames, cb) {
 
     try {
       if (pgPool) {
-          const { rows } = await pgPool.query(
+          const result4 = await pgSafe(
             "SELECT username, prefs_json FROM users WHERE username = ANY($1::text[])",
             [unique]
           );
+          const rows = result4?.rows || [];
           for (const row of rows || []) {
             const prefs = safeJsonParse(row?.prefs_json, {});
             base[row.username] = mergeChatFxWithCustomization(prefs?.chatFx, prefs?.customization, prefs?.textStyle);
@@ -9528,7 +9631,8 @@ app.get("/api/me/prefs", requireLogin, async (req, res) => {
   try {
     // Prefer Postgres if the user exists there
     if (await pgUserExists(userId)) {
-      const { rows } = await pgPool.query("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
+      const result25 = await pgSafe("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
+      const rows = result25?.rows || [];
       const prefs = normalizePrefs(safeJsonParse(rows?.[0]?.prefs_json, {}), userRole);
       return res.json({ prefs });
     }
@@ -9555,7 +9659,8 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
 
   try {
     if (await pgUserExists(userId)) {
-      const { rows } = await pgPool.query("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
+      const result26 = await pgSafe("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
+      const rows = result26?.rows || [];
       const current = safeJsonParse(rows?.[0]?.prefs_json, {});
       const currentPrefs = normalizePrefs(current || {}, userRole);
       const mergedCustomization = sanitizeCustomization(
@@ -9569,7 +9674,7 @@ app.post("/api/me/prefs", strictLimiter, requireLogin, async (req, res) => {
       );
       // IMPORTANT: node-postgres does not reliably serialize plain JS objects to JSON/JSONB.
       // Always stringify and cast to jsonb to ensure prefs are actually persisted.
-      await pgPool.query("UPDATE users SET prefs_json = $1::jsonb WHERE id = $2", [JSON.stringify(merged), userId]);
+      await pgSafe("UPDATE users SET prefs_json = $1::jsonb WHERE id = $2", [JSON.stringify(merged), userId]);
 
       // Keep SQLite in sync
       db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId]);
@@ -9634,7 +9739,8 @@ app.post("/api/profile/customization", strictLimiter, requireLogin, async (req, 
 
   try {
     if (await pgUserExists(userId)) {
-      const { rows } = await pgPool.query("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
+      const result27 = await pgSafe("SELECT prefs_json FROM users WHERE id = $1 LIMIT 1", [userId]);
+      const rows = result27?.rows || [];
       const current = safeJsonParse(rows?.[0]?.prefs_json, {});
       const currentPrefs = normalizePrefs(current || {}, userRole);
       const mergedCustomization = sanitizeCustomization(
@@ -9646,7 +9752,7 @@ app.post("/api/profile/customization", strictLimiter, requireLogin, async (req, 
         normalizePrefs({ ...(current || {}), ...(incoming || {}), customization: mergedCustomization }, userRole),
         userRole
       );
-      await pgPool.query("UPDATE users SET prefs_json = $1::jsonb WHERE id = $2", [JSON.stringify(merged), userId]);
+      await pgSafe("UPDATE users SET prefs_json = $1::jsonb WHERE id = $2", [JSON.stringify(merged), userId]);
       db.run("UPDATE users SET prefs_json = ? WHERE id = ?", [JSON.stringify(merged), userId]);
       req.session.user.customization = sanitizeCustomization(merged.customization, merged.textStyle, userRole);
       updateLiveCustomization(userId, merged.customization, merged.textStyle);
@@ -9696,7 +9802,7 @@ async function buildLeaderboardPayload() {
 
   if (await pgUsersEnabled()) {
     try {
-      const { rows } = await pgPool.query(
+      const result28 = await pgSafe(
         `SELECT u.id,
                 u.username,
                 COALESCE(u.xp, 0) AS xp,
@@ -9707,6 +9813,7 @@ async function buildLeaderboardPayload() {
            LEFT JOIN profile_likes pl ON pl.target_user_id = u.id
           GROUP BY u.id`
       );
+      const rows = result28?.rows || [];
       for (const row of rows || []) {
         const id = Number(row.id);
         if (!Number.isInteger(id)) continue;
@@ -9784,7 +9891,7 @@ async function fetchChessLeaderboard(limit = 50, offset = 0) {
   const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
   const safeOffset = Math.max(Number(offset) || 0, 0);
   if (await chessPgEnabled()) {
-    const { rows } = await pgPool.query(
+    const result21 = await pgSafe(
       `SELECT s.user_id,
               u.username,
               s.chess_elo,
@@ -9799,6 +9906,7 @@ async function fetchChessLeaderboard(limit = 50, offset = 0) {
         LIMIT $1 OFFSET $2`,
       [safeLimit, safeOffset]
     );
+    const rows = result21?.rows || [];
     return rows || [];
   }
 
@@ -9975,7 +10083,8 @@ app.post("/rooms", strictLimiter, requireAdminPlus, express.json({ limit: "16kb"
   try {
     const row = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [name]);
+        const result2 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [name]);
+        const rows = result2?.rows || [];
         return rows?.[0] || null;
       })()
       : await dbGetAsync(`SELECT name FROM rooms WHERE name=?`, [name]);
@@ -9993,13 +10102,14 @@ app.post("/rooms", strictLimiter, requireAdminPlus, express.json({ limit: "16kb"
     let categoryRow = null;
     if (categoryId) {
       if (await pgUsersEnabled()) {
-        const { rows } = await pgPool.query(
+        const result3 = await pgSafe(
           `SELECT c.id, c.master_id, m.name as master_name
              FROM room_categories c
              JOIN room_master_categories m ON m.id = c.master_id
             WHERE c.id = $1 LIMIT 1`,
           [categoryId]
         );
+        const rows = result3?.rows || [];
         categoryRow = rows?.[0] || null;
       } else {
         categoryRow = await dbGetAsync(
@@ -10015,10 +10125,11 @@ app.post("/rooms", strictLimiter, requireAdminPlus, express.json({ limit: "16kb"
     let nextSort = { maxSort: 0, maxsort: 0 };
     if (categoryId) {
       if (await pgUsersEnabled()) {
-        const { rows } = await pgPool.query(
+        const result4 = await pgSafe(
           `SELECT COALESCE(MAX(room_sort_order), 0) as maxsort FROM rooms WHERE category_id = $1`,
           [categoryId]
         );
+        const rows = result4?.rows || [];
         nextSort = rows?.[0] || nextSort;
       } else {
         nextSort = await dbGetAsync(
@@ -10030,7 +10141,7 @@ app.post("/rooms", strictLimiter, requireAdminPlus, express.json({ limit: "16kb"
     const sortOrder = Number(nextSort?.maxsort || nextSort?.maxSort || 0) + 1;
 
     if (await pgUsersEnabled()) {
-      await pgPool.query(
+      await pgSafe(
         `INSERT INTO rooms (name, created_by, created_at, category_id, room_sort_order, created_by_user_id, is_user_room, vip_only, staff_only, min_level, is_locked, maintenance_mode, events_enabled, slowmode_seconds, archived, is_system)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
         [name, actor.id, Date.now(), categoryId, sortOrder, actor.id, isUserRoom,
@@ -10257,7 +10368,7 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
   try {
     if (await pgUsersEnabled()) {
       await pgPool.query("BEGIN");
-      const { rows } = await pgPool.query(
+      const result29 = await pgSafe(
         `INSERT INTO survival_seasons (room_id, created_by_user_id, title, status, day_index, phase, rng_seed, created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          RETURNING id`,
@@ -10273,12 +10384,13 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
           seasonPayload.updated_at,
         ]
       );
+      const rows = result29?.rows || [];
       seasonId = rows[0]?.id;
       if (!seasonId) throw new Error("missing season id");
       for (const user of userSnapshots) {
         const traits = buildSurvivalTraits(rng, options.chaoticMode);
         const location = pickSurvivalSpawnLocation(rng);
-        await pgPool.query(
+        await pgSafe(
           `INSERT INTO survival_participants
            (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
            VALUES ($1,$2,$3,$4,1,100,0,NULL,$5,$6,$7,NULL,$8)`,
@@ -10299,7 +10411,7 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
       for (const name of npcNames) {
         const traits = buildSurvivalTraits(rng, options.chaoticMode);
         const location = pickSurvivalSpawnLocation(rng);
-        await pgPool.query(
+        await pgSafe(
           `INSERT INTO survival_participants
            (season_id, user_id, display_name, avatar_url, alive, hp, kills, alliance_id, inventory_json, traits_json, location, last_event_at, created_at)
            VALUES ($1, NULL, $2, NULL, 1, 100, 0, NULL, $3, $4, $5, NULL, $6)`,
@@ -10432,10 +10544,11 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
       try {
         if (await pgUsersEnabled()) {
           const ids = alive.map((p) => p.user_id);
-          const { rows } = await pgPool.query(
+          const result5 = await pgSafe(
             `SELECT user1_id, user2_id FROM couple_links WHERE user1_id = ANY($1::int[]) OR user2_id = ANY($1::int[])`,
             [ids]
           );
+          const rows = result5?.rows || [];
           return (rows || []).map((row) => [Number(row.user1_id), Number(row.user2_id)]);
         }
       } catch (e) {
@@ -10636,10 +10749,11 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
     if (await pgUsersEnabled()) {
       await pgPool.query("BEGIN");
       for (const pending of pendingAlliances) {
-        const { rows } = await pgPool.query(
+        const result5 = await pgSafe(
           `INSERT INTO survival_alliances (season_id, name, created_at) VALUES ($1,$2,$3) RETURNING id`,
           [seasonId, pending.name, now]
         );
+        const rows = result5?.rows || [];
         const actualId = rows[0]?.id;
         pendingMap.set(pending.tempId, actualId);
       }
@@ -10647,7 +10761,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
       for (const participant of participants) {
         const allianceId = pendingMap.get(participant.alliance_id) || participant.alliance_id;
         participant.alliance_id = allianceId && allianceId < 0 ? null : allianceId;
-        await pgPool.query(
+        await pgSafe(
           `UPDATE survival_participants
            SET alive=$1, hp=$2, kills=$3, alliance_id=$4, inventory_json=$5, traits_json=$6, location=$7, last_event_at=$8
            WHERE id=$9`,
@@ -10669,7 +10783,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
         if (event.outcome?.alliance?.id && pendingMap.has(event.outcome.alliance.id)) {
           event.outcome.alliance.id = pendingMap.get(event.outcome.alliance.id);
         }
-        const { rows } = await pgPool.query(
+        const result6 = await pgSafe(
           `INSERT INTO survival_events
            (season_id, day_index, phase, order_index, text, involved_user_ids_json, outcome_json, created_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
@@ -10685,10 +10799,11 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
             event.created_at,
           ]
         );
+        const rows = result6?.rows || [];
         event.id = rows[0]?.id;
       }
 
-      await pgPool.query(
+      await pgSafe(
         `UPDATE survival_seasons SET status=$1, day_index=$2, phase=$3, updated_at=$4 WHERE id=$5`,
         [season.status, season.day_index, season.phase, season.updated_at, seasonId]
       );
@@ -10786,7 +10901,7 @@ app.post("/api/survival/seasons/:id/end", survivalLimiter, requireCoOwner, expre
   const now = Date.now();
   try {
     if (await pgUsersEnabled()) {
-      await pgPool.query(`UPDATE survival_seasons SET status='finished', updated_at=$1 WHERE id=$2`, [now, seasonId]);
+      await pgSafe(`UPDATE survival_seasons SET status='finished', updated_at=$1 WHERE id=$2`, [now, seasonId]);
     } else {
       await dbRunAsync(`UPDATE survival_seasons SET status='finished', updated_at=? WHERE id=?`, [now, seasonId]);
     }
@@ -10810,17 +10925,20 @@ app.post("/api/room-masters", strictLimiter, requireAdminPlus, express.json({ li
     let insertedId = null;
     const now = Date.now();
     if (await pgUsersEnabled()) {
-      const { rows: exists } = await pgPool.query(
+      const result30 = await pgSafe(
         `SELECT id FROM room_master_categories WHERE lower(name) = lower($1)`,
         [name]
       );
+      const exists = result30?.rows || [];
       if (exists?.[0]) return res.status(409).send("Master exists");
-      const { rows: maxRows } = await pgPool.query(`SELECT COALESCE(MAX(sort_order), 0) as maxsort FROM room_master_categories`);
+      const result31 = await pgSafe(`SELECT COALESCE(MAX(sort_order), 0) as maxsort FROM room_master_categories`);
+      const maxRows = result31?.rows || [];
       sortOrder = Number(maxRows?.[0]?.maxsort || 0) + 1;
-      const { rows } = await pgPool.query(
+      const result32 = await pgSafe(
         `INSERT INTO room_master_categories (name, sort_order, created_at) VALUES ($1, $2, $3) RETURNING id`,
         [name, sortOrder, now]
       );
+      const rows = result32?.rows || [];
       insertedId = rows?.[0]?.id ?? null;
     } else {
       const existing = await dbGetAsync(`SELECT id FROM room_master_categories WHERE lower(name) = lower(?)`, [name]);
@@ -10855,7 +10973,7 @@ app.patch("/api/room-masters/reorder", strictLimiter, requireAdminPlus, express.
       for (let i = 0; i < orderedIds.length; i += 1) {
         const id = Number(orderedIds[i]);
         if (!id) continue;
-        await pgPool.query(`UPDATE room_master_categories SET sort_order = $1 WHERE id = $2`, [i, id]);
+        await pgSafe(`UPDATE room_master_categories SET sort_order = $1 WHERE id = $2`, [i, id]);
       }
     } else {
       for (let i = 0; i < orderedIds.length; i += 1) {
@@ -10884,7 +11002,8 @@ app.patch("/api/room-masters/:id", strictLimiter, requireAdminPlus, express.json
     if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
     const row = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(`SELECT id, name FROM room_master_categories WHERE id = $1`, [id]);
+        const result7 = await pgSafe(`SELECT id, name FROM room_master_categories WHERE id = $1`, [id]);
+        const rows = result7?.rows || [];
         return rows?.[0] || null;
       })()
       : await dbGetAsync(`SELECT id, name FROM room_master_categories WHERE id = ?`, [id]);
@@ -10899,10 +11018,11 @@ app.patch("/api/room-masters/:id", strictLimiter, requireAdminPlus, express.json
       }
       const existing = await (await pgUsersEnabled())
         ? (async () => {
-          const { rows } = await pgPool.query(
+          const result6 = await pgSafe(
             `SELECT id FROM room_master_categories WHERE lower(name) = lower($1) AND id != $2`,
             [name, id]
           );
+          const rows = result6?.rows || [];
           return rows?.[0] || null;
         })()
         : await dbGetAsync(
@@ -10924,7 +11044,7 @@ app.patch("/api/room-masters/:id", strictLimiter, requireAdminPlus, express.json
     if (await pgUsersEnabled()) {
       const pgUpdates = updates.map((item, idx) => item.replace("?", `$${idx + 1}`));
       const pgParams = [...params, id];
-      await pgPool.query(`UPDATE room_master_categories SET ${pgUpdates.join(", ")} WHERE id = $${pgParams.length}`, pgParams);
+      await pgSafe(`UPDATE room_master_categories SET ${pgUpdates.join(", ")} WHERE id = $${pgParams.length}`, pgParams);
     } else {
       params.push(id);
       await dbRunAsync(`UPDATE room_master_categories SET ${updates.join(", ")} WHERE id = ?`, params);
@@ -10949,7 +11069,8 @@ app.delete("/api/room-masters/:id", strictLimiter, requireOwner, async (req, res
     if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
     const row = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(`SELECT id, name FROM room_master_categories WHERE id = $1`, [id]);
+        const result8 = await pgSafe(`SELECT id, name FROM room_master_categories WHERE id = $1`, [id]);
+        const rows = result8?.rows || [];
         return rows?.[0] || null;
       })()
       : await dbGetAsync(`SELECT id, name FROM room_master_categories WHERE id = ?`, [id]);
@@ -10960,16 +11081,17 @@ app.delete("/api/room-masters/:id", strictLimiter, requireOwner, async (req, res
     const defaults = await getDefaultMasterIds();
     const fallbackCategoryId = await getUncategorizedCategoryId(defaults.site);
     if (await pgUsersEnabled()) {
-      const { rows: categories } = await pgPool.query(`SELECT id FROM room_categories WHERE master_id = $1`, [id]);
+      const result33 = await pgSafe(`SELECT id FROM room_categories WHERE master_id = $1`, [id]);
+      const categories = result33?.rows || [];
       const categoryIds = (categories || []).map((c) => c.id).filter(Boolean);
       if (categoryIds.length && fallbackCategoryId) {
-        await pgPool.query(
+        await pgSafe(
           `UPDATE rooms SET category_id = $1 WHERE category_id = ANY($2::int[])`,
           [fallbackCategoryId, categoryIds]
         );
       }
-      await pgPool.query(`DELETE FROM room_categories WHERE master_id = $1`, [id]);
-      await pgPool.query(`DELETE FROM room_master_categories WHERE id = $1`, [id]);
+      await pgSafe(`DELETE FROM room_categories WHERE master_id = $1`, [id]);
+      await pgSafe(`DELETE FROM room_master_categories WHERE id = $1`, [id]);
     } else {
       const categories = await dbAllAsync(`SELECT id FROM room_categories WHERE master_id = ?`, [id]);
       const categoryIds = categories.map((c) => c.id).filter(Boolean);
@@ -11007,25 +11129,29 @@ app.post("/api/room-categories", strictLimiter, requireAdminPlus, express.json({
     let insertedId = null;
     const now = Date.now();
     if (await pgUsersEnabled()) {
-      const { rows: masterRows } = await pgPool.query(
+      const result34 = await pgSafe(
         `SELECT id FROM room_master_categories WHERE id = $1`,
         [masterId]
       );
+      const masterRows = result34?.rows || [];
       if (!masterRows?.[0]) return res.status(404).send("Master not found");
-      const { rows: existingRows } = await pgPool.query(
+      const result35 = await pgSafe(
         `SELECT id FROM room_categories WHERE master_id = $1 AND lower(name) = lower($2)`,
         [masterId, name]
       );
+      const existingRows = result35?.rows || [];
       if (existingRows?.[0]) return res.status(409).send("Category exists");
-      const { rows: maxRows } = await pgPool.query(
+      const result36 = await pgSafe(
         `SELECT COALESCE(MAX(sort_order), 0) as maxsort FROM room_categories WHERE master_id = $1`,
         [masterId]
       );
+      const maxRows = result36?.rows || [];
       sortOrder = Number(maxRows?.[0]?.maxsort || 0) + 1;
-      const { rows } = await pgPool.query(
+      const result37 = await pgSafe(
         `INSERT INTO room_categories (master_id, name, sort_order, created_at) VALUES ($1, $2, $3, $4) RETURNING id`,
         [masterId, name, sortOrder, now]
       );
+      const rows = result37?.rows || [];
       insertedId = rows?.[0]?.id ?? null;
     } else {
       const master = await dbGetAsync(`SELECT id FROM room_master_categories WHERE id = ?`, [masterId]);
@@ -11069,7 +11195,7 @@ app.patch("/api/room-categories/reorder", strictLimiter, requireAdminPlus, expre
       for (let i = 0; i < orderedIds.length; i += 1) {
         const id = Number(orderedIds[i]);
         if (!id) continue;
-        await pgPool.query(
+        await pgSafe(
           `UPDATE room_categories SET sort_order = $1 WHERE id = $2 AND master_id = $3`,
           [i, id, masterId]
         );
@@ -11104,7 +11230,8 @@ app.patch("/api/room-categories/:id", strictLimiter, requireAdminPlus, express.j
     if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
     const row = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(`SELECT id, name, master_id FROM room_categories WHERE id = $1`, [id]);
+        const result9 = await pgSafe(`SELECT id, name, master_id FROM room_categories WHERE id = $1`, [id]);
+        const rows = result9?.rows || [];
         return rows?.[0] || null;
       })()
       : await dbGetAsync(`SELECT id, name, master_id FROM room_categories WHERE id = ?`, [id]);
@@ -11121,10 +11248,11 @@ app.patch("/api/room-categories/:id", strictLimiter, requireAdminPlus, express.j
       const targetMaster = Number(req.body?.master_id) || row.master_id;
       const existing = await (await pgUsersEnabled())
         ? (async () => {
-          const { rows } = await pgPool.query(
+          const result7 = await pgSafe(
             `SELECT id FROM room_categories WHERE master_id = $1 AND lower(name) = lower($2) AND id != $3`,
             [targetMaster, name, id]
           );
+          const rows = result7?.rows || [];
           return rows?.[0] || null;
         })()
         : await dbGetAsync(
@@ -11145,7 +11273,8 @@ app.patch("/api/room-categories/:id", strictLimiter, requireAdminPlus, express.j
       }
       const masterRow = await (await pgUsersEnabled())
         ? (async () => {
-          const { rows } = await pgPool.query(`SELECT id FROM room_master_categories WHERE id = $1`, [masterId]);
+          const result8 = await pgSafe(`SELECT id FROM room_master_categories WHERE id = $1`, [masterId]);
+          const rows = result8?.rows || [];
           return rows?.[0] || null;
         })()
         : await dbGetAsync(`SELECT id FROM room_master_categories WHERE id = ?`, [masterId]);
@@ -11168,10 +11297,11 @@ app.patch("/api/room-categories/:id", strictLimiter, requireAdminPlus, express.j
     if (nextMasterId !== row.master_id && !Object.prototype.hasOwnProperty.call(req.body || {}, "sort_order")) {
       const maxRow = await (await pgUsersEnabled())
         ? (async () => {
-          const { rows } = await pgPool.query(
+          const result9 = await pgSafe(
             `SELECT COALESCE(MAX(sort_order), 0) as maxsort FROM room_categories WHERE master_id = $1`,
             [nextMasterId]
           );
+          const rows = result9?.rows || [];
           return rows?.[0] || null;
         })()
         : await dbGetAsync(
@@ -11186,7 +11316,7 @@ app.patch("/api/room-categories/:id", strictLimiter, requireAdminPlus, express.j
     if (await pgUsersEnabled()) {
       const pgUpdates = updates.map((item, idx) => item.replace("?", `$${idx + 1}`));
       const pgParams = [...params, id];
-      await pgPool.query(`UPDATE room_categories SET ${pgUpdates.join(", ")} WHERE id = $${pgParams.length}`, pgParams);
+      await pgSafe(`UPDATE room_categories SET ${pgUpdates.join(", ")} WHERE id = $${pgParams.length}`, pgParams);
     } else {
       params.push(id);
       await dbRunAsync(`UPDATE room_categories SET ${updates.join(", ")} WHERE id = ?`, params);
@@ -11211,7 +11341,8 @@ app.delete("/api/room-categories/:id", strictLimiter, requireAdminPlus, async (r
     if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
     const row = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(`SELECT id, name, master_id FROM room_categories WHERE id = $1`, [id]);
+        const result10 = await pgSafe(`SELECT id, name, master_id FROM room_categories WHERE id = $1`, [id]);
+        const rows = result10?.rows || [];
         return rows?.[0] || null;
       })()
       : await dbGetAsync(`SELECT id, name, master_id FROM room_categories WHERE id = ?`, [id]);
@@ -11221,13 +11352,14 @@ app.delete("/api/room-categories/:id", strictLimiter, requireAdminPlus, async (r
     }
     const rooms = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE category_id = $1`, [id]);
+        const result11 = await pgSafe(`SELECT name FROM rooms WHERE category_id = $1`, [id]);
+        const rows = result11?.rows || [];
         return rows || [];
       })()
       : await dbAllAsync(`SELECT name FROM rooms WHERE category_id = ?`, [id]);
     if (rooms?.length) return res.status(409).send("Category must be empty to delete");
     if (await pgUsersEnabled()) {
-      await pgPool.query(`DELETE FROM room_categories WHERE id = $1`, [id]);
+      await pgSafe(`DELETE FROM room_categories WHERE id = $1`, [id]);
     } else {
       await dbRunAsync(`DELETE FROM room_categories WHERE id = ?`, [id]);
     }
@@ -11251,7 +11383,8 @@ app.patch("/api/rooms/:id/move", strictLimiter, requireAdminPlus, express.json({
     if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
     const roomRow = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+        const result12 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+        const rows = result12?.rows || [];
         return rows?.[0] || null;
       })()
       : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
@@ -11262,13 +11395,14 @@ app.patch("/api/rooms/:id/move", strictLimiter, requireAdminPlus, express.json({
     let categoryRow = null;
     if (categoryId) {
       if (await pgUsersEnabled()) {
-        const { rows } = await pgPool.query(
+        const result13 = await pgSafe(
           `SELECT c.id, m.name as master_name
              FROM room_categories c
              JOIN room_master_categories m ON m.id = c.master_id
             WHERE c.id = $1 LIMIT 1`,
           [categoryId]
         );
+        const rows = result13?.rows || [];
         categoryRow = rows?.[0] || null;
       } else {
         categoryRow = await dbGetAsync(
@@ -11286,10 +11420,11 @@ app.patch("/api/rooms/:id/move", strictLimiter, requireAdminPlus, express.json({
       let maxRow = { maxSort: 0, maxsort: 0 };
       if (categoryId) {
         if (await pgUsersEnabled()) {
-          const { rows } = await pgPool.query(
+          const result10 = await pgSafe(
             `SELECT COALESCE(MAX(room_sort_order), 0) as maxsort FROM rooms WHERE category_id = $1`,
             [categoryId]
           );
+          const rows = result10?.rows || [];
           maxRow = rows?.[0] || maxRow;
         } else {
           maxRow = await dbGetAsync(
@@ -11301,7 +11436,7 @@ app.patch("/api/rooms/:id/move", strictLimiter, requireAdminPlus, express.json({
       sortOrder = Number(maxRow?.maxsort || maxRow?.maxSort || 0) + 1;
     }
     if (await pgUsersEnabled()) {
-      await pgPool.query(
+      await pgSafe(
         `UPDATE rooms SET category_id = $1, room_sort_order = $2, is_user_room = $3 WHERE name = $4`,
         [categoryId, sortOrder, isUserRoom, roomName]
       );
@@ -11340,13 +11475,14 @@ app.patch("/api/rooms/:id/settings", strictLimiter, requireAdminPlus, express.js
   try {
     const roomRow = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+        const result14 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+        const rows = result14?.rows || [];
         return rows?.[0] || null;
       })()
       : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
     if (!roomRow) return res.status(404).send("Not found");
     if (await pgUsersEnabled()) {
-      await pgPool.query(
+      await pgSafe(
         `UPDATE rooms
             SET slowmode_seconds = $1,
                 is_locked = $2,
@@ -11392,13 +11528,14 @@ app.patch("/api/rooms/:id/archive", strictLimiter, requireAdminPlus, async (req,
     if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
     const row = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+        const result15 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+        const rows = result15?.rows || [];
         return rows?.[0] || null;
       })()
       : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
     if (!row) return res.status(404).send("Not found");
     if (await pgUsersEnabled()) {
-      await pgPool.query(`UPDATE rooms SET archived = 1 WHERE name = $1`, [roomName]);
+      await pgSafe(`UPDATE rooms SET archived = 1 WHERE name = $1`, [roomName]);
     } else {
       await dbRunAsync(`UPDATE rooms SET archived = 1 WHERE name = ?`, [roomName]);
     }
@@ -11422,13 +11559,14 @@ app.patch("/api/rooms/:id/restore", strictLimiter, requireAdminPlus, async (req,
     if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
     const row = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+        const result16 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [roomName]);
+        const rows = result16?.rows || [];
         return rows?.[0] || null;
       })()
       : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [roomName]);
     if (!row) return res.status(404).send("Not found");
     if (await pgUsersEnabled()) {
-      await pgPool.query(`UPDATE rooms SET archived = 0 WHERE name = $1`, [roomName]);
+      await pgSafe(`UPDATE rooms SET archived = 0 WHERE name = $1`, [roomName]);
     } else {
       await dbRunAsync(`UPDATE rooms SET archived = 0 WHERE name = ?`, [roomName]);
     }
@@ -11506,14 +11644,16 @@ app.patch("/api/rooms/:id", strictLimiter, requireAdminPlus, express.json({ limi
     if (!versionCheck.ok) return res.status(409).json({ ok: false, version: versionCheck.version });
     const roomRow = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [oldName]);
+        const result17 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [oldName]);
+        const rows = result17?.rows || [];
         return rows?.[0] || null;
       })()
       : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [oldName]);
     if (!roomRow) return res.status(404).send("Not found");
     const exists = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [nextName]);
+        const result18 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [nextName]);
+        const rows = result18?.rows || [];
         return rows?.[0] || null;
       })()
       : await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [nextName]);
@@ -11521,7 +11661,7 @@ app.patch("/api/rooms/:id", strictLimiter, requireAdminPlus, express.json({ limi
 
     // Update rooms primary key name + all references that store room name
     if (await pgUsersEnabled()) {
-      await pgPool.query(`UPDATE rooms SET name = $1 WHERE name = $2`, [nextName, oldName]);
+      await pgSafe(`UPDATE rooms SET name = $1 WHERE name = $2`, [nextName, oldName]);
     } else {
       await dbRunAsync(`UPDATE rooms SET name = ? WHERE name = ?`, [nextName, oldName]);
     }
@@ -11536,7 +11676,7 @@ app.patch("/api/rooms/:id", strictLimiter, requireAdminPlus, express.json({ limi
 
     if (await pgUsersEnabled()) {
       const safeUpdatePg = async (sql, params) => {
-        try { await pgPool.query(sql, params); } catch (_) {}
+        try { await pgSafe(sql, params); } catch (_) {}
       };
       await safeUpdatePg(`UPDATE messages SET room = $1 WHERE room = $2`, [nextName, oldName]);
       await safeUpdatePg(`UPDATE mod_logs SET room = $1 WHERE room = $2`, [nextName, oldName]);
@@ -11577,7 +11717,7 @@ app.patch("/api/rooms/reorder", strictLimiter, requireAdminPlus, express.json({ 
       for (let i = 0; i < orderedIds.length; i += 1) {
         const roomName = sanitizeRoomName(orderedIds[i] || "");
         if (!roomName) continue;
-        await pgPool.query(
+        await pgSafe(
           `UPDATE rooms SET room_sort_order = $1 WHERE name = $2 AND category_id = $3`,
           [i, roomName, categoryId]
         );
@@ -11652,7 +11792,8 @@ app.get("/api/mod/cases", strictLimiter, requireLogin, async (req, res) => {
         }
       }
       const sql = `SELECT * FROM mod_cases ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY updated_at DESC LIMIT ${limit}`;
-      const { rows } = await pgPool.query(sql, params);
+      const result38 = await pgSafe(sql, params);
+      const rows = result38?.rows || [];
       return res.json({ ok: true, items: rows || [] });
     }
 
@@ -11702,28 +11843,31 @@ app.get("/api/mod/cases/:id", strictLimiter, requireLogin, async (req, res) => {
 
     const events = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(
+        const result19 = await pgSafe(
           `SELECT * FROM mod_case_events WHERE case_id = $1 ORDER BY created_at ASC`,
           [id]
         );
+        const rows = result19?.rows || [];
         return rows || [];
       })()
       : await dbAllAsync(`SELECT * FROM mod_case_events WHERE case_id = ? ORDER BY created_at ASC`, [id]);
     const notes = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(
+        const result20 = await pgSafe(
           `SELECT * FROM mod_case_notes WHERE case_id = $1 ORDER BY created_at ASC`,
           [id]
         );
+        const rows = result20?.rows || [];
         return rows || [];
       })()
       : await dbAllAsync(`SELECT * FROM mod_case_notes WHERE case_id = ? ORDER BY created_at ASC`, [id]);
     const evidence = await (await pgUsersEnabled())
       ? (async () => {
-        const { rows } = await pgPool.query(
+        const result21 = await pgSafe(
           `SELECT * FROM mod_case_evidence WHERE case_id = $1 ORDER BY created_at ASC`,
           [id]
         );
+        const rows = result21?.rows || [];
         return rows || [];
       })()
       : await dbAllAsync(`SELECT * FROM mod_case_evidence WHERE case_id = ? ORDER BY created_at ASC`, [id]);
@@ -11805,7 +11949,7 @@ app.patch("/api/mod/cases/:id", strictLimiter, requireLogin, express.json({ limi
     if (await pgUsersEnabled()) {
       const setParts = updates.map((col, idx) => `${col} = $${idx + 1}`);
       const pgParams = [...params, now, id];
-      await pgPool.query(
+      await pgSafe(
         `UPDATE mod_cases SET ${setParts.join(", ")}, updated_at = $${pgParams.length - 1} WHERE id = $${pgParams.length}`,
         pgParams
       );
@@ -11848,7 +11992,7 @@ app.post("/api/mod/cases/:id/status", strictLimiter, requireLogin, express.json(
     const closedAt = status === "closed" ? now : null;
     const closedReason = req.body?.closed_reason ? String(req.body.closed_reason).slice(0, 400) : null;
     if (await pgUsersEnabled()) {
-      await pgPool.query(
+      await pgSafe(
         `UPDATE mod_cases SET status = $1, updated_at = $2, closed_at = $3, closed_reason = $4 WHERE id = $5`,
         [status, now, closedAt, closedReason, id]
       );
@@ -12029,7 +12173,7 @@ app.patch(
       const serialized = JSON.stringify(next);
       await dbRunAsync(`UPDATE users SET room_master_collapsed = ? WHERE id = ?`, [serialized, userId]);
       try {
-        await pgPool.query(`UPDATE users SET room_master_collapsed = $1 WHERE id = $2`, [serialized, userId]);
+        await pgSafe(`UPDATE users SET room_master_collapsed = $1 WHERE id = $2`, [serialized, userId]);
       } catch {}
       return res.json({ ok: true });
     } catch (e) {
@@ -12056,7 +12200,7 @@ app.patch(
       const serialized = JSON.stringify(next);
       await dbRunAsync(`UPDATE users SET room_category_collapsed = ? WHERE id = ?`, [serialized, userId]);
       try {
-        await pgPool.query(`UPDATE users SET room_category_collapsed = $1 WHERE id = $2`, [serialized, userId]);
+        await pgSafe(`UPDATE users SET room_category_collapsed = $1 WHERE id = $2`, [serialized, userId]);
       } catch {}
       return res.json({ ok: true });
     } catch (e) {
@@ -12353,11 +12497,12 @@ app.get("/api/profile", requireLogin, (req, res) => res.redirect(307, "/profile"
 async function fetchProfileLikeStats(targetUserId, viewerId) {
   if (await pgUsersEnabled()) {
     try {
-      const { rows } = await pgPool.query(
+      const result39 = await pgSafe(
         `SELECT COUNT(*)::int AS likes,
                 EXISTS(SELECT 1 FROM profile_likes WHERE user_id = $2 AND target_user_id = $1) AS liked`,
         [targetUserId, viewerId]
       );
+      const rows = result39?.rows || [];
       return { likes: Number(rows?.[0]?.likes || 0), liked: !!rows?.[0]?.liked };
     } catch (e) {
       console.warn("[profile likes][pg] failed, falling back to sqlite:", e?.message || e);
@@ -12384,7 +12529,7 @@ async function toggleProfileLike(userId, targetUserId) {
   if (await pgUsersEnabled()) {
     try {
       const now = Date.now();
-      await pgPool.query(
+      await pgSafe(
         `WITH deleted AS (
             DELETE FROM profile_likes
              WHERE user_id = $1 AND target_user_id = $2
@@ -12547,7 +12692,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
     try {
       for (const cand of candidates) {
         try {
-          const r = await pgPool.query(
+          const r = await pgSafe(
             `SELECT id, username FROM users WHERE username = $1 OR lower(username) = lower($1)
              LIMIT 1`,
             [cand]
@@ -12647,7 +12792,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
     try {
       if (PG_READY && row?.id) {
         const targetId = Number(row.id) || 0;
-        const { rows: clRows } = await pgPool.query(
+        const result22 = await pgSafe(
           `
           SELECT cl.*,
                  u1.username AS user1_name,
@@ -12672,6 +12817,7 @@ app.get("/profile/:username", requireLogin, async (req, res) => {
           `,
           [targetId]
         );
+        const clRows = result22?.rows || [];
 
         const cl = clRows[0];
         if (cl) {
@@ -12851,10 +12997,11 @@ app.get("/api/memories", requireLogin, async (req, res) => {
         params.push(types);
         whereSql += ` AND type = ANY($${params.length}::text[])`;
       }
-      const { rows } = await pgPool.query(
+      const result40 = await pgSafe(
         `SELECT * FROM memories WHERE ${whereSql} ORDER BY created_at DESC`,
         params
       );
+      const rows = result40?.rows || [];
       const memories = rows.map(normalizeMemoryRow);
       return res.json({ ok: true, memories });
     }
@@ -12891,10 +13038,11 @@ app.post("/api/memories/:id/pin", strictLimiter, requireLogin, async (req, res) 
     if (!settings.available || !settings.enabled) return res.status(403).json({ ok: false, error: "disabled" });
 
     if (await pgUserExists(user.id)) {
-      const { rows } = await pgPool.query(
+      const result41 = await pgSafe(
         `UPDATE memories SET pinned = NOT pinned WHERE id = $1 AND user_id = $2 RETURNING pinned`,
         [memoryId, user.id]
       );
+      const rows = result41?.rows || [];
       const row = rows[0];
       if (!row) return res.status(404).json({ ok: false, error: "not_found" });
       return res.json({ ok: true, pinned: normalizeMemoryBool(row.pinned) });
@@ -12948,7 +13096,8 @@ app.post("/api/couples/request", strictLimiter, requireLogin, async (req, res) =
       return res.status(400).send("You cannot link with yourself");
     }
 
-    const { rows: trg } = await pgPool.query(`SELECT id, username FROM users WHERE lower(username)=lower($1) LIMIT 1`, [targetName]);
+    const result22 = await pgSafe(`SELECT id, username FROM users WHERE lower(username)=lower($1) LIMIT 1`, [targetName]);
+    const trg = result22?.rows || [];
     const target = trg[0];
     if (!target) return res.status(404).send("User not found");
 
@@ -12958,16 +13107,17 @@ app.post("/api/couples/request", strictLimiter, requireLogin, async (req, res) =
     const [u1, u2] = orderPair(meId, otherId);
     const now = Date.now();
 
-    const { rows: existing } = await pgPool.query(
+    const result23 = await pgSafe(
       `SELECT id, status FROM couple_links WHERE user1_id=$1 AND user2_id=$2 LIMIT 1`,
       [u1, u2]
     );
+    const existing = result23?.rows || [];
     if (existing[0]) {
       if (existing[0].status === "active") return res.status(409).send("Already linked");
       return res.status(409).send("A link request already exists");
     }
 
-    const { rows: created } = await pgPool.query(
+    const result24 = await pgSafe(
       `
       INSERT INTO couple_links(user1_id, user2_id, requested_by_id, status, status_emoji, status_label, created_at, updated_at)
       VALUES($1,$2,$3,'pending','💜','Linked',$4,$4)
@@ -12975,9 +13125,10 @@ app.post("/api/couples/request", strictLimiter, requireLogin, async (req, res) =
       `,
       [u1, u2, meId, now]
     );
+    const created = result24?.rows || [];
     const linkId = created?.[0]?.id;
 
-    await pgPool.query(
+    await pgSafe(
       `
       INSERT INTO couple_prefs(link_id, user_id, enabled, show_profile, show_members, group_members, aura, badge, allow_ping, updated_at)
       VALUES
@@ -13005,21 +13156,22 @@ app.post("/api/couples/respond", strictLimiter, requireLogin, async (req, res) =
     if (!linkId) return res.status(400).send("Bad request");
 
     const meId = Number(req.session.user?.id) || 0;
-    const { rows } = await pgPool.query(`SELECT * FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+    const result25 = await pgSafe(`SELECT * FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+    const rows = result25?.rows || [];
     const link = rows[0];
     if (!link) return res.status(404).send("Not found");
     if (link.status !== "pending") return res.status(409).send("Not pending");
     if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
 
     if (!accept) {
-      await pgPool.query(`DELETE FROM couple_links WHERE id=$1`, [linkId]);
+      await pgSafe(`DELETE FROM couple_links WHERE id=$1`, [linkId]);
       emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
       const summary = await pgGetCoupleSummaryFor(req.session.user);
       return res.json(summary);
     }
 
     const now = Date.now();
-    await pgPool.query(
+    await pgSafe(
       `UPDATE couple_links SET status='active', activated_at=$2, updated_at=$2 WHERE id=$1`,
       [linkId, now]
     );
@@ -13055,12 +13207,13 @@ app.post("/api/couples/unlink", strictLimiter, requireLogin, async (req, res) =>
     if (!linkId) return res.status(400).send("Bad request");
 
     const meId = Number(req.session.user?.id) || 0;
-    const { rows } = await pgPool.query(`SELECT user1_id,user2_id FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+    const result26 = await pgSafe(`SELECT user1_id,user2_id FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+    const rows = result26?.rows || [];
     const link = rows[0];
     if (!link) return res.status(404).send("Not found");
     if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
 
-    await pgPool.query(`DELETE FROM couple_links WHERE id=$1`, [linkId]);
+    await pgSafe(`DELETE FROM couple_links WHERE id=$1`, [linkId]);
     emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId });
     const summary = await pgGetCoupleSummaryFor(req.session.user);
     return res.json(summary);
@@ -13078,7 +13231,8 @@ app.post("/api/couples/prefs", strictLimiter, requireLogin, async (req, res) => 
     if (!linkId) return res.status(400).send("Bad request");
     const meId = Number(req.session.user?.id) || 0;
 
-    const { rows } = await pgPool.query(`SELECT user1_id,user2_id FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+    const result27 = await pgSafe(`SELECT user1_id,user2_id FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+    const rows = result27?.rows || [];
     const link = rows[0];
     if (!link) return res.status(404).send("Not found");
     if (!isCoupleMember(meId, link)) return res.status(403).send("Forbidden");
@@ -13101,7 +13255,8 @@ app.post("/api/couples/status", strictLimiter, requireLogin, async (req, res) =>
     if (!linkId) return res.status(400).send("Bad request");
 
     const meId = Number(req.session.user?.id) || 0;
-    const { rows } = await pgPool.query(`SELECT user1_id,user2_id,status FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+    const result28 = await pgSafe(`SELECT user1_id,user2_id,status FROM couple_links WHERE id=$1 LIMIT 1`, [linkId]);
+    const rows = result28?.rows || [];
     const link = rows[0];
     if (!link) return res.status(404).send("Not found");
     if (link.status !== "active") return res.status(409).send("Not active");
@@ -13111,7 +13266,7 @@ app.post("/api/couples/status", strictLimiter, requireLogin, async (req, res) =>
     const label = String(req.body?.statusLabel || "Linked").trim().slice(0, 20) || "Linked";
     const now = Date.now();
 
-    await pgPool.query(
+    await pgSafe(
       `UPDATE couple_links SET status_emoji=$2, status_label=$3, updated_at=$4 WHERE id=$1`,
       [linkId, emoji, label, now]
     );
@@ -13154,7 +13309,7 @@ app.post("/api/couples/settings", strictLimiter, requireLogin, async (req, res) 
 
     if (sets.length) {
       vals.push(link.id);
-      await pgPool.query(`UPDATE couple_links SET ${sets.join(", ")} WHERE id=$${vals.length}`, vals);
+      await pgSafe(`UPDATE couple_links SET ${sets.join(", ")} WHERE id=$${vals.length}`, vals);
     }
 
     emitToUserIds([link.user1_id, link.user2_id], "couples:update", { linkId: link.id });
@@ -13284,7 +13439,7 @@ app.post("/api/friends/request", strictLimiter, requireLogin, async (req, res) =
 
     if (incoming?.id) {
       if (PG_READY && FRIENDS_READY) {
-        await pgPool.query(`UPDATE friend_requests SET status='accepted', updated_at=$2 WHERE id=$1`, [incoming.id, now]);
+        await pgSafe(`UPDATE friend_requests SET status='accepted', updated_at=$2 WHERE id=$1`, [incoming.id, now]);
         await pgCreateFriendsPair(meId, toUser.id);
       } else {
         await dbRunAsync(`UPDATE friend_requests SET status='accepted', updated_at=? WHERE id=?`, [now, incoming.id]);
@@ -13308,12 +13463,13 @@ app.post("/api/friends/request", strictLimiter, requireLogin, async (req, res) =
 
     let requestId = 0;
     if (PG_READY && FRIENDS_READY) {
-      const { rows } = await pgPool.query(
+      const result42 = await pgSafe(
         `INSERT INTO friend_requests(from_user_id, to_user_id, status, created_at, updated_at)
          VALUES ($1,$2,'pending',$3,$3)
          RETURNING id`,
         [meId, toUser.id, now]
       );
+      const rows = result42?.rows || [];
       requestId = Number(rows?.[0]?.id) || 0;
     } else {
       const r = await dbRunAsync(
@@ -13355,17 +13511,18 @@ app.post("/api/friends/respond", strictLimiter, requireLogin, async (req, res) =
     const now = Date.now();
 
     if (PG_READY && FRIENDS_READY) {
-      const { rows } = await pgPool.query(`SELECT * FROM friend_requests WHERE id=$1 LIMIT 1`, [requestId]);
+      const result43 = await pgSafe(`SELECT * FROM friend_requests WHERE id=$1 LIMIT 1`, [requestId]);
+      const rows = result43?.rows || [];
       const fr = rows[0];
       if (!fr) return res.status(404).send('Not found');
       if (String(fr.status) !== 'pending') return res.json({ ok: true, status: fr.status });
       if (Number(fr.to_user_id) !== meId) return res.status(403).send('Forbidden');
 
       if (action === 'accept') {
-        await pgPool.query(`UPDATE friend_requests SET status='accepted', updated_at=$2 WHERE id=$1`, [requestId, now]);
+        await pgSafe(`UPDATE friend_requests SET status='accepted', updated_at=$2 WHERE id=$1`, [requestId, now]);
         await pgCreateFriendsPair(fr.from_user_id, fr.to_user_id);
       } else {
-        await pgPool.query(`UPDATE friend_requests SET status='declined', updated_at=$2 WHERE id=$1`, [requestId, now]);
+        await pgSafe(`UPDATE friend_requests SET status='declined', updated_at=$2 WHERE id=$1`, [requestId, now]);
       }
 
       const fromId = Number(fr.from_user_id) || 0;
@@ -13418,7 +13575,7 @@ app.post("/api/friends/favorite", strictLimiter, requireLogin, async (req, res) 
     const isFavorite = !!req.body?.isFavorite;
 
     if (PG_READY && FRIENDS_READY) {
-      await pgPool.query(
+      await pgSafe(
         `UPDATE friends SET is_favorite=$3 WHERE user_id=$1 AND friend_user_id=$2`,
         [meId, other.id, isFavorite]
       );
@@ -13440,7 +13597,7 @@ app.post("/api/friends/remove", strictLimiter, requireLogin, async (req, res) =>
     if (!other) return res.status(404).send('User not found');
 
     if (PG_READY && FRIENDS_READY) {
-      await pgPool.query(`DELETE FROM friends WHERE (user_id=$1 AND friend_user_id=$2) OR (user_id=$2 AND friend_user_id=$1)`, [meId, other.id]);
+      await pgSafe(`DELETE FROM friends WHERE (user_id=$1 AND friend_user_id=$2) OR (user_id=$2 AND friend_user_id=$1)`, [meId, other.id]);
     } else {
       await dbRunAsync(`DELETE FROM friends WHERE (user_id=? AND friend_user_id=?) OR (user_id=? AND friend_user_id=?)`, [meId, other.id, other.id, meId]);
     }
@@ -13538,7 +13695,7 @@ app.post("/profile", strictLimiter, requireLogin, (req, res) => {
       // Prefer Postgres if this user exists there (Render prod path)
       if (await pgUserExists(userId)) {
         if (file) {
-          await pgPool.query(
+          await pgSafe(
             `UPDATE users
                SET mood = $1,
                    bio = $2,
@@ -13555,7 +13712,7 @@ app.post("/profile", strictLimiter, requireLogin, (req, res) => {
             [mood, bio, age, gender, file.buffer, file.mimetype, avatarUpdated, vibeTagsJson, headerGradA, headerGradB, userId]
           );
         } else {
-          await pgPool.query(
+          await pgSafe(
             `UPDATE users
                SET mood = $1,
                    bio = $2,
@@ -13633,10 +13790,11 @@ app.delete("/profile/avatar", strictLimiter, requireLogin, async (req, res) => {
   try {
     // Prefer Postgres if present
     if (await pgUserExists(userId)) {
-      const { rows } = await pgPool.query(`SELECT avatar FROM users WHERE id = $1`, [userId]);
+      const result44 = await pgSafe(`SELECT avatar FROM users WHERE id = $1`, [userId]);
+      const rows = result44?.rows || [];
       const oldAvatar = rows?.[0]?.avatar || null;
 
-      await pgPool.query(
+      await pgSafe(
         `UPDATE users
             SET avatar = NULL,
                 avatar_bytes = NULL,
@@ -14393,10 +14551,11 @@ async function getRestrictionByUsername(username){
   // PG first
   try {
     if (PG_READY) {
-      const { rows } = await pgPool.query(
+      const result45 = await pgSafe(
         "SELECT restriction_type, reason, expires_at, set_at FROM user_restrictions WHERE lower(username)=lower($1) LIMIT 1",
         [u]
       );
+      const rows = result45?.rows || [];
       const r = rows?.[0];
       if (r) {
         const type = normalizeRestrictionType(r.restriction_type);
@@ -14448,7 +14607,7 @@ async function logModerationAction({ targetUsername, actorUsername, actionType, 
   } catch {}
   try {
     if (PG_READY) {
-      await pgPool.query(
+      await pgSafe(
         `INSERT INTO moderation_actions (target_username, actor_username, action_type, reason, duration_seconds, expires_at, created_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7)`,
         [tUser, aUser, act, why, durationSeconds, expiresAt, now]
@@ -14484,7 +14643,7 @@ async function upsertRestrictionEverywhere(username, { type, reason = "", setBy 
   // PG
   try {
     if (PG_READY) {
-      await pgPool.query(
+      await pgSafe(
         `INSERT INTO user_restrictions (username, restriction_type, reason, set_by, set_at, expires_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7)
          ON CONFLICT (username) DO UPDATE SET
@@ -14527,10 +14686,11 @@ async function findOpenAppeal(username){
   // PG first
   try {
     if (PG_READY) {
-      const { rows } = await pgPool.query(
+      const result46 = await pgSafe(
         "SELECT * FROM appeals WHERE lower(username)=lower($1) AND status='open' ORDER BY created_at DESC LIMIT 1",
         [u]
       );
+      const rows = result46?.rows || [];
       return rows?.[0] || null;
     }
   } catch {}
@@ -14579,12 +14739,13 @@ async function createAppeal(username, restrictionType, reasonAtTime){
   // PG
   try {
     if (PG_READY) {
-      const { rows } = await pgPool.query(
+      const result47 = await pgSafe(
         `INSERT INTO appeals (username, restriction_type, reason_at_time, status, created_at, updated_at, last_admin_reply_at, last_user_reply_at)
          VALUES ($1,$2,$3,'open',$4,$5,NULL,$6)
          RETURNING *`,
         [u, t === "ban" ? "ban" : "kick", r, now, now, now]
       );
+      const rows = result47?.rows || [];
       const appeal = rows?.[0] || null;
       if (appeal?.id) {
         try {
@@ -14631,13 +14792,13 @@ async function addAppealMessage(appealId, { authorRole, authorName, message }){
   // PG
   try {
     if (PG_READY) {
-      await pgPool.query(
+      await pgSafe(
         `INSERT INTO appeal_messages (appeal_id, author_role, author_name, message, created_at)
          VALUES ($1,$2,$3,$4,$5)`,
         [appealId, role, name, msg, now]
       );
       const col = role === "admin" ? "last_admin_reply_at" : "last_user_reply_at";
-      await pgPool.query(`UPDATE appeals SET updated_at=$1, ${col}=$2 WHERE id=$3`, [now, now, appealId]);
+      await pgSafe(`UPDATE appeals SET updated_at=$1, ${col}=$2 WHERE id=$3`, [now, now, appealId]);
     }
   } catch {}
 }
@@ -14646,10 +14807,11 @@ async function getAppealThread(appealId){
   // PG first
   try {
     if (PG_READY) {
-      const { rows: msgs } = await pgPool.query(
+      const result48 = await pgSafe(
         "SELECT * FROM appeal_messages WHERE appeal_id=$1 ORDER BY created_at ASC",
         [appealId]
       );
+      const msgs = result48?.rows || [];
       return msgs || [];
     }
   } catch {}
@@ -14667,9 +14829,10 @@ async function listOpenAppeals(){
   // PG first
   try {
     if (PG_READY) {
-      const { rows } = await pgPool.query(
+      const result49 = await pgSafe(
         "SELECT * FROM appeals WHERE status='open' ORDER BY updated_at DESC LIMIT 200"
       );
+      const rows = result49?.rows || [];
       return rows || [];
     }
   } catch {}
@@ -14685,10 +14848,11 @@ async function getModerationLogsForUser(username, limit=200){
   const lim = Math.max(10, Math.min(Number(limit)||200, 500));
   try {
     if (PG_READY) {
-      const { rows } = await pgPool.query(
+      const result50 = await pgSafe(
         "SELECT * FROM moderation_actions WHERE lower(target_username)=lower($1) ORDER BY created_at DESC LIMIT $2",
         [u, lim]
       );
+      const rows = result50?.rows || [];
       return rows || [];
     }
   } catch {}
@@ -14731,7 +14895,7 @@ async function trackUserAddress(userId, addressType, addressValue) {
   try {
     if (PG_READY) {
       // Use INSERT with ON CONFLICT for atomic upsert
-      await pgPool.query(
+      await pgSafe(
         `INSERT INTO user_addresses (user_id, address_type, address_value, first_seen, last_seen, connection_count)
          VALUES ($1, $2, $3, $4, $5, 1)
          ON CONFLICT (user_id, address_type, address_value) DO UPDATE
@@ -14773,12 +14937,13 @@ async function isAddressBanned(addressType, addressValue) {
   
   try {
     if (PG_READY) {
-      const { rows } = await pgPool.query(
+      const result51 = await pgSafe(
         `SELECT id, reason, expires_at FROM address_bans 
          WHERE address_type = $1 AND address_value = $2 
          AND (expires_at IS NULL OR expires_at > $3)`,
         [addressType, addressValue, now]
       );
+      const rows = result51?.rows || [];
       return rows && rows.length > 0;
     }
   } catch (e) {
@@ -14805,13 +14970,14 @@ async function banAllUserAddresses(userId, reason, bannedByUserId, bannedByUsern
   
   try {
     if (PG_READY) {
-      const { rows } = await pgPool.query(
+      const result52 = await pgSafe(
         "SELECT DISTINCT address_type, address_value FROM user_addresses WHERE user_id = $1",
         [userId]
       );
+      const rows = result52?.rows || [];
       
       for (const addr of rows || []) {
-        await pgPool.query(
+        await pgSafe(
           `INSERT INTO address_bans (address_type, address_value, reason, banned_by_user_id, banned_by_username, expires_at, created_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7)
            ON CONFLICT (address_type, address_value) DO UPDATE
@@ -14863,7 +15029,7 @@ async function getLinkedAccounts(userId) {
   
   try {
     if (PG_READY) {
-      const { rows } = await pgPool.query(
+      const result53 = await pgSafe(
         `SELECT DISTINCT u.id, u.username, u.role, ua2.address_type, ua2.address_value, ua2.last_seen
          FROM user_addresses ua1
          JOIN user_addresses ua2 ON ua1.address_value = ua2.address_value AND ua1.address_type = ua2.address_type
@@ -14873,6 +15039,7 @@ async function getLinkedAccounts(userId) {
          LIMIT 100`,
         [userId]
       );
+      const rows = result53?.rows || [];
       return rows || [];
     }
   } catch (e) {
@@ -15114,7 +15281,7 @@ async function emitUserList(room) {
     if (PG_READY && users.length) {
       const ids = users.map(u => Number(u.id) || 0).filter(Boolean);
       if (ids.length) {
-        const { rows: couples } = await pgPool.query(
+        const result23 = await pgSafe(
           `
           SELECT cl.id AS link_id,
                  cl.user1_id, cl.user2_id,
@@ -15135,6 +15302,7 @@ async function emitUserList(room) {
           `,
           [ids]
         );
+        const couples = result23?.rows || [];
 
         const byId = new Map(users.map(u => [Number(u.id) || 0, u]));
         for (const c of couples) {
@@ -15240,7 +15408,7 @@ async function applyLuckForQualifyingMessage({ userId, room, text }) {
 
       const nextLuck = clampLuck(Number(row.luck || 0) + gain);
       const nextStreak = 0;
-      await pgPool.query(
+      await pgSafe(
         `UPDATE users
            SET luck = $1,
                roll_streak = $2,
@@ -15389,6 +15557,9 @@ io.on("connection", async (socket) => {
     customization: sanitizeCustomization(sessUser.customization, sessUser.textStyle, sessUser.role),
   };
 
+  // Emit server-ready signal to fix false connection errors
+  socket.emit("server-ready", { ok: true });
+
   // --- Owner session map: register basic meta
   try {
     const uid = socket.user?.id;
@@ -15477,10 +15648,11 @@ if (existingSid && existingSid !== socket.id) {
 (async () => {
   try {
     if (await pgUserExists(socket.user.id)) {
-      const { rows } = await pgPool.query(
+      const result54 = await pgSafe(
         "SELECT avatar, avatar_updated, mood, vibe_tags, prefs_json FROM users WHERE id=$1 LIMIT 1",
         [socket.user.id]
       );
+      const rows = result54?.rows || [];
       const r = rows?.[0];
       if (r) {
         // IMPORTANT: don't overwrite a session-provided avatar with an empty value
@@ -15726,7 +15898,7 @@ enforceVipGate(desired, (allowed) => {
           const didWinForLuck = isLuckWin(variant, roll.result, roll.breakdown);
           const finalLuck = clampLuck(applyWinCut(luckState.nextLuck, didWinForLuck));
 
-          await pgPool.query(
+          await pgSafe(
             `UPDATE users
                SET gold = GREATEST(0, gold + $1),
                    lastDiceRollAt = $2,
@@ -17895,7 +18067,8 @@ socket.on("appeals:read", async ({ appealId } = {}, ack) => {
   let appeal = null;
   try {
     if (PG_READY) {
-      const { rows } = await pgPool.query("SELECT * FROM appeals WHERE id=$1 LIMIT 1", [id]);
+      const result55 = await pgSafe("SELECT * FROM appeals WHERE id=$1 LIMIT 1", [id]);
+      const rows = result55?.rows || [];
       appeal = rows?.[0] || null;
     }
   } catch {}
@@ -17941,7 +18114,8 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
   let appeal = null;
   try {
     if (PG_READY) {
-      const { rows } = await pgPool.query("SELECT * FROM appeals WHERE id=$1 LIMIT 1", [id]);
+      const result56 = await pgSafe("SELECT * FROM appeals WHERE id=$1 LIMIT 1", [id]);
+      const rows = result56?.rows || [];
       appeal = rows?.[0] || null;
     }
   } catch {}
@@ -17979,7 +18153,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
   try {
     const now = Date.now();
     await dbRunAsync("UPDATE appeals SET status='resolved', updated_at=? WHERE id=?", [now, id]).catch(()=>{});
-    if (PG_READY) await pgPool.query("UPDATE appeals SET status='resolved', updated_at=$1 WHERE id=$2", [now, id]).catch(()=>{});
+    if (PG_READY) await pgSafe("UPDATE appeals SET status='resolved', updated_at=$1 WHERE id=$2", [now, id]).catch(()=>{});
   } catch {}
 
   io.emit("appeals:updated");
@@ -18135,10 +18309,11 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
   async function getUserRoomRole(roomName, userId) {
     try {
       if (await pgUsersEnabled()) {
-        const { rows } = await pgPool.query(
+        const result24 = await pgSafe(
           `SELECT role FROM room_members WHERE room_name = $1 AND user_id = $2 LIMIT 1`,
           [roomName, userId]
         );
+        const rows = result24?.rows || [];
         return rows?.[0]?.role || null;
       } else {
         const row = await dbGetAsync(
@@ -18158,10 +18333,11 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
     try {
       const now = Date.now();
       if (await pgUsersEnabled()) {
-        const { rows } = await pgPool.query(
+        const result25 = await pgSafe(
           `SELECT expires_at FROM room_bans WHERE room_name = $1 AND user_id = $2 AND (expires_at IS NULL OR expires_at > $3) LIMIT 1`,
           [roomName, userId, now]
         );
+        const rows = result25?.rows || [];
         return rows && rows.length > 0;
       } else {
         const row = await dbGetAsync(
@@ -18192,12 +18368,13 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
       
       // Check if new name already exists
       if (await pgUsersEnabled()) {
-        const { rows } = await pgPool.query(`SELECT name FROM rooms WHERE name = $1`, [sanitizedNewName]);
+        const result26 = await pgSafe(`SELECT name FROM rooms WHERE name = $1`, [sanitizedNewName]);
+        const rows = result26?.rows || [];
         if (rows && rows.length > 0) return safe({ ok: false, error: "Room name already exists" });
         
-        await pgPool.query(`UPDATE room_members SET room_name = $1 WHERE room_name = $2`, [sanitizedNewName, roomName]);
-        await pgPool.query(`UPDATE room_bans SET room_name = $1 WHERE room_name = $2`, [sanitizedNewName, roomName]);
-        await pgPool.query(`UPDATE rooms SET name = $1 WHERE name = $2`, [sanitizedNewName, roomName]);
+        await pgSafe(`UPDATE room_members SET room_name = $1 WHERE room_name = $2`, [sanitizedNewName, roomName]);
+        await pgSafe(`UPDATE room_bans SET room_name = $1 WHERE room_name = $2`, [sanitizedNewName, roomName]);
+        await pgSafe(`UPDATE rooms SET name = $1 WHERE name = $2`, [sanitizedNewName, roomName]);
       } else {
         const exists = await dbGetAsync(`SELECT name FROM rooms WHERE name = ?`, [sanitizedNewName]);
         if (exists) return safe({ ok: false, error: "Room name already exists" });
@@ -18238,7 +18415,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
       
       const now = Date.now();
       if (await pgUsersEnabled()) {
-        await pgPool.query(
+        await pgSafe(
           `INSERT INTO room_members (room_name, user_id, role, assigned_by_user_id, assigned_at)
            VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT (room_name, user_id) DO UPDATE SET role = $3, assigned_by_user_id = $4, assigned_at = $5`,
@@ -18271,7 +18448,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
       if (actorRole !== "owner") return safe({ ok: false, error: "Only room owner can demote users" });
       
       if (await pgUsersEnabled()) {
-        await pgPool.query(
+        await pgSafe(
           `DELETE FROM room_members WHERE room_name = $1 AND user_id = $2 AND role != 'owner'`,
           [roomName, userId]
         );
@@ -18323,7 +18500,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
       }
       
       if (await pgUsersEnabled()) {
-        await pgPool.query(
+        await pgSafe(
           `INSERT INTO room_bans (room_name, user_id, banned_by_user_id, reason, banned_at, expires_at)
            VALUES ($1, $2, $3, $4, $5, $6)
            ON CONFLICT (room_name, user_id) DO UPDATE SET 
@@ -18369,7 +18546,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
       }
       
       if (await pgUsersEnabled()) {
-        await pgPool.query(`DELETE FROM room_bans WHERE room_name = $1 AND user_id = $2`, [roomName, userId]);
+        await pgSafe(`DELETE FROM room_bans WHERE room_name = $1 AND user_id = $2`, [roomName, userId]);
       } else {
         await dbRunAsync(`DELETE FROM room_bans WHERE room_name = ? AND user_id = ?`, [roomName, userId]);
       }
@@ -18392,7 +18569,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
       let members = [];
       
       if (await pgUsersEnabled()) {
-        const { rows } = await pgPool.query(
+        const result27 = await pgSafe(
           `SELECT rm.user_id, rm.role, u.username, rm.assigned_at 
            FROM room_members rm
            JOIN users u ON u.id = rm.user_id
@@ -18407,6 +18584,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
              rm.assigned_at ASC`,
           [roomName]
         );
+        const rows = result27?.rows || [];
         members = rows || [];
       } else {
         members = await dbAllAsync(
@@ -18449,7 +18627,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
       let bans = [];
       
       if (await pgUsersEnabled()) {
-        const { rows } = await pgPool.query(
+        const result28 = await pgSafe(
           `SELECT rb.user_id, u.username, rb.reason, rb.banned_at, rb.expires_at, b.username as banned_by
            FROM room_bans rb
            JOIN users u ON u.id = rb.user_id
@@ -18458,6 +18636,7 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
            ORDER BY rb.banned_at DESC`,
           [roomName]
         );
+        const rows = result28?.rows || [];
         bans = rows || [];
       } else {
         bans = await dbAllAsync(
@@ -18556,22 +18735,28 @@ socket.on("disconnect", () => {
 
 });
 
-// ---- Start
+// ---- Start Server - Always starts, even if database init partially fails
 const startupReady = Promise.allSettled([migrationsReady, pgInitPromise]);
 let SERVER_STARTED = false;
 async function startServer() {
   if (SERVER_STARTED) return httpServer;
-  const results = await startupReady;
-  const [sqliteResult, pgResult] = results;
-  if (sqliteResult.status === "rejected") {
-    console.error("[startup] SQLite migration failed", sqliteResult.reason);
-    process.exit(1);
-  }
-  if (pgResult.status === "rejected") {
-    console.error("[startup] Postgres init failed", pgResult.reason);
-    if (IS_PROD) {
-      process.exit(1);
+  
+  try {
+    const results = await startupReady;
+    const [sqliteResult, pgResult] = results;
+    
+    if (sqliteResult.status === "rejected") {
+      console.error("[startup] SQLite migration failed", sqliteResult.reason);
+      process.exit(1); // SQLite is required
     }
+    
+    if (pgResult.status === "rejected") {
+      console.warn("[startup] Postgres init failed (non-fatal):", pgResult.reason?.message || pgResult.reason);
+      // Continue - Postgres is optional
+    }
+  } catch (err) {
+    console.warn("[startup] DB init warning:", err?.message || err);
+    // Continue anyway
   }
 
   try {
@@ -18580,9 +18765,13 @@ async function startServer() {
     console.warn("[startup] core room ensure failed", e?.message || e);
   }
 
-  await ensureDevSeedUser();
+  try {
+    await ensureDevSeedUser();
+  } catch (e) {
+    console.warn("[startup] dev seed user failed", e?.message || e);
+  }
 
-  // ---- NEW: Initialize state persistence ----
+  // ---- Initialize state persistence ----
   try {
     console.log("[startup] Initializing state persistence...");
     initStateManagement(dbRunAsync, dbAllAsync, pgPool);
@@ -18602,10 +18791,13 @@ async function startServer() {
     console.warn("[startup] Word filter init failed", e?.message || e);
   }
 
+  // Server ALWAYS starts listening
   await new Promise((resolve) => {
     httpServer.listen(PORT, () => {
       SERVER_STARTED = true;
-      console.log(`Server running on http://localhost:${PORT}`);
+      console.log(`[startup] Server running on http://localhost:${PORT}`);
+      console.log(`[startup] Database mode: ${POSTGRES_ENABLED && PG_READY ? 'Postgres + SQLite' : 'SQLite-only'}`);
+
       resolve();
     });
   });

@@ -39,7 +39,30 @@
     });
   });
 
-  // ===== Socket.IO Initialization =====
+  // ===== Socket.IO Initialization with Smart Connection Error Handling =====
+  let failedAttempts = 0;
+  let serverReady = false;
+  let connectionErrorShown = false;
+
+  function showConnectionError() {
+    if (connectionErrorShown) return;
+    connectionErrorShown = true;
+    
+    const errorDiv = document.createElement('div');
+    errorDiv.id = 'connection-error-popup';
+    errorDiv.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff6b6b;color:white;padding:15px 25px;border-radius:8px;z-index:10000;font-family:system-ui;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
+    errorDiv.textContent = '⚠️ Failed to connect to chat server. Please refresh the page.';
+    document.body.appendChild(errorDiv);
+  }
+
+  function hideConnectionError() {
+    connectionErrorShown = false;
+    const errorDiv = document.getElementById('connection-error-popup');
+    if (errorDiv) {
+      errorDiv.remove();
+    }
+  }
+
   function initializeSocket() {
     if (window.socket) {
       console.log('[app.js] Socket already initialized');
@@ -60,14 +83,32 @@
       try {
         window.socket = io();
         
+        // Server-ready handler - clears false connection errors
+        window.socket.on('server-ready', () => {
+          console.log('[app.js] Server ready signal received');
+          serverReady = true;
+          failedAttempts = 0;
+          hideConnectionError();
+        });
+
         window.socket.on('connect', () => {
           console.log('[app.js] Socket connected:', window.socket.id);
+          failedAttempts = 0;
+          hideConnectionError();
           resolve(window.socket);
         });
 
         window.socket.on('connect_error', (error) => {
           console.error('[app.js] Socket connection error:', error);
-          reject(error);
+          
+          // Only show error after multiple attempts and if server hasn't signaled ready
+          if (!serverReady) {
+            failedAttempts++;
+            if (failedAttempts >= 3) {
+              showConnectionError();
+              reject(error);
+            }
+          }
         });
 
         window.socket.on('disconnect', (reason) => {
@@ -149,17 +190,8 @@
 
     } catch (error) {
       console.error('[app.js] Bootstrap failed:', error);
-      
-      // Only show error if we expected socket to connect (i.e., user is logged in)
-      if (window.currentUser) {
-        // Display user-friendly error
-        const errorDiv = document.createElement('div');
-        errorDiv.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff6b6b;color:white;padding:15px 25px;border-radius:8px;z-index:10000;font-family:system-ui;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
-        errorDiv.textContent = '⚠️ Failed to connect to chat server. Please refresh the page.';
-        document.body.appendChild(errorDiv);
-      }
-      
-      throw error;
+      // Error handling is now managed by the connection error logic above
+      // No immediate error popup - wait for multiple connection failures
     }
   }
 
