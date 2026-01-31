@@ -1,25 +1,3 @@
-//
-
-// Update a user's role in SQLite (legacy) and Postgres (Render/prod) when available.
-async function setRoleEverywhere(targetId, username, role) {
-  // SQLite
-  try {
-    if (targetId != null) {
-      await dbRunAsync("UPDATE users SET role=? WHERE id=?", [role, targetId]);
-    } else if (username) {
-      await dbRunAsync("UPDATE users SET role=? WHERE lower(username)=lower(?)", [role, username]);
-    }
-  } catch {}
-
-  // Postgres
-  try {
-    if (targetId != null) {
-      await pgSafe("UPDATE users SET role=$1 WHERE id=$2", [role, targetId]);
-    } else if (username) {
-      await pgSafe("UPDATE users SET role=$1 WHERE lower(username)=lower($2)", [role, username]);
-    }
-  } catch {}
-}
 "use strict";
 
 // Load environment variables from .env file
@@ -282,7 +260,7 @@ process.on("uncaughtException", (err) => {
   console.error("[uncaughtException]", err);
 });
 const { Server } = require("socket.io");
-const { db, migrationsReady, seedDevUser, DB_FILE } = require("./database");
+const { db, runAllMigrations, seedDevUser, DB_FILE } = require("./database");
 const { VIBE_TAGS, VIBE_TAG_LIMIT } = require("./vibe-tags");
 
 // ---- NEW: Message utilities for receipts, reactions, edits ----
@@ -3088,6 +3066,32 @@ function dbRunAsync(sql, params = []) {
       resolve(this);
     });
   });
+}
+
+/**
+ * Update a user's role in SQLite (legacy) and Postgres (Render/prod) when available.
+ * @param {number|null} targetId - User ID to update
+ * @param {string|null} username - Username to update (if targetId not provided)
+ * @param {string} role - New role value
+ */
+async function setRoleEverywhere(targetId, username, role) {
+  // SQLite
+  try {
+    if (targetId != null) {
+      await dbRunAsync("UPDATE users SET role=? WHERE id=?", [role, targetId]);
+    } else if (username) {
+      await dbRunAsync("UPDATE users SET role=? WHERE lower(username)=lower(?)", [role, username]);
+    }
+  } catch {}
+
+  // Postgres
+  try {
+    if (targetId != null) {
+      await pgSafe("UPDATE users SET role=$1 WHERE id=$2", [role, targetId]);
+    } else if (username) {
+      await pgSafe("UPDATE users SET role=$1 WHERE lower(username)=lower($2)", [role, username]);
+    }
+  } catch {}
 }
 
 // Initialize message-utils with database functions
@@ -18860,81 +18864,217 @@ socket.on("disconnect", (reason) => {
 
 });
 
-// ---- Start Server - Always starts, even if database init partially fails
-const startupReady = Promise.allSettled([migrationsReady, pgInitPromise]);
+// ===================================================================
+// STRUCTURED STARTUP SEQUENCE
+// ===================================================================
+
 let SERVER_STARTED = false;
+
+/**
+ * Phase 1: Validate Environment
+ * Ensures all required environment variables are set
+ */
+async function validateEnvironment() {
+  console.log('[startup] Phase 1: Environment validation');
+  
+  const required = ['SESSION_SECRET'];
+  const missing = required.filter(key => !process.env[key]);
+  
+  if (missing.length && !IS_DEV_MODE) {
+    console.error('[startup] ✗ Missing required environment variables:', missing);
+    process.exit(1);
+  }
+  
+  if (process.env.SESSION_SECRET && process.env.SESSION_SECRET.length < 32) {
+    console.error('[startup] ✗ SESSION_SECRET must be at least 32 characters for production security');
+    process.exit(1);
+  }
+  
+  console.log('[startup] ✓ Environment validation complete');
+}
+
+/**
+ * Phase 2: Initialize Database
+ * Runs migrations and validates database is ready
+ */
+async function initializeDatabase() {
+  console.log('[startup] Phase 2: Database initialization');
+  
+  // Run SQLite migrations
+  console.log('[startup]   Running SQLite migrations...');
+  try {
+    await runAllMigrations();
+    console.log('[startup]   ✓ SQLite migrations complete');
+  } catch (err) {
+    console.error('[startup]   ✗ SQLite migration failed:', err.message);
+    process.exit(1);
+  }
+  
+  // Validate core tables exist
+  const tables = ['users', 'messages', 'rooms'];
+  for (const table of tables) {
+    try {
+      const result = await dbAllAsync(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name=?`,
+        [table]
+      );
+      if (!result || result.length === 0) {
+        console.error(`[startup]   ✗ Critical table missing: ${table}`);
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error(`[startup]   ✗ Failed to validate table ${table}:`, err.message);
+      process.exit(1);
+    }
+  }
+  
+  console.log('[startup]   ✓ SQLite ready with all core tables');
+  
+  // Initialize Postgres if available
+  if (POSTGRES_ENABLED && pgPool) {
+    console.log('[startup]   Initializing Postgres...');
+    
+    try {
+      await pgInitPromise; // Wait for Postgres schema creation
+      await pgPool.query('SELECT 1'); // Validate connection
+      console.log('[startup]   ✓ Postgres ready');
+    } catch (err) {
+      console.warn('[startup]   ⚠ Postgres failed (continuing with SQLite only):', err.message);
+    }
+  }
+  
+  console.log('[startup] ✓ Database initialization complete');
+}
+
+/**
+ * Phase 3: Initialize State Management
+ * Sets up state persistence tables
+ */
+async function initializeStateManagement() {
+  console.log('[startup] Phase 3: State management initialization');
+  
+  try {
+    initStateManagement(dbRunAsync, dbAllAsync, pgPool);
+    await createStateTables();
+    
+    // Validate state tables exist
+    const result = await dbAllAsync(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='state_kv'`
+    );
+    if (!result || result.length === 0) {
+      console.error('[startup]   ✗ State persistence tables failed to create');
+      process.exit(1);
+    }
+    
+    console.log('[startup] ✓ State management ready');
+  } catch (err) {
+    console.error('[startup]   ✗ State persistence init failed:', err.message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Phase 4: Initialize Core Data
+ * Ensures core rooms and seed data exist
+ */
+async function initializeCoreData() {
+  console.log('[startup] Phase 4: Core data initialization');
+  
+  try {
+    await ensureCoreRoomsExist();
+    console.log('[startup]   ✓ Core rooms ready');
+  } catch (err) {
+    console.warn('[startup]   ⚠ Core rooms setup failed:', err.message);
+  }
+  
+  try {
+    await ensureDevSeedUser();
+    console.log('[startup]   ✓ Dev seed user ready');
+  } catch (err) {
+    console.warn('[startup]   ⚠ Dev seed user failed:', err.message);
+  }
+  
+  console.log('[startup] ✓ Core data initialization complete');
+}
+
+/**
+ * Phase 5: Initialize Word Filters
+ * Sets up content filtering system
+ */
+async function initializeWordFilters() {
+  console.log('[startup] Phase 5: Word filters initialization');
+  
+  try {
+    await initializeHardcodedFilters();
+    await loadWordFilters();
+    console.log('[startup] ✓ Word filters ready');
+  } catch (err) {
+    console.warn('[startup]   ⚠ Word filter init failed:', err.message);
+  }
+}
+
+/**
+ * Phase 6: Start HTTP Server
+ * Begins listening for connections
+ */
+async function startHttpServer() {
+  console.log('[startup] Phase 6: Starting HTTP server');
+  
+  return new Promise((resolve, reject) => {
+    httpServer.listen(PORT, (err) => {
+      if (err) {
+        console.error('[startup] ✗ Failed to start server:', err);
+        reject(err);
+        return;
+      }
+      
+      SERVER_STARTED = true;
+      console.log(`[startup] ✓ HTTP server listening on port ${PORT}`);
+      console.log(`[startup]   Database mode: ${POSTGRES_ENABLED && PG_READY ? 'Postgres + SQLite' : 'SQLite-only'}`);
+      resolve();
+    });
+  });
+}
+
+/**
+ * Main startup function
+ * Orchestrates all initialization phases
+ */
 async function startServer() {
   if (SERVER_STARTED) return httpServer;
   
   try {
-    const results = await startupReady;
-    const [sqliteResult, pgResult] = results;
+    console.log('[startup] ========================================');
+    console.log('[startup] SERVER INITIALIZATION STARTING');
+    console.log('[startup] ========================================');
     
-    if (sqliteResult.status === "rejected") {
-      console.error("[startup] SQLite migration failed", sqliteResult.reason);
-      // SQLite is required as the primary data store; exit if it fails to initialize
-      process.exit(1);
-    }
+    await validateEnvironment();
+    await initializeDatabase();
+    await initializeStateManagement();
+    await initializeCoreData();
+    await initializeWordFilters();
+    await startHttpServer();
     
-    if (pgResult.status === "rejected") {
-      console.warn("[startup] Postgres init failed (non-fatal):", pgResult.reason?.message || pgResult.reason);
-      // Continue - Postgres is optional
-    }
+    console.log('[startup] ========================================');
+    console.log('[startup] === SERVER FULLY READY ===');
+    console.log('[startup] ========================================');
+    
+    return httpServer;
   } catch (err) {
-    console.warn("[startup] DB init warning:", err?.message || err);
-    // Continue anyway
+    console.error('[startup] ========================================');
+    console.error('[startup] FATAL ERROR DURING INITIALIZATION');
+    console.error('[startup] ========================================');
+    console.error(err);
+    process.exit(1);
   }
-
-  try {
-    await ensureCoreRoomsExist();
-  } catch (e) {
-    console.warn("[startup] core room ensure failed", e?.message || e);
-  }
-
-  try {
-    await ensureDevSeedUser();
-  } catch (e) {
-    console.warn("[startup] dev seed user failed", e?.message || e);
-  }
-
-  // ---- Initialize state persistence ----
-  try {
-    console.log("[startup] Initializing state persistence...");
-    initStateManagement(dbRunAsync, dbAllAsync, pgPool);
-    await createStateTables();
-    console.log("[startup] State persistence ready ✓");
-  } catch (e) {
-    console.warn("[startup] State persistence init failed", e?.message || e);
-  }
-
-  // ---- Initialize word filters ----
-  try {
-    console.log("[startup] Initializing word filters...");
-    await initializeHardcodedFilters();
-    await loadWordFilters();
-    console.log("[startup] Word filters ready ✓");
-  } catch (e) {
-    console.warn("[startup] Word filter init failed", e?.message || e);
-  }
-
-  // Server ALWAYS starts listening
-  await new Promise((resolve) => {
-    httpServer.listen(PORT, () => {
-      SERVER_STARTED = true;
-      console.log(`[startup] Server running on http://localhost:${PORT}`);
-      console.log(`[startup] Database mode: ${POSTGRES_ENABLED && PG_READY ? 'Postgres + SQLite' : 'SQLite-only'}`);
-
-      resolve();
-    });
-  });
-  return httpServer;
 }
 
+// Start server if run directly
 if (require.main === module) {
   startServer();
 }
 
-module.exports = { app, httpServer, io, startServer, startupReady };
+module.exports = { app, httpServer, io, startServer };
 
 
 function normalizeUserKey(value) {

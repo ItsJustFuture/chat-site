@@ -1018,11 +1018,11 @@ async function runAllMigrations() {
   await runSqlFileMigrations();
 }
 
-const migrationsReady = runAllMigrations();
-
+// Export runAllMigrations as a function (do not auto-execute)
+// This allows the server to control when migrations run
 module.exports = {
   db,
-  migrationsReady,
+  runAllMigrations,
   runSqliteMigrations,
   runSqlFileMigrations,
   DB_FILE,
