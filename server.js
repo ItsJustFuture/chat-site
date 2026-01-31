@@ -493,8 +493,7 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
 // === SAFE POSTGRES INITIALIZATION ===
 let pgPool = null;
 
-if (POSTGRES_ENABLED) {
-  const { Pool } = require("pg");
+if (POSTGRES_ENABLED && Pool) {
   pgPool = new Pool({
     connectionString: POSTGRES_URL,
     ssl: NODE_ENV === "production" && process.env.DATABASE_URL
