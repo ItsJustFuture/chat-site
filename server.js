@@ -208,6 +208,7 @@ const bcrypt = require("bcrypt");
 const rateLimit = require("express-rate-limit");
 const multer = require("multer");
 
+const NODE_ENV = process.env.NODE_ENV || "development";
 // === POSTGRES CONNECTION SOURCE ===
 // Single authoritative Postgres connection URL.
 // In production, DATABASE_URL should be set; when omitted the app falls back to SQLite-only mode.
@@ -369,7 +370,6 @@ const ALLOWED_ORIGINS = new Set(
 );
 
 const LOCAL_DEV = process.env.LOCAL_DEV === "1";
-const NODE_ENV = process.env.NODE_ENV || "development";
 // ---- Startup sanity checks (fail fast in production)
 const IS_PROD = NODE_ENV === "production" && !LOCAL_DEV;
 const IS_DEV_MODE = LOCAL_DEV || NODE_ENV === "development" || NODE_ENV === "test";
