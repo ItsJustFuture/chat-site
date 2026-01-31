@@ -216,6 +216,7 @@ const multer = require("multer");
 const POSTGRES_URL =
   process.env.DATABASE_URL ||
   "postgresql://bandb_db_5j7x_user:7p4Xkp0jiPdn4RuTUIPPJofcsowUZnz4@dpg-d5tcj1dactks73a4pnu0-a.oregon-postgres.render.com/bandb_db_5j7x";
+// PGSSL_REJECT_UNAUTHORIZED=true enables strict certificate verification (rejects self-signed certs).
 const POSTGRES_SSL_REJECT_UNAUTHORIZED = ["1", "true", "yes"].includes(
   String(process.env.PGSSL_REJECT_UNAUTHORIZED || "").toLowerCase()
 );
