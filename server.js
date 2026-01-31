@@ -216,6 +216,9 @@ const multer = require("multer");
 const POSTGRES_URL =
   process.env.DATABASE_URL ||
   "postgresql://bandb_db_5j7x_user:7p4Xkp0jiPdn4RuTUIPPJofcsowUZnz4@dpg-d5tcj1dactks73a4pnu0-a.oregon-postgres.render.com/bandb_db_5j7x";
+const POSTGRES_SSL_REJECT_UNAUTHORIZED = ["1", "true", "yes"].includes(
+  String(process.env.PGSSL_REJECT_UNAUTHORIZED || "").toLowerCase()
+);
 
 const POSTGRES_ENABLED = !!POSTGRES_URL;
 
@@ -497,7 +500,7 @@ if (POSTGRES_ENABLED && Pool) {
   pgPool = new Pool({
     connectionString: POSTGRES_URL,
     ssl: NODE_ENV === "production" && process.env.DATABASE_URL
-      ? { rejectUnauthorized: true }
+      ? { rejectUnauthorized: POSTGRES_SSL_REJECT_UNAUTHORIZED }
       : { rejectUnauthorized: false }
   });
 }

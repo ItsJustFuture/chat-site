@@ -80,7 +80,7 @@ npm run test:memory
 
 **Optional:**
 - `SQLITE_PATH` - SQLite database path (default: `./data/dev.sqlite`)
+- `PGSSL_REJECT_UNAUTHORIZED` - Set to `false` for self-signed Postgres certificates
 - `REDIS_URL` - Redis connection for Socket.IO adapter
 - `SENTRY_DSN` - Sentry error tracking
 - `ENABLE_PWA` - Enable PWA features
-
