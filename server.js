@@ -15145,7 +15145,9 @@ io.use((socket, next) => {
     }
     return next();
   }
-  if (secFetchSite === "same-origin" && (secFetchMode || secFetchDest)) return next();
+  if (secFetchSite === "same-origin" && (secFetchMode === "websocket" || secFetchDest === "websocket")) {
+    return next();
+  }
   if (referer) {
     // Referrer (Referer header) can be spoofed or omitted; only use as a best-effort fallback.
     const refOrigin = safeParseUrl(referer)?.origin || "";
