@@ -15,25 +15,20 @@ const seed = {
 };
 
 async function seedPostgres() {
-  const pool = pgPool;
-  if (!pool) {
+  if (!pgPool) {
     throw new Error("Postgres pool unavailable");
   }
-  try {
-    const hash = await bcrypt.hash(seed.password, 10);
-    await pool.query(
-      `
-      INSERT INTO users (username, password_hash, role, created_at)
-      VALUES ($1, $2, $3, $4)
-      ON CONFLICT (username)
-      DO UPDATE SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role
-      `,
-      [seed.username, hash, seed.role, Date.now()]
-    );
-    console.log("[seed] Postgres: ensured dev user", seed.username);
-  } finally {
-    await pool.end();
-  }
+  const hash = await bcrypt.hash(seed.password, 10);
+  await pgPool.query(
+    `
+    INSERT INTO users (username, password_hash, role, created_at)
+    VALUES ($1, $2, $3, $4)
+    ON CONFLICT (username)
+    DO UPDATE SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role
+    `,
+    [seed.username, hash, seed.role, Date.now()]
+  );
+  console.log("[seed] Postgres: ensured dev user", seed.username);
 }
 
 async function seedSqlite() {

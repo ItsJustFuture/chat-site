@@ -212,6 +212,7 @@ const NODE_ENV = process.env.NODE_ENV || "development";
 const {
   pgPool,
   POSTGRES_ENABLED,
+  POSTGRES_SSL_MODE,
   POSTGRES_SSL_VERIFY,
   POSTGRES_URL,
 } = require("./db/postgres");
@@ -481,15 +482,16 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
       console.log("[rooms] system emit", { room: "__global__", text: payload.text, meta: payload.meta || null });
     }
   }
+let pgSafeWarned = false;
 // Safe Postgres query helper - never blocks or crashes
 async function pgSafe(query, params = []) {
   if (!POSTGRES_ENABLED || !pgPool) return null;
   try {
     return await pgPool.query(query, params);
   } catch (err) {
-    if (!pgSafe.warned) {
+    if (!pgSafeWarned) {
       console.warn("[Postgres skipped]", err.message);
-      pgSafe.warned = true;
+      pgSafeWarned = true;
     }
     return null;
   }
@@ -499,13 +501,13 @@ if (!POSTGRES_ENABLED && IS_DEV_MODE) {
   console.warn("[db] Postgres unavailable, using SQLite-only mode:", DB_FILE);
 }
 if (POSTGRES_ENABLED) {
-  console.log("[startup] Postgres SSL:", POSTGRES_SSL_VERIFY ? "verify" : "self-signed");
-}
-if (POSTGRES_ENABLED && pgPool) {
-  pgPool
-    .query("SELECT 1")
-    .then(() => console.log("[startup] Postgres connected"))
-    .catch((err) => console.warn("[startup] Postgres connection failed:", err?.message || err));
+  console.log("[startup] Postgres SSL:", POSTGRES_SSL_MODE);
+  if (pgPool) {
+    pgPool
+      .query("SELECT 1")
+      .then(() => console.log("[startup] Postgres connected"))
+      .catch((err) => console.warn("[startup] Postgres connection failed:", err?.message || err));
+  }
 }
 let DB_BACKEND = "sqlite";
 // ---- Postgres: helpers to keep legacy schemas compatible
@@ -1949,7 +1951,7 @@ app.use((req, res, next) => {
 
 // ---- Sessions (Postgres-backed; survives redeploys)
 let sessionStore = new session.MemoryStore();
-if (pgPool) {
+if (POSTGRES_ENABLED && pgPool) {
   try {
     sessionStore = new PgSession({
       pool: pgPool,
@@ -1958,7 +1960,7 @@ if (pgPool) {
       // connect-pg-simple will create it on demand if missing.
       createTableIfMissing: true,
     });
-    console.log("[startup] Session store connected (Postgres)");
+    console.log("[startup] Session store configured (Postgres)");
   } catch (err) {
     console.warn("[startup] Session store init failed, using MemoryStore:", err?.message || err);
   }
