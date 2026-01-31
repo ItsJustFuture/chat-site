@@ -352,46 +352,11 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
 }
 
 // ---- App + Server (initialized at module load, but controlled startup in startServer)
-// Note: Full deferred initialization would require moving all middleware/routes into functions
-// This is a pragmatic compromise - app/httpServer/io are created here, but:
-// - Redis connection is deferred to Phase 5a
-// - Background tasks are deferred to Phase 10  
-// - Server listening is deferred to Phase 11
-console.log("[startup] Initializing Express app and HTTP server...");
-const app = express();
-app.set("trust proxy", 1);
-const httpServer = http.createServer(app);
-console.log("[startup] Initializing Socket.IO...");
-const io = new Server(httpServer, {
-  cors: { origin: true, credentials: true },
-  transports: ["websocket", "polling"],
-  allowRequest: (req, cb) => {
-    try {
-      const origin = req.headers.origin;
-      const host = req.headers.host;
-      if (!origin) {
-        if (isAllowedHostHeader(host)) {
-          return cb(null, true);
-        }
-        console.warn("[socket.io] Handshake rejected: origin required", { host });
-        return cb(null, false);
-      }
-      if (!isAllowedOrigin(origin, host)) {
-        console.warn("[socket.io] Handshake rejected: origin not allowed", { origin, host });
-        return cb(null, false);
-      }
-      return cb(null, true);
-    } catch (err) {
-      console.warn("[socket.io] Handshake rejected: error", err?.message || err);
-      return cb(null, false);
-    }
-  },
-  pingInterval: 25_000,
-  pingTimeout: 300_000,
-  upgradeTimeout: 45_000,
-});
-console.log("[startup] Socket.IO initialized ✓");
-// Note: Redis adapter will be attached in startServer Phase 5a (after Redis connects)
+// App, Server, IO (will be created in startServer Phase 6)
+// Changed from const to let to allow assignment in startServer()
+let app;
+let httpServer;
+let io;
 
 
   const DEBUG_ROOMS = String(process.env.DEBUG_ROOMS || "").toLowerCase() === "true";
@@ -19048,18 +19013,98 @@ async function initializeRedis() {
 }
 
 /**
+ * Create and configure Express application
+ * Called during Phase 6a of startup
+ * @returns {Express.Application} Configured Express app
+ */
+function createExpressApp() {
+  console.log('[startup] Phase 6a: Creating Express app...');
+  
+  const app = express();
+  app.set("trust proxy", 1);
+  app.disable("x-powered-by"); // Security best practice
+  
+  console.log('[startup]   ✓ Express app created');
+  return app;
+}
+
+/**
+ * Create HTTP server
+ * Called during Phase 6b of startup
+ * @param {Express.Application} app - Express application
+ * @returns {http.Server} HTTP server instance
+ */
+function createHttpServer(app) {
+  console.log('[startup] Phase 6b: Creating HTTP server...');
+  
+  const httpServer = http.createServer(app);
+  
+  console.log('[startup]   ✓ HTTP server created');
+  return httpServer;
+}
+
+/**
+ * Create and configure Socket.IO server
+ * Called during Phase 6c of startup
+ * @param {http.Server} httpServer - HTTP server instance
+ * @returns {Server} Socket.IO server instance
+ */
+function createSocketIOServer(httpServer) {
+  console.log('[startup] Phase 6c: Creating Socket.IO server...');
+  
+  const io = new Server(httpServer, {
+    cors: {
+      origin: true,
+      credentials: true,
+    },
+    transports: ["websocket", "polling"],
+    
+    // Origin allowlist for Socket.IO handshake
+    allowRequest: (req, cb) => {
+      try {
+        const origin = req.headers.origin;
+        const host = req.headers.host;
+        if (!origin) {
+          if (isAllowedHostHeader(host)) {
+            return cb(null, true);
+          }
+          console.warn("[socket.io] Handshake rejected: origin required", { host });
+          return cb(null, false);
+        }
+        if (!isAllowedOrigin(origin, host)) {
+          console.warn("[socket.io] Handshake rejected: origin not allowed", { origin, host });
+          return cb(null, false);
+        }
+        return cb(null, true);
+      } catch (err) {
+        console.warn("[socket.io] Handshake rejected: error", err?.message || err);
+        return cb(null, false);
+      }
+    },
+    
+    // Tolerant of mobile/background + Render sleep
+    pingInterval: 25_000,
+    pingTimeout: 300_000,
+    upgradeTimeout: 45_000,
+  });
+  
+  console.log('[startup]   ✓ Socket.IO server created');
+  return io;
+}
+
+/**
  * Attach Redis adapter to Socket.IO
- * Called during Phase 6 of startup (after Redis connects, if configured)
+ * Called during Phase 6d of startup (after Redis connects, if configured)
  */
 function attachRedisAdapter() {
-  console.log('[startup] Phase 6: Attaching Redis adapter to Socket.IO...');
+  console.log('[startup] Phase 6d: Attaching Redis adapter to Socket.IO...');
   if (redisAdapter) {
     io.adapter(redisAdapter);
     console.log('[startup]   ✓ Redis adapter attached to Socket.IO');
   } else {
     console.log('[startup]   ⚠ No Redis adapter to attach (Redis not configured or connection failed)');
   }
-  console.log('[startup]   ✓ Phase 6 complete');
+  console.log('[startup]   ✓ Phase 6d complete');
 }
 
 /**
@@ -19180,16 +19225,21 @@ async function startServer() {
     // Phase 5a: Connect Redis (optional, for multi-instance Socket.IO)
     await initializeRedis();
     
-    // Phase 6: Attach Redis adapter to Socket.IO (if Redis connected)
+    // Phase 6: Create Express app and servers
+    app = createExpressApp();
+    httpServer = createHttpServer(app);
+    io = createSocketIOServer(httpServer);
+    
+    // Phase 6d: Attach Redis adapter (if connected)
     attachRedisAdapter();
     
-    // Phase 7: Middleware registration check (already done at module load)
+    // Phase 7: Register all middleware
     registerMiddleware();
     
-    // Phase 8: Routes registration check (already done at module load)
+    // Phase 8: Register all HTTP routes
     registerRoutes();
     
-    // Phase 9: Socket handlers registration check (already done at module load)
+    // Phase 9: Register all Socket.IO handlers
     registerSocketHandlers();
     
     // Phase 10: Start background tasks
@@ -19217,7 +19267,16 @@ if (require.main === module) {
   startServer();
 }
 
-module.exports = { app, httpServer, io, startServer };
+module.exports = { 
+  app,              // Will be undefined until startServer() called
+  httpServer,       // Will be undefined until startServer() called
+  io,               // Will be undefined until startServer() called
+  startServer,
+  // Export creation functions for testing
+  createExpressApp,
+  createHttpServer,
+  createSocketIOServer,
+};
 
 
 function normalizeUserKey(value) {
