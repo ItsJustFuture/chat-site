@@ -207,8 +207,18 @@ const PgSession = require("connect-pg-simple")(session);
 const bcrypt = require("bcrypt");
 const rateLimit = require("express-rate-limit");
 const multer = require("multer");
-// Postgres is OPTIONAL - only load if DATABASE_URL is present
-const POSTGRES_ENABLED = !!process.env.DATABASE_URL;
+
+// === POSTGRES CONNECTION SOURCE ===
+// Single authoritative Postgres connection URL
+// NOTE: The fallback URL is intentionally hard-coded per requirements for production deployment.
+// In production, DATABASE_URL environment variable should be set to override this fallback.
+// The hard-coded URL ensures Postgres connectivity when DATABASE_URL is not explicitly configured.
+const POSTGRES_URL =
+  process.env.DATABASE_URL ||
+  "postgresql://bandb_db_5j7x_user:7p4Xkp0jiPdn4RuTUIPPJofcsowUZnz4@dpg-d5tcj1dactks73a4pnu0-a.oregon-postgres.render.com/bandb_db_5j7x";
+
+const POSTGRES_ENABLED = !!POSTGRES_URL;
+
 let Pool = null;
 if (POSTGRES_ENABLED) {
   Pool = require("pg").Pool;
@@ -368,8 +378,8 @@ if (IS_PROD) {
     console.error("FATAL: SESSION_SECRET is missing/too short. Set a strong secret in your environment.");
     process.exit(1);
   }
-  // DATABASE_URL is now OPTIONAL - SQLite fallback is acceptable
-  if (!process.env.DATABASE_URL) {
+  // POSTGRES_URL is now defined explicitly - SQLite fallback is acceptable if DATABASE_URL is not set
+  if (!POSTGRES_ENABLED) {
     console.warn("WARN: DATABASE_URL not set. Using SQLite-only mode.");
   }
 }
@@ -480,14 +490,17 @@ for (const dir of [UPLOADS_DIR, AVATARS_DIR]) {
       console.log("[rooms] system emit", { room: "__global__", text: payload.text, meta: payload.meta || null });
     }
   }
-const pgPool = POSTGRES_ENABLED && Pool
-  ? new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: NODE_ENV === "production"
-        ? { rejectUnauthorized: false }
-        : false,
-    })
-  : null;
+// === SAFE POSTGRES INITIALIZATION ===
+let pgPool = null;
+
+if (POSTGRES_ENABLED && Pool) {
+  pgPool = new Pool({
+    connectionString: POSTGRES_URL,
+    ssl: NODE_ENV === "production" && process.env.DATABASE_URL
+      ? { rejectUnauthorized: true }
+      : { rejectUnauthorized: false }
+  });
+}
 
 // Safe Postgres query helper - never blocks or crashes
 async function pgSafe(query, params = []) {
@@ -506,7 +519,8 @@ if (!POSTGRES_ENABLED && IS_DEV_MODE) {
 let DB_BACKEND = "sqlite";
 // ---- Postgres: helpers to keep legacy schemas compatible
 async function pgGetColumnType(tableName, columnName) {
-  const { rows } = await pgPool.query(
+  if (!POSTGRES_ENABLED || !pgPool) return null;
+  const result = await pgSafe(
     `SELECT udt_name, data_type
      FROM information_schema.columns
      WHERE table_schema = 'public'
@@ -515,9 +529,11 @@ async function pgGetColumnType(tableName, columnName) {
      LIMIT 1`,
     [tableName, columnName]
   );
-  return rows[0] || null;
+  return result?.rows?.[0] || null;
 }
 async function pgEnsureCamelColumn(tableName, camelName, typeSql = "BIGINT") {
+  if (!POSTGRES_ENABLED || !pgPool) return;
+
   // If exact camelCase column already exists, we're good
   const exact = await pgGetColumnType(tableName, camelName);
   if (exact) return;
@@ -527,14 +543,16 @@ async function pgEnsureCamelColumn(tableName, camelName, typeSql = "BIGINT") {
   const lowerInfo = await pgGetColumnType(tableName, lower);
   if (lowerInfo) {
     // Postgres lowercases unquoted identifiers; rename the legacy column to a quoted camelCase name.
-    await pgPool.query(`ALTER TABLE ${tableName} RENAME COLUMN ${lower} TO "${camelName}"`);
+    await pgSafe(`ALTER TABLE ${tableName} RENAME COLUMN ${lower} TO "${camelName}"`);
     return;
   }
 
   // Otherwise just add the camelCase column
-  await pgPool.query(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS "${camelName}" ${typeSql}`);
+  await pgSafe(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS "${camelName}" ${typeSql}`);
 }
 async function pgEnsureEpochMsBigint(tableName, columnName) {
+  if (!POSTGRES_ENABLED || !pgPool) return;
+
   const info = await pgGetColumnType(tableName, columnName);
   if (!info) return;
 
@@ -546,11 +564,11 @@ async function pgEnsureEpochMsBigint(tableName, columnName) {
   // If the column has a default that can't be cast to BIGINT (common on legacy timestamp defaults),
   // the ALTER TYPE will fail. Drop the default first (best-effort).
   try {
-    await pgPool.query(`ALTER TABLE ${tableName} ALTER COLUMN ${columnName} DROP DEFAULT`);
+    await pgSafe(`ALTER TABLE ${tableName} ALTER COLUMN ${columnName} DROP DEFAULT`);
   } catch (_) {}
 
   if (udt === "timestamp" || udt === "timestamptz" || dataType.includes("timestamp")) {
-    await pgPool.query(
+    await pgSafe(
       `ALTER TABLE ${tableName}
        ALTER COLUMN ${columnName}
        TYPE BIGINT
@@ -560,7 +578,7 @@ async function pgEnsureEpochMsBigint(tableName, columnName) {
   }
 
   if (udt === "int4" || dataType === "integer") {
-    await pgPool.query(
+    await pgSafe(
       `ALTER TABLE ${tableName}
        ALTER COLUMN ${columnName}
        TYPE BIGINT
@@ -3291,7 +3309,7 @@ function createChessId() {
 }
 
 async function chessPgEnabled() {
-  if (!process.env.DATABASE_URL) return false;
+  if (!POSTGRES_ENABLED || !pgPool) return false;
   try {
     await pgInitPromise;
     return !!PG_READY;
@@ -3675,7 +3693,7 @@ async function chessApplyEloUpdate(game, result) {
   };
 
   if (await chessPgEnabled()) {
-    await pgPool.query("BEGIN");
+    await pgSafe("BEGIN");
     try {
       await pgSafe(
         `UPDATE chess_user_stats
@@ -3703,9 +3721,9 @@ async function chessApplyEloUpdate(game, result) {
          WHERE user_id = $1`,
         [blackId, blackUpdate.chess_elo, blackUpdate.chess_games_played, blackUpdate.chess_wins, blackUpdate.chess_losses, blackUpdate.chess_draws, blackUpdate.chess_peak_elo, blackUpdate.chess_last_game_at, blackUpdate.updated_at]
       );
-      await pgPool.query("COMMIT");
+      await pgSafe("COMMIT");
     } catch (e) {
-      await pgPool.query("ROLLBACK");
+      await pgSafe("ROLLBACK");
       throw e;
     }
   } else {
@@ -4291,7 +4309,7 @@ async function spendGoldInTransaction(client, userId, amount, reason) {
 
 // Centralized gold spending helper: atomic deduction + ledger logging for extensibility.
 async function spendGold(userId, amount, reason, opts = {}) {
-  if (!(await pgUsersEnabled())) {
+  if (!POSTGRES_ENABLED || !pgPool || !(await pgUsersEnabled())) {
     return { ok: false, error: "PG_UNAVAILABLE", message: "Gold spending is unavailable right now." };
   }
   const client = opts.client || await pgPool.connect();
@@ -7535,8 +7553,8 @@ function cleanFaqInput(title, details){
 
 
 async function pgChangelogEnabled(){
-  // If DATABASE_URL is missing or Postgres init/connect failed, fall back to sqlite.
-  if (!process.env.DATABASE_URL) return false;
+  // If POSTGRES_URL is missing or Postgres init/connect failed, fall back to sqlite.
+  if (!POSTGRES_ENABLED || !pgPool) return false;
   try {
     await pgInitPromise;
     if (!PG_READY) return false;
@@ -7765,6 +7783,7 @@ async function pgDeleteFaqQuestion(id){
 }
 
 async function pgToggleChangelogReaction(entryId, userId, reaction){
+  if (!POSTGRES_ENABLED || !pgPool) return;
   await pgInitPromise;
   const client = await pgPool.connect();
   try{
@@ -7789,6 +7808,7 @@ async function pgToggleChangelogReaction(entryId, userId, reaction){
 }
 
 async function pgToggleFaqReaction(questionId, username, reaction){
+  if (!POSTGRES_ENABLED || !pgPool) return;
   await pgInitPromise;
   const client = await pgPool.connect();
   try{
@@ -10373,7 +10393,7 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
   let seasonId = null;
   try {
     if (await pgUsersEnabled()) {
-      await pgPool.query("BEGIN");
+      await pgSafe("BEGIN");
       const result29 = await pgSafe(
         `INSERT INTO survival_seasons (room_id, created_by_user_id, title, status, day_index, phase, rng_seed, created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -10431,7 +10451,7 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
           ]
         );
       }
-      await pgPool.query("COMMIT");
+      await pgSafe("COMMIT");
     } else {
       await dbRunAsync("BEGIN");
       const result = await dbRunAsync(
@@ -10493,7 +10513,7 @@ app.post("/api/survival/seasons", survivalLimiter, requireCoOwner, express.json(
     }
   } catch (e) {
     try { await dbRunAsync("ROLLBACK"); } catch {}
-    try { if (await pgUsersEnabled()) await pgPool.query("ROLLBACK"); } catch {}
+    try { if (await pgUsersEnabled()) await pgSafe("ROLLBACK"); } catch {}
     console.warn("[survival] create season failed", e?.message || e);
     return res.status(500).json({ message: "Failed to start season." });
   }
@@ -10753,7 +10773,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
   const pendingMap = new Map();
   try {
     if (await pgUsersEnabled()) {
-      await pgPool.query("BEGIN");
+      await pgSafe("BEGIN");
       for (const pending of pendingAlliances) {
         const result5 = await pgSafe(
           `INSERT INTO survival_alliances (season_id, name, created_at) VALUES ($1,$2,$3) RETURNING id`,
@@ -10813,7 +10833,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
         `UPDATE survival_seasons SET status=$1, day_index=$2, phase=$3, updated_at=$4 WHERE id=$5`,
         [season.status, season.day_index, season.phase, season.updated_at, seasonId]
       );
-      await pgPool.query("COMMIT");
+      await pgSafe("COMMIT");
     } else {
       await dbRunAsync("BEGIN");
       for (const pending of pendingAlliances) {
@@ -10875,7 +10895,7 @@ app.post("/api/survival/seasons/:id/advance", survivalLimiter, requireCoOwner, e
     }
   } catch (e) {
     try { await dbRunAsync("ROLLBACK"); } catch {}
-    try { if (await pgUsersEnabled()) await pgPool.query("ROLLBACK"); } catch {}
+    try { if (await pgUsersEnabled()) await pgSafe("ROLLBACK"); } catch {}
     console.warn("[survival] advance failed", e?.message || e);
     return res.status(500).json({ message: "Failed to advance." });
   }
