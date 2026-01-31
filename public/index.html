@@ -3061,5 +3061,394 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
 })();
 </script>
 
+<script>
+// Vibe Tags Management
+(function() {
+  'use strict';
+  
+  let availableVibeTags = [];
+  let selectedVibeTags = [];
+  let vibeTagLimit = 3;
+  let isInitialized = false;
+  
+  /**
+   * Fetch available vibe tags from API
+   */
+  async function loadVibeTags() {
+    try {
+      const response = await fetch('/api/vibes');
+      
+      if (!response.ok) {
+        console.error('[vibe-tags] Failed to load vibe tags:', response.status);
+        return;
+      }
+      
+      const data = await response.json();
+      
+      if (data && data.vibes) {
+        availableVibeTags = data.vibes;
+        vibeTagLimit = data.limit || 3;
+        
+        // Update the limit display
+        const limitEl = document.getElementById('vibeTagLimit');
+        if (limitEl) {
+          limitEl.textContent = vibeTagLimit;
+        }
+        
+        renderVibeTags();
+        console.log('[vibe-tags] Loaded', availableVibeTags.length, 'vibe tags');
+      }
+    } catch (error) {
+      console.error('[vibe-tags] Error loading vibe tags:', error);
+    }
+  }
+  
+  /**
+   * Render vibe tags as clickable pills
+   */
+  function renderVibeTags() {
+    const container = document.getElementById('vibeTagOptions');
+    if (!container || availableVibeTags.length === 0) return;
+    
+    container.innerHTML = '';
+    
+    availableVibeTags.forEach(tag => {
+      const button = document.createElement('button');
+      button.className = 'pillBtn';
+      button.type = 'button';
+      button.dataset.vibeId = tag.id;
+      button.innerHTML = `${tag.emoji} ${tag.label}`;
+      
+      // Check if this tag is already selected
+      if (selectedVibeTags.includes(tag.label)) {
+        button.classList.add('active');
+      }
+      
+      button.addEventListener('click', () => toggleVibeTag(tag, button));
+      
+      container.appendChild(button);
+    });
+  }
+  
+  /**
+   * Toggle vibe tag selection
+   */
+  function toggleVibeTag(tag, buttonEl) {
+    const isSelected = selectedVibeTags.includes(tag.label);
+    
+    if (isSelected) {
+      // Deselect
+      selectedVibeTags = selectedVibeTags.filter(t => t !== tag.label);
+      buttonEl.classList.remove('active');
+    } else {
+      // Check limit before selecting
+      if (selectedVibeTags.length >= vibeTagLimit) {
+        // Show a brief message that limit is reached
+        const container = document.getElementById('vibeTagOptions');
+        if (!container || !container.parentElement) return;
+        
+        const existingMsg = container.querySelector('.vibe-limit-msg');
+        if (!existingMsg) {
+          const msg = document.createElement('div');
+          msg.className = 'small vibe-limit-msg';
+          msg.style.cssText = 'color: var(--text-muted); margin-top: 4px;';
+          msg.textContent = `Maximum ${vibeTagLimit} tags allowed. Deselect one first.`;
+          container.parentElement.insertBefore(msg, container.nextSibling);
+          
+          setTimeout(() => msg.remove(), 3000);
+        }
+        return;
+      }
+      
+      // Select
+      selectedVibeTags.push(tag.label);
+      buttonEl.classList.add('active');
+    }
+    
+    console.log('[vibe-tags] Selected:', selectedVibeTags);
+  }
+  
+  /**
+   * Get currently selected vibe tags
+   */
+  window.getSelectedVibeTags = function() {
+    return selectedVibeTags;
+  };
+  
+  /**
+   * Set selected vibe tags (e.g., when loading user's profile)
+   */
+  window.setSelectedVibeTags = function(tags) {
+    if (!Array.isArray(tags)) return;
+    
+    selectedVibeTags = tags.filter(t => typeof t === 'string').slice(0, vibeTagLimit);
+    
+    // Update button states
+    const container = document.getElementById('vibeTagOptions');
+    if (container) {
+      const buttons = container.querySelectorAll('.pillBtn');
+      buttons.forEach(btn => {
+        const vibeId = btn.dataset.vibeId;
+        const tag = availableVibeTags.find(t => t.id === vibeId);
+        if (tag && selectedVibeTags.includes(tag.label)) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      });
+    }
+    
+    console.log('[vibe-tags] Set selected tags:', selectedVibeTags);
+  };
+  
+  /**
+   * Clear all selections
+   */
+  window.clearSelectedVibeTags = function() {
+    selectedVibeTags = [];
+    const container = document.getElementById('vibeTagOptions');
+    if (container) {
+      const buttons = container.querySelectorAll('.pillBtn');
+      buttons.forEach(btn => btn.classList.remove('active'));
+    }
+  };
+  
+  /**
+   * Initialize vibe tags when profile edit section is shown
+   */
+  function initVibeTags() {
+    if (isInitialized) return;
+    
+    const profileEditSection = document.getElementById('profileEditSection');
+    if (!profileEditSection) {
+      console.warn('[vibe-tags] Profile edit section not found');
+      return;
+    }
+    
+    // Load vibe tags when the edit section becomes visible
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+          const isVisible = profileEditSection.style.display !== 'none';
+          if (isVisible && availableVibeTags.length === 0) {
+            loadVibeTags();
+          }
+        }
+      });
+    });
+    
+    observer.observe(profileEditSection, { attributes: true });
+    
+    // Also try to load immediately if section is already visible
+    if (profileEditSection.style.display !== 'none') {
+      loadVibeTags();
+    }
+    
+    isInitialized = true;
+    console.log('[vibe-tags] Initialized');
+  }
+  
+  // Initialize after DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initVibeTags);
+  } else {
+    initVibeTags();
+  }
+})();
+</script>
+
+<script>
+// Profile Load and Save Handler
+(function() {
+  'use strict';
+  
+  /**
+   * Load user's profile data into the edit form
+   */
+  async function loadProfileData() {
+    try {
+      const response = await fetch('/profile');
+      
+      if (!response.ok) {
+        console.error('[profile] Failed to load profile:', response.status);
+        return;
+      }
+      
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        console.error('[profile] Invalid response type:', contentType);
+        return;
+      }
+      
+      const profile = await response.json();
+      
+      if (!profile) {
+        console.error('[profile] No profile data returned');
+        return;
+      }
+      
+      // Populate form fields
+      const moodInput = document.getElementById('editMood');
+      const bioInput = document.getElementById('editBio');
+      const ageInput = document.getElementById('editAge');
+      const genderSelect = document.getElementById('editGender');
+      
+      if (moodInput) moodInput.value = profile.mood || '';
+      if (bioInput) bioInput.value = profile.bio || '';
+      if (ageInput) ageInput.value = profile.age || '';
+      if (genderSelect) genderSelect.value = profile.gender || '';
+      
+      // Load vibe tags if the function is available
+      if (profile.vibe_tags && window.setSelectedVibeTags) {
+        window.setSelectedVibeTags(profile.vibe_tags);
+      }
+      
+      // Load header gradient colors if they exist
+      const headerColorA = document.getElementById('headerColorA');
+      const headerColorB = document.getElementById('headerColorB');
+      if (headerColorA && profile.header_grad_a) headerColorA.value = profile.header_grad_a;
+      if (headerColorB && profile.header_grad_b) headerColorB.value = profile.header_grad_b;
+      
+      console.log('[profile] Profile data loaded successfully');
+    } catch (error) {
+      console.error('[profile] Error loading profile:', error);
+    }
+  }
+  
+  /**
+   * Handle profile save button click
+   */
+  async function handleProfileSave() {
+    const saveBtn = document.getElementById('saveProfileBtn');
+    const profileMsg = document.getElementById('profileMsg');
+    
+    if (!saveBtn || !profileMsg) return;
+    
+    // Disable button during save
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    profileMsg.textContent = '';
+    profileMsg.className = 'msgline';
+    
+    try {
+      // Gather form data
+      const formData = new FormData();
+      
+      // Avatar file (if selected)
+      const avatarFile = document.getElementById('avatarFile');
+      if (avatarFile && avatarFile.files && avatarFile.files[0]) {
+        formData.append('avatar', avatarFile.files[0]);
+      }
+      
+      // Text fields
+      const mood = document.getElementById('editMood')?.value || '';
+      const bio = document.getElementById('editBio')?.value || '';
+      const age = document.getElementById('editAge')?.value || '';
+      const gender = document.getElementById('editGender')?.value || '';
+      
+      formData.append('mood', mood);
+      formData.append('bio', bio);
+      if (age) formData.append('age', age);
+      formData.append('gender', gender);
+      
+      // Vibe tags
+      const vibeTags = window.getSelectedVibeTags ? window.getSelectedVibeTags() : [];
+      formData.append('vibeTags', JSON.stringify(vibeTags));
+      
+      // Header gradient colors (if they exist)
+      const headerColorA = document.getElementById('headerColorA')?.value || '';
+      const headerColorB = document.getElementById('headerColorB')?.value || '';
+      if (headerColorA) formData.append('headerColorA', headerColorA);
+      if (headerColorB) formData.append('headerColorB', headerColorB);
+      
+      // Send request
+      const response = await fetch('/profile', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) {
+        const text = await response.text();
+        profileMsg.textContent = `Failed to save profile (${response.status})`;
+        profileMsg.className = 'msgline error';
+        console.error('[profile] Save failed:', response.status, text);
+        return;
+      }
+      
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        profileMsg.textContent = 'Invalid server response';
+        profileMsg.className = 'msgline error';
+        console.error('[profile] Invalid response type:', contentType);
+        return;
+      }
+      
+      const data = await response.json();
+      
+      if (data.ok) {
+        profileMsg.textContent = 'Profile saved successfully!';
+        profileMsg.className = 'msgline success';
+        
+        // Optionally reload the page or update UI to reflect changes
+        setTimeout(() => {
+          profileMsg.textContent = '';
+        }, 3000);
+      } else {
+        profileMsg.textContent = data.message || 'Failed to save profile';
+        profileMsg.className = 'msgline error';
+      }
+    } catch (error) {
+      console.error('[profile] Save error:', error);
+      profileMsg.textContent = 'Error saving profile: ' + error.message;
+      profileMsg.className = 'msgline error';
+    } finally {
+      // Re-enable button
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  }
+  
+  /**
+   * Initialize profile save handler and load data when edit section is shown
+   */
+  function initProfileSave() {
+    const saveBtn = document.getElementById('saveProfileBtn');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', handleProfileSave);
+      console.log('[profile] Save handler initialized');
+    }
+    
+    // Load profile data when edit section becomes visible
+    const profileEditSection = document.getElementById('profileEditSection');
+    if (profileEditSection) {
+      const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+          if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+            const isVisible = profileEditSection.style.display !== 'none';
+            if (isVisible) {
+              loadProfileData();
+            }
+          }
+        });
+      });
+      
+      observer.observe(profileEditSection, { attributes: true });
+      
+      // Also load immediately if section is already visible
+      if (profileEditSection.style.display !== 'none') {
+        loadProfileData();
+      }
+    }
+  }
+  
+  // Initialize after DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initProfileSave);
+  } else {
+    initProfileSave();
+  }
+})();
+</script>
+
 </body>
 </html>
