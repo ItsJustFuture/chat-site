@@ -1862,47 +1862,6 @@ function getClientIp(req) {
   return xfwd || req.ip || req.connection?.remoteAddress || "";
 }
 
-// ---- Security + parsing
-app.disable("x-powered-by");
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: false, limit: "1mb" }));
-
-app.use(
-  helmet({
-    contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false,
-  })
-);
-
-// IMPORTANT: CSP that blocks inline JS (good), but allows our external /public/app.js & /public/styles.css
-app.use((req, res, next) => {
-  res.setHeader(
-    "Content-Security-Policy",
-    [
-      "default-src 'self'",
-      // Inline hashes map to: admin word filters, mod message capture overlay, username history, vibe tags, and profile UI in index.html.
-      "script-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=' 'sha256-oWpLZycNOHPRAKwunf75GOBemv1jh7TmBxWivRAc6a4=' 'sha256-goKOkmKJAPdYQYWwcQHapCcKarPdgPOdvsRdXEM/cfQ=' 'sha256-7sXnZ2TVMnxHVWCkmooJgY2WLwuABY3ORO4U2HyqhCk=' 'sha256-i/aTBp59Im0Ii8AbJaj/fpbmIm5uEe2SBSUfuz0qWdo=' 'sha256-h6XKXaSUiZETwfkdn71tqPwNbWkKP7NuIVivpP1YHkQ=' 'sha256-yGn8Ao66AtYyuV/LmdeSWHLPjQvhNwVQ39CW3mlyk3U=' 'sha256-FyuENKF0oqbS8GySBjZmSheWBnbSBzWln9hSmxXIMxY=' 'sha256-RbHiP1owkaFYxhobIPZZPoETOLi+bWnIbX7EeyA0rOc='",
-      "script-src-elem 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=' 'sha256-oWpLZycNOHPRAKwunf75GOBemv1jh7TmBxWivRAc6a4=' 'sha256-goKOkmKJAPdYQYWwcQHapCcKarPdgPOdvsRdXEM/cfQ=' 'sha256-7sXnZ2TVMnxHVWCkmooJgY2WLwuABY3ORO4U2HyqhCk=' 'sha256-i/aTBp59Im0Ii8AbJaj/fpbmIm5uEe2SBSUfuz0qWdo=' 'sha256-h6XKXaSUiZETwfkdn71tqPwNbWkKP7NuIVivpP1YHkQ=' 'sha256-yGn8Ao66AtYyuV/LmdeSWHLPjQvhNwVQ39CW3mlyk3U=' 'sha256-FyuENKF0oqbS8GySBjZmSheWBnbSBzWln9hSmxXIMxY=' 'sha256-RbHiP1owkaFYxhobIPZZPoETOLi+bWnIbX7EeyA0rOc='",
-      // Inline style attributes are set by the client JS (e.g. show/hide panels),
-      // so allow them alongside our external stylesheet.
-      // Also allow Google Fonts stylesheets for optional custom fonts.
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      // Allow Google Fonts font files.
-      "font-src 'self' data: https://fonts.gstatic.com",
-      // allow avatars/uploads + blob previews on client
-      "img-src 'self' data: blob: https://i.ytimg.com",
-      "media-src 'self' blob:",
-      // socket.io
-      "connect-src 'self' ws: wss: https://noembed.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com",
-      "object-src 'none'",
-      "base-uri 'self'",
-      "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://challenges.cloudflare.com https://hcaptcha.com",
-      "frame-ancestors 'none'",
-    ].join("; ")
-  );
-  next();
-});
-
 // ---- Sessions (Postgres-backed; survives redeploys)
 let sessionStore = new session.MemoryStore();
 if (POSTGRES_ENABLED && pgPool) {
@@ -1938,12 +1897,6 @@ const sessionMiddleware = session({
   },
 });
 
-app.use(sessionMiddleware);
-
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", db: DB_BACKEND });
-});
-
 const genericRateLimitHandler = (_req, res) => {
   res.status(429).json({ message: "Too many requests, please try again later." });
 };
@@ -1956,8 +1909,6 @@ const globalLimiter = rateLimit({
   handler: genericRateLimitHandler,
   keyGenerator: (req) => getClientIp(req),
 });
-
-app.use(globalLimiter);
 
 const strictLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
@@ -2064,56 +2015,6 @@ const postOriginGuard = (req, res, next) => {
   console.warn("[http] Origin required", { host: hostHeader, path: req.path });
   return res.status(403).json({ message: "Origin required." });
 };
-
-app.use(postOriginGuard);
-
-// ---- Static
-app.use("/uploads", express.static(UPLOADS_DIR, {
-  setHeaders: (res, filePath) => {
-    const ext = path.extname(filePath).toLowerCase();
-    if (ext === ".mp3") res.setHeader("Content-Type", "audio/mpeg");
-    if (ext === ".m4a") res.setHeader("Content-Type", "audio/mp4");
-    if (ext === ".mp4") res.setHeader("Content-Type", "video/mp4");
-    if (ext === ".webm") res.setHeader("Content-Type", "video/webm");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-  },
-}));
-app.use("/avatars", express.static(AVATARS_DIR, {
-  setHeaders: (res) => {
-    res.setHeader("X-Content-Type-Options", "nosniff");
-  },
-}));
-app.use(express.static(PUBLIC_DIR));
-
-// Serve avatars stored in Postgres
-app.get("/avatar/:id", async (req, res) => {
-  const id = Number(req.params?.id);
-  if (!Number.isFinite(id) || id <= 0) return res.status(400).send("Invalid id");
-
-  try {
-    const result3 = await pgSafe(
-      `SELECT avatar_bytes, avatar_mime, avatar_updated FROM users WHERE id = $1 LIMIT 1`,
-      [id]
-    );
-    const rows = result3?.rows || [];
-    const row = rows?.[0];
-    if (!row?.avatar_bytes) return res.status(404).send("Not found");
-
-    const etag = `"av-${id}-${Number(row.avatar_updated || 0)}"`;
-    const weakEtag = `W/${etag}`;
-    const inm = String(req.headers["if-none-match"] || "");
-    if (inm === etag || inm === weakEtag) return res.status(304).end();
-
-    res.setHeader("Content-Type", row.avatar_mime || "image/png");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Cache-Control", "public, max-age=86400");
-    res.setHeader("ETag", etag);
-    return res.send(row.avatar_bytes);
-  } catch (e) {
-    console.error("[/avatar] failed:", e?.message || e);
-    return res.status(500).send("Failed to load avatar");
-  }
-});
 
 // ---- Helpers
 function normalizeUsername(u) {
@@ -19109,13 +19010,111 @@ function attachRedisAdapter() {
 
 /**
  * Register all Express middleware
- * Called during Phase 7 of startup  
- * Note: Middleware is already registered at module level (historical architecture)
+ * Called during Phase 7 of startup
+ * @param {Express.Application} app - Express application
  */
-function registerMiddleware() {
-  console.log('[startup] Phase 7: Middleware registration check...');
-  console.log('[startup]   ℹ️ Middleware registered at module load (historical architecture)');
-  console.log('[startup]   ✓ Phase 7 complete');
+function registerMiddleware(app) {
+  console.log('[startup] Phase 7: Registering middleware...');
+  
+  // Body parsers
+  app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ extended: false, limit: "1mb" }));
+  
+  // Security headers (helmet)
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    })
+  );
+  
+  // Custom CSP header
+  app.use((req, res, next) => {
+    res.setHeader(
+      "Content-Security-Policy",
+      [
+        "default-src 'self'",
+        "script-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=' 'sha256-oWpLZycNOHPRAKwunf75GOBemv1jh7TmBxWivRAc6a4=' 'sha256-goKOkmKJAPdYQYWwcQHapCcKarPdgPOdvsRdXEM/cfQ=' 'sha256-7sXnZ2TVMnxHVWCkmooJgY2WLwuABY3ORO4U2HyqhCk=' 'sha256-i/aTBp59Im0Ii8AbJaj/fpbmIm5uEe2SBSUfuz0qWdo=' 'sha256-h6XKXaSUiZETwfkdn71tqPwNbWkKP7NuIVivpP1YHkQ=' 'sha256-yGn8Ao66AtYyuV/LmdeSWHLPjQvhNwVQ39CW3mlyk3U=' 'sha256-FyuENKF0oqbS8GySBjZmSheWBnbSBzWln9hSmxXIMxY=' 'sha256-RbHiP1owkaFYxhobIPZZPoETOLi+bWnIbX7EeyA0rOc='",
+        "script-src-elem 'self' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://unpkg.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=' 'sha256-oWpLZycNOHPRAKwunf75GOBemv1jh7TmBxWivRAc6a4=' 'sha256-goKOkmKJAPdYQYWwcQHapCcKarPdgPOdvsRdXEM/cfQ=' 'sha256-7sXnZ2TVMnxHVWCkmooJgY2WLwuABY3ORO4U2HyqhCk=' 'sha256-i/aTBp59Im0Ii8AbJaj/fpbmIm5uEe2SBSUfuz0qWdo=' 'sha256-h6XKXaSUiZETwfkdn71tqPwNbWkKP7NuIVivpP1YHkQ=' 'sha256-yGn8Ao66AtYyuV/LmdeSWHLPjQvhNwVQ39CW3mlyk3U=' 'sha256-FyuENKF0oqbS8GySBjZmSheWBnbSBzWln9hSmxXIMxY=' 'sha256-RbHiP1owkaFYxhobIPZZPoETOLi+bWnIbX7EeyA0rOc='",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' data: https://fonts.gstatic.com",
+        "img-src 'self' data: blob: https://i.ytimg.com",
+        "media-src 'self' blob:",
+        "connect-src 'self' ws: wss: https://noembed.com https://challenges.cloudflare.com https://hcaptcha.com https://js.hcaptcha.com",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://challenges.cloudflare.com https://hcaptcha.com",
+        "frame-ancestors 'none'",
+      ].join("; ")
+    );
+    next();
+  });
+  
+  // Session middleware
+  app.use(sessionMiddleware);
+  
+  // Health check (before rate limiting)
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", db: DB_BACKEND });
+  });
+  
+  // Rate limiting
+  app.use(globalLimiter);
+  
+  // Origin guard for POST/PUT/DELETE/PATCH
+  app.use(postOriginGuard);
+  
+  // Static files
+  app.use("/uploads", express.static(UPLOADS_DIR, {
+    setHeaders: (res, filePath) => {
+      const ext = path.extname(filePath).toLowerCase();
+      if (ext === ".mp3") res.setHeader("Content-Type", "audio/mpeg");
+      if (ext === ".m4a") res.setHeader("Content-Type", "audio/mp4");
+      if (ext === ".mp4") res.setHeader("Content-Type", "video/mp4");
+      if (ext === ".webm") res.setHeader("Content-Type", "video/webm");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+    },
+  }));
+  
+  app.use("/avatars", express.static(AVATARS_DIR, {
+    setHeaders: (res) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+    },
+  }));
+  
+  app.use(express.static(PUBLIC_DIR));
+  
+  // Avatar serving route
+  app.get("/avatar/:id", async (req, res) => {
+    const id = Number(req.params?.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).send("Invalid id");
+  
+    try {
+      const result3 = await pgSafe(
+        `SELECT avatar_bytes, avatar_mime, avatar_updated FROM users WHERE id = $1 LIMIT 1`,
+        [id]
+      );
+      const rows = result3?.rows || [];
+      const row = rows?.[0];
+      if (!row?.avatar_bytes) return res.status(404).send("Not found");
+  
+      const etag = `"av-${id}-${Number(row.avatar_updated || 0)}"`;
+      const weakEtag = `W/${etag}`;
+      const inm = String(req.headers["if-none-match"] || "");
+      if (inm === etag || inm === weakEtag) return res.status(304).end();
+  
+      res.setHeader("Content-Type", row.avatar_mime || "image/png");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("ETag", etag);
+      return res.send(row.avatar_bytes);
+    } catch (e) {
+      console.error("[/avatar] failed:", e?.message || e);
+      return res.status(500).send("Failed to load avatar");
+    }
+  });
+  
+  console.log('[startup]   ✓ Middleware registered');
 }
 
 /**
@@ -19234,13 +19233,13 @@ async function startServer() {
     attachRedisAdapter();
     
     // Phase 7: Register all middleware
-    registerMiddleware();
+    registerMiddleware(app);
     
     // Phase 8: Register all HTTP routes
-    registerRoutes();
+    registerRoutes(app);
     
     // Phase 9: Register all Socket.IO handlers
-    registerSocketHandlers();
+    registerSocketHandlers(io);
     
     // Phase 10: Start background tasks
     startBackgroundTasks();
