@@ -209,13 +209,9 @@ const rateLimit = require("express-rate-limit");
 const multer = require("multer");
 
 // === POSTGRES CONNECTION SOURCE ===
-// Single authoritative Postgres connection URL
-// NOTE: The fallback URL is intentionally hard-coded per requirements for production deployment.
-// In production, DATABASE_URL environment variable should be set to override this fallback.
-// The hard-coded URL ensures Postgres connectivity when DATABASE_URL is not explicitly configured.
-const POSTGRES_URL =
-  process.env.DATABASE_URL ||
-  "postgresql://bandb_db_5j7x_user:7p4Xkp0jiPdn4RuTUIPPJofcsowUZnz4@dpg-d5tcj1dactks73a4pnu0-a.oregon-postgres.render.com/bandb_db_5j7x";
+// Single authoritative Postgres connection URL.
+// In production, DATABASE_URL should be set; when omitted the app falls back to SQLite-only mode.
+const POSTGRES_URL = process.env.DATABASE_URL || "";
 // PGSSL_REJECT_UNAUTHORIZED accepts '1', 'true', or 'yes' to enable strict certificate verification.
 const POSTGRES_SSL_REJECT_UNAUTHORIZED = process.env.PGSSL_REJECT_UNAUTHORIZED == null
   ? NODE_ENV === "production"
@@ -382,7 +378,7 @@ if (IS_PROD) {
     console.error("FATAL: SESSION_SECRET is missing/too short. Set a strong secret in your environment.");
     process.exit(1);
   }
-  // POSTGRES_URL is now defined explicitly - SQLite fallback is acceptable if DATABASE_URL is not set
+  // SQLite fallback is acceptable if DATABASE_URL is not set
   if (!POSTGRES_ENABLED) {
     console.warn("WARN: DATABASE_URL not set. Using SQLite-only mode.");
   }
@@ -500,9 +496,7 @@ let pgPool = null;
 if (POSTGRES_ENABLED && Pool) {
   pgPool = new Pool({
     connectionString: POSTGRES_URL,
-    ssl: NODE_ENV === "production"
-      ? { rejectUnauthorized: POSTGRES_SSL_REJECT_UNAUTHORIZED }
-      : { rejectUnauthorized: false }
+    ssl: { rejectUnauthorized: POSTGRES_SSL_REJECT_UNAUTHORIZED }
   });
 }
 
