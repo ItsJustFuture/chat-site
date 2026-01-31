@@ -33,13 +33,22 @@
       currentUser = appState.currentUser || window.currentUser;
       currentRoom = appState.currentRoom || window.currentRoom;
 
+      // Socket might not be available yet if user just logged in
+      // Listen for additional app:ready events in case socket gets initialized later
       if (!socket) {
-        console.error('[chat.js] FATAL: Socket not available from app bootstrap!');
-        return;
+        console.log('[chat.js] Socket not yet available, waiting for it...');
+        window.addEventListener('app:ready', (event) => {
+          if (event.detail.socket && !socket) {
+            console.log('[chat.js] Socket now available from re-dispatched app:ready');
+            socket = event.detail.socket;
+            currentUser = event.detail.currentUser || window.currentUser;
+            setupSocketListeners();
+          }
+        });
+      } else {
+        console.log('[chat.js] Using global socket:', socket.id);
+        setupSocketListeners();
       }
-
-      console.log('[chat.js] Using global socket:', socket.id);
-      setupSocketListeners();
     } catch (error) {
       console.error('[chat.js] Failed to wait for app:ready:', error);
     }

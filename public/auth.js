@@ -129,6 +129,31 @@
         if (!res.ok) return showLoginView();
         const data = await res.json();
         if (!data || !data.id) return showLoginView();
+        
+        // User is logged in, initialize socket if not already done
+        if (!window.socket && typeof window.initSocket === 'function') {
+          console.log('[auth.js] Initializing socket after successful session check...');
+          try {
+            await window.initSocket();
+            window.currentUser = data;
+            console.log('[auth.js] Socket initialized, updating global state');
+            
+            // Re-dispatch app:ready with socket now available
+            const readyEvent = new CustomEvent('app:ready', {
+              detail: {
+                socket: window.socket,
+                currentUser: window.currentUser,
+                currentRoom: window.currentRoom
+              }
+            });
+            window.dispatchEvent(readyEvent);
+            console.log('[auth.js] Re-dispatched app:ready with socket');
+          } catch (socketErr) {
+            console.error('[auth.js] Failed to initialize socket:', socketErr);
+            // Continue to show chat view - chat.js will handle missing socket gracefully
+          }
+        }
+        
         showChatView();
       } catch (err) {
         console.warn('[auth.js] session hydrate failed:', err?.message || err);

@@ -84,6 +84,9 @@
     });
   }
 
+  // ===== Expose socket initializer for auth.js to call after login =====
+  window.initSocket = initializeSocket;
+
   // ===== Session State Fetching =====
   async function fetchSessionState() {
     try {
@@ -116,13 +119,18 @@
     console.log('[app.js] Starting application bootstrap...');
 
     try {
-      // Step 1: Initialize Socket.IO
-      await initializeSocket();
-      console.log('[app.js] ✓ Socket.IO initialized');
-
-      // Step 2: Fetch session state (may be null if not logged in)
+      // Step 1: Fetch session state (may be null if not logged in)
       await fetchSessionState();
       console.log('[app.js] ✓ Session state checked');
+
+      // Step 2: Initialize Socket.IO ONLY if user is logged in
+      // If not logged in, socket will be initialized after successful login by auth.js
+      if (window.currentUser) {
+        await initializeSocket();
+        console.log('[app.js] ✓ Socket.IO initialized (user logged in)');
+      } else {
+        console.log('[app.js] ℹ Socket.IO initialization deferred (user not logged in)');
+      }
 
       // Step 3: Mark app as ready
       isAppReady = true;
@@ -142,11 +150,14 @@
     } catch (error) {
       console.error('[app.js] Bootstrap failed:', error);
       
-      // Display user-friendly error
-      const errorDiv = document.createElement('div');
-      errorDiv.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff6b6b;color:white;padding:15px 25px;border-radius:8px;z-index:10000;font-family:system-ui;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
-      errorDiv.textContent = '⚠️ Failed to connect to chat server. Please refresh the page.';
-      document.body.appendChild(errorDiv);
+      // Only show error if we expected socket to connect (i.e., user is logged in)
+      if (window.currentUser) {
+        // Display user-friendly error
+        const errorDiv = document.createElement('div');
+        errorDiv.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff6b6b;color:white;padding:15px 25px;border-radius:8px;z-index:10000;font-family:system-ui;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
+        errorDiv.textContent = '⚠️ Failed to connect to chat server. Please refresh the page.';
+        document.body.appendChild(errorDiv);
+      }
       
       throw error;
     }
