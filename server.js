@@ -15659,10 +15659,9 @@ io.on("connection", async (socket) => {
     customization: sanitizeCustomization(sessUser.customization, sessUser.textStyle, sessUser.role),
   };
 
-  // Emit server-ready signal to prevent race condition where client shows 
-  // connection error before server completes initialization. This fixes false
-  // "failed to connect" errors on initial page load.
-  socket.emit("server-ready", { ok: true });
+  // === SOCKET EVENT LISTENER REGISTRATION (ALL LISTENERS MUST BE REGISTERED BEFORE ANY EMITS) ===
+  // server-ready will be emitted at the end after all listeners are registered
+  // to ensure strict event registration order per reliability requirements
 
   // --- Owner session map: register basic meta
   try {
@@ -15686,6 +15685,7 @@ io.on("connection", async (socket) => {
   } catch {}
 
   socket.on("client:hello", (info = {}) => {
+    if (IS_DEV_MODE) console.log("[socket] client:hello", { socketId: socket.id, info });
     try {
       const meta = sessionMetaBySocketId.get(socket.id) || {};
       meta.tz = info.tz ? String(info.tz).slice(0, 64) : meta.tz;
@@ -15697,19 +15697,8 @@ io.on("connection", async (socket) => {
   });
 
   socket.on("luck:get", () => {
+    if (IS_DEV_MODE) console.log("[socket] luck:get", { socketId: socket.id });
     void emitLuckStateToSocket(socket);
-  });
-
-  socket.on("disconnect", () => {
-    try {
-      sessionMetaBySocketId.delete(socket.id);
-      const uid = socket.user?.id;
-      const set = sessionByUserId.get(uid);
-      if (set) {
-        set.delete(socket.id);
-        if (!set.size) sessionByUserId.delete(uid);
-      }
-    } catch {}
   });
 
 
@@ -15826,6 +15815,7 @@ if (existingSid && existingSid !== socket.id) {
   );
 
 socket.on("join room", ({ room, status }) => {
+  if (IS_DEV_MODE) console.log("[socket] join room", { socketId: socket.id, room, status });
   if (socket.restriction?.type && socket.restriction.type !== "none") {
     io.to(socket.id).emit("restriction:status", {
       type: socket.restriction.type,
@@ -15906,6 +15896,7 @@ enforceVipGate(desired, (allowed) => {
 
   // Dice Room mini-game
   socket.on("dice:roll", (payload = {}) => {
+    if (IS_DEV_MODE) console.log("[socket] dice:roll", { socketId: socket.id, variant: payload.variant });
     const room = socket.currentRoom;
     const requestedRoom = typeof payload.room === "string" ? sanitizeRoomName(payload.room) : null;
     if (requestedRoom && requestedRoom !== room) {
@@ -16306,6 +16297,7 @@ function doJoin(room, status) {
 }
 
   socket.on("typing", () => {
+    if (IS_DEV_MODE) console.log("[socket] typing", { socketId: socket.id, room: socket.currentRoom });
     let room = socket.currentRoom;
 if (!room) {
   // fallback: join main so the message shows up instead of disappearing
@@ -16320,6 +16312,7 @@ if (!room) {
   });
 
   socket.on("stop typing", () => {
+    if (IS_DEV_MODE) console.log("[socket] stop typing", { socketId: socket.id, room: socket.currentRoom });
     const room = socket.currentRoom;
     if (!room) return;
 
@@ -16331,6 +16324,7 @@ if (!room) {
   });
 
   socket.on("dm join", (payload = {}) => {
+    if (IS_DEV_MODE) console.log("[socket] dm join", { socketId: socket.id, threadId: payload.threadId });
     const tid = Number(payload.threadId);
     if (!Number.isInteger(tid)) return;
 
@@ -16548,6 +16542,7 @@ if (!room) {
   });
 
   socket.on("dm message", async (payload = {}) => {
+    if (IS_DEV_MODE) console.log("[socket] dm message", { socketId: socket.id, threadId: payload.threadId });
     const { threadId, text, replyToId, attachment, tone } = payload || {};
     const tid = Number(threadId);
     if (!allowSocketEvent(socket, "dm_message", 12, 4000)) return;
@@ -17115,6 +17110,7 @@ if (!room) {
   });
 
   socket.on("chat message", async (payload = {}) => {
+    if (IS_DEV_MODE) console.log("[socket] chat message", { socketId: socket.id, room: payload.room, textLen: payload.text?.length });
     // ---- NEW: Validate input ----
     const validation = validate(ChatMessageSchema, {
       room: payload.room || socket.currentRoom || "main",
@@ -17660,6 +17656,7 @@ if (!room) {
   });
   
 socket.on("mod kick", async ({ username, reason = "", durationSeconds = 300, caseId = null, autoClear = false, capturedMessage = null } = {}, ack) => {
+  if (IS_DEV_MODE) console.log("[socket] mod kick", { socketId: socket.id, username, durationSeconds });
   const respond = (payload) => { if (typeof ack === "function") ack(payload); };
   if (!allowSocketEvent(socket, "mod_action", 5, 5000)) return respond({ ok: false, error: "Rate limited." });
   const room = socket.currentRoom;
@@ -18783,12 +18780,29 @@ socket.on("appeals:action", async ({ appealId, action, durationSeconds } = {}, a
 
   
   socket.on("refresh user list", () => {
+    if (IS_DEV_MODE) console.log("[socket] refresh user list", { socketId: socket.id });
     try {
       if (socket.currentRoom) emitUserList(socket.currentRoom);
     } catch {}
   });
 
-socket.on("disconnect", () => {
+socket.on("disconnect", (reason) => {
+    // Enhanced disconnect handler with comprehensive cleanup and logging
+    if (IS_DEV_MODE) console.log("[socket] disconnect", { socketId: socket.id, reason, username: socket.user?.username });
+    
+    try {
+      // Clean up session metadata
+      sessionMetaBySocketId.delete(socket.id);
+      const uid = socket.user?.id;
+      const set = sessionByUserId.get(uid);
+      if (set) {
+        set.delete(socket.id);
+        if (!set.size) sessionByUserId.delete(uid);
+      }
+    } catch (err) {
+      if (IS_DEV_MODE) console.warn("[socket] disconnect: session cleanup failed", err);
+    }
+
     // socket.user is attached after successful auth; guard for anonymous / early disconnects
     if (socket.user?.username) ONLINE_USERS.delete(socket.user.username);
     emitOnlineUsers();
@@ -18836,6 +18850,13 @@ socket.on("disconnect", () => {
       }
     } catch {}
   });
+
+  // === EMIT SERVER-READY AFTER ALL LISTENERS ARE REGISTERED ===
+  // This confirms to the client that the server is fully initialized and ready to handle events.
+  // All socket.on(...) listeners are now registered and will not miss any client events.
+  // Emitting this at the end (after all listener setup) ensures strict event registration order.
+  socket.emit("server-ready", { ok: true, socketId: socket.id });
+  if (IS_DEV_MODE) console.log("[socket] server-ready emitted", { socketId: socket.id, username: socket.user?.username });
 
 });
 

@@ -88,9 +88,9 @@
           withCredentials: true
         });
         
-        // Server-ready handler - clears false connection errors
-        window.socket.on('server-ready', () => {
-          console.log('[app.js] Server ready signal received');
+        // Server-ready handler - clears false connection errors and confirms all listeners registered
+        window.socket.on('server-ready', (data) => {
+          console.log('[app.js] Server ready signal received', { socketId: data?.socketId || window.socket.id });
           serverReady = true;
           failedAttempts = 0;
           hideConnectionError();
@@ -101,6 +101,18 @@
           failedAttempts = 0;
           hideConnectionError();
           resolve(window.socket);
+        });
+
+        window.socket.on('reconnect', (attemptNumber) => {
+          console.log('[app.js] Socket reconnected after', attemptNumber, 'attempts');
+          // Reset serverReady flag - will be set again when new server-ready signal arrives
+          // Note: socket.connected is the authoritative connection state. The serverReady flag
+          // is only used for initial connection error handling (to avoid showing false errors
+          // before the server has finished initialization). All socket operations should check
+          // socket.connected, not serverReady.
+          serverReady = false;
+          failedAttempts = 0;
+          hideConnectionError();
         });
 
         window.socket.on('connect_error', (error) => {
@@ -414,6 +426,35 @@
   setupMessageInputShortcuts();
 
   // ===== Utility Functions =====
+  
+  /**
+   * Check if socket is connected before performing socket operations
+   * Provides a safe guard for all socket-dependent features
+   * @returns {boolean} true if socket is connected, false otherwise
+   */
+  window.isSocketConnected = function() {
+    return window.socket && window.socket.connected;
+  };
+
+  /**
+   * Safely emit socket event with connection check
+   * @param {string} event - Event name
+   * @param {*} data - Event data
+   * @param {Function} ack - Optional acknowledgment callback
+   * @returns {boolean} true if emitted, false if socket not connected
+   */
+  window.safeSocketEmit = function(event, data, ack) {
+    if (!window.isSocketConnected()) {
+      console.warn('[app.js] Cannot emit', event, '- socket not connected');
+      return false;
+    }
+    if (typeof ack === 'function') {
+      window.socket.emit(event, data, ack);
+    } else {
+      window.socket.emit(event, data);
+    }
+    return true;
+  };
   
   /**
    * Unified method for handling checkbox events
