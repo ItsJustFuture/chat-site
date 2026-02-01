@@ -56,15 +56,17 @@
         console.log('[chat.js] Using global socket:', socket.id);
         setupSocketListeners();
         
-        // Handle reconnection - reattach listeners and reprocess queues
+        // Handle reconnection - verify socket state and reprocess queues
         socket.on('reconnect', () => {
-          console.log('[chat.js] ⚠️ Socket reconnected - resetting state...');
-          socketReady = false;
-          listenersAttached = false;
-          // Don't re-setup listeners as they persist across reconnection
-          // But mark as ready and process queues
-          socketReady = true;
-          processOutgoingQueue();
+          console.log('[chat.js] ⚠️ Socket reconnected - verifying state and processing queues...');
+          
+          // Only mark as ready and process queues if the socket reports as connected
+          if (socket && socket.connected) {
+            socketReady = true;
+            processOutgoingQueue();
+          } else {
+            console.warn('[chat.js] Socket reconnect event fired, but socket is not connected');
+          }
         });
       }
     } catch (error) {
