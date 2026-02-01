@@ -254,7 +254,7 @@
         updateUIBasedOnRole(userData.role);
         updateBottomPanel(userData);
       }
-    });
+    }, { once: true });
 
     // Handle chat messages - buffer them if renderer not ready
     socket.on('chat message', (data) => {
