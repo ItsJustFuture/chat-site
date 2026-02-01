@@ -186,41 +186,49 @@
 
     // DM toggle button
     const dmToggleBtn = document.getElementById('dmToggleBtn');
-    if (dmToggleBtn) {
+    const dmPanel = document.getElementById('dmPanel');
+    if (dmToggleBtn && dmPanel) {
       dmToggleBtn.addEventListener('click', () => {
         console.log('[chat.js] DM toggle clicked');
-        // TODO: Toggle DM panel
+        dmPanel.classList.toggle('open');
       });
       console.log('[chat.js] DM toggle button configured');
     }
 
-    // Group DM toggle button
+    // DM close button
+    const dmCloseBtn = document.getElementById('dmCloseBtn');
+    if (dmCloseBtn && dmPanel) {
+      dmCloseBtn.addEventListener('click', () => {
+        dmPanel.classList.remove('open');
+      });
+    }
+
+    // Group DM toggle button (opens same DM panel as DM button)
     const groupDmToggleBtn = document.getElementById('groupDmToggleBtn');
-    if (groupDmToggleBtn) {
+    if (groupDmToggleBtn && dmPanel) {
       groupDmToggleBtn.addEventListener('click', () => {
         console.log('[chat.js] Group DM toggle clicked');
-        // TODO: Toggle group DM panel
+        dmPanel.classList.toggle('open');
       });
       console.log('[chat.js] Group DM toggle button configured');
     }
 
     // Notifications button
     const notificationsBtn = document.getElementById('notificationsBtn');
-    if (notificationsBtn) {
+    const notificationsModal = document.getElementById('notificationsModal');
+    if (notificationsBtn && notificationsModal) {
       notificationsBtn.addEventListener('click', () => {
         console.log('[chat.js] Notifications button clicked');
-        const modal = document.getElementById('notificationsModal');
-        if (modal) modal.style.display = '';
+        notificationsModal.removeAttribute('hidden');
       });
       console.log('[chat.js] Notifications button configured');
     }
 
     // Close notifications
     const notificationsCloseBtn = document.getElementById('notificationsCloseBtn');
-    if (notificationsCloseBtn) {
+    if (notificationsCloseBtn && notificationsModal) {
       notificationsCloseBtn.addEventListener('click', () => {
-        const modal = document.getElementById('notificationsModal');
-        if (modal) modal.style.display = 'none';
+        notificationsModal.setAttribute('hidden', '');
       });
     }
 
@@ -231,14 +239,14 @@
     
     if (openChannelsBtn && channelsPane) {
       openChannelsBtn.addEventListener('click', () => {
-        channelsPane.classList.add('show');
+        channelsPane.classList.add('open');
         console.log('[chat.js] Channels panel opened');
       });
     }
     
     if (channelsCloseBtn && channelsPane) {
       channelsCloseBtn.addEventListener('click', () => {
-        channelsPane.classList.remove('show');
+        channelsPane.classList.remove('open');
         console.log('[chat.js] Channels panel closed');
       });
     }
@@ -257,11 +265,60 @@
 
     // Members toggle (mobile)
     const openMembersBtn = document.getElementById('openMembersBtn');
-    if (openMembersBtn) {
+    const membersPane = document.getElementById('membersPane');
+    if (openMembersBtn && membersPane) {
       openMembersBtn.addEventListener('click', () => {
         console.log('[chat.js] Members button clicked');
-        // TODO: Toggle members panel on mobile
+        membersPane.classList.toggle('open');
       });
+    }
+
+    // Chess button
+    const roomChessBtn = document.getElementById('roomChessBtn');
+    const chessModal = document.getElementById('chessModal');
+    if (roomChessBtn && chessModal) {
+      roomChessBtn.addEventListener('click', () => {
+        console.log('[chat.js] Chess button clicked');
+        chessModal.removeAttribute('hidden');
+      });
+      console.log('[chat.js] Chess button configured');
+    }
+
+    // Chess close button
+    const chessCloseBtn = document.getElementById('chessCloseBtn');
+    if (chessCloseBtn && chessModal) {
+      chessCloseBtn.addEventListener('click', () => {
+        chessModal.setAttribute('hidden', '');
+      });
+    }
+
+    // Media button (upload)
+    const mediaBtn = document.getElementById('mediaBtn');
+    const mediaMenu = document.getElementById('mediaMenu');
+    if (mediaBtn && mediaMenu) {
+      mediaBtn.addEventListener('click', () => {
+        console.log('[chat.js] Media button clicked');
+        const isHidden = mediaMenu.hasAttribute('hidden');
+        if (isHidden) {
+          mediaMenu.removeAttribute('hidden');
+        } else {
+          mediaMenu.setAttribute('hidden', '');
+        }
+      });
+      console.log('[chat.js] Media button configured');
+    }
+
+    // Manage rooms button
+    const manageRoomsBtn = document.getElementById('manageRoomsBtn');
+    if (manageRoomsBtn) {
+      manageRoomsBtn.addEventListener('click', () => {
+        console.log('[chat.js] Manage rooms button clicked');
+        // Open menu panel which contains room management options
+        if (menuPanel) {
+          menuPanel.classList.add('show');
+        }
+      });
+      console.log('[chat.js] Manage rooms button configured');
     }
 
     console.log('[chat.js] Event listeners attached successfully');
