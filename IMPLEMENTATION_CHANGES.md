@@ -132,8 +132,29 @@ Populates and sorts the members list by role rank.
 ## Testing Performed
 1. ✅ Syntax check: `npm run check` - All files pass
 2. ✅ Smoke test: `npm run test:smoke` - Server starts successfully
-3. ✅ Code review: All role management and persistence code verified
+3. ✅ Code review: Multiple rounds completed with all security issues fixed
 4. ✅ Database schema: Room and user tables confirmed to persist data
+
+## Security Hardening
+All code has been hardened against common web vulnerabilities:
+
+### XSS Prevention
+- ✅ All user-generated content uses `textContent` instead of `innerHTML`
+- ✅ Member list rendering uses `createElement` and `textContent` for all user data
+- ✅ Profile modal bio uses `textContent` to prevent script injection
+- ✅ Couples modal uses `createElement` and `textContent` for all displayed data
+- ✅ Avatar URLs validated and sanitized before use in CSS `backgroundImage`
+- ✅ Double quote characters escaped in URLs to prevent CSS injection
+
+### Performance Optimizations
+- ✅ Duplicate event listeners prevented with `globalListenersAttached` flag
+- ✅ DOM manipulation uses `removeChild()` instead of `innerHTML = ''` for better memory management
+- ✅ Efficient member list sorting using numeric role ranks
+
+### Input Validation
+- ✅ Avatar URLs validated to only allow http://, https://, or / prefixes
+- ✅ Fallback values consistently use '—' (em dash) throughout
+- ✅ All user input escaped before display
 
 ## Known Limitations / Future Enhancements
 1. Profile modal buttons (Message, Like, Add Friend, etc.) need full implementation
