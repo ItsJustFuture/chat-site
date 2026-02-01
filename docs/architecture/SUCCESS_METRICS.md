@@ -142,7 +142,7 @@ const successRate = (metrics.confirmed / metrics.sent) * 100;
 **Alert Threshold**: If success rate < 99%, trigger alert
 
 **Phase Target**:
-- Phase 3 (Week 6): 99.9% delivery rate
+- Phase 3 (Week 7): 99.9% delivery rate
 
 ---
 
@@ -182,7 +182,7 @@ const roomSuccessRate = (roomMetrics.switchSuccess / roomMetrics.switchAttempts)
 ```
 
 **Phase Target**:
-- Phase 3 (Week 6): 100% room loading success
+- Phase 3 (Week 7): 100% room loading success
 
 ---
 
@@ -237,7 +237,7 @@ describe('Admin Tools', () => {
 ```
 
 **Phase Target**:
-- Phase 4 (Week 8): 100% admin tools functional
+- Phase 4 (Week 9): 100% admin tools functional
 
 ---
 
@@ -358,7 +358,7 @@ class APIClient {
 **Monitoring**: Track with APM tool (e.g., Sentry Performance)
 
 **Phase Target**:
-- Phase 5 (Week 10): Meet all API response time targets
+- Phase 5 (Week 11): Meet all API response time targets
 
 ---
 
@@ -444,7 +444,7 @@ const connectionSuccessRate = (socketMetrics.connectSuccess / socketMetrics.conn
 ```
 
 **Phase Target**:
-- Phase 3 (Week 6): Meet all socket reliability targets
+- Phase 3 (Week 7): Meet all socket reliability targets
 
 ---
 
@@ -504,7 +504,7 @@ npm test -- --coverage --coverageThreshold='{"global":{"lines":80}}'
 
 **Phase Target**:
 - Phase 1 (Week 2): Core modules >90% coverage
-- Phase 5 (Week 10): Overall >80% coverage
+- Phase 5 (Week 11): Overall >80% coverage
 
 ---
 
@@ -532,7 +532,7 @@ npx complexity-report --format json src/
 ```
 
 **Phase Target**:
-- Phase 5 (Week 10): All new code meets targets
+- Phase 5 (Week 11): All new code meets targets
 - Long-term: Refactor legacy code to meet targets
 
 ---
@@ -564,8 +564,8 @@ fi
 ```
 
 **Phase Target**:
-- Phase 4 (Week 8): Zero TODOs in new code
-- Phase 5 (Week 10): Zero TODOs overall
+- Phase 4 (Week 9): Zero TODOs in new code
+- Phase 5 (Week 11): Zero TODOs overall
 
 ---
 
@@ -592,7 +592,7 @@ npm run lint -- --max-warnings 0
 
 **Phase Target**:
 - Phase 1 (Week 1): Zero warnings in new code
-- Phase 5 (Week 10): Zero warnings overall
+- Phase 5 (Week 11): Zero warnings overall
 
 ---
 
@@ -616,7 +616,7 @@ jscpd --threshold 5 src/
 ```
 
 **Phase Target**:
-- Phase 5 (Week 10): <5% duplication
+- Phase 5 (Week 11): <5% duplication
 
 ---
 
@@ -653,7 +653,7 @@ const errorRate = (sessionsWithErrors / totalSessions) * 100;
 **Alert Threshold**: If error rate > 5%, trigger alert
 
 **Phase Target**:
-- Phase 5 (Week 10): <2% error rate
+- Phase 5 (Week 11): <2% error rate
 
 ---
 
@@ -689,8 +689,8 @@ const profileUsage = (usersWhoOpenedProfile / totalActiveUsers) * 100;
 ```
 
 **Phase Target**:
-- Phase 4 (Week 8): Track baseline for new features
-- Phase 5 (Week 10): Meet usage targets
+- Phase 4 (Week 9): Track baseline for new features
+- Phase 5 (Week 11): Meet usage targets
 
 ---
 
@@ -724,7 +724,7 @@ const profileUsage = (usersWhoOpenedProfile / totalActiveUsers) * 100;
 5. What needs more work?
 
 **Phase Target**:
-- Phase 5 (Week 10): Survey users and establish new baseline
+- Phase 5 (Week 11): Survey users and establish new baseline
 
 ---
 
@@ -754,7 +754,7 @@ window.addEventListener('beforeunload', () => {
 ```
 
 **Phase Target**:
-- Phase 5 (Week 10): Measure impact on session metrics
+- Phase 5 (Week 11): Measure impact on session metrics
 
 ---
 
@@ -791,7 +791,7 @@ npm run test:a11y
 
 **Phase Target**:
 - Phase 2 (Week 4): Modals fully accessible
-- Phase 5 (Week 10): Overall score >90
+- Phase 5 (Week 11): Overall score >90
 
 ---
 
@@ -879,17 +879,17 @@ npm run test:a11y
 - ✅ 100% modal reliability
 - ✅ Accessibility score >85
 
-### Phase 3 (Weeks 5-6): Chat & Rooms
+### Phase 3 (Weeks 5-7): Chat & Rooms
 - ✅ 99.9% message delivery
 - ✅ 100% room loading success
 - ✅ 99%+ socket reliability
 
-### Phase 4 (Weeks 7-8): Admin & Social
+### Phase 4 (Weeks 8-9): Admin & Social
 - ✅ 100% admin tools functional
 - ✅ Friends system working
 - ✅ Members list reliable
 
-### Phase 5 (Weeks 9-10): Polish & Testing
+### Phase 5 (Weeks 10-11): Polish & Testing
 - ✅ Performance targets met
 - ✅ >80% test coverage
 - ✅ <2% error rate

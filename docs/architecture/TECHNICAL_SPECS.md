@@ -172,17 +172,20 @@ class EventBus {
     const exactHandlers = this.events.get(eventName) || [];
     
     // Get wildcard match handlers (e.g., 'user:*' matches 'user:login')
-    const wildcardHandlers = [];
+    const wildcardMatches = [];
     for (const [pattern, handlers] of this.events.entries()) {
       if (pattern.includes('*')) {
         const regex = new RegExp('^' + pattern.replace('*', '.*') + '$');
         if (regex.test(eventName)) {
-          wildcardHandlers.push(...handlers);
+          wildcardMatches.push({ pattern, handlers });
         }
       }
     }
     
-    const allHandlers = [...exactHandlers, ...wildcardHandlers];
+    const allHandlers = [...exactHandlers];
+    for (const { handlers } of wildcardMatches) {
+      allHandlers.push(...handlers);
+    }
     
     if (allHandlers.length === 0) {
       if (this.debug) {
@@ -191,10 +194,11 @@ class EventBus {
       return;
     }
     
-    // Execute handlers
+    // Execute handlers and track which ones to remove
     const toRemove = [];
     
-    for (const subscription of allHandlers) {
+    // Process exact handlers
+    for (const subscription of exactHandlers) {
       try {
         const { handler, context, once } = subscription;
         
@@ -205,9 +209,9 @@ class EventBus {
           handler(data);
         }
         
-        // Mark for removal if once
+        // Mark for removal if once (store with exact event name)
         if (once) {
-          toRemove.push({ eventName, handler });
+          toRemove.push({ pattern: eventName, handler });
         }
       } catch (error) {
         console.error(`[EventBus] Error in handler for ${eventName}:`, error);
@@ -215,9 +219,33 @@ class EventBus {
       }
     }
     
-    // Remove 'once' handlers
-    for (const { eventName, handler } of toRemove) {
-      this.off(eventName, handler);
+    // Process wildcard handlers
+    for (const { pattern, handlers } of wildcardMatches) {
+      for (const subscription of handlers) {
+        try {
+          const { handler, context, once } = subscription;
+          
+          // Call handler with context binding
+          if (context) {
+            handler.call(context, data);
+          } else {
+            handler(data);
+          }
+          
+          // Mark for removal if once (store with wildcard pattern)
+          if (once) {
+            toRemove.push({ pattern, handler });
+          }
+        } catch (error) {
+          console.error(`[EventBus] Error in handler for ${eventName}:`, error);
+          // Continue executing other handlers
+        }
+      }
+    }
+    
+    // Remove 'once' handlers using the correct pattern
+    for (const { pattern, handler } of toRemove) {
+      this.off(pattern, handler);
     }
   }
   
@@ -642,6 +670,12 @@ class ModalManager {
     modal.hidden = true;
     modal.setAttribute('aria-hidden', 'true');
     
+    // Remove event listeners to prevent memory leaks
+    if (modal._focusTrapHandler) {
+      modal.removeEventListener('keydown', modal._focusTrapHandler);
+      delete modal._focusTrapHandler;
+    }
+    
     // Remove from stack
     const index = this.stack.indexOf(modalId);
     if (index > -1) {
@@ -721,8 +755,9 @@ class ModalManager {
    */
   setupBackdropClick(modal, modalId) {
     const backdropHandler = (e) => {
-      if (e.target === modal || e.target.classList.contains('modalCard')) {
-        return; // Click on modal content, not backdrop
+      // Only close when clicking directly on the backdrop (modal container), not its content
+      if (e.target !== modal) {
+        return;
       }
       this.close(modalId);
     };
@@ -773,6 +808,9 @@ class ModalManager {
     };
     
     modal.addEventListener('keydown', trapHandler);
+    
+    // Store handler reference for cleanup
+    modal._focusTrapHandler = trapHandler;
   }
 }
 
@@ -1085,6 +1123,11 @@ class StateManager {
   
   /**
    * Set value at path
+   * 
+   * Note: This implementation intentionally mutates the state object for performance.
+   * The subscription system ensures reactive updates, and history tracking provides
+   * snapshots for undo/redo. For true immutability, consider using Immer or similar.
+   * 
    * @param {string} path - Dot-separated path
    * @param {any} value - New value
    */
@@ -1272,12 +1315,12 @@ class StateManager {
     
     // Add snapshot
     this.history.push(JSON.parse(JSON.stringify(this.state)));
+    this.historyIndex++;
     
-    // Limit history size
+    // Limit history size and adjust index
     if (this.history.length > this.config.maxHistory) {
       this.history.shift();
-    } else {
-      this.historyIndex++;
+      this.historyIndex--;
     }
   }
   
@@ -1781,19 +1824,33 @@ class SocketWrapper {
     
     console.log(`[SocketWrapper] Processing ${this.messageQueue.length} queued messages...`);
     
-    while (this.messageQueue.length > 0 && this.connected) {
-      const message = this.messageQueue.shift();
+    while (this.messageQueue.length > 0) {
+      if (!this.connected) {
+        console.log('[SocketWrapper] Stopping queue processing: socket not connected');
+        break;
+      }
+      
+      // Peek at the next message without removing it so we don't lose it
+      const message = this.messageQueue[0];
       try {
         await this.emit(message.eventName, message.data, {
           ...message.options,
           queue: false // Don't re-queue
         });
+        // Only remove the message after successful send
+        this.messageQueue.shift();
       } catch (error) {
         console.error('[SocketWrapper] Error processing queued message:', error);
+        // Leave the message in the queue for retry and stop processing for now
+        break;
       }
     }
     
-    console.log('[SocketWrapper] Queue processed');
+    if (this.messageQueue.length === 0) {
+      console.log('[SocketWrapper] Queue processed');
+    } else {
+      console.log(`[SocketWrapper] Queue processing paused with ${this.messageQueue.length} messages remaining`);
+    }
   }
   
   /**

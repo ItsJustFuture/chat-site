@@ -717,43 +717,81 @@ Not applicable (browser-specific issues)
    }
    ```
 
-2. **Database-Backed Flags**:
-   ```javascript
-   // Flags stored in database
-   SELECT * FROM feature_flags WHERE enabled = true;
+2. **Database-Backed Flags (Source of Truth)**:
+   ```sql
+   -- Primary source of truth for feature flags
+   CREATE TABLE feature_flags (
+     name TEXT PRIMARY KEY,
+     enabled BOOLEAN NOT NULL,
+     description TEXT,
+     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+   );
+
+   -- Example: migration flag used in this document
+   INSERT INTO feature_flags (name, enabled, description)
+   VALUES ('USE_NEW_CHAT', false, 'Gate for new chat experience');
    ```
 
-3. **Admin UI for Flags**:
-   - Easy toggle on/off
-   - See current state
-   - User-specific overrides
+3. **Environment Variable Overrides (Emergency Only)**:
+   - Optional overrides for rapid rollback or canary testing
+   - `FEATURE_FLAG_USE_NEW_CHAT=true` temporarily forces the flag on
+   - `FEATURE_FLAG_USE_NEW_CHAT=false` temporarily forces the flag off
+   - Evaluated at process start and take precedence over database values
 
-4. **Flag Validation**:
+4. **Flag Evaluation API (Pseudocode)**:
    ```javascript
-   // Validate flags on startup
+   // Centralised feature flag helper used across the app
+   const FeatureFlags = {
+     cache: new Map(),
+
+     async refreshFromDatabase(db) {
+       const rows = await db.query('SELECT name, enabled FROM feature_flags');
+       this.cache.clear();
+       for (const row of rows) {
+         this.cache.set(row.name, row.enabled);
+       }
+     },
+
+     isEnabled(name) {
+       const envName = `FEATURE_FLAG_${name}`;
+       if (process.env[envName] === 'true') return true;
+       if (process.env[envName] === 'false') return false;
+       return this.cache.get(name) === true;
+     }
+   };
+   ```
+
+5. **Admin UI for Flags**:
+   - Single page listing all rows from `feature_flags`
+   - Toggle on/off persists to the database and invalidates the in-memory cache
+   - Audit log entry written on every change (who, when, old/new value)
+
+6. **Flag Validation**:
+   ```javascript
+   // Validate flags on startup or after refresh
    function validateFlags() {
-     for (const flag in FeatureFlags.flags) {
-       if (typeof FeatureFlags.flags[flag] !== 'boolean') {
-         throw new Error(`Invalid flag: ${flag}`);
+     for (const [flag, value] of FeatureFlags.cache.entries()) {
+       if (typeof value !== 'boolean') {
+         throw new Error(`Invalid flag value for: ${flag}`);
        }
      }
    }
    ```
 
-5. **Flag Documentation**:
-   - Document all flags
+7. **Flag Documentation**:
+   - All flags (including `USE_NEW_CHAT` and other migration gates) are documented in `TECHNICAL_SPECS.md`
    - Document dependencies (A requires B)
-   - Document when to remove
+   - Document when to remove and a clean-up checklist
 
 **Rollback Procedure**:
-1. Toggle flag off
-2. Restart server (or reload flags)
+1. Toggle the corresponding flag off via the Admin UI (preferred) or via an environment override
+2. Ensure the cache is refreshed (or restart the server, depending on deployment)
 
 **Success Criteria**:
-- Flags work consistently
-- Easy to toggle
-- No flag conflicts
-- Clear flag state
+- Flags work consistently across all services
+- Easy to toggle via a single, well-defined mechanism
+- No flag conflicts; environment overrides are rare and audited
+- Clear flag state visible in the Admin UI and logs
 
 ---
 

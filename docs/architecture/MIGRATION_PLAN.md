@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-This document outlines a **10-week phased migration plan** to transition from the current monolithic architecture to the new event-driven modular system. The migration is designed to be **incremental**, **safe**, and **reversible**, with feature flags enabling gradual rollout.
+This document outlines an **11-week phased migration plan** to transition from the current monolithic architecture to the new event-driven modular system. The migration is designed to be **incremental**, **safe**, and **reversible**, with feature flags enabling gradual rollout.
 
 ### Timeline Overview
 
@@ -14,9 +14,11 @@ This document outlines a **10-week phased migration plan** to transition from th
 |-------|----------|-------|------------|
 | Phase 1 | Weeks 1-2 | Foundation - Core Modules | 🟢 Low |
 | Phase 2 | Weeks 3-4 | Critical UI Systems | 🟡 Medium |
-| Phase 3 | Weeks 5-6 | Chat & Rooms | 🟡 Medium |
-| Phase 4 | Weeks 7-8 | Admin & Social | 🟢 Low |
-| Phase 5 | Weeks 9-10 | Polish & Testing | 🟢 Low |
+| Phase 3 | Weeks 5-7 | Chat & Rooms (Extended) | 🔴 High |
+| Phase 4 | Weeks 8-9 | Admin & Social | 🟢 Low |
+| Phase 5 | Weeks 10-11 | Polish & Testing | 🟢 Low |
+
+**Note**: Phase 3 has been extended from 2 weeks to 3 weeks due to the critical nature of socket reliability and message delivery, which are rated as "Critical" severity risks in the Risk Assessment.
 
 ---
 
@@ -224,7 +226,7 @@ const FeatureFlags = {
 
 ---
 
-## Phase 3: Chat & Rooms (Weeks 5-6)
+## Phase 3: Chat & Rooms (Weeks 5-7)
 
 ### Objectives
 - Refactor message sending with reliability
@@ -233,9 +235,11 @@ const FeatureFlags = {
 - Add message queuing UI
 - Enable SocketWrapper
 
+**Note**: This phase has been extended from 2 weeks to 3 weeks due to the critical nature of chat functionality and the complexity of socket reliability refactoring. Given that the Risk Assessment rates socket stability and message loss as "Critical" severity risks, the additional time allows for thorough testing and gradual rollout.
+
 ### Deliverables
 
-#### Week 5: Socket Reliability
+#### Week 5: Socket Reliability & Foundation
 
 **Day 1-2: SocketWrapper Integration**
 ```
@@ -246,14 +250,30 @@ const FeatureFlags = {
 ✓ Test message queuing
 ```
 
-**Day 3-4: Chat Module Refactor**
+**Day 3-5: Initial Testing & Stabilization**
+```
+✓ Comprehensive connection stability tests
+✓ Test with poor network conditions
+✓ Load testing with 100+ concurrent users
+✓ Fix any critical issues discovered
+✓ Document edge cases
+```
+
+#### Week 6: Chat Module Refactor
+
+**Day 1-2: Chat Module Structure**
 ```
 ✓ Create chat/message-handler.js module
 ✓ Create chat/message-renderer.js module
 ✓ Create chat/chat-state.js module
+```
+
+**Day 3-4: Message Flow Implementation**
+```
 ✓ Implement message send via EventBus
 ✓ Implement message receive via EventBus
 ✓ Add retry logic for failed sends
+✓ Add optimistic UI updates
 ```
 
 **Day 5: Error Handling**
@@ -265,7 +285,7 @@ const FeatureFlags = {
 ✓ Test offline behavior
 ```
 
-#### Week 6: Room System
+#### Week 7: Room System & Integration Testing
 
 **Day 1-2: Room Module**
 ```
@@ -285,23 +305,26 @@ const FeatureFlags = {
 ✓ Test room switching
 ```
 
-**Day 5: Testing & Polish**
+**Day 5: Comprehensive Testing & Polish**
 ```
 ✓ E2E tests for message sending
 ✓ E2E tests for room switching
 ✓ Performance testing (message rendering)
 ✓ Test with slow/unreliable connection
 ✓ Test with 100+ messages in room
+✓ Gradual rollout to 10% → 25% → 50% of users
+✓ Monitor metrics and gather feedback
 ```
 
 ### Success Criteria
-- ✅ Messages send reliably (99%+ success rate)
+- ✅ Messages send reliably (99.9%+ success rate)
 - ✅ Messages queue when disconnected
 - ✅ Automatic reconnection works
 - ✅ Room switching works 100% of time
 - ✅ Members list populates correctly
 - ✅ No message loss
 - ✅ Clear connection status feedback
+- ✅ Stable performance under load
 
 ### Testing Requirements
 - Connection stability tests
@@ -310,6 +333,8 @@ const FeatureFlags = {
 - Room switch tests
 - Load testing (100+ concurrent users)
 - Network simulation (slow, dropped connections)
+- Stress testing with rapid room switches
+- Extended duration testing (24+ hours)
 
 ### Feature Flags
 ```javascript
@@ -338,7 +363,7 @@ const FeatureFlags = {
 
 ---
 
-## Phase 4: Admin & Social (Weeks 7-8)
+## Phase 4: Admin & Social (Weeks 8-9)
 
 ### Objectives
 - Build admin panels (appeals, cases, referrals)
@@ -349,7 +374,7 @@ const FeatureFlags = {
 
 ### Deliverables
 
-#### Week 7: Admin System
+#### Week 8: Admin System
 
 **Day 1-2: Admin Module**
 ```
@@ -378,7 +403,7 @@ const FeatureFlags = {
 ✓ Security review
 ```
 
-#### Week 8: Social Features
+#### Week 9: Social Features
 
 **Day 1-2: Members System**
 ```
@@ -450,7 +475,7 @@ const FeatureFlags = {
 
 ---
 
-## Phase 5: Polish & Testing (Weeks 9-10)
+## Phase 5: Polish & Testing (Weeks 10-11)
 
 ### Objectives
 - Performance optimization
@@ -461,7 +486,7 @@ const FeatureFlags = {
 
 ### Deliverables
 
-#### Week 9: Performance & Optimization
+#### Week 10: Performance & Optimization
 
 **Day 1-2: Performance Audit**
 ```
@@ -490,7 +515,7 @@ const FeatureFlags = {
 ✓ Network performance testing
 ```
 
-#### Week 10: Final Testing & Launch Prep
+#### Week 11: Final Testing & Launch Prep
 
 **Day 1-2: Comprehensive Testing**
 ```

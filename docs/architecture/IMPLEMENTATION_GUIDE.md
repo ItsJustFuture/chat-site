@@ -560,8 +560,8 @@ Implement an EventBus pattern for publish-subscribe communication.
 **Minimum Coverage**:
 - Core modules: 90%
 - Feature modules: 80%
-- Utility modules: 85%
-- Overall: 80%
+- Utility modules: 80%
+- Overall: >80%
 
 **What to Test**:
 - All public methods
@@ -1015,7 +1015,9 @@ jobs:
         run: npm run test:e2e
       
       - name: Upload coverage
-        uses: codecov/codecov-action@v2
+        uses: codecov/codecov-action@e28ff129e5465c2c0dcc6f003fc735cb6ae0c673  # v4.5.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 ```
 
 ### 8.2 Status Checks
