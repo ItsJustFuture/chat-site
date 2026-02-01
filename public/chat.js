@@ -306,8 +306,9 @@
       }
     }
 
-    // Show modal
-    modal.removeAttribute('hidden');
+    // Show modal using CSS modal-visible mechanism
+    modal.style.display = 'block';
+    modal.classList.add('modal-visible');
     console.log('[chat.js] Profile modal opened with data:', profileData);
   }
 
