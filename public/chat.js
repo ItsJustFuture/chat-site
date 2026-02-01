@@ -492,6 +492,9 @@
       retryBtn.type = 'button';
       retryBtn.textContent = 'Retry';
       retryBtn.addEventListener('click', () => {
+        // Prevent multiple concurrent retries by disabling the button
+        retryBtn.disabled = true;
+        retryBtn.textContent = 'Retrying...';
         loadAndRenderRoomList();
       });
       
@@ -509,7 +512,7 @@
     // Clear existing content
     chanList.innerHTML = '';
 
-    const { masters = [], categories = [], rooms = [], userCollapse = {} } = data;
+    const { masters = [], categories = [], rooms = [] } = data;
 
     // Group categories by master
     const categoriesByMaster = new Map();
@@ -582,8 +585,8 @@
             if (socket && socket.connected) {
               console.log('[chat.js] Switching to room:', room.name);
               socket.emit('join room', { room: room.name, status: 'Online' });
-              currentRoom = room.name;
               window.currentRoom = room.name;
+              currentRoom = window.currentRoom;
               
               // Update active state
               document.querySelectorAll('.pill[data-room-name]').forEach(btn => btn.classList.remove('active'));
@@ -1231,18 +1234,15 @@
     
     const tones = ['Friendly', 'Professional', 'Casual', 'Humorous', 'Serious'];
     
-    // Global click handler for closing tone pickers (attach only once)
-    if (!globalListenersAttached) {
-      document.addEventListener('click', (e) => {
-        // Close any open tone pickers when clicking outside
-        document.querySelectorAll('.tonePicker.is-open').forEach(picker => {
-          if (!picker.contains(e.target)) {
-            picker.classList.remove('is-open');
-          }
-        });
+    // Global click handler for closing tone pickers
+    document.addEventListener('click', (e) => {
+      // Close any open tone pickers when clicking outside
+      document.querySelectorAll('.tonePicker.is-open').forEach(picker => {
+        if (!picker.contains(e.target)) {
+          picker.classList.remove('is-open');
+        }
       });
-      // Note: globalListenersAttached is set to true by other event listeners in attachEventListeners
-    }
+    });
     
     // Function to create tone buttons with proper structure
     function initializeTonePicker(pickerElement) {
@@ -1340,6 +1340,14 @@
     if (profileTabs) {
       const tabButtons = profileTabs.querySelectorAll('.tab[data-tab]');
       
+      // Query tab content elements once during initialization
+      const tabContents = {
+        'profile': document.getElementById('viewProfile'),
+        'timeline': document.getElementById('viewTimeline'),
+        'customize': document.getElementById('viewCustomize'),
+        'actions': document.getElementById('viewActions')
+      };
+      
       tabButtons.forEach(tabBtn => {
         tabBtn.addEventListener('click', () => {
           const targetTab = tabBtn.getAttribute('data-tab');
@@ -1350,14 +1358,7 @@
           // Add active class to clicked tab
           tabBtn.classList.add('active');
           
-          // Hide all tab content sections
-          const tabContents = {
-            'profile': document.getElementById('viewProfile'),
-            'timeline': document.getElementById('viewTimeline'),
-            'customize': document.getElementById('viewCustomize'),
-            'actions': document.getElementById('viewActions')
-          };
-          
+          // Show/hide tab content sections
           Object.keys(tabContents).forEach(key => {
             const content = tabContents[key];
             if (content) {
