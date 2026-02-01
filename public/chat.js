@@ -169,7 +169,11 @@
     if (meRole) meRole.textContent = userData.role || 'User';
     
     if (meAvatar && userData.avatar) {
-      meAvatar.style.backgroundImage = `url(${userData.avatar})`;
+      // Validate avatar URL to prevent CSS injection
+      const avatarUrl = String(userData.avatar).trim();
+      if (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://') || avatarUrl.startsWith('/')) {
+        meAvatar.style.backgroundImage = `url("${avatarUrl.replace(/"/g, '%22')}")`;
+      }
     } else if (meAvatar) {
       // Use default avatar or initials
       const initials = (userData.username || '?').charAt(0).toUpperCase();
@@ -184,8 +188,10 @@
     const memberList = document.getElementById('memberList');
     if (!memberList) return;
 
-    // Clear existing list
-    memberList.innerHTML = '';
+    // Clear existing list efficiently
+    while (memberList.firstChild) {
+      memberList.removeChild(memberList.firstChild);
+    }
 
     // Sort users by role rank (highest first)
     const users = data.users || [];
@@ -278,7 +284,11 @@
     // Show avatar if exists
     const profileSheetAvatar = document.getElementById('profileSheetAvatar');
     if (profileSheetAvatar && profileData.avatar) {
-      profileSheetAvatar.style.backgroundImage = `url(${profileData.avatar})`;
+      // Validate avatar URL to prevent CSS injection
+      const avatarUrl = String(profileData.avatar).trim();
+      if (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://') || avatarUrl.startsWith('/')) {
+        profileSheetAvatar.style.backgroundImage = `url("${avatarUrl.replace(/"/g, '%22')}")`;
+      }
     }
 
     // Show modal
@@ -293,8 +303,10 @@
     const modalBody = document.getElementById('couplesModalBody');
     if (!modalBody) return;
 
-    // Clear existing content
-    modalBody.innerHTML = '';
+    // Clear existing content efficiently
+    while (modalBody.firstChild) {
+      modalBody.removeChild(modalBody.firstChild);
+    }
 
     // Display couples data
     if (couplesData.active && couplesData.active.length > 0) {
