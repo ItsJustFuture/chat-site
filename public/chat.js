@@ -14,6 +14,12 @@
   let currentUser = null;
   let isInitialized = false;
   let globalListenersAttached = false; // Track global listeners to prevent duplicates
+  
+  // ===== Action and Message Queues =====
+  const outgoingMessageQueue = [];
+  const incomingMessageBuffer = [];
+  let listenersAttached = false;
+  let socketReady = false;
 
   // ===== Wait for app:ready before initializing =====
   async function waitAndInit() {
@@ -56,6 +62,42 @@
   }
 
   // ===== Message Rendering Functions =====
+  function flushIncomingMessageBuffer() {
+    if (incomingMessageBuffer.length === 0) return;
+    
+    console.log('[chat.js] ⚠️ Flushing', incomingMessageBuffer.length, 'buffered messages...');
+    
+    while (incomingMessageBuffer.length > 0) {
+      const msg = incomingMessageBuffer.shift();
+      if (msg.type === 'chat') {
+        renderChatMessage(msg.data);
+      } else if (msg.type === 'system') {
+        renderSystemMessage(msg.data);
+      }
+    }
+    
+    console.log('[chat.js] ✓ Message buffer flushed');
+  }
+  
+  function processOutgoingQueue() {
+    if (outgoingMessageQueue.length === 0) return;
+    
+    if (!socket || !socket.connected) {
+      console.warn('[chat.js] ⚠️ Cannot process outgoing queue: socket not connected');
+      return;
+    }
+    
+    console.log('[chat.js] ⚠️ Processing', outgoingMessageQueue.length, 'queued outgoing messages...');
+    
+    while (outgoingMessageQueue.length > 0) {
+      const msg = outgoingMessageQueue.shift();
+      console.log('[chat.js] Sending queued message:', msg.text.substring(0, 50));
+      socket.emit('chat message', msg);
+    }
+    
+    console.log('[chat.js] ✓ Outgoing message queue processed');
+  }
+  
   function renderChatMessage(data) {
     const msgsContainer = document.getElementById('msgs');
     if (!msgsContainer) {
@@ -152,21 +194,20 @@
       return;
     }
 
+    if (listenersAttached) {
+      console.log('[chat.js] Socket listeners already attached, skipping duplicate setup');
+      return;
+    }
+
     console.log('[chat.js] Setting up socket event listeners...');
-
-    // Send client hello with browser info
-    socket.emit('client:hello', {
-      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      locale: navigator.language,
-      platform: navigator.platform
-    });
-
-    // Auto-join main room
-    socket.emit('join room', { room: currentRoom, status: 'Online' });
+    
+    // Mark listeners as being attached FIRST to prevent race conditions
+    listenersAttached = true;
 
     // Handle disconnect
     socket.on('disconnect', () => {
       console.log('[chat.js] Socket disconnected');
+      socketReady = false;
     });
 
     socket.on('error', (error) => {
@@ -202,16 +243,26 @@
       }
     });
 
-    // Handle chat messages
+    // Handle chat messages - buffer them if renderer not ready
     socket.on('chat message', (data) => {
       console.log('[chat.js] Received message:', data);
-      renderChatMessage(data);
+      if (!isInitialized) {
+        console.warn('[chat.js] ⚠️ Message received before UI initialized, buffering...');
+        incomingMessageBuffer.push({ type: 'chat', data });
+      } else {
+        renderChatMessage(data);
+      }
     });
 
     // Handle system messages
     socket.on('system', (data) => {
       console.log('[chat.js] System message:', data);
-      renderSystemMessage(data);
+      if (!isInitialized) {
+        console.warn('[chat.js] ⚠️ System message received before UI initialized, buffering...');
+        incomingMessageBuffer.push({ type: 'system', data });
+      } else {
+        renderSystemMessage(data);
+      }
     });
 
     // Handle room list updates
@@ -226,10 +277,28 @@
       updateMembersList(data);
     });
 
-    console.log('[chat.js] Socket listeners configured ✓');
+    console.log('[chat.js] ✓ Socket listeners attached and verified');
+
+    // Now that listeners are attached, send client hello and join room
+    socket.emit('client:hello', {
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      locale: navigator.language,
+      platform: navigator.platform
+    });
+    console.log('[chat.js] ✓ client:hello sent');
+
+    // Auto-join main room
+    socket.emit('join room', { room: currentRoom, status: 'Online' });
+    console.log('[chat.js] ✓ Joined room:', currentRoom);
+    
+    // Mark socket as ready
+    socketReady = true;
 
     // Now attach UI event listeners
     attachEventListeners();
+    
+    // Process any queued outgoing messages
+    processOutgoingQueue();
   }
 
   // ===== UI Update Functions =====
@@ -478,17 +547,34 @@
         const text = messageInput.value.trim();
         if (!text) return;
 
+        const messagePayload = {
+          room: currentRoom,
+          text: text
+        };
+
         // Check socket connection before emitting
         if (!socket || !socket.connected) {
-          console.warn('[chat.js] Cannot send message: socket not connected');
+          console.warn('[chat.js] ⚠️ Socket not connected - queuing message for later delivery');
+          outgoingMessageQueue.push(messagePayload);
+          
+          // Show user feedback
+          const msgsContainer = document.getElementById('msgs');
+          if (msgsContainer) {
+            const pendingDiv = document.createElement('div');
+            pendingDiv.className = 'sysMsg';
+            pendingDiv.textContent = '⏳ Message queued (connecting...)';
+            pendingDiv.style.opacity = '0.6';
+            msgsContainer.appendChild(pendingDiv);
+            msgsContainer.scrollTop = msgsContainer.scrollHeight;
+          }
+          
+          // Clear input
+          messageInput.value = '';
           return;
         }
 
-        console.log('[chat.js] Sending message:', text);
-        socket.emit('chat message', {
-          room: currentRoom,
-          text: text
-        });
+        console.log('[chat.js] Sending message:', text.substring(0, 50));
+        socket.emit('chat message', messagePayload);
 
         messageInput.value = '';
       };
@@ -498,7 +584,7 @@
       // Note: app.js already handles Enter key for message sending
       // We don't need to duplicate that functionality here
 
-      console.log('[chat.js] Message sending configured');
+      console.log('[chat.js] Message sending configured with queueing support');
     } else {
       console.warn('[chat.js] Send button or message input not found');
     }
@@ -527,6 +613,23 @@
     if (profileBtn && profileModal) {
       profileBtn.addEventListener('click', async () => {
         console.log('[chat.js] Profile button clicked - opening own profile');
+        
+        // Verify dependencies before opening modal
+        if (!currentUser) {
+          console.error('[chat.js] ⚠️ Cannot open profile: currentUser not available');
+          // Show error feedback to user
+          const msgsContainer = document.getElementById('msgs');
+          if (msgsContainer) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'sysMsg';
+            errorDiv.textContent = '⚠️ Profile not available yet. Please wait...';
+            errorDiv.style.color = '#ff6b6b';
+            msgsContainer.appendChild(errorDiv);
+            msgsContainer.scrollTop = msgsContainer.scrollHeight;
+          }
+          return;
+        }
+        
         try {
           // Fetch own profile data
           const response = await fetch('/api/profile', { credentials: 'include' });
@@ -572,7 +675,7 @@
           }
         }
       });
-      console.log('[chat.js] Profile button configured');
+      console.log('[chat.js] Profile button configured with dependency checks');
     }
 
     // Couples button - open couples modal
@@ -581,6 +684,23 @@
     if (couplesBtn && couplesModal) {
       couplesBtn.addEventListener('click', async () => {
         console.log('[chat.js] Couples button clicked - opening couples modal');
+        
+        // Verify dependencies before opening modal
+        if (!currentUser) {
+          console.error('[chat.js] ⚠️ Cannot open couples: currentUser not available');
+          // Show error feedback to user
+          const msgsContainer = document.getElementById('msgs');
+          if (msgsContainer) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'sysMsg';
+            errorDiv.textContent = '⚠️ Couples feature not available yet. Please wait...';
+            errorDiv.style.color = '#ff6b6b';
+            msgsContainer.appendChild(errorDiv);
+            msgsContainer.scrollTop = msgsContainer.scrollHeight;
+          }
+          return;
+        }
+        
         try {
           // Fetch couples data
           const response = await fetch('/api/couples/me', { credentials: 'include' });
@@ -604,7 +724,7 @@
           });
         }
       });
-      console.log('[chat.js] Couples button configured');
+      console.log('[chat.js] Couples button configured with dependency checks');
     }
 
     // Close profile modal button
@@ -922,7 +1042,11 @@
     // Set immediately to prevent race conditions with multiple initialization calls
     isInitialized = true;
 
-    console.log('[chat.js] Chat UI initialized');
+    console.log('[chat.js] ✓ Chat UI initialized and verified');
+    
+    // Flush any buffered incoming messages now that UI is ready
+    flushIncomingMessageBuffer();
+    
     // Note: attachEventListeners is called from setupSocketListeners after socket is ready
   }
 
