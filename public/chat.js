@@ -168,17 +168,32 @@
     if (meName) meName.textContent = userData.username || '—';
     if (meRole) meRole.textContent = userData.role || 'User';
     
-    if (meAvatar && userData.avatar) {
-      // Validate avatar URL to prevent CSS injection
-      const avatarUrl = String(userData.avatar).trim();
-      if (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://') || avatarUrl.startsWith('/')) {
-        meAvatar.style.backgroundImage = `url("${avatarUrl.replace(/"/g, '%22')}")`;
-      }
-    } else if (meAvatar) {
-      // Use default avatar or initials
-      const initials = (userData.username || '?').charAt(0).toUpperCase();
-      meAvatar.textContent = initials;
+    if (meAvatar) {
+      // Always reset avatar state first to avoid stale text or images
+      meAvatar.textContent = '';
       meAvatar.style.backgroundImage = 'none';
+
+      const rawAvatar = userData && userData.avatar != null ? String(userData.avatar).trim() : '';
+      let appliedAvatarImage = false;
+
+      if (rawAvatar) {
+        // Validate avatar URL to prevent CSS injection
+        if (
+          rawAvatar.startsWith('http://') ||
+          rawAvatar.startsWith('https://') ||
+          rawAvatar.startsWith('/')
+        ) {
+          const safeUrl = rawAvatar.replace(/"/g, '%22');
+          meAvatar.style.backgroundImage = `url("${safeUrl}")`;
+          appliedAvatarImage = true;
+        }
+      }
+
+      if (!appliedAvatarImage) {
+        // Use default avatar or initials when there is no valid avatar image
+        const initials = (userData.username || '?').charAt(0).toUpperCase();
+        meAvatar.textContent = initials;
+      }
     }
 
     console.log('[chat.js] Bottom panel updated with user data');
