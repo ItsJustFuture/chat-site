@@ -881,14 +881,26 @@ window.claimSeat = claimSeat;
 
 // Initialize when DOM is ready
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initChessModal);
+  document.addEventListener("DOMContentLoaded", init);
 } else {
+  init();
+}
+
+function init() {
   initChessModal();
-  // Also check for socket after a short delay in case app:ready already fired
-  setTimeout(() => {
+  // Check for socket periodically in case app:ready already fired
+  let attempts = 0;
+  const checkSocket = setInterval(() => {
+    attempts++;
     if (window.socket && !window.chessSocketListenersSetup) {
-      console.log("[chess.js] Socket available after timeout, setting up listeners");
+      console.log("[chess.js] Socket available after", attempts * 200, "ms, setting up listeners");
       setupSocketListeners(window.socket);
+      clearInterval(checkSocket);
+    } else if (window.chessSocketListenersSetup) {
+      clearInterval(checkSocket);
+    } else if (attempts > 25) {  // Stop after 5 seconds
+      console.warn("[chess.js] Socket still not available after 5 seconds");
+      clearInterval(checkSocket);
     }
-  }, 100);
+  }, 200);
 }
