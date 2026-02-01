@@ -314,8 +314,9 @@
       manageRoomsBtn.addEventListener('click', () => {
         console.log('[chat.js] Manage rooms button clicked');
         // Open menu panel which contains room management options
-        if (menuPanel) {
-          menuPanel.classList.add('show');
+        const menuPanelForRooms = document.getElementById('menuPanel');
+        if (menuPanelForRooms) {
+          menuPanelForRooms.classList.add('show');
         }
       });
       console.log('[chat.js] Manage rooms button configured');
