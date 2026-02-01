@@ -94,6 +94,17 @@
           serverReady = true;
           failedAttempts = 0;
           hideConnectionError();
+          
+          // Store user data if provided
+          if (data?.user) {
+            window.currentUser = data.user;
+            console.log('[app.js] User data received from server:', data.user);
+            
+            // Dispatch event with user data for chat.js and other modules
+            window.dispatchEvent(new CustomEvent('user:data', { 
+              detail: { user: data.user } 
+            }));
+          }
         });
 
         window.socket.on('connect', () => {

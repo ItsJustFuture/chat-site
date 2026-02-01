@@ -19150,7 +19150,20 @@ socket.on("disconnect", (reason) => {
   // This confirms to the client that the server is fully initialized and ready to handle events.
   // All socket.on(...) listeners are now registered and will not miss any client events.
   // Emitting this at the end (after all listener setup) ensures strict event registration order.
-  socket.emit("server-ready", { ok: true, socketId: socket.id });
+  socket.emit("server-ready", { 
+    ok: true, 
+    socketId: socket.id,
+    user: {
+      id: socket.user.id,
+      username: socket.user.username,
+      role: socket.user.role,
+      avatar: socket.user.avatar,
+      mood: socket.user.mood,
+      status: socket.user.status,
+      theme: socket.user.theme,
+      vibe_tags: socket.user.vibe_tags
+    }
+  });
   if (IS_DEV_MODE) console.log("[socket] server-ready emitted", { socketId: socket.id, username: socket.user?.username });
 
 });
