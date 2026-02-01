@@ -255,6 +255,11 @@
     return socketReadyPromise;
   };
 
+  // ===== Utility: Get socket instance =====
+  window.getSocket = function() {
+    return socket;
+  };
+
   // ===== PWA Service Worker Registration =====
   if ('serviceWorker' in navigator && window.location.hostname !== 'localhost') {
     const enablePWA = document.querySelector('meta[name="enable-pwa"]')?.content === 'true';

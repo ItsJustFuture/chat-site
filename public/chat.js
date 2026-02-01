@@ -27,7 +27,15 @@
     
     // Ensure waitForAppReady is available
     if (typeof window.waitForAppReady !== 'function') {
-      console.error('[chat.js] FATAL: window.waitForAppReady not initialized by app.js - runtime initialization error');
+      console.error('[chat.js] FATAL: window.waitForAppReady not initialized. Retrying in 100ms...');
+      setTimeout(() => {
+        // Retry initialization
+        if (typeof window.waitForAppReady === 'function') {
+          window.waitForAppReady().then(initialize);
+        } else {
+          console.error('[chat.js] FATAL: window.waitForAppReady still not available after retry');
+        }
+      }, 100);
       return;
     }
 
