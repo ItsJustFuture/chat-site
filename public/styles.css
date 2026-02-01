@@ -2203,6 +2203,7 @@ body.event-active .roomTitle{
   min-height:0;
 }
 .menuPanel{ display:none; }
+.menuPanel.show{ display:block; }
 .menuNav{
   display:flex;
   gap:6px;

@@ -298,12 +298,7 @@
     if (mediaBtn && mediaMenu) {
       mediaBtn.addEventListener('click', () => {
         console.log('[chat.js] Media button clicked');
-        const isHidden = mediaMenu.hasAttribute('hidden');
-        if (isHidden) {
-          mediaMenu.removeAttribute('hidden');
-        } else {
-          mediaMenu.setAttribute('hidden', '');
-        }
+        mediaMenu.toggleAttribute('hidden');
       });
       console.log('[chat.js] Media button configured');
     }
