@@ -99,6 +99,18 @@
       }
     });
 
+    // Also listen for user:data event from app.js (dispatched on server-ready)
+    window.addEventListener('user:data', (event) => {
+      const userData = event.detail?.user;
+      if (userData) {
+        console.log('[chat.js] User data from window event:', userData);
+        currentUser = userData;
+        window.currentUser = userData;
+        updateUIBasedOnRole(userData.role);
+        updateBottomPanel(userData);
+      }
+    });
+
     // Handle chat messages
     socket.on('chat message', (data) => {
       console.log('[chat.js] Received message:', data);
