@@ -55,6 +55,96 @@
     }
   }
 
+  // ===== Message Rendering Functions =====
+  function renderChatMessage(data) {
+    const msgsContainer = document.getElementById('msgs');
+    if (!msgsContainer) {
+      console.warn('[chat.js] Messages container not found');
+      return;
+    }
+
+    // Create message element
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'msg';
+    msgDiv.dataset.msgId = data.id || '';
+    
+    // Create message header (username, timestamp, role)
+    const msgHeader = document.createElement('div');
+    msgHeader.className = 'msgHeader';
+    
+    const msgAuthor = document.createElement('span');
+    msgAuthor.className = 'msgAuthor';
+    msgAuthor.textContent = data.username || 'Unknown';
+    
+    const msgTime = document.createElement('span');
+    msgTime.className = 'msgTime';
+    if (data.ts) {
+      const date = new Date(data.ts);
+      msgTime.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    
+    msgHeader.appendChild(msgAuthor);
+    if (data.role) {
+      const roleChip = document.createElement('span');
+      roleChip.className = 'roleChip';
+      roleChip.textContent = data.role;
+      msgHeader.appendChild(roleChip);
+    }
+    msgHeader.appendChild(msgTime);
+    
+    // Create message body
+    const msgBody = document.createElement('div');
+    msgBody.className = 'msgBody';
+    
+    // Use markdown rendering if available
+    if (typeof window.renderMarkdown === 'function') {
+      const renderedText = window.renderMarkdown(data.text || '');
+      msgBody.innerHTML = renderedText;
+    } else {
+      msgBody.textContent = data.text || '';
+    }
+    
+    // Assemble message
+    msgDiv.appendChild(msgHeader);
+    msgDiv.appendChild(msgBody);
+    
+    // Append to container
+    msgsContainer.appendChild(msgDiv);
+    
+    // Auto-scroll to bottom
+    msgsContainer.scrollTop = msgsContainer.scrollHeight;
+    
+    console.log('[chat.js] Message rendered:', data.id);
+  }
+
+  function renderSystemMessage(data) {
+    const msgsContainer = document.getElementById('msgs');
+    if (!msgsContainer) {
+      console.warn('[chat.js] Messages container not found');
+      return;
+    }
+
+    // Create system message element
+    const sysDiv = document.createElement('div');
+    sysDiv.className = 'sysMsg';
+    sysDiv.dataset.msgId = data.id || '';
+    
+    // System messages are typically simple text
+    const sysText = document.createElement('div');
+    sysText.className = 'sysText';
+    sysText.textContent = data.text || data.message || '';
+    
+    sysDiv.appendChild(sysText);
+    
+    // Append to container
+    msgsContainer.appendChild(sysDiv);
+    
+    // Auto-scroll to bottom
+    msgsContainer.scrollTop = msgsContainer.scrollHeight;
+    
+    console.log('[chat.js] System message rendered:', data.id);
+  }
+
   // ===== Socket Event Listeners =====
   function setupSocketListeners() {
     if (!socket) {
@@ -115,13 +205,13 @@
     // Handle chat messages
     socket.on('chat message', (data) => {
       console.log('[chat.js] Received message:', data);
-      // TODO: Display message in UI
+      renderChatMessage(data);
     });
 
     // Handle system messages
     socket.on('system', (data) => {
       console.log('[chat.js] System message:', data);
-      // TODO: Display system message
+      renderSystemMessage(data);
     });
 
     // Handle room list updates
@@ -307,7 +397,8 @@
     }
 
     // Show modal using CSS modal-visible mechanism
-    modal.style.display = 'block';
+    modal.removeAttribute('hidden');
+    modal.style.display = 'flex'; // Override display: none
     modal.classList.add('modal-visible');
     console.log('[chat.js] Profile modal opened with data:', profileData);
   }
@@ -368,6 +459,9 @@
     // Show modal
     modal.removeAttribute('hidden');
     modal.removeAttribute('aria-hidden');
+    modal.style.display = 'flex'; // Override display: none
+    modal.style.pointerEvents = 'auto'; // Enable interaction
+    modal.classList.add('modal-visible'); // Add class for opacity transition
     console.log('[chat.js] Couples modal opened with data:', couplesData);
   }
 
@@ -440,10 +534,42 @@
             const data = await response.json();
             openProfileModal(data);
           } else {
-            console.error('[chat.js] Failed to fetch own profile');
+            console.error('[chat.js] Failed to fetch own profile:', response.status);
+            // Show fallback modal with basic user info
+            if (currentUser) {
+              openProfileModal({
+                username: currentUser.username || 'Unknown',
+                role: currentUser.role || 'User',
+                status: currentUser.status || 'Online',
+                avatar: currentUser.avatar || '',
+                mood: currentUser.mood || '',
+                bio: '(Profile data unavailable)',
+                age: '—',
+                gender: '—',
+                currentRoom: currentRoom || 'main',
+                createdAt: null,
+                lastSeen: null
+              });
+            }
           }
         } catch (err) {
           console.error('[chat.js] Error fetching profile:', err);
+          // Show fallback modal
+          if (currentUser) {
+            openProfileModal({
+              username: currentUser.username || 'Unknown',
+              role: currentUser.role || 'User',
+              status: currentUser.status || 'Online',
+              avatar: currentUser.avatar || '',
+              mood: currentUser.mood || '',
+              bio: '(Profile data unavailable)',
+              age: '—',
+              gender: '—',
+              currentRoom: currentRoom || 'main',
+              createdAt: null,
+              lastSeen: null
+            });
+          }
         }
       });
       console.log('[chat.js] Profile button configured');
@@ -462,10 +588,20 @@
             const data = await response.json();
             openCouplesModal(data);
           } else {
-            console.error('[chat.js] Failed to fetch couples data');
+            console.error('[chat.js] Failed to fetch couples data:', response.status);
+            // Show fallback modal with empty state
+            openCouplesModal({
+              active: [],
+              pending: []
+            });
           }
         } catch (err) {
           console.error('[chat.js] Error fetching couples data:', err);
+          // Show fallback modal with empty state
+          openCouplesModal({
+            active: [],
+            pending: []
+          });
         }
       });
       console.log('[chat.js] Couples button configured');
@@ -476,6 +612,8 @@
     if (closeModalBtn && profileModal) {
       closeModalBtn.addEventListener('click', () => {
         profileModal.setAttribute('hidden', '');
+        profileModal.classList.remove('modal-visible');
+        profileModal.style.display = 'none'; // Reset display
       });
     }
 
@@ -485,6 +623,9 @@
       couplesModalClose.addEventListener('click', () => {
         couplesModal.setAttribute('hidden', '');
         couplesModal.setAttribute('aria-hidden', 'true');
+        couplesModal.classList.remove('modal-visible'); // Remove class
+        couplesModal.style.display = 'none'; // Reset display
+        couplesModal.style.pointerEvents = 'none'; // Reset pointer events
       });
     }
 
