@@ -30,19 +30,25 @@ const PIECE_NAMES = {
 function initChessModal() {
   console.log("[chess.js] Initializing chess modal");
   
-  const socket = window.socket;
-  if (!socket) {
-    console.error("[chess.js] Socket not available");
-    return;
-  }
-
-  // Listen for game state updates
-  socket.on("chess:game:state", handleChessGameState);
-  socket.on("chess:challenge:state", handleChessChallengeState);
-  socket.on("chess:leaderboard:data", handleChessLeaderboard);
-
-  // Setup button handlers
+  // Setup button handlers (these don't need socket)
   setupChessButtons();
+
+  // Setup socket listeners when socket becomes available
+  const socket = window.socket;
+  if (socket) {
+    console.log("[chess.js] Socket already available, setting up listeners immediately");
+    setupSocketListeners(socket);
+  } else {
+    console.log("[chess.js] Socket not available yet, will initialize on app:ready");
+    // Listen for app:ready event which is dispatched when socket is ready
+    document.addEventListener("app:ready", () => {
+      console.log("[chess.js] app:ready received, setting up socket listeners");
+      const socket = window.socket;
+      if (socket) {
+        setupSocketListeners(socket);
+      }
+    });
+  }
 
   // Request current state when modal opens
   const roomChessBtn = document.getElementById("roomChessBtn");
@@ -51,6 +57,26 @@ function initChessModal() {
       requestCurrentChessState();
     });
   }
+}
+
+/**
+ * Setup socket event listeners
+ */
+function setupSocketListeners(socket) {
+  if (window.chessSocketListenersSetup) {
+    console.log("[chess.js] Socket listeners already set up, skipping");
+    return;
+  }
+  
+  console.log("[chess.js] Setting up socket listeners");
+  
+  // Listen for game state updates
+  socket.on("chess:game:state", handleChessGameState);
+  socket.on("chess:challenge:state", handleChessChallengeState);
+  socket.on("chess:leaderboard:data", handleChessLeaderboard);
+  
+  window.chessSocketListenersSetup = true;
+  console.log("[chess.js] Socket listeners configured");
 }
 
 /**
@@ -88,7 +114,7 @@ function setupChessButtons() {
  * Request current chess state from server
  */
 function requestCurrentChessState() {
-  const currentRoom = window.currentRoomId;
+  const currentRoom = window.currentRoom;
   if (!currentRoom) {
     console.log("[chess.js] No current room");
     renderEmptyChessBoard();
@@ -96,6 +122,13 @@ function requestCurrentChessState() {
   }
 
   const socket = window.socket;
+  if (!socket) {
+    console.log("[chess.js] No socket available");
+    renderEmptyChessBoard();
+    return;
+  }
+
+  console.log("[chess.js] Requesting chess state for room:", currentRoom);
   socket.emit("chess:game:join", {
     contextType: "room",
     contextId: currentRoom
@@ -685,13 +718,19 @@ function updateChessButtons(state) {
  * Handle create game button
  */
 function handleCreateGame() {
-  const currentRoom = window.currentRoomId;
+  const currentRoom = window.currentRoom;
   if (!currentRoom) {
     alert("Please select a room first");
     return;
   }
 
   const socket = window.socket;
+  if (!socket) {
+    alert("Socket not connected");
+    return;
+  }
+
+  console.log("[chess.js] Creating game in room:", currentRoom);
   socket.emit("chess:game:create", {
     contextType: "room",
     contextId: currentRoom
@@ -845,4 +884,11 @@ if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", initChessModal);
 } else {
   initChessModal();
+  // Also check for socket after a short delay in case app:ready already fired
+  setTimeout(() => {
+    if (window.socket && !window.chessSocketListenersSetup) {
+      console.log("[chess.js] Socket available after timeout, setting up listeners");
+      setupSocketListeners(window.socket);
+    }
+  }, 100);
 }
