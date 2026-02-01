@@ -257,7 +257,8 @@
 
   // ===== Utility: Get socket instance =====
   window.getSocket = function() {
-    return socket;
+    // Return the global socket reference managed by this file; normalize to null if unset
+    return window.socket || null;
   };
 
   // ===== PWA Service Worker Registration =====
