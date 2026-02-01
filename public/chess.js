@@ -585,8 +585,14 @@ function updateChessSeats(state) {
     whiteSeat.innerHTML = `
       <div class="seatLabel">White</div>
       <div class="seatPlayer muted">Empty</div>
-      ${state.seatClaimable?.white ? '<button class="btn btnSmall" onclick="claimSeat(\'w\')">Join as White</button>' : ''}
     `;
+    if (state.seatClaimable?.white) {
+      const btn = document.createElement('button');
+      btn.className = 'btn btnSmall';
+      btn.textContent = 'Join as White';
+      btn.addEventListener('click', () => claimSeat('w'));
+      whiteSeat.appendChild(btn);
+    }
   }
   
   seatsDiv.appendChild(whiteSeat);
@@ -605,8 +611,14 @@ function updateChessSeats(state) {
     blackSeat.innerHTML = `
       <div class="seatLabel">Black</div>
       <div class="seatPlayer muted">Empty</div>
-      ${state.seatClaimable?.black ? '<button class="btn btnSmall" onclick="claimSeat(\'b\')">Join as Black</button>' : ''}
     `;
+    if (state.seatClaimable?.black) {
+      const btn = document.createElement('button');
+      btn.className = 'btn btnSmall';
+      btn.textContent = 'Join as Black';
+      btn.addEventListener('click', () => claimSeat('b'));
+      blackSeat.appendChild(btn);
+    }
   }
   
   seatsDiv.appendChild(blackSeat);
@@ -876,9 +888,6 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
-// Make claimSeat available globally for inline onclick handlers
-window.claimSeat = claimSeat;
-
 // Initialize when DOM is ready
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", init);
@@ -889,6 +898,7 @@ if (document.readyState === "loading") {
 function init() {
   initChessModal();
   // Check for socket periodically in case app:ready already fired
+  // This is necessary because app:ready event may fire before chess.js finishes loading
   let attempts = 0;
   const checkSocket = setInterval(() => {
     attempts++;
