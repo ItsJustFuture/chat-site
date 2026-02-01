@@ -1241,6 +1241,7 @@
           }
         });
       });
+      // Note: globalListenersAttached is set to true by other event listeners in attachEventListeners
     }
     
     // Function to create tone buttons with proper structure
