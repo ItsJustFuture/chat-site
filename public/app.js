@@ -16,7 +16,12 @@
   window.socket = null;
   window.currentUser = null;
   window.currentRoom = 'main';
-  let isAppReady = false;
+  
+  // ===== Promise-Based Readiness Gates =====
+  let appReadyResolve = null;
+  let socketReadyResolve = null;
+  const appReadyPromise = new Promise((resolve) => { appReadyResolve = resolve; });
+  const socketReadyPromise = new Promise((resolve) => { socketReadyResolve = resolve; });
 
   // ===== Global Error Trapping =====
   window.onerror = function(message, source, lineno, colno, error) {
@@ -108,9 +113,13 @@
         });
 
         window.socket.on('connect', () => {
-          console.log('[app.js] Socket connected:', window.socket.id);
+          console.log('[app.js] Socket connected (verified):', window.socket.id);
           failedAttempts = 0;
           hideConnectionError();
+          // Resolve socket ready promise
+          if (socketReadyResolve) {
+            socketReadyResolve(window.socket);
+          }
           resolve(window.socket);
         });
 
@@ -124,6 +133,10 @@
           serverReady = false;
           failedAttempts = 0;
           hideConnectionError();
+          // Resolve socket ready promise again for reconnection
+          if (socketReadyResolve) {
+            socketReadyResolve(window.socket);
+          }
         });
 
         window.socket.on('connect_error', (error) => {
@@ -196,16 +209,14 @@
       // If not logged in, socket will be initialized after successful login by auth.js
       if (window.currentUser) {
         await initializeSocket();
-        console.log('[app.js] ✓ Socket.IO initialized (user logged in)');
+        // Wait for socket to be fully connected before proceeding
+        await socketReadyPromise;
+        console.log('[app.js] ✓ Socket.IO initialized and connected (user logged in)');
       } else {
         console.log('[app.js] ℹ Socket.IO initialization deferred (user not logged in)');
       }
 
-      // Step 3: Mark app as ready
-      isAppReady = true;
-      console.log('[app.js] ✓ Application bootstrap complete');
-
-      // Step 4: Emit custom ready event for other modules
+      // Step 3: Emit custom ready event for other modules
       const readyEvent = new CustomEvent('app:ready', {
         detail: {
           socket: window.socket,
@@ -214,7 +225,17 @@
         }
       });
       window.dispatchEvent(readyEvent);
-      console.log('[app.js] ✓ app:ready event dispatched');
+      console.log('[app.js] ✓ app:ready event dispatched with verified state');
+      
+      // Step 4: Resolve app ready promise
+      if (appReadyResolve) {
+        appReadyResolve({
+          socket: window.socket,
+          currentUser: window.currentUser,
+          currentRoom: window.currentRoom
+        });
+      }
+      console.log('[app.js] ✓ Application bootstrap complete (verified)');
 
     } catch (error) {
       console.error('[app.js] Bootstrap failed:', error);
@@ -225,25 +246,13 @@
 
   // ===== Utility: Wait for app:ready =====
   window.waitForAppReady = function() {
-    return new Promise((resolve) => {
-      // Set up listener first to avoid race condition
-      const listener = (event) => {
-        resolve(event.detail);
-      };
-      
-      // Check if already ready
-      if (isAppReady) {
-        // Already ready, resolve immediately
-        resolve({
-          socket: window.socket,
-          currentUser: window.currentUser,
-          currentRoom: window.currentRoom
-        });
-      } else {
-        // Not ready yet, wait for event
-        window.addEventListener('app:ready', listener, { once: true });
-      }
-    });
+    // Return the promise-based gate instead of event listener
+    return appReadyPromise;
+  };
+  
+  // ===== Utility: Wait for socket ready =====
+  window.waitForSocketReady = function() {
+    return socketReadyPromise;
   };
 
   // ===== PWA Service Worker Registration =====

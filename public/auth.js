@@ -141,6 +141,11 @@
           console.log('[auth.js] Initializing socket after successful session check...');
           try {
             await window.initSocket();
+            // Wait for socket to be fully connected
+            if (typeof window.waitForSocketReady === 'function') {
+              await window.waitForSocketReady();
+              console.log('[auth.js] ✓ Socket initialized and connected (verified)');
+            }
             window.currentUser = data;
             console.log('[auth.js] Socket initialized, updating global state');
             
@@ -153,7 +158,7 @@
               }
             });
             window.dispatchEvent(readyEvent);
-            console.log('[auth.js] Re-dispatched app:ready with socket');
+            console.log('[auth.js] ✓ Re-dispatched app:ready with verified socket');
           } catch (socketErr) {
             console.error('[auth.js] Failed to initialize socket:', socketErr);
             // Continue to show chat view - chat.js will handle missing socket gracefully
