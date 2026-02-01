@@ -614,6 +614,7 @@
             membersAdminMenuBtn.setAttribute('aria-expanded', 'false');
           }
         });
+        globalListenersAttached = true;
       }
     }
 
