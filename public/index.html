@@ -2187,17 +2187,17 @@ Word filters match whole words (e.g., "bad" won't match "badly"). Phrase filters
 </div>
 <!-- Scripts in correct initialization order -->
 <!-- 1. Socket.IO client library (must load first) -->
-<script src="/socket.io/socket.io.js"></script>
+<script src="/socket.io/socket.io.js" defer></script>
 <!-- 2. Third-party libraries -->
-<script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+<script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js" defer></script>
 <!-- 3. App bootstrap (initializes socket, session, emits app:ready) -->
-<script src="/app.js"></script>
+<script src="/app.js" defer></script>
 <!-- 4. Auth module (waits for app:ready) -->
-<script src="/auth.js"></script>
+<script src="/auth.js" defer></script>
 <!-- 5. Chat module (waits for app:ready) -->
-<script src="/chat.js"></script>
+<script src="/chat.js" defer></script>
 <!-- 6. Chess module (waits for DOM ready and socket) -->
-<script src="/chess.js"></script>
+<script src="/chess.js" defer></script>
 <div id="modalRoot">
 <!-- STAFF: Kick/Ban Appeals Panel -->
 <div class="appealsPanel" hidden="" id="appealsPanel">
