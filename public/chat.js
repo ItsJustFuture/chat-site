@@ -88,6 +88,17 @@
       // The auth system should handle this
     });
 
+    // Handle user data update (includes role info)
+    socket.on('user:data', (data) => {
+      console.log('[chat.js] User data received:', data);
+      if (data) {
+        currentUser = data;
+        window.currentUser = data;
+        updateUIBasedOnRole(data.role);
+        updateBottomPanel(data);
+      }
+    });
+
     // Handle chat messages
     socket.on('chat message', (data) => {
       console.log('[chat.js] Received message:', data);
@@ -109,13 +120,172 @@
     // Handle user list updates
     socket.on('room users', (data) => {
       console.log('[chat.js] Room users:', data);
-      // TODO: Update members list UI
+      updateMembersList(data);
     });
 
     console.log('[chat.js] Socket listeners configured ✓');
 
     // Now attach UI event listeners
     attachEventListeners();
+  }
+
+  // ===== UI Update Functions =====
+  function updateUIBasedOnRole(role) {
+    const roleRank = getRoleRank(role);
+    
+    // Show admin menu button for Moderator and above
+    const membersAdminMenuBtn = document.getElementById('membersAdminMenuBtn');
+    if (membersAdminMenuBtn) {
+      if (roleRank >= 3) { // Moderator = 3, Admin = 4, Co-owner = 5, Owner = 6
+        membersAdminMenuBtn.removeAttribute('hidden');
+      } else {
+        membersAdminMenuBtn.setAttribute('hidden', '');
+      }
+    }
+
+    console.log('[chat.js] UI updated for role:', role, 'rank:', roleRank);
+  }
+
+  function updateBottomPanel(userData) {
+    // Update name panel with user info
+    const meName = document.getElementById('meName');
+    const meRole = document.getElementById('meRole');
+    const meAvatar = document.getElementById('meAvatar');
+    
+    if (meName) meName.textContent = userData.username || '...';
+    if (meRole) meRole.textContent = userData.role || 'User';
+    
+    if (meAvatar && userData.avatar) {
+      meAvatar.style.backgroundImage = `url(${userData.avatar})`;
+    } else if (meAvatar) {
+      // Use default avatar or initials
+      const initials = (userData.username || '?').charAt(0).toUpperCase();
+      meAvatar.textContent = initials;
+      meAvatar.style.backgroundImage = 'none';
+    }
+
+    console.log('[chat.js] Bottom panel updated with user data');
+  }
+
+  function updateMembersList(data) {
+    const memberList = document.getElementById('memberList');
+    if (!memberList) return;
+
+    // Clear existing list
+    memberList.innerHTML = '';
+
+    // Sort users by role rank (highest first)
+    const users = data.users || [];
+    users.sort((a, b) => {
+      const rankA = getRoleRank(a.role);
+      const rankB = getRoleRank(b.role);
+      return rankB - rankA; // Descending order
+    });
+
+    // Render members
+    users.forEach(user => {
+      const memberItem = document.createElement('div');
+      memberItem.className = 'memberItem';
+      memberItem.innerHTML = `
+        <div class="memberAvatar">${user.username.charAt(0).toUpperCase()}</div>
+        <div class="memberInfo">
+          <div class="memberName">${user.username}</div>
+          <div class="memberRole">${user.role || 'User'}</div>
+        </div>
+      `;
+      memberList.appendChild(memberItem);
+    });
+
+    console.log('[chat.js] Members list updated with', users.length, 'members');
+  }
+
+  function getRoleRank(role) {
+    const ranks = {
+      'Guest': 0,
+      'User': 1,
+      'VIP': 2,
+      'Moderator': 3,
+      'Admin': 4,
+      'Co-owner': 5,
+      'Owner': 6
+    };
+    return ranks[role] || 1;
+  }
+
+  // ===== Modal Helper Functions =====
+  function openProfileModal(profileData) {
+    const modal = document.getElementById('modal');
+    if (!modal) return;
+
+    // Populate profile modal with data
+    const profileSheetName = document.getElementById('profileSheetName');
+    const profileSheetRoleChip = document.getElementById('profileSheetRoleChip');
+    const profileMood = document.getElementById('profileMood');
+    const infoAge = document.getElementById('infoAge');
+    const infoGender = document.getElementById('infoGender');
+    const infoRoom = document.getElementById('infoRoom');
+    const infoCreated = document.getElementById('infoCreated');
+    const infoLastSeen = document.getElementById('infoLastSeen');
+    const profileStatus = document.getElementById('profileStatus');
+    const bioRender = document.getElementById('bioRender');
+
+    if (profileSheetName) profileSheetName.textContent = profileData.username || '—';
+    if (profileSheetRoleChip) profileSheetRoleChip.textContent = profileData.role || 'User';
+    if (profileMood) profileMood.textContent = profileData.mood || '';
+    if (infoAge) infoAge.textContent = profileData.age || '—';
+    if (infoGender) infoGender.textContent = profileData.gender || '—';
+    if (infoRoom) infoRoom.textContent = profileData.currentRoom || '—';
+    if (infoCreated) infoCreated.textContent = profileData.createdAt ? new Date(profileData.createdAt).toLocaleDateString() : '—';
+    if (infoLastSeen) infoLastSeen.textContent = profileData.lastSeen ? new Date(profileData.lastSeen).toLocaleDateString() : '—';
+    if (profileStatus) profileStatus.textContent = profileData.status || 'Online';
+    if (bioRender) bioRender.innerHTML = profileData.bio || '(no bio)';
+
+    // Show avatar if exists
+    const profileSheetAvatar = document.getElementById('profileSheetAvatar');
+    if (profileSheetAvatar && profileData.avatar) {
+      profileSheetAvatar.style.backgroundImage = `url(${profileData.avatar})`;
+    }
+
+    // Show modal
+    modal.removeAttribute('hidden');
+    console.log('[chat.js] Profile modal opened with data:', profileData);
+  }
+
+  function openCouplesModal(couplesData) {
+    const modal = document.getElementById('couplesModal');
+    if (!modal) return;
+
+    const modalBody = document.getElementById('couplesModalBody');
+    if (!modalBody) return;
+
+    // Clear existing content
+    modalBody.innerHTML = '';
+
+    // Display couples data
+    if (couplesData.active && couplesData.active.length > 0) {
+      const link = couplesData.active[0];
+      const html = `
+        <div class="coupleCard">
+          <div class="coupleCardHeader">
+            <div class="coupleCardTitle">${link.user1Name || '—'} & ${link.user2Name || '—'}</div>
+            <div class="coupleCardStatus">${link.status || 'Linked'}</div>
+          </div>
+          <div class="coupleCardBody">
+            <p>Started: ${link.createdAt ? new Date(link.createdAt).toLocaleDateString() : '—'}</p>
+          </div>
+        </div>
+      `;
+      modalBody.innerHTML = html;
+    } else if (couplesData.pending && couplesData.pending.length > 0) {
+      modalBody.innerHTML = '<p>You have pending couple requests.</p>';
+    } else {
+      modalBody.innerHTML = '<p>No active couples links. Use your profile settings to link with a partner.</p>';
+    }
+
+    // Show modal
+    modal.removeAttribute('hidden');
+    modal.removeAttribute('aria-hidden');
+    console.log('[chat.js] Couples modal opened with data:', couplesData);
   }
 
   // ===== Button Event Handlers =====
@@ -174,14 +344,65 @@
       console.log('[chat.js] Logout button configured');
     }
 
-    // Profile button
+    // Profile button - open own profile modal
     const profileBtn = document.getElementById('profileBtn');
-    if (profileBtn) {
-      profileBtn.addEventListener('click', () => {
-        console.log('[chat.js] Profile button clicked');
-        // TODO: Open profile modal
+    const profileModal = document.getElementById('modal');
+    if (profileBtn && profileModal) {
+      profileBtn.addEventListener('click', async () => {
+        console.log('[chat.js] Profile button clicked - opening own profile');
+        try {
+          // Fetch own profile data
+          const response = await fetch('/api/profile', { credentials: 'include' });
+          if (response.ok) {
+            const data = await response.json();
+            openProfileModal(data);
+          } else {
+            console.error('[chat.js] Failed to fetch own profile');
+          }
+        } catch (err) {
+          console.error('[chat.js] Error fetching profile:', err);
+        }
       });
       console.log('[chat.js] Profile button configured');
+    }
+
+    // Couples button - open couples modal
+    const couplesBtn = document.getElementById('couplesBtn');
+    const couplesModal = document.getElementById('couplesModal');
+    if (couplesBtn && couplesModal) {
+      couplesBtn.addEventListener('click', async () => {
+        console.log('[chat.js] Couples button clicked - opening couples modal');
+        try {
+          // Fetch couples data
+          const response = await fetch('/api/couples/me', { credentials: 'include' });
+          if (response.ok) {
+            const data = await response.json();
+            openCouplesModal(data);
+          } else {
+            console.error('[chat.js] Failed to fetch couples data');
+          }
+        } catch (err) {
+          console.error('[chat.js] Error fetching couples data:', err);
+        }
+      });
+      console.log('[chat.js] Couples button configured');
+    }
+
+    // Close profile modal button
+    const closeModalBtn = document.getElementById('closeModalBtn');
+    if (closeModalBtn && profileModal) {
+      closeModalBtn.addEventListener('click', () => {
+        profileModal.setAttribute('hidden', '');
+      });
+    }
+
+    // Close couples modal button
+    const couplesModalClose = document.getElementById('couplesModalClose');
+    if (couplesModalClose && couplesModal) {
+      couplesModalClose.addEventListener('click', () => {
+        couplesModal.setAttribute('hidden', '');
+        couplesModal.setAttribute('aria-hidden', 'true');
+      });
     }
 
     // DM toggle button
@@ -270,6 +491,91 @@
       openMembersBtn.addEventListener('click', () => {
         console.log('[chat.js] Members button clicked');
         membersPane.classList.toggle('open');
+      });
+    }
+
+    // Members close button
+    const membersCloseBtn = document.getElementById('membersCloseBtn');
+    if (membersCloseBtn && membersPane) {
+      membersCloseBtn.addEventListener('click', () => {
+        membersPane.classList.remove('open');
+        console.log('[chat.js] Members panel closed');
+      });
+    }
+
+    // Admin menu button (for admins/mods/owners)
+    const membersAdminMenuBtn = document.getElementById('membersAdminMenuBtn');
+    const membersAdminMenu = document.getElementById('membersAdminMenu');
+    if (membersAdminMenuBtn && membersAdminMenu) {
+      membersAdminMenuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = membersAdminMenu.hasAttribute('hidden');
+        if (isHidden) {
+          membersAdminMenu.removeAttribute('hidden');
+          membersAdminMenuBtn.setAttribute('aria-expanded', 'true');
+        } else {
+          membersAdminMenu.setAttribute('hidden', '');
+          membersAdminMenuBtn.setAttribute('aria-expanded', 'false');
+        }
+        console.log('[chat.js] Admin menu toggled');
+      });
+      console.log('[chat.js] Admin menu button configured');
+
+      // Close admin menu when clicking outside
+      document.addEventListener('click', (e) => {
+        if (!membersAdminMenu.contains(e.target) && e.target !== membersAdminMenuBtn) {
+          membersAdminMenu.setAttribute('hidden', '');
+          membersAdminMenuBtn.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+
+    // Admin menu items
+    const adminMenuAppealsBtn = document.getElementById('adminMenuAppealsBtn');
+    if (adminMenuAppealsBtn) {
+      adminMenuAppealsBtn.addEventListener('click', () => {
+        console.log('[chat.js] Admin appeals button clicked');
+        // TODO: Open appeals panel
+      });
+    }
+
+    const adminMenuReferralsBtn = document.getElementById('adminMenuReferralsBtn');
+    if (adminMenuReferralsBtn) {
+      adminMenuReferralsBtn.addEventListener('click', () => {
+        console.log('[chat.js] Admin referrals button clicked');
+        // TODO: Open referrals panel
+      });
+    }
+
+    const adminMenuCasesBtn = document.getElementById('adminMenuCasesBtn');
+    if (adminMenuCasesBtn) {
+      adminMenuCasesBtn.addEventListener('click', () => {
+        console.log('[chat.js] Admin cases button clicked');
+        // TODO: Open cases panel
+      });
+    }
+
+    const adminMenuRoleDebugBtn = document.getElementById('adminMenuRoleDebugBtn');
+    if (adminMenuRoleDebugBtn) {
+      adminMenuRoleDebugBtn.addEventListener('click', () => {
+        console.log('[chat.js] Admin role debug button clicked');
+        // TODO: Open role debug panel
+      });
+    }
+
+    const adminMenuFeatureFlagsBtn = document.getElementById('adminMenuFeatureFlagsBtn');
+    if (adminMenuFeatureFlagsBtn) {
+      adminMenuFeatureFlagsBtn.addEventListener('click', () => {
+        console.log('[chat.js] Admin feature flags button clicked');
+        // TODO: Open feature flags panel
+      });
+    }
+
+    const adminMenuSessionsBtn = document.getElementById('adminMenuSessionsBtn');
+    if (adminMenuSessionsBtn) {
+      adminMenuSessionsBtn.addEventListener('click', () => {
+        console.log('[chat.js] Admin sessions button clicked');
+        // TODO: Open sessions panel
       });
     }
 
