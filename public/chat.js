@@ -13,6 +13,7 @@
   let currentRoom = 'main';
   let currentUser = null;
   let isInitialized = false;
+  let globalListenersAttached = false; // Track global listeners to prevent duplicates
 
   // ===== Wait for app:ready before initializing =====
   async function waitAndInit() {
@@ -164,7 +165,7 @@
     const meRole = document.getElementById('meRole');
     const meAvatar = document.getElementById('meAvatar');
     
-    if (meName) meName.textContent = userData.username || '...';
+    if (meName) meName.textContent = userData.username || '—';
     if (meRole) meRole.textContent = userData.role || 'User';
     
     if (meAvatar && userData.avatar) {
@@ -198,13 +199,26 @@
     users.forEach(user => {
       const memberItem = document.createElement('div');
       memberItem.className = 'memberItem';
-      memberItem.innerHTML = `
-        <div class="memberAvatar">${user.username.charAt(0).toUpperCase()}</div>
-        <div class="memberInfo">
-          <div class="memberName">${user.username}</div>
-          <div class="memberRole">${user.role || 'User'}</div>
-        </div>
-      `;
+      
+      const memberAvatar = document.createElement('div');
+      memberAvatar.className = 'memberAvatar';
+      memberAvatar.textContent = (user.username || '?').charAt(0).toUpperCase();
+      
+      const memberInfo = document.createElement('div');
+      memberInfo.className = 'memberInfo';
+      
+      const memberName = document.createElement('div');
+      memberName.className = 'memberName';
+      memberName.textContent = user.username || 'Unknown';
+      
+      const memberRole = document.createElement('div');
+      memberRole.className = 'memberRole';
+      memberRole.textContent = user.role || 'User';
+      
+      memberInfo.appendChild(memberName);
+      memberInfo.appendChild(memberRole);
+      memberItem.appendChild(memberAvatar);
+      memberItem.appendChild(memberInfo);
       memberList.appendChild(memberItem);
     });
 
@@ -250,7 +264,16 @@
     if (infoCreated) infoCreated.textContent = profileData.createdAt ? new Date(profileData.createdAt).toLocaleDateString() : '—';
     if (infoLastSeen) infoLastSeen.textContent = profileData.lastSeen ? new Date(profileData.lastSeen).toLocaleDateString() : '—';
     if (profileStatus) profileStatus.textContent = profileData.status || 'Online';
-    if (bioRender) bioRender.innerHTML = profileData.bio || '(no bio)';
+    
+    // Bio may contain formatted text from server (already sanitized server-side)
+    // For additional safety, we could sanitize again here if needed
+    if (bioRender) {
+      if (profileData.bio) {
+        bioRender.textContent = profileData.bio; // Use textContent for plain text
+      } else {
+        bioRender.textContent = '(no bio)';
+      }
+    }
 
     // Show avatar if exists
     const profileSheetAvatar = document.getElementById('profileSheetAvatar');
@@ -276,22 +299,42 @@
     // Display couples data
     if (couplesData.active && couplesData.active.length > 0) {
       const link = couplesData.active[0];
-      const html = `
-        <div class="coupleCard">
-          <div class="coupleCardHeader">
-            <div class="coupleCardTitle">${link.user1Name || '—'} & ${link.user2Name || '—'}</div>
-            <div class="coupleCardStatus">${link.status || 'Linked'}</div>
-          </div>
-          <div class="coupleCardBody">
-            <p>Started: ${link.createdAt ? new Date(link.createdAt).toLocaleDateString() : '—'}</p>
-          </div>
-        </div>
-      `;
-      modalBody.innerHTML = html;
+      
+      const coupleCard = document.createElement('div');
+      coupleCard.className = 'coupleCard';
+      
+      const coupleHeader = document.createElement('div');
+      coupleHeader.className = 'coupleCardHeader';
+      
+      const coupleTitle = document.createElement('div');
+      coupleTitle.className = 'coupleCardTitle';
+      coupleTitle.textContent = `${link.user1Name || '—'} & ${link.user2Name || '—'}`;
+      
+      const coupleStatus = document.createElement('div');
+      coupleStatus.className = 'coupleCardStatus';
+      coupleStatus.textContent = link.status || 'Linked';
+      
+      coupleHeader.appendChild(coupleTitle);
+      coupleHeader.appendChild(coupleStatus);
+      
+      const coupleBody = document.createElement('div');
+      coupleBody.className = 'coupleCardBody';
+      
+      const startedText = document.createElement('p');
+      startedText.textContent = `Started: ${link.createdAt ? new Date(link.createdAt).toLocaleDateString() : '—'}`;
+      coupleBody.appendChild(startedText);
+      
+      coupleCard.appendChild(coupleHeader);
+      coupleCard.appendChild(coupleBody);
+      modalBody.appendChild(coupleCard);
     } else if (couplesData.pending && couplesData.pending.length > 0) {
-      modalBody.innerHTML = '<p>You have pending couple requests.</p>';
+      const pendingText = document.createElement('p');
+      pendingText.textContent = 'You have pending couple requests.';
+      modalBody.appendChild(pendingText);
     } else {
-      modalBody.innerHTML = '<p>No active couples links. Use your profile settings to link with a partner.</p>';
+      const emptyText = document.createElement('p');
+      emptyText.textContent = 'No active couples links. Use your profile settings to link with a partner.';
+      modalBody.appendChild(emptyText);
     }
 
     // Show modal
@@ -533,13 +576,18 @@
       });
       console.log('[chat.js] Admin menu button configured');
 
-      // Close admin menu when clicking outside
-      document.addEventListener('click', (e) => {
-        if (!membersAdminMenu.contains(e.target) && e.target !== membersAdminMenuBtn) {
-          membersAdminMenu.setAttribute('hidden', '');
-          membersAdminMenuBtn.setAttribute('aria-expanded', 'false');
-        }
-      });
+      // Close admin menu when clicking outside (only attach once)
+      if (!globalListenersAttached) {
+        document.addEventListener('click', (e) => {
+          const membersAdminMenu = document.getElementById('membersAdminMenu');
+          const membersAdminMenuBtn = document.getElementById('membersAdminMenuBtn');
+          if (membersAdminMenu && membersAdminMenuBtn && 
+              !membersAdminMenu.contains(e.target) && e.target !== membersAdminMenuBtn) {
+            membersAdminMenu.setAttribute('hidden', '');
+            membersAdminMenuBtn.setAttribute('aria-expanded', 'false');
+          }
+        });
+      }
     }
 
     // Admin menu items
@@ -637,12 +685,18 @@
       });
       console.log('[chat.js] Manage rooms button configured');
 
-      // Close room actions menu when clicking outside
-      document.addEventListener('click', (e) => {
-        if (!roomActionsMenu.contains(e.target) && e.target !== manageRoomsBtn) {
-          roomActionsMenu.setAttribute('hidden', '');
-        }
-      });
+      // Close room actions menu when clicking outside (only attach once)
+      if (!globalListenersAttached) {
+        document.addEventListener('click', (e) => {
+          const roomActionsMenu = document.getElementById('roomActionsMenu');
+          const manageRoomsBtn = document.getElementById('manageRoomsBtn');
+          if (roomActionsMenu && manageRoomsBtn &&
+              !roomActionsMenu.contains(e.target) && e.target !== manageRoomsBtn) {
+            roomActionsMenu.setAttribute('hidden', '');
+          }
+        });
+        globalListenersAttached = true; // Mark that global listeners are now attached
+      }
     }
 
     // Room action buttons
