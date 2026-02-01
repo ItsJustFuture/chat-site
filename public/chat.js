@@ -299,7 +299,14 @@
     // Handle room list updates
     socket.on('rooms update', (rooms) => {
       console.log('[chat.js] Rooms updated:', rooms);
-      // TODO: Update room list UI
+      // Reload room structure when server notifies of changes
+      loadAndRenderRoomList();
+    });
+
+    // Listen for room structure updates with full data
+    socket.on('roomStructure:update', (data) => {
+      console.log('[chat.js] Room structure update received');
+      renderRoomStructure(data);
     });
 
     // Handle user list updates
@@ -447,6 +454,149 @@
       'Owner': 6
     };
     return ranks[role] ?? 1;
+  }
+
+  // ===== Room List Rendering =====
+  async function loadAndRenderRoomList() {
+    const chanList = document.getElementById('chanList');
+    if (!chanList) {
+      console.warn('[chat.js] Room list container not found');
+      return;
+    }
+
+    try {
+      console.log('[chat.js] Fetching room structure...');
+      const response = await fetch('/rooms', { credentials: 'include' });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch rooms: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      renderRoomStructure(data);
+      
+      console.log('[chat.js] Room list rendered successfully');
+    } catch (error) {
+      console.error('[chat.js] Error loading room list:', error);
+      
+      // Show error message in the UI
+      chanList.innerHTML = `
+        <div style="padding: 15px; color: #ff6b6b; text-align: center;">
+          <div style="margin-bottom: 8px;">⚠️ Failed to load rooms</div>
+          <button class="btn secondary small" onclick="window.chatApp.reloadRooms()" type="button">
+            Retry
+          </button>
+        </div>
+      `;
+    }
+  }
+
+  function renderRoomStructure(data) {
+    const chanList = document.getElementById('chanList');
+    if (!chanList) return;
+
+    // Clear existing content
+    chanList.innerHTML = '';
+
+    const { masters = [], categories = [], rooms = [], userCollapse = {} } = data;
+
+    // Group categories by master
+    const categoriesByMaster = new Map();
+    categories.forEach(cat => {
+      if (!categoriesByMaster.has(cat.master_id)) {
+        categoriesByMaster.set(cat.master_id, []);
+      }
+      categoriesByMaster.get(cat.master_id).push(cat);
+    });
+
+    // Group rooms by category
+    const roomsByCategory = new Map();
+    rooms.forEach(room => {
+      if (!roomsByCategory.has(room.category_id)) {
+        roomsByCategory.set(room.category_id, []);
+      }
+      roomsByCategory.get(room.category_id).push(room);
+    });
+
+    // Render each master category
+    masters.forEach(master => {
+      const masterDiv = document.createElement('div');
+      masterDiv.className = 'roomMaster';
+      masterDiv.dataset.masterId = master.id;
+
+      const masterHeader = document.createElement('div');
+      masterHeader.className = 'roomMasterHeader';
+      masterHeader.textContent = master.name || 'Unnamed Master';
+      masterDiv.appendChild(masterHeader);
+
+      // Render categories within this master
+      const masterCategories = categoriesByMaster.get(master.id) || [];
+      masterCategories.forEach(category => {
+        const categoryDiv = document.createElement('div');
+        categoryDiv.className = 'roomCategory';
+        categoryDiv.dataset.categoryId = category.id;
+
+        const categoryHeader = document.createElement('div');
+        categoryHeader.className = 'roomCategoryHeader';
+        categoryHeader.textContent = category.name || 'Unnamed Category';
+        categoryDiv.appendChild(categoryHeader);
+
+        // Render rooms within this category
+        const categoryRooms = roomsByCategory.get(category.id) || [];
+        const roomListDiv = document.createElement('div');
+        roomListDiv.className = 'roomList';
+
+        categoryRooms.forEach(room => {
+          const roomBtn = document.createElement('button');
+          roomBtn.className = 'pill';
+          roomBtn.type = 'button';
+          roomBtn.dataset.roomName = room.name;
+          roomBtn.style.cssText = 'width: 100%; text-align: left; justify-content: flex-start;';
+          
+          // Highlight current room
+          if (room.name === currentRoom) {
+            roomBtn.classList.add('active');
+          }
+
+          // Show room status indicators
+          let statusIndicator = '';
+          if (room.is_locked) statusIndicator += '🔒 ';
+          if (room.maintenance_mode) statusIndicator += '🔧 ';
+          if (room.vip_only) statusIndicator += '⭐ ';
+          
+          roomBtn.textContent = statusIndicator + (room.name || 'Unnamed Room');
+
+          // Add click handler to join room
+          roomBtn.addEventListener('click', () => {
+            if (socket && socket.connected) {
+              console.log('[chat.js] Switching to room:', room.name);
+              socket.emit('join room', { room: room.name, status: 'Online' });
+              currentRoom = room.name;
+              window.currentRoom = room.name;
+              
+              // Update active state
+              document.querySelectorAll('.pill[data-room-name]').forEach(btn => btn.classList.remove('active'));
+              roomBtn.classList.add('active');
+              
+              // Update room title
+              const roomTitle = document.getElementById('roomTitle');
+              if (roomTitle) roomTitle.textContent = room.name;
+            } else {
+              console.warn('[chat.js] Cannot join room: socket not connected');
+            }
+          });
+
+          roomListDiv.appendChild(roomBtn);
+        });
+
+        categoryDiv.appendChild(roomListDiv);
+        masterDiv.appendChild(categoryDiv);
+      });
+
+      chanList.appendChild(masterDiv);
+    });
+
+    console.log('[chat.js] Rendered', masters.length, 'masters,', categories.length, 'categories,', rooms.length, 'rooms');
   }
 
   // ===== Modal Helper Functions =====
@@ -1059,6 +1209,156 @@
       console.log('[chat.js] Room action buttons configured:', roomActionButtons.length);
     }
 
+    // ===== Tone Picker Initialization =====
+    const tonePicker = document.getElementById('tonePicker');
+    const dmTonePicker = document.getElementById('dmTonePicker');
+    
+    // Initialize global currentTone variable
+    if (typeof window.currentTone === 'undefined') {
+      window.currentTone = 'Friendly';
+    }
+    
+    const tones = ['Friendly', 'Professional', 'Casual', 'Humorous', 'Serious'];
+    
+    // Function to create tone buttons with proper structure
+    function initializeTonePicker(pickerElement) {
+      if (!pickerElement) return;
+      
+      // Clear existing content
+      pickerElement.innerHTML = '';
+      
+      // Create the main menu button
+      const menuBtn = document.createElement('button');
+      menuBtn.className = 'toneMenuBtn';
+      menuBtn.type = 'button';
+      menuBtn.textContent = '🎭';
+      menuBtn.setAttribute('aria-label', 'Select tone');
+      menuBtn.setAttribute('title', 'Select tone');
+      
+      // Create the panel
+      const panel = document.createElement('div');
+      panel.className = 'toneMenuPanel';
+      
+      tones.forEach(tone => {
+        const item = document.createElement('button');
+        item.className = 'toneMenuItem';
+        item.type = 'button';
+        item.setAttribute('data-tone', tone);
+        
+        // Mark as active if it's the current tone
+        if (window.currentTone === tone) {
+          item.classList.add('is-active');
+          pickerElement.classList.add('has-tone');
+        }
+        
+        // Add emoji based on tone
+        const emojiMap = {
+          'Friendly': '😊',
+          'Professional': '💼',
+          'Casual': '👋',
+          'Humorous': '😄',
+          'Serious': '🎯'
+        };
+        
+        const emoji = document.createElement('span');
+        emoji.className = 'toneMenuEmoji';
+        emoji.textContent = emojiMap[tone] || '🎭';
+        
+        const text = document.createElement('div');
+        text.className = 'toneMenuText';
+        
+        const name = document.createElement('div');
+        name.className = 'toneMenuName';
+        name.textContent = tone;
+        
+        text.appendChild(name);
+        item.appendChild(emoji);
+        item.appendChild(text);
+        
+        item.addEventListener('click', () => {
+          // Update global tone
+          window.currentTone = tone;
+          
+          // Update all tone items in this picker
+          panel.querySelectorAll('.toneMenuItem').forEach(i => i.classList.remove('is-active'));
+          item.classList.add('is-active');
+          
+          // Add has-tone class
+          pickerElement.classList.add('has-tone');
+          
+          // Close the panel
+          pickerElement.classList.remove('is-open');
+          
+          console.log('[chat.js] Tone updated to:', tone);
+        });
+        
+        panel.appendChild(item);
+      });
+      
+      // Toggle panel on button click
+      menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        pickerElement.classList.toggle('is-open');
+      });
+      
+      // Close panel when clicking outside
+      document.addEventListener('click', (e) => {
+        if (!pickerElement.contains(e.target)) {
+          pickerElement.classList.remove('is-open');
+        }
+      });
+      
+      pickerElement.appendChild(menuBtn);
+      pickerElement.appendChild(panel);
+      
+      console.log('[chat.js] Tone picker initialized with', tones.length, 'tones');
+    }
+    
+    // Initialize both tone pickers
+    initializeTonePicker(tonePicker);
+    initializeTonePicker(dmTonePicker);
+    
+    // ===== Profile Modal Tab Switching =====
+    const profileTabs = document.getElementById('profileTabs');
+    if (profileTabs) {
+      const tabButtons = profileTabs.querySelectorAll('.tab[data-tab]');
+      
+      tabButtons.forEach(tabBtn => {
+        tabBtn.addEventListener('click', () => {
+          const targetTab = tabBtn.getAttribute('data-tab');
+          
+          // Remove active class from all tabs
+          tabButtons.forEach(btn => btn.classList.remove('active'));
+          
+          // Add active class to clicked tab
+          tabBtn.classList.add('active');
+          
+          // Hide all tab content sections
+          const tabContents = {
+            'profile': document.getElementById('viewProfile'),
+            'timeline': document.getElementById('viewTimeline'),
+            'customize': document.getElementById('viewCustomize'),
+            'actions': document.getElementById('viewActions')
+          };
+          
+          Object.keys(tabContents).forEach(key => {
+            const content = tabContents[key];
+            if (content) {
+              if (key === targetTab) {
+                content.style.display = 'block';
+              } else {
+                content.style.display = 'none';
+              }
+            }
+          });
+          
+          console.log('[chat.js] Profile tab switched to:', targetTab);
+        });
+      });
+      
+      console.log('[chat.js] Profile tabs initialized with', tabButtons.length, 'tabs');
+    }
+
     console.log('[chat.js] Event listeners attached successfully');
   }
 
@@ -1078,13 +1378,17 @@
     // Flush any buffered incoming messages now that UI is ready
     flushIncomingMessageBuffer();
     
+    // Load room list after initialization
+    loadAndRenderRoomList();
+    
     // Note: attachEventListeners is called from setupSocketListeners after socket is ready
   }
 
   // ===== Public API =====
   window.chatApp = {
     initialize,
-    isInitialized: () => isInitialized
+    isInitialized: () => isInitialized,
+    reloadRooms: loadAndRenderRoomList
   };
 
   // Start waiting for app:ready
