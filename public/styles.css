@@ -12590,3 +12590,175 @@ body[data-theme="Iris & Lola Neon"] .irisLolaDrawerEasterStar{
 .messagePreviewTime {
   opacity: 0.7;
 }
+
+/* Additional Chess Styles */
+.chessPromotion[hidden] {
+  display: none;
+}
+
+.promotionTitle {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.promotionButtons {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.promotionBtn {
+  border: none;
+  background: rgba(255,255,255,.08);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #fff;
+  cursor: pointer;
+  min-width: 52px;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.promotionBtn:hover {
+  background: rgba(255,255,255,.15);
+  transform: scale(1.05);
+}
+
+.promotionPieceImg {
+  width: 34px;
+  height: 34px;
+  pointer-events: none;
+}
+
+.seatLabel {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.seatPlayer {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.seatElo {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.chessSeat {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.08);
+  gap: 6px;
+}
+
+.chessSeat.white {
+  border-left: 3px solid #f0d9b5;
+}
+
+.chessSeat.black {
+  border-left: 3px solid #b58863;
+}
+
+.statusText {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.statusHighlight {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.chessMoves {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.chessRated {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--success);
+}
+
+.eloChanges {
+  font-size: 13px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,.1);
+}
+
+.eloChanges > div {
+  margin-bottom: 4px;
+}
+
+.btnSmall {
+  padding: 6px 12px;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.leaderboardTable {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.leaderboardHeader {
+  display: grid;
+  grid-template-columns: 40px 1fr 70px 60px 90px;
+  gap: 8px;
+  padding: 10px 12px;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(255,255,255,.1);
+}
+
+.leaderboardRow {
+  display: grid;
+  grid-template-columns: 40px 1fr 70px 60px 90px;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  transition: background 0.2s ease;
+}
+
+.leaderboardRow:hover {
+  background: rgba(255,255,255,.05);
+}
+
+.leaderboardRow .rank {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.leaderboardRow .player {
+  font-weight: 500;
+}
+
+.leaderboardRow .elo {
+  font-weight: 600;
+}
+
+.leaderboardRow .games {
+  color: var(--muted);
+}
+
+.leaderboardRow .record {
+  font-size: 12px;
+  color: var(--muted);
+}
