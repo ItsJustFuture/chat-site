@@ -22,7 +22,7 @@
   let socketReady = false;
 
   // ===== Wait for app:ready before initializing =====
-  const INIT_RETRY_DELAY = 100; // ms
+  const INIT_RETRY_BASE_DELAY = 100; // ms
   const MAX_INIT_RETRIES = 5;
   let initRetryCount = 0;
   
@@ -33,15 +33,16 @@
     if (typeof window.waitForAppReady !== 'function') {
       initRetryCount++;
       if (initRetryCount <= MAX_INIT_RETRIES) {
-        console.error(`[chat.js] window.waitForAppReady not initialized. Retrying (${initRetryCount}/${MAX_INIT_RETRIES}) in ${INIT_RETRY_DELAY}ms...`);
+        // Exponential backoff: 100ms, 200ms, 400ms, 800ms, 1600ms
+        const delay = INIT_RETRY_BASE_DELAY * Math.pow(2, initRetryCount - 1);
+        console.error(`[chat.js] window.waitForAppReady not initialized. Retrying (${initRetryCount}/${MAX_INIT_RETRIES}) in ${delay}ms...`);
         setTimeout(() => {
-          // Retry initialization
-          if (typeof window.waitForAppReady === 'function') {
-            window.waitForAppReady().then(initialize);
-          } else {
-            waitAndInit(); // Retry recursively
-          }
-        }, INIT_RETRY_DELAY);
+          // Retry full initialization flow; waitAndInit will:
+          //  - check for window.waitForAppReady
+          //  - await it with proper error handling
+          //  - run the normal bootstrap path
+          waitAndInit();
+        }, delay);
       } else {
         console.error('[chat.js] FATAL: window.waitForAppReady not available after maximum retries');
       }
