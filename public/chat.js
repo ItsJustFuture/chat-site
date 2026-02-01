@@ -55,6 +55,17 @@
       } else {
         console.log('[chat.js] Using global socket:', socket.id);
         setupSocketListeners();
+        
+        // Handle reconnection - reattach listeners and reprocess queues
+        socket.on('reconnect', () => {
+          console.log('[chat.js] ⚠️ Socket reconnected - resetting state...');
+          socketReady = false;
+          listenersAttached = false;
+          // Don't re-setup listeners as they persist across reconnection
+          // But mark as ready and process queues
+          socketReady = true;
+          processOutgoingQueue();
+        });
       }
     } catch (error) {
       console.error('[chat.js] Failed to wait for app:ready:', error);

@@ -133,6 +133,10 @@
           serverReady = false;
           failedAttempts = 0;
           hideConnectionError();
+          // Resolve socket ready promise again for reconnection
+          if (socketReadyResolve) {
+            socketReadyResolve(window.socket);
+          }
         });
 
         window.socket.on('connect_error', (error) => {
