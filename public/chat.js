@@ -459,6 +459,7 @@
     // Show modal
     modal.removeAttribute('hidden');
     modal.removeAttribute('aria-hidden');
+    modal.style.display = 'flex'; // Override display: none
     console.log('[chat.js] Couples modal opened with data:', couplesData);
   }
 
@@ -620,6 +621,7 @@
       couplesModalClose.addEventListener('click', () => {
         couplesModal.setAttribute('hidden', '');
         couplesModal.setAttribute('aria-hidden', 'true');
+        couplesModal.style.display = 'none'; // Reset display
       });
     }
 
