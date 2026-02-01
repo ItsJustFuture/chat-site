@@ -256,7 +256,7 @@
       'Co-owner': 5,
       'Owner': 6
     };
-    return ranks[role] || 1;
+    return ranks[role] ?? 1;
   }
 
   // ===== Modal Helper Functions =====
