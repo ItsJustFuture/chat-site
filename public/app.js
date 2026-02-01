@@ -214,10 +214,6 @@
         console.log('[app.js] ✓ Socket.IO initialized and connected (user logged in)');
       } else {
         console.log('[app.js] ℹ Socket.IO initialization deferred (user not logged in)');
-        // Resolve socket ready promise with null to allow auth flow to continue
-        if (socketReadyResolve) {
-          socketReadyResolve(null);
-        }
       }
 
       // Step 3: Emit custom ready event for other modules
