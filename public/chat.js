@@ -480,14 +480,25 @@
       console.error('[chat.js] Error loading room list:', error);
       
       // Show error message in the UI
-      chanList.innerHTML = `
-        <div style="padding: 15px; color: #ff6b6b; text-align: center;">
-          <div style="margin-bottom: 8px;">⚠️ Failed to load rooms</div>
-          <button class="btn secondary small" onclick="window.chatApp.reloadRooms()" type="button">
-            Retry
-          </button>
-        </div>
-      `;
+      const errorDiv = document.createElement('div');
+      errorDiv.style.cssText = 'padding: 15px; color: #ff6b6b; text-align: center;';
+      
+      const errorMsg = document.createElement('div');
+      errorMsg.style.marginBottom = '8px';
+      errorMsg.textContent = '⚠️ Failed to load rooms';
+      
+      const retryBtn = document.createElement('button');
+      retryBtn.className = 'btn secondary small';
+      retryBtn.type = 'button';
+      retryBtn.textContent = 'Retry';
+      retryBtn.addEventListener('click', () => {
+        loadAndRenderRoomList();
+      });
+      
+      errorDiv.appendChild(errorMsg);
+      errorDiv.appendChild(retryBtn);
+      chanList.innerHTML = '';
+      chanList.appendChild(errorDiv);
     }
   }
 
@@ -1220,6 +1231,18 @@
     
     const tones = ['Friendly', 'Professional', 'Casual', 'Humorous', 'Serious'];
     
+    // Global click handler for closing tone pickers (attach only once)
+    if (!globalListenersAttached) {
+      document.addEventListener('click', (e) => {
+        // Close any open tone pickers when clicking outside
+        document.querySelectorAll('.tonePicker.is-open').forEach(picker => {
+          if (!picker.contains(e.target)) {
+            picker.classList.remove('is-open');
+          }
+        });
+      });
+    }
+    
     // Function to create tone buttons with proper structure
     function initializeTonePicker(pickerElement) {
       if (!pickerElement) return;
@@ -1299,13 +1322,6 @@
       menuBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         pickerElement.classList.toggle('is-open');
-      });
-      
-      // Close panel when clicking outside
-      document.addEventListener('click', (e) => {
-        if (!pickerElement.contains(e.target)) {
-          pickerElement.classList.remove('is-open');
-        }
       });
       
       pickerElement.appendChild(menuBtn);
