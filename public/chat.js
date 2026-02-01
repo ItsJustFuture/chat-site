@@ -22,20 +22,29 @@
   let socketReady = false;
 
   // ===== Wait for app:ready before initializing =====
+  const INIT_RETRY_DELAY = 100; // ms
+  const MAX_INIT_RETRIES = 5;
+  let initRetryCount = 0;
+  
   async function waitAndInit() {
     console.log('[chat.js] Waiting for app:ready...');
     
     // Ensure waitForAppReady is available
     if (typeof window.waitForAppReady !== 'function') {
-      console.error('[chat.js] FATAL: window.waitForAppReady not initialized. Retrying in 100ms...');
-      setTimeout(() => {
-        // Retry initialization
-        if (typeof window.waitForAppReady === 'function') {
-          window.waitForAppReady().then(initialize);
-        } else {
-          console.error('[chat.js] FATAL: window.waitForAppReady still not available after retry');
-        }
-      }, 100);
+      initRetryCount++;
+      if (initRetryCount <= MAX_INIT_RETRIES) {
+        console.error(`[chat.js] window.waitForAppReady not initialized. Retrying (${initRetryCount}/${MAX_INIT_RETRIES}) in ${INIT_RETRY_DELAY}ms...`);
+        setTimeout(() => {
+          // Retry initialization
+          if (typeof window.waitForAppReady === 'function') {
+            window.waitForAppReady().then(initialize);
+          } else {
+            waitAndInit(); // Retry recursively
+          }
+        }, INIT_RETRY_DELAY);
+      } else {
+        console.error('[chat.js] FATAL: window.waitForAppReady not available after maximum retries');
+      }
       return;
     }
 
