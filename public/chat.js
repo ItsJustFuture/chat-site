@@ -623,16 +623,65 @@
 
     // Manage rooms button
     const manageRoomsBtn = document.getElementById('manageRoomsBtn');
-    if (manageRoomsBtn) {
-      manageRoomsBtn.addEventListener('click', () => {
-        console.log('[chat.js] Manage rooms button clicked');
-        // Open menu panel which contains room management options
-        const menuPanel = document.getElementById('menuPanel');
-        if (menuPanel) {
-          menuPanel.classList.add('show');
+    const roomActionsMenu = document.getElementById('roomActionsMenu');
+    if (manageRoomsBtn && roomActionsMenu) {
+      manageRoomsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = roomActionsMenu.hasAttribute('hidden');
+        if (isHidden) {
+          roomActionsMenu.removeAttribute('hidden');
+        } else {
+          roomActionsMenu.setAttribute('hidden', '');
         }
+        console.log('[chat.js] Manage rooms menu toggled');
       });
       console.log('[chat.js] Manage rooms button configured');
+
+      // Close room actions menu when clicking outside
+      document.addEventListener('click', (e) => {
+        if (!roomActionsMenu.contains(e.target) && e.target !== manageRoomsBtn) {
+          roomActionsMenu.setAttribute('hidden', '');
+        }
+      });
+    }
+
+    // Room action buttons
+    const roomActionButtons = document.querySelectorAll('[data-room-action]');
+    roomActionButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = btn.getAttribute('data-room-action');
+        console.log('[chat.js] Room action clicked:', action);
+        
+        // Hide the menu after clicking
+        if (roomActionsMenu) {
+          roomActionsMenu.setAttribute('hidden', '');
+        }
+
+        // Handle different room actions
+        switch (action) {
+          case 'add-category':
+            console.log('[chat.js] Add category - TODO');
+            // TODO: Show add category dialog
+            break;
+          case 'add-room':
+            console.log('[chat.js] Add room - TODO');
+            // TODO: Show add room dialog
+            break;
+          case 'add-vip-room':
+            console.log('[chat.js] Add VIP room - TODO');
+            // TODO: Show add VIP room dialog
+            break;
+          case 'manage-rooms':
+            console.log('[chat.js] Manage rooms - TODO');
+            // TODO: Show room management panel
+            break;
+          default:
+            console.log('[chat.js] Unknown room action:', action);
+        }
+      });
+    });
+    if (roomActionButtons.length > 0) {
+      console.log('[chat.js] Room action buttons configured:', roomActionButtons.length);
     }
 
     console.log('[chat.js] Event listeners attached successfully');
